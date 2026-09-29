@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""框架卡一：共识 → 分歧 → 证实 / 证伪（机会模型）"""
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import json, datetime
+from collections import Counter
+from config import out, data
+from core import analyze
+from render.style import *
+
+f_t, f_s, f_b, f_m, f_n = F(50), F(30), F(34), F(27), F(24)
+
+W, H = 1400, 2200                    # 卡片尺寸；模块常量，各段函数直接用
+
+
+def box(d, x0, x1, y0, y1, col):
+    """中枢 / 共识区：同色半透明底 + 描边"""
+    d.rounded_rectangle([x0, y0, x1, y1], 10, fill=col + (46,), outline=col, width=3)
+
+
+def draw_title(d):
+    """标题 + 署名"""
+    d.text((60, 44), "缠论的机会模型", font=f_t, fill=TX)
+    d.text((62, 112), "共识 → 分歧 → 证实 / 证伪（作者解读，非原文术语）", font=f_s, fill=MU)
+    r = "冲浪者 · 2026-09-26"
+    d.text((W - d.textlength(r, font=f_n) - 60, 60), r, font=f_n, fill=(110, 118, 136))
+
+
+def draw_diagram(d):
+    """示意图：共识区 → 分歧段 → 回试证实 / 证伪"""
+    d.rounded_rectangle([50, 180, W - 50, 900], 22, fill=CARD, outline=LINE, width=2)
+    ax0, ax1 = 120, W - 120
+    # 中枢区间按第 20 课公式：ZG = 三段高点里最低的，ZD = 三段低点里最高的（屏幕上 y 越小价越高）
+    ZG = 632                                   # 中枢① 的 ZG：高点 y=622/632/612 里最低的那个
+
+    box(d, 140, 420, 632, 690, BL)                # 中枢① / 共识区① = [ZD, ZG]
+    box(d, 770, 1170, 404, 452, BL)               # 中枢② / 共识区②
+    d.text((150, 574), "共识区①  中枢", font=f_m, fill=(200, 215, 255))
+    d.text((880, 340), "共识区②  中枢", font=f_m, fill=(200, 215, 255))
+
+    # ZG 线
+    x = ax0
+    while x < ax1:
+        d.line([x, ZG, min(x + 16, ax1), ZG], fill=BL + (230,), width=3); x += 26
+    d.text((ax1 - 200, ZG - 38), "ZG（中枢上沿）", font=f_n, fill=BL)
+
+    # 价格折线
+    path = [(140,690),(188,622),(232,704),(282,632),(332,700),(396,612),
+            (462,516),(520,668),                          # 回试① 跌破 ZG ✗
+            (626,462),(680,556),                          # 回试② 站住 ✓
+            (770,404),(818,452),(872,398),(930,462),(986,392),(1044,458),(1102,398),
+            (1170,388)]
+    for i in range(len(path) - 1):
+        d.line([path[i], path[i+1]], fill=(255, 255, 255, 220), width=4)
+
+    # 分歧段标注
+    d.line([396, 760, 396, 786], fill=AM, width=3)
+    d.line([770, 760, 770, 786], fill=AM, width=3)
+    d.line([396, 786, 770, 786], fill=AM, width=3)
+    d.text((452, 742), "分歧段（缝隙）", font=f_m, fill=AM)
+
+    # 回试点标记
+    d.ellipse([520-15, 668-15, 520+15, 668+15], fill=BG, outline=RD, width=5)
+    d.text((520, 668), "✗", font=F(26), fill=RD, anchor="mm")
+    d.text((540, 690), "① 回试跌回 ZG 以内 → 中枢延伸，不是机会", font=f_m, fill=RD)
+    d.ellipse([680-15, 556-15, 680+15, 556+15], fill=BG, outline=GR, width=5)
+    d.text((680, 556), "✓", font=F(26), fill=GR, anchor="mm")
+    d.text((700, 516), "② 回试不破 ZG → 三买成立，缝隙才被追认", font=f_m, fill=GR)
+
+    d.text((140, 826), "中枢 = 多空达成共识的区间　　分歧 = 有人不同意，把价格拉开　　机会 = 分歧被证实的那一刻",
+           font=f_n, fill=MU)
+
+
+def draw_rules(d):
+    """口诀：四句话记住"""
+    y = 930
+    d.rounded_rectangle([50, y, W - 50, y + 454], 22, fill=CARD, outline=LINE, width=2)
+    d.text((86, y + 26), "四句话记住", font=f_s, fill=AM)
+    rules = [("中枢是共识", "多空都认的价位区间"),
+             ("缝隙是分歧", "有人不同意，把价格拉出去"),
+             ("机会在「回不去」被证实的那一下", "不在缝隙中段追，在回试不破 ZG 的那一下"),
+             ("缝隙是结果，不是原因", "先有回试通过，才追认这是缝隙")]
+    yy = y + 90
+    for i, (a, b) in enumerate(rules):
+        d.ellipse([86, yy + 6, 86 + 44, yy + 50], fill=(BL + (235,)))
+        d.text((86 + 22, yy + 28), str(i + 1), font=f_b, fill=(255, 255, 255), anchor="mm")
+        d.text((150, yy), a, font=f_b, fill=TX)
+        d.text((150, yy + 46), b, font=f_n, fill=MU)
+        yy += 88
+
+
+def gap_rows():
+    """引擎现算：4 小时笔中枢里，每次「向上离开 ZG」之后的第一次回试。
+
+    返回 [(日期, 中枢序号, 中枢, 离开冲高, 回试低点, 判定)]；判定 = 三买 / 假缝隙 / ZD 下方。
+    出图时现算 —— 换数据或改引擎，卡片自动跟着变，不会过期。
+    """
+    r = analyze(json.load(open(data("aaplusdt_4h.json"), encoding="utf-8")))
+    P, B, Z = r["pens"], r["bars"], r["centers"]
+    rows = []
+    for n, z in enumerate(Z):
+        nxt = Z[n + 1]["PI0"] if n + 1 < len(Z) else len(P)
+        for j in range(z["PI0"], min(nxt + 1, len(P) - 1)):
+            up, dn = P[j], P[j + 1]
+            if up["p1"] > up["p0"] and up["p1"] > z["ZG"] and dn["p1"] < dn["p0"]:
+                v = "三买" if dn["p1"] >= z["ZG"] else ("ZD 下方" if dn["p1"] < z["ZD"] else "假缝隙")
+                t = datetime.datetime.utcfromtimestamp(B[dn["i1"]]["t"] / 1000)
+                rows.append(("%d月%d日" % (t.month, t.day), n + 1, z, up["p1"], dn["p1"], v))
+    return rows
+
+
+def draw_evidence(d):
+    """实证：本引擎 4 小时笔中枢，逐次核对「缝隙」"""
+    rows = gap_rows()
+    y = 1414
+    d.rounded_rectangle([50, y, W - 50, y + 730], 22, fill=CARD, outline=LINE, width=2)
+    d.text((86, y + 24), "用真实数据验证：本引擎 4 小时笔中枢，每次向上离开后的回试", font=f_s, fill=AM)
+    hd = ["日期（UTC）", "中枢", "离开冲高", "回试低点", "中枢区间 [ZD, ZG]", "判定"]
+    xs = [86, 280, 400, 580, 760, 1080]
+    yy = y + 96
+    for i, h in enumerate(hd):
+        d.text((xs[i], yy), h, font=f_n, fill=MU)
+    d.line([86, yy + 38, W - 86, yy + 38], fill=LINE, width=2)
+    yy += 56
+    for t, n, z, hi, lo, v in rows:
+        col = GR if v == "三买" else RD
+        mark = "✓ 三买" if v == "三买" else ("✗ 假缝隙" if v == "假缝隙" else "✗ 跌到 ZD 下方")
+        for x, txt in zip(xs[:5], [t, "中枢%d" % n, "%.2f" % hi, "%.2f" % lo, "[%.2f, %.2f]" % (z["ZD"], z["ZG"])]):
+            d.text((x, yy), txt, font=f_n, fill=TX)
+        d.text((xs[5], yy), mark, font=f_n, fill=col)
+        yy += 40
+    c = Counter(r[5] for r in rows)
+    d.line([86, yy + 6, W - 86, yy + 6], fill=LINE, width=2)
+    d.text((86, yy + 24), "%d 次向上离开后回试：成立 %d 次，跌回中枢 %d 次，跌到 ZD 下方 %d 次 —— 不追缝隙中段。"
+           % (len(rows), c["三买"], c["假缝隙"], c["ZD 下方"]), font=f_m, fill=AM)
+    d.text((86, yy + 72), "注：AAPLUSDT 永续 4 小时，2026-07-26 – 09-27；笔中枢（第 83 课所说稳定性差的口径），出图时由引擎现算。",
+           font=f_n, fill=MU)
+    d.text((86, yy + 104), "　 三买都是各中枢的最后一次 —— 回试段整段在 ZG 之上，按中心定理一即中枢终结，不是另一条规律。",
+           font=f_n, fill=MU)
+    d.text((86, yy + 136), "　 样本只有 %d 次，只作示意。" % len(rows), font=f_n, fill=MU)
+
+
+def build():
+    """画整张卡，返回 PIL Image。"""
+    im = Image.new("RGB", (W, H), BG); d = ImageDraw.Draw(im, "RGBA")
+    draw_title(d)
+    draw_diagram(d)
+    draw_rules(d)
+    draw_evidence(d)
+    return im
+
+
+def main():
+    build().save(out("chanlun_model.png"))
+    print("model ok")
+
+
+if __name__ == "__main__":
+    main()
