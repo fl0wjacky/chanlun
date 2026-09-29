@@ -27,6 +27,34 @@ UP    = (38, 166, 154)    # 阳线
 DN    = (239, 83, 80)     # 阴线
 
 # ---- 截图标注配色：画在浅底 TradingView 截图上，要深、要饱和，所以和上面深底那套分开 ----
+# ---- 真实数据全量图的配色 / 线宽（render/full_common.py 用）----
+# 规则：笔与它构成的类中枢同色，线段与它构成的线段中枢同色；满 9 段的高一级别中枢用同色加粗框。
+# 想改就在项目根目录放一个 chart_style.json 覆盖其中任意几项，例如 {"pen": [120, 120, 255], "seg": [255, 150, 0]}。
+CHART = dict(
+    pen=BL, seg=AM,              # 笔 / 类中枢的颜色；线段 / 线段中枢的颜色
+    pen_w=2, seg_w=7,            # 笔、线段的线宽
+    pc_w=2, sc_w=4,              # 类中枢、线段中枢的框线宽
+    pc_fill=22, sc_fill=34,      # 框内填充的不透明度（0–255）
+    up_w=4,                      # 高一级别框：在所属中枢框线宽之上再加粗多少（满 27 段再加一倍）
+    sig_seg=True, sig_pen=True,  # 买卖点：线段中枢层（大号实心）/ 类中枢层（小号空心，标「·笔」）
+    sig_pending=True,            # 待确认的买卖点也画（文字加「?」、更淡）
+    sig_measure="macd",          # 一买一卖的背驰力度："macd"（MACD 柱面积）/ "slope"（斜率）
+    buy=GR, sell=RD,             # 买点 / 卖点颜色
+)
+
+
+def _load_chart_style():
+    import json, os
+    f = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "chart_style.json")
+    if os.path.exists(f):
+        for k, v in json.load(open(f, encoding="utf-8")).items():
+            if k not in CHART:
+                raise KeyError("chart_style.json 里的 %s 不认识，可用：%s" % (k, ", ".join(CHART)))
+            CHART[k] = tuple(v) if isinstance(v, list) else v
+
+
+_load_chart_style()
+
 SH_BLUE   = (30, 90, 210)         # 同级别中枢框（可用三笔复算）/ ZG 线
 SH_DEEP   = (20, 70, 190)         # 延伸段虚线与括注
 SH_ORANGE = (230, 150, 20)        # 另一级别中枢框

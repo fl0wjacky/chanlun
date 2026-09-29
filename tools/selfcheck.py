@@ -17,6 +17,7 @@ from core.pen import check_pens, nonextreme_pens, unsplit_violations, build_pens
 from core.segment import check_segments, verify_by_definition, nonextreme_endpoints
 from core.center import check_centers
 from core.extend import check_hierarchy
+from core.signals import signals, check_signals
 
 DATASETS = [("aaplusdt_4h.json", "AAPL 4h"), ("aaplusdt_2h.json", "AAPL 2h"),
             ("aaplusdt_1h.json", "AAPL 1h"), ("aaplusdt_30m.json", "AAPL 30m"),
@@ -62,6 +63,7 @@ for tag, r in R.items():
     # 中枢层
     count("类中枢不变量违规", len(check_centers(r["centers"], P)))
     count("类中枢扩展合成违规", len(check_hierarchy(r["big"], r["centers"], P)))
+    count("买卖点复核违规", sum(len(check_signals(signals(r, lv, m), r, lv)) for lv in ("seg", "pen") for m in ("macd", "slope")))
     count("线段中枢不变量违规", len(check_centers(r["seg_centers"], [s for s in S if not s.get("live")])))
 
 # ---- 变异测试：校验器必须能抓住故意做错的输入 ----
@@ -108,6 +110,15 @@ count("漏掉的 9 段升级未被发现", 0 if check_centers(Zc, R["ZEC 15m"]["
 Zc = copy.deepcopy(R["ZEC 15m"]["centers"])
 Zc[k9]["up"][0]["ZG"] += 0.01
 count("算错的升级区间未被发现", 0 if check_centers(Zc, R["ZEC 15m"]["pens"]) else 1)
+# 买卖点：把一个三买挪到离开段的终点、把一个一买挪到没创新低的位置，复核必须报错
+Rz = R["ZEC 15m"]
+S = signals(Rz, "pen")
+s3 = copy.deepcopy(S); t = next(x for x in s3 if x["kind"] == "三买")
+t["unit"] -= 1; t["bar"], t["price"] = Rz["pens"][t["unit"]]["i1"], Rz["pens"][t["unit"]]["p1"]
+count("挪错位置的三买未被发现", 0 if check_signals(s3, Rz, "pen") else 1)
+s1 = copy.deepcopy(S); t = next(x for x in s1 if x["kind"] == "一买")
+t["center"] = next(k + 1 for k, z in enumerate(Rz["centers"]) if z["rel"] != "下跌延续")
+count("不在下跌趋势里的一买未被发现", 0 if check_signals(s1, Rz, "pen") else 1)
 
 print("=" * 72)
 print("总违规数:", FAIL, "→", "全部通过" if FAIL == 0 else "有问题，需排查")

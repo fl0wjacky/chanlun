@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import data, out, tick_of
 from PIL import Image, ImageDraw
 from render.style import *
-from render.full_common import draw_layers, draw_labels, legend
+from render.full_common import draw_layers, draw_labels, draw_signals, legend
 from core import analyze
 
 bars = json.load(open(data("zec15.json"), encoding="utf-8"))   # tools/fetch_klines.py ZECUSDT 15m 拉的最新数据
@@ -51,6 +51,7 @@ g = ImageDraw.Draw(sub, "RGBA")
 for p in ticks:
     g.line([0, Y(p), PW, Y(p)], fill=(34, 38, 48), width=1)
 labels = draw_layers(g, r, X, Y, keep=lambda a, b: b > a0)   # 恰好止于视窗起点的不画
+labels += draw_signals(g, r, X, Y, keep=lambda a, b: b > a0)
 draw_labels(g, labels, f_n, CY)
 im.paste(sub, (X0, Y0))
 d.rectangle([X0 - 1, Y0 - 1, X1, Y1], outline=LINE, width=1)

@@ -13,7 +13,7 @@ import os, sys, json, math, time, datetime, argparse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import data, out, tick_of
 from render.style import *
-from render.full_common import draw_layers, draw_labels, legend, price_ticks
+from render.full_common import draw_layers, draw_labels, draw_signals, legend, price_ticks
 from core import analyze
 
 utc = lambda ms: datetime.datetime.fromtimestamp(ms / 1000, datetime.timezone.utc)
@@ -64,6 +64,7 @@ def render(fn, name, tf, px, ph, out_name=None):
 
     # ---- 结构层 + 标签最后画 ----
     center_labels = draw_layers(d, r, X, Y, bar_w=px)
+    center_labels += draw_signals(d, r, X, Y)
     every = max(1200, (W - L - R) // 12)            # 价格刻度沿宽度重复
     placed = draw_labels(d, [((xl + 8, Y(p) - 30), "%g" % p) for p in ticks for xl in range(L, W - R - 100, every)],
                          f_x, MU)

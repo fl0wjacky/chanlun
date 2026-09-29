@@ -18,38 +18,36 @@ def draw_layers(g, r, X, Y, keep=lambda a, b: True, bar_w=2):
     bars, pens, segs = r["bars"], r["pens"], r["segs"]
     done = [s for s in segs if not s.get("live")]     # 线段中枢的序号指向「已完成线段」
     labels = []
+    C = CHART
+    lighter = lambda c: tuple(min(255, v + 40) for v in c)
 
-    def up_mark(z, box):
-        """满 9 段：同一时间跨度上再画高一级别中枢的框（琥珀色细框，区间按 3+3+3 重叠）；满 27 段再画一层更粗的。"""
+    def center_box(z, box, col, w, fill):
+        """中枢框：延续中的虚线、已终结的实线；满 9 段再在同一时间跨度上画同色加粗的高一级别框。"""
+        if z["live"]:
+            dashed_rect(g, box, col, width=w, fill=col + (fill,))
+        else:
+            g.rectangle(box, fill=col + (fill,), outline=col + (235,), width=w)
         for u in z.get("up", []):
             ub = [box[0], Y(u["ZG"]), box[2], Y(u["ZD"])]
-            w = 2 + 2 * u["up"]
+            uw = w + C["up_w"] * u["up"]
             if z["live"]:
-                dashed_rect(g, ub, AM, width=w)
+                dashed_rect(g, ub, col, width=uw)
             else:
-                g.rectangle(ub, outline=AM + (230,), width=w)
+                g.rectangle(ub, outline=col, width=uw)
             labels.append(((max(box[0], 0) + 8, ub[1] - 36), "↑高%s级 [%g, %g]" % (
-                "一两三四"[u["up"] - 1], round(u["ZD"], 2), round(u["ZG"], 2)), AM))
+                "一两三四"[u["up"] - 1], round(u["ZD"], 2), round(u["ZG"], 2)), col))
 
-    for z in r["centers"]:
+    for z in r["centers"]:                            # 类中枢：与笔同色
         a, b = pens[z["PI0"]]["i0"], pens[z["PI1"]]["i1"]
         if keep(a, b):
-            box = [X(a), Y(z["ZG"]), X(b), Y(z["ZD"])]
-            up_mark(z, box)
-            if z["live"]:
-                dashed_rect(g, box, BL + (120,), width=2, fill=BL + (20,))
-            else:
-                g.rectangle(box, fill=BL + (20,), outline=BL + (95,), width=2)
-    for z in r["seg_centers"]:
+            center_box(z, [X(a), Y(z["ZG"]), X(b), Y(z["ZD"])], C["pen"], C["pc_w"], C["pc_fill"])
+    for z in r["seg_centers"]:                        # 线段中枢：与线段同色
         a, b = done[z["PI0"]]["i0"], done[z["PI1"]]["i1"]
         if keep(a, b):
             box = [X(a), Y(z["ZG"]), X(b), Y(z["ZD"])]
-            if z["live"]:
-                dashed_rect(g, box, CY, width=5, fill=CY + (38,))
-            else:
-                g.rectangle(box, fill=CY + (38,), outline=CY, width=5)
-            labels.append(((max(box[0], 0) + 8, box[1] - 36), "[%g, %g]" % (round(z["ZD"], 2), round(z["ZG"], 2))))
-            up_mark(z, box)
+            center_box(z, box, C["seg"], C["sc_w"], C["sc_fill"])
+            labels.append(((max(box[0], 0) + 8, box[1] - 36), "[%g, %g]" % (round(z["ZD"], 2), round(z["ZG"], 2)),
+                           C["seg"]))
     for i, b in enumerate(bars):                      # K 线：影线 + 实体
         if keep(i, i):
             col = UP if b["c"] >= b["o"] else DN
@@ -66,9 +64,9 @@ def draw_layers(g, r, X, Y, keep=lambda a, b: True, bar_w=2):
         if keep(p["i0"], p["i1"]):
             a, b = (X(p["i0"]), Y(p["p0"])), (X(p["i1"]), Y(p["p1"]))
             if k == len(pens) - 1:
-                dashed_line(g, a, b, LB, width=3, dash_len=12, gap=8)
+                dashed_line(g, a, b, lighter(C["pen"]), width=C["pen_w"] + 1, dash_len=12, gap=8)
             else:
-                g.line([a, b], fill=BL + (235,), width=2)
+                g.line([a, b], fill=C["pen"] + (235,), width=C["pen_w"])
     for s in segs:                                    # 未完成（live）→ 虚线；端点：顶红、底绿
         if keep(s["i0"], s["i1"]):
             a, b = (X(s["i0"]), Y(s["p0"])), (X(s["i1"]), Y(s["p1"]))
@@ -77,13 +75,43 @@ def draw_layers(g, r, X, Y, keep=lambda a, b: True, bar_w=2):
                 k = max(j for j in range(s["PI0"], s["PI1"] + 1) if pens[j]["p1"] == ext)
                 b = (X(pens[k]["i1"]), Y(ext))
             if s.get("live"):
-                dashed_line(g, a, b, AM, width=7, dash_len=26, gap=16)
+                dashed_line(g, a, b, C["seg"], width=C["seg_w"], dash_len=26, gap=16)
             else:
-                g.line([a, b], fill=AM, width=7)
+                g.line([a, b], fill=C["seg"], width=C["seg_w"])
             up = s["dir"] == "up"
             for (x, y), col in ((a, GR if up else RD), (b, RD if up else GR)):
                 g.ellipse([x - 9, y - 9, x + 9, y + 9], fill=BG, outline=col, width=4)
     return labels
+
+
+def draw_signals(g, r, X, Y, keep=lambda a, b: True):
+    """买卖点：在点位画一个小三角（买点朝上、在低点下方；卖点朝下、在高点上方），返回文字标签请求。
+
+    线段中枢层用实心三角 + 大字；类中枢层用空心三角 + 「·笔」；待确认的加「?」、更淡（core/signals.py）。
+    """
+    from core.signals import signals
+    C = CHART
+    out = []
+    for lv, on, sz, tag in (("pen", C["sig_pen"], 9, "·笔"), ("seg", C["sig_seg"], 15, "")):
+        if not on:
+            continue
+        for s in signals(r, lv, C["sig_measure"]):
+            if not keep(s["bar"], s["bar"]) or not (s["confirmed"] or C["sig_pending"]):
+                continue
+            buy = s["kind"].endswith("买")
+            col = C["buy"] if buy else C["sell"]
+            a = 255 if s["confirmed"] else 140
+            x, y = X(s["bar"]), Y(s["price"])
+            d = 1 if buy else -1                       # 买点画在下方，卖点画在上方
+            tip, y0 = y + d * 6, y + d * (6 + 2 * sz)
+            tri = [(x, tip), (x - sz, y0), (x + sz, y0)]
+            if lv == "seg":
+                g.polygon(tri, fill=col + (a,), outline=BG)
+            else:
+                g.polygon(tri, outline=col + (a,), width=2)
+            txt = s["kind"] + ("(弱)" if s["weak"] else "") + tag + ("" if s["confirmed"] else "?")
+            out.append(((x - sz, y0 + (8 if buy else -40 - sz)), txt, col if s["confirmed"] else tuple(int(v * .7) for v in col)))
+    return out
 
 
 def draw_labels(g, labels, font, col, placed=None):
@@ -114,16 +142,20 @@ def legend(d, x, y, font):
         x += 84 + d.textlength(name, font=font) + 56
     item(lambda x0, y0: [d.rectangle([x0 + k * 14, y0 - 10 + (k % 2) * 6, x0 + k * 14 + 8, y0 + 6 + (k % 2) * 6],
                                      fill=(UP, DN)[k % 2]) for k in range(5)], "K线")
-    item(lambda x0, y0: d.line([x0, y0, x0 + 70, y0], fill=BL, width=3), "笔")
-    item(lambda x0, y0: dashed_line(d, (x0, y0), (x0 + 70, y0), LB, 3, 12, 8), "未完成的笔")
-    item(lambda x0, y0: d.line([x0, y0, x0 + 70, y0], fill=AM, width=7), "线段")
-    item(lambda x0, y0: dashed_line(d, (x0, y0), (x0 + 70, y0), AM, 7, 22, 12), "未完成的线段")
-    item(lambda x0, y0: d.rectangle([x0, y0 - 14, x0 + 70, y0 + 14], fill=CY + (38,), outline=CY, width=4), "线段中枢")
-    item(lambda x0, y0: d.rectangle([x0, y0 - 14, x0 + 70, y0 + 14], fill=BL + (20,), outline=BL + (95,), width=2),
-         "类中枢（对照）")
-    item(lambda x0, y0: dashed_rect(d, [x0, y0 - 14, x0 + 70, y0 + 14], CY, 3, fill=CY + (20,), dash_len=12, gap=8),
-         "仍在延续的中枢")
-    item(lambda x0, y0: d.rectangle([x0, y0 - 14, x0 + 70, y0 + 14], outline=AM, width=4), "高一级中枢（满 9 段，第 33 课）")
+    C = CHART
+    pc, sc = C["pen"], C["seg"]
+    item(lambda x0, y0: d.line([x0, y0, x0 + 70, y0], fill=pc, width=3), "笔")
+    item(lambda x0, y0: d.rectangle([x0, y0 - 14, x0 + 70, y0 + 14], fill=pc + (C["pc_fill"],), outline=pc, width=2),
+         "类中枢（与笔同色）")
+    item(lambda x0, y0: d.line([x0, y0, x0 + 70, y0], fill=sc, width=7), "线段")
+    item(lambda x0, y0: d.rectangle([x0, y0 - 14, x0 + 70, y0 + 14], fill=sc + (C["sc_fill"],), outline=sc, width=4),
+         "线段中枢（与线段同色）")
+    item(lambda x0, y0: d.rectangle([x0, y0 - 14, x0 + 70, y0 + 14], outline=sc, width=4 + C["up_w"]),
+         "加粗框 = 高一级（满 9 段，第 33 课）")
+    item(lambda x0, y0: dashed_line(d, (x0, y0), (x0 + 70, y0), sc, 7, 22, 12), "虚线 = 未完成 / 仍在延续")
+    item(lambda x0, y0: [d.polygon([(x0 + 18, y0 - 12), (x0 + 6, y0 + 12), (x0 + 30, y0 + 12)], fill=C["buy"]),
+                         d.polygon([(x0 + 52, y0 + 12), (x0 + 40, y0 - 12), (x0 + 64, y0 - 12)], fill=C["sell"])],
+         "买卖点（线段中枢层；空心「·笔」= 类中枢层，「?」= 待确认）")
     return x
 
 

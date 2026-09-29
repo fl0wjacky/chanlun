@@ -12,7 +12,7 @@ import os, sys, json, math, datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import data, out, tick_of
 from render.style import *
-from render.full_common import draw_layers, draw_labels, legend
+from render.full_common import draw_layers, draw_labels, draw_signals, legend
 from core import analyze
 
 PX = 2                                              # 每根K线的像素宽
@@ -75,6 +75,7 @@ def draw_panel(i0, i1, last):
             g.line([X(i), 0, X(i), PH], fill=(40, 45, 56) if t.weekday() == 0 else (27, 30, 38), width=1)
 
     center_labels = draw_layers(g, r, X, Y, keep=lambda a, b: b >= i0 and a <= i1)
+    center_labels += draw_signals(g, r, X, Y, keep=lambda a, b: b >= i0 and a <= i1)
     placed = draw_labels(g, [((xl + 8, Y(p) - 30), "%g" % p) for p in ticks for xl in range(0, pw - 120, 1400)],
                          f_x, MU)
     draw_labels(g, center_labels, f_n, CY, placed)

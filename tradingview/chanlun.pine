@@ -1,0 +1,687 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// 冲浪者 · 缠论结构（chanlun_mag 引擎 v2.2 的 Pine 移植）
+//
+// 与 Python 引擎（core/）同一套口径，逐步照搬：
+//   K线包含处理（第 65 课）→ 分型 → 笔（第 77 课，端点必为极值、带回头修正；可选第 81 课新笔）
+//   → 线段（第 67 / 71 / 78 课，特征序列）→ 类中枢（笔构成）/ 线段中枢
+//   → 中枢终结：三买三卖为主、中心定理一兜底（第 20 / 38 课）→ 满 9 段升级（第 33 / 64 课）
+//   → 一二三类买卖点（第 20 / 21 / 24 课）
+// 画法：笔与类中枢同色，线段与线段中枢同色；高一级别中枢用同色加粗框；未完成 / 仍在延续的一律虚线。
+// 计算方式：只在最后一根K线上，用收集好的全部K线从头算一遍（与 Python 版逐步一致，便于对账）。
+// 买卖点：默认只标「结构已确认」的；打开「显示待确认」后，未确认的用空心标签，之后可能改掉或消失。
+//@version=6
+indicator("缠论 · 笔 / 线段 / 中枢 / 买卖点", shorttitle = "缠论", overlay = true,
+     max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
+
+// ───────────────────────── 设置 ─────────────────────────
+G1 = "口径（选定后一路保持，第 64 / 81 课）"
+penRule   = input.string("老笔", "笔的标准", options = ["老笔", "新笔"], group = G1,
+     tooltip = "老笔（第 77 课）：顶底分型之间至少隔一根独立K线。新笔（第 81 课）：包含处理后不共用K线，且两个极值K线之间原始K线 ≥ 3 根。")
+tickSize  = input.float(0.0, "价格精度（0 = 用原始价格）", minval = 0.0, group = G1,
+     tooltip = "第 64 课：精度一旦预设就要一路保持。填 0.1 表示高低价按 0.1 取整后再算。")
+calcBars  = input.int(3000, "参与计算的K线数（最近）", minval = 300, maxval = 10000, group = G1,
+     tooltip = "越多越慢；报「loop 执行超过 500ms」或脚本超时就调小。")
+
+G2 = "显示"
+showPen   = input.bool(true,  "笔", inline = "p", group = G2)
+penCol    = input.color(color.rgb(86, 142, 255), "", inline = "p", group = G2)
+penW      = input.int(1, "线宽", minval = 1, maxval = 5, inline = "p", group = G2)
+showPC    = input.bool(true,  "类中枢（与笔同色）", group = G2)
+showSeg   = input.bool(true,  "线段", inline = "s", group = G2)
+segCol    = input.color(color.rgb(255, 190, 60), "", inline = "s", group = G2)
+segW      = input.int(3, "线宽", minval = 1, maxval = 8, inline = "s", group = G2)
+showSC    = input.bool(true,  "线段中枢（与线段同色）", group = G2)
+showUp    = input.bool(true,  "高一级别中枢（满 9 段，同色加粗）", group = G2)
+fillTr    = input.int(85, "中枢填充透明度", minval = 0, maxval = 100, group = G2)
+drawBars  = input.int(3000, "只画最近多少根K线里的结构", minval = 100, maxval = 9000, group = G2,
+     tooltip = "TradingView 每种图形最多 500 个；太长的历史会画不全，所以只画最近这一段。")
+
+G3 = "买卖点"
+sigLevel  = input.string("线段中枢", "按哪层中枢判", options = ["线段中枢", "类中枢"], group = G3,
+     tooltip = "线段中枢是原文承认的正规中枢（第 83 课）；类中枢由笔构成（第 64 课），信号多但稳定性差。")
+measure   = input.string("MACD 柱面积", "背驰力度（一买一卖）", options = ["MACD 柱面积", "价格斜率"], group = G3,
+     tooltip = "第 24 课：离开段（C 段）的 MACD 柱面积比进入段（A 段）小即背驰。斜率 = |价差| / K线根数。")
+divRatio  = input.float(1.0, "背驰比例：C < A × ", minval = 0.1, maxval = 1.0, step = 0.05, group = G3)
+mFast     = input.int(12, "MACD 快线", minval = 1, inline = "m", group = G3)
+mSlow     = input.int(26, "慢线", minval = 2, inline = "m", group = G3)
+mSig      = input.int(9, "信号", minval = 1, inline = "m", group = G3)
+show1B    = input.bool(true, "一买", inline = "b", group = G3)
+show2B    = input.bool(true, "二买", inline = "b", group = G3)
+show3B    = input.bool(true, "三买", inline = "b", group = G3)
+show1S    = input.bool(true, "一卖", inline = "x", group = G3)
+show2S    = input.bool(true, "二卖", inline = "x", group = G3)
+show3S    = input.bool(true, "三卖", inline = "x", group = G3)
+showPend  = input.bool(false, "显示待确认（空心，可能重画）", group = G3)
+buyCol    = input.color(color.rgb(0, 205, 125), "买点颜色", inline = "c", group = G3)
+sellCol   = input.color(color.rgb(255, 86, 86), "卖点颜色", inline = "c", group = G3)
+
+// ───────────────────────── 数据类型 ─────────────────────────
+type Fx
+    int   k        // 标准化序列下标
+    int   i        // 贡献极值的那根原始K线（相对下标）
+    bool  top
+    float p
+
+type Unit          // 笔或线段
+    int   i0
+    int   i1
+    float p0
+    float p1
+    float hi
+    float lo
+    int   PI0 = -1 // 线段：起止笔序号
+    int   PI1 = -1
+    bool  live = false
+
+type Ctr
+    int   PI0
+    int   PI1
+    float ZD
+    float ZG
+    float DD
+    float GG
+    bool  live
+    int   term     // 0 仍在延续 / 1 三买 / 2 三卖 / 3 Z 段向上离开 / 4 Z 段向下离开
+    int   rel      // 0 无 / 1 下跌延续 / 2 上涨延续 / 3 扩展·向下 / 4 扩展·向上 / 5 区间重叠
+    array<float> upZD
+    array<float> upZG
+
+type Sig
+    int   kind     // 1 一买 2 二买 3 三买 4 一卖 5 二卖 6 三卖
+    int   bar
+    float price
+    bool  confirmed
+    bool  weak
+
+// ───────────────────────── 逐根收集数据 ─────────────────────────
+q(float p) => tickSize > 0 ? math.round(p / tickSize) * tickSize : p
+
+var array<float> aH = array.new<float>()
+var array<float> aL = array.new<float>()
+var array<float> aM = array.new<float>()   // MACD 柱（DIF − DEA，EMA 以第一根收盘价起算，与 Python 版一致）
+var float emaF = na
+var float emaS = na
+var float dea  = na
+aH.push(q(high))
+aL.push(q(low))
+if na(emaF)
+    emaF := close
+    emaS := close
+    dea  := 0.0
+else
+    emaF += (close - emaF) * 2.0 / (mFast + 1)
+    emaS += (close - emaS) * 2.0 / (mSlow + 1)
+    dea  += (emaF - emaS - dea) * 2.0 / (mSig + 1)
+aM.push(emaF - emaS - dea)
+if aH.size() > 20000                              // 数组上限 10 万；只留最近 2 万根（calcBars ≤ 1 万）
+    aH.shift(), aL.shift(), aM.shift()
+
+// ───────────────────────── K线：包含处理与分型（第 65 课）─────────────────────────
+contains(float ah, float al, float bh, float bl) => (ah >= bh and al <= bl) or (bh >= ah and bl <= al)
+
+standardize(array<float> H, array<float> L) =>
+    n = H.size()
+    sH = array.new<float>()
+    sL = array.new<float>()
+    sIH = array.new<int>()
+    sIL = array.new<int>()
+    if n > 0
+        k = 1
+        while k < n and contains(H.get(k - 1), L.get(k - 1), H.get(k), L.get(k))
+            k += 1
+        if k >= n
+            sH.push(H.get(0)), sL.push(L.get(0)), sIH.push(0), sIL.push(0)
+        else
+            sH.push(H.get(k - 1)), sL.push(L.get(k - 1)), sIH.push(k - 1), sIL.push(k - 1)
+            sH.push(H.get(k)), sL.push(L.get(k)), sIH.push(k), sIL.push(k)
+            i = k + 1
+            while i < n
+                bh = H.get(i)
+                bl = L.get(i)
+                m = sH.size()
+                ph = sH.get(m - 1)
+                pl = sL.get(m - 1)
+                up = ph > sH.get(m - 2) or (ph == sH.get(m - 2) and pl > sL.get(m - 2))
+                if contains(ph, pl, bh, bl)
+                    if up
+                        sH.set(m - 1, math.max(ph, bh)), sL.set(m - 1, math.max(pl, bl))
+                        if bh > ph
+                            sIH.set(m - 1, i)
+                        if bl > pl
+                            sIL.set(m - 1, i)
+                    else
+                        sH.set(m - 1, math.min(ph, bh)), sL.set(m - 1, math.min(pl, bl))
+                        if bh < ph
+                            sIH.set(m - 1, i)
+                        if bl < pl
+                            sIL.set(m - 1, i)
+                else
+                    sH.push(bh), sL.push(bl), sIH.push(i), sIL.push(i)
+                i += 1
+    [sH, sL, sIH, sIL]
+
+fractals(array<float> sH, array<float> sL, array<int> sIH, array<int> sIL) =>
+    fx = array.new<Fx>()
+    m = sH.size()
+    k = 1
+    while k < m - 1
+        h0 = sH.get(k - 1), h1 = sH.get(k), h2 = sH.get(k + 1)
+        l0 = sL.get(k - 1), l1 = sL.get(k), l2 = sL.get(k + 1)
+        if h1 > h0 and h1 > h2 and l1 > l0 and l1 > l2
+            fx.push(Fx.new(k, sIH.get(k), true, h1))
+        else if l1 < l0 and l1 < l2 and h1 < h0 and h1 < h2
+            fx.push(Fx.new(k, sIL.get(k), false, l1))
+        k += 1
+    fx
+
+// ───────────────────────── 笔（第 77 课 + 回头修正；第 81 课新笔）─────────────────────────
+far(Fx a, Fx b) => penRule == "老笔" ? b.k - a.k >= 4 : (b.k - a.k >= 3 and math.abs(b.i - a.i) >= 4)
+beyond(Fx f, Fx g) => f.top ? f.p > g.p : f.p < g.p
+
+extremeIn(Fx f, int k0, int k1, array<float> sH, array<float> sL) =>
+    ok = true
+    k = k0
+    while k <= k1 and ok
+        if f.top ? sH.get(k) > f.p : sL.get(k) < f.p
+            ok := false
+        k += 1
+    ok
+
+penOk(Fx a, Fx b, array<float> sH, array<float> sL) =>
+    far(a, b) and extremeIn(a, a.k, b.k, sH, sL) and extremeIn(b, a.k, b.k, sH, sL)
+
+// 把 fx 里标准化下标在 (kFrom, kTo] 的分型按顺序压到工作栈上（栈顶先处理，所以倒着压）
+pushRange(array<int> stack, array<int> fxAtK, int kFrom, int kTo) =>
+    k = kTo
+    while k > kFrom
+        idx = fxAtK.get(k)
+        if idx >= 0
+            stack.push(idx)
+        k -= 1
+
+// 最后一笔起点不是极值时往回修（对应 Python fix_start）；pend 放在长度 1 的数组里以便修改
+fixStart(array<Fx> fx, array<int> seq, array<int> pend, array<int> stack, array<int> fxAtK, array<float> sH, array<float> sL) =>
+    ns = seq.size()
+    if ns >= 2
+        a = fx.get(seq.get(ns - 2))
+        g = fx.get(seq.get(ns - 1))
+        if not extremeIn(a, a.k, g.k, sH, sL)
+            int P = -1
+            k = a.k + 1
+            while k < g.k
+                idx = fxAtK.get(k)
+                if idx >= 0
+                    f = fx.get(idx)
+                    if f.top == a.top and (P < 0 or (a.top ? f.p > fx.get(P).p : f.p < fx.get(P).p))
+                        P := idx
+                k += 1
+            j = ns - 3
+            bool fin = false
+            while j >= 0 and not fin
+                e = fx.get(seq.get(j))
+                if P >= 0 and e.top == g.top and e.k < fx.get(P).k and penOk(e, fx.get(P), sH, sL) and penOk(fx.get(P), g, sH, sL)
+                    while seq.size() > j + 1
+                        seq.pop()
+                    seq.push(P)
+                    pend.set(0, -1)
+                    pushRange(stack, fxAtK, fx.get(P).k, g.k)
+                    fin := true
+                else if e.top == a.top and j <= ns - 4 and penOk(e, g, sH, sL)
+                    gi = seq.get(ns - 1)
+                    while seq.size() > j + 1
+                        seq.pop()
+                    seq.push(gi)
+                    fin := true
+                j -= 1
+    true
+
+buildPens(array<Fx> fx, array<float> sH, array<float> sL) =>
+    seq = array.new<int>()
+    pend = array.from(-1)
+    stack = array.new<int>()
+    fxAtK = array.new<int>(sH.size(), -1)
+    for [n, f] in fx
+        fxAtK.set(f.k, n)
+    nfx = 0
+    while nfx < fx.size()
+        stack.push(nfx)
+        nfx += 1
+        while stack.size() > 0
+            fi = stack.pop()
+            f = fx.get(fi)
+            ns = seq.size()
+            if ns == 0
+                seq.push(fi)
+            else
+                last = fx.get(seq.get(ns - 1))
+                if f.top == last.top
+                    if beyond(f, last)
+                        pd = pend.get(0)
+                        if pd >= 0 and (ns < 3 or not beyond(last, fx.get(seq.get(ns - 3))))
+                            pend.set(0, -1)
+                            seq.pop()
+                            seq.set(seq.size() - 1, pd)
+                            pushRange(stack, fxAtK, fx.get(pd).k, f.k)       // 先压：它在 fixStart 的重看之后处理
+                            fixStart(fx, seq, pend, stack, fxAtK, sH, sL)
+                        else
+                            seq.set(ns - 1, fi)
+                            pend.set(0, -1)
+                            fixStart(fx, seq, pend, stack, fxAtK, sH, sL)
+                else if far(last, f) and extremeIn(f, last.k, f.k, sH, sL)
+                    seq.push(fi)
+                    pend.set(0, -1)
+                else if not far(last, f) and ns >= 2 and beyond(f, fx.get(seq.get(ns - 2)))
+                    pd = pend.get(0)
+                    if pd < 0 or beyond(f, fx.get(pd))
+                        pend.set(0, fi)
+    pens = array.new<Unit>()
+    m = seq.size()
+    if m >= 2
+        for t = 0 to m - 2
+            a = fx.get(seq.get(t))
+            b = fx.get(seq.get(t + 1))
+            pens.push(Unit.new(a.i, b.i, a.p, b.p, math.max(a.p, b.p), math.min(a.p, b.p)))
+    pens
+
+// ───────────────────────── 线段（第 67 / 71 / 78 课）─────────────────────────
+isUp(Unit u) => u.p1 > u.p0
+
+// 特征序列的非包含处理：开头按线段方向合并（向上段取高高、向下段取低低），之后按最后两根定方向
+featStd(array<float> eh, array<float> el, bool up) =>
+    mh = array.new<float>()
+    ml = array.new<float>()
+    n = eh.size()
+    t = 0
+    while t < n
+        h = eh.get(t)
+        l = el.get(t)
+        m = mh.size()
+        if m > 0 and contains(mh.get(m - 1), ml.get(m - 1), h, l)
+            ah = mh.get(m - 1)
+            al = ml.get(m - 1)
+            goUp = m < 2 ? up : ah > mh.get(m - 2)
+            mh.set(m - 1, goUp ? math.max(ah, h) : math.min(ah, h))
+            ml.set(m - 1, goUp ? math.max(al, l) : math.min(al, l))
+        else
+            mh.push(h), ml.push(l)
+        t += 1
+    [mh, ml]
+
+hasFractal(array<float> mh, array<float> ml, bool wantTop) =>
+    found = false
+    k = 1
+    while k < mh.size() - 1 and not found
+        h0 = mh.get(k - 1), h1 = mh.get(k), h2 = mh.get(k + 1)
+        l0 = ml.get(k - 1), l1 = ml.get(k), l2 = ml.get(k + 1)
+        if wantTop ? (h1 > h0 and h1 > h2 and l1 > l0 and l1 > l2) : (l1 < l0 and l1 < l2 and h1 < h0 and h1 < h2)
+            found := true
+        k += 1
+    found
+
+// 第二种情况的确认：端点之后、价格重新越过端点之前，反向段的特征序列里要出分型。返回 [确认, 破位笔(-1 = 没破)]
+reverseScan(array<Unit> P, int endPen, bool segUp) =>
+    n = P.size()
+    pivot = P.get(endPen).p1
+    eh = array.new<float>()
+    el = array.new<float>()
+    int ntail = 0
+    int brk = -1
+    j = endPen + 1
+    while j < n and brk < 0
+        p = P.get(j)
+        if segUp ? p.hi > pivot : p.lo < pivot
+            brk := j
+        else
+            ntail += 1
+            if isUp(p) == segUp               // 反向段（方向与原段相反）的特征元素 = 与原段同向的笔
+                eh.push(p.hi), el.push(p.lo)
+        j += 1
+    bool ok = false
+    if ntail >= 3 and eh.size() >= 3
+        [mh, ml] = featStd(eh, el, not segUp)
+        ok := hasFractal(mh, ml, not segUp)
+    [ok, brk]
+
+// 第 71 课：假设 pens[k] 的终点是分界点。返回 [情况(0 不成立 / 1 / 2), at(-1 = 无)]，含义同 Python _case_at
+caseAt(array<Unit> P, int i, int k, bool up) =>
+    n = P.size()
+    int cse = 0
+    int at = -1
+    eh = array.new<float>()
+    el = array.new<float>()
+    j = i + 1
+    while j < k
+        if isUp(P.get(j)) != up
+            eh.push(P.get(j).hi), el.push(P.get(j).lo)
+        j += 1
+    if eh.size() > 0 and k + 1 < n
+        [mh, ml] = featStd(eh, el, up)
+        e1h = mh.last()
+        e1l = ml.last()
+        V = P.get(k).p1
+        e2h = P.get(k + 1).hi
+        e2l = P.get(k + 1).lo
+        if not (up ? V <= e1h : V >= e1l)
+            gap = up ? e1h < e2l : e1l > e2h
+            if not gap                                    // 第一种情况：第一笔在中间地带，看先破哪一头
+                L = P.get(k + 1).p1
+                at := n
+                r = k + 2
+                bool fin = false
+                while r < n and not fin
+                    p = P.get(r)
+                    if up ? p.hi > V : p.lo < V
+                        at := r, fin := true
+                    else if up ? p.lo < L : p.hi > L
+                        cse := 1, at := r, fin := true
+                    r += 1
+            else                                          // 第二种情况
+                float e3h = na
+                float e3l = na
+                jj = k + 3
+                while jj < n and na(e3h)
+                    e = P.get(jj)
+                    if contains(e2h, e2l, e.hi, e.lo)
+                        e2h := up ? math.max(e2h, e.hi) : math.min(e2h, e.hi)
+                        e2l := up ? math.max(e2l, e.lo) : math.min(e2l, e.lo)
+                    else
+                        e3h := e.hi, e3l := e.lo
+                    jj += 2
+                if not na(e3h)
+                    fracOk = up ? (e2h == V and e2h > e3h and e2l > e3l) : (e2l == V and e2l < e3l and e2h < e3h)
+                    if fracOk
+                        [ok, brk] = reverseScan(P, k, up)
+                        if ok
+                            cse := 2
+                        else
+                            at := brk >= 0 ? brk : n
+    [cse, at]
+
+mkSeg(array<Unit> P, int a, int b, bool live) =>
+    hi = P.get(a).hi
+    lo = P.get(a).lo
+    t = a + 1
+    while t <= b
+        hi := math.max(hi, P.get(t).hi)
+        lo := math.min(lo, P.get(t).lo)
+        t += 1
+    Unit.new(P.get(a).i0, P.get(b).i1, P.get(a).p0, P.get(b).p1, hi, lo, a, b, live)
+
+buildSegments(array<Unit> P) =>
+    segs = array.new<Unit>()
+    n = P.size()
+    i = 0
+    born = 0
+    bool stop = false
+    while i + 2 < n and not stop
+        up = isUp(P.get(i))
+        k = i + 2
+        while k < born
+            k += 2
+        int endPen = -1
+        int res = -1
+        while k < n - 1 and endPen < 0
+            [cse, at] = caseAt(P, i, k, up)
+            if cse > 0
+                endPen := k
+                res := cse == 1 ? at : 0
+            else
+                k += 2
+                if at >= 0
+                    while k < at
+                        k += 2
+        if endPen < 0
+            stop := true
+        else
+            born := res
+            segs.push(mkSeg(P, i, endPen, false))
+            i := endPen + 1
+    if n - i >= 3
+        segs.push(mkSeg(P, i, n - 1, true))
+    segs
+
+// ───────────────────────── 中枢（第 17 / 20 / 38 课）与 9 段升级（第 33 / 64 课）─────────────────────────
+relOf(Ctr A, Ctr B) =>
+    B.GG < A.DD ? 1 : B.DD > A.GG ? 2 : (B.ZG < A.ZD and B.GG >= A.DD) ? 3 : (B.ZD > A.ZG and B.DD <= A.GG) ? 4 : 5
+
+findCenters(array<Unit> U) =>
+    zs = array.new<Ctr>()
+    N = U.size()
+    i = 0
+    while i + 2 < N
+        a = U.get(i), b = U.get(i + 1), c = U.get(i + 2)
+        ZG = math.min(a.hi, math.min(b.hi, c.hi))
+        ZD = math.max(a.lo, math.max(b.lo, c.lo))
+        if ZG >= ZD
+            endU = i + 2
+            j = i + 3
+            int reason = 0
+            int nxt = -1
+            while j < N and reason == 0
+                u = U.get(j)
+                bool hit = false
+                if (j - i) % 2 == 0
+                    if u.lo > ZG or u.hi < ZD
+                        reason := u.lo > ZG ? 3 : 4
+                        nxt := j
+                        hit := true
+                    else
+                        endU := j
+                if not hit and j + 1 < N and u.p0 >= ZD and u.p0 <= ZG
+                    w = U.get(j + 1)
+                    if (isUp(u) and w.lo > ZG) or (not isUp(u) and w.hi < ZD)
+                        reason := isUp(u) ? 1 : 2
+                        endU := j - 1
+                        nxt := j + 1
+                if reason == 0
+                    j += 1
+            DD = U.get(i).lo
+            GG = U.get(i).hi
+            t = i
+            while t <= endU
+                DD := math.min(DD, U.get(t).lo)
+                GG := math.max(GG, U.get(t).hi)
+                t += 2
+            upZD = array.new<float>()
+            upZG = array.new<float>()
+            nU = endU - i + 1
+            g = 3
+            while 3 * g <= nU
+                float gZD = na
+                float gZG = na
+                for grp = 0 to 2
+                    lo = U.get(i + grp * g).lo
+                    hi = U.get(i + grp * g).hi
+                    s = i + grp * g + 1
+                    while s < i + (grp + 1) * g
+                        lo := math.min(lo, U.get(s).lo)
+                        hi := math.max(hi, U.get(s).hi)
+                        s += 1
+                    gZD := na(gZD) ? lo : math.max(gZD, lo)
+                    gZG := na(gZG) ? hi : math.min(gZG, hi)
+                upZD.push(gZD), upZG.push(gZG)
+                g *= 3
+            zs.push(Ctr.new(i, endU, ZD, ZG, DD, GG, reason == 0, reason, 0, upZD, upZG))
+            i := reason != 0 ? nxt : endU + 1
+        else
+            i += 1
+    if zs.size() > 1
+        for k = 1 to zs.size() - 1
+            z = zs.get(k)
+            z.rel := relOf(zs.get(k - 1), z)
+    zs
+
+// ───────────────────────── 买卖点（第 20 / 21 / 24 课）─────────────────────────
+strengthOf(Unit u, int off) =>
+    float s = 0.0
+    if measure == "价格斜率"
+        s := math.abs(u.p1 - u.p0) / math.max(1, u.i1 - u.i0)
+    else
+        t = u.i0
+        while t <= u.i1
+            h = aM.get(off + t)
+            s += isUp(u) ? math.max(h, 0.0) : -math.min(h, 0.0)
+            t += 1
+    s
+
+// AU：全部单位（线段层含最后一条未完成的）；Z：中枢；lastLive：AU 最后一个还在走
+signalsOf(array<Unit> AU, array<Ctr> Z, int nDone, bool lastLive, bool segLevel, int off) =>
+    out = array.new<Sig>()
+    nAU = AU.size()
+    // 第三类：与中枢终结同一口径
+    for [k, z] in Z
+        if z.term == 1 or z.term == 2
+            qi = z.PI1 + 2
+            if qi < nAU
+                u = AU.get(qi)
+                out.push(Sig.new(z.term == 1 ? 3 : 6, u.i1, u.p1, not (lastLive and qi == nAU - 1), false))
+    if segLevel and Z.size() > 0 and nAU > nDone
+        z = Z.last()
+        j = nDone - 1
+        if z.live and j >= z.PI0 + 3
+            u = AU.get(j)
+            w = AU.get(j + 1)
+            if u.p0 >= z.ZD and u.p0 <= z.ZG
+                if isUp(u) and w.lo > z.ZG
+                    out.push(Sig.new(3, w.i1, w.p1, false, false))
+                else if not isUp(u) and w.hi < z.ZD
+                    out.push(Sig.new(6, w.i1, w.p1, false, false))
+    // 第一类、第二类
+    if Z.size() > 1
+        for k = 1 to Z.size() - 1
+            B = Z.get(k)
+            if B.rel == 1 or B.rel == 2
+                wantDown = B.rel == 1
+                int a = -1
+                t = B.PI0 - 1
+                while t >= 0 and a < 0
+                    if isUp(AU.get(t)) != wantDown
+                        a := t
+                    t -= 1
+                int c = -1
+                for cc = B.PI1 + 1 to B.PI1 + 2
+                    if c < 0 and cc < nAU and isUp(AU.get(cc)) != wantDown
+                        c := cc
+                if a >= 0 and c >= 0
+                    C = AU.get(c)
+                    newExt = wantDown ? C.lo < B.DD : C.hi > B.GG
+                    if newExt and strengthOf(C, off) < strengthOf(AU.get(a), off) * divRatio
+                        int ok = 0                  // 0 未定 / 1 回拉进中枢 / -1 先破 C 的极值
+                        qq = c + 1
+                        while qq < nAU and ok == 0
+                            u = AU.get(qq)
+                            if wantDown ? u.lo < C.p1 : u.hi > C.p1
+                                ok := -1
+                            else if wantDown ? u.hi >= B.ZD : u.lo <= B.ZG
+                                ok := 1
+                            qq += 1
+                        if ok >= 0
+                            cDone = not (lastLive and c == nAU - 1)
+                            conf = ok == 1 and cDone
+                            out.push(Sig.new(wantDown ? 1 : 4, C.i1, C.p1, conf, false))
+                            if conf and c + 2 < nAU
+                                s2 = AU.get(c + 2)
+                                weak = wantDown ? s2.p1 < C.p1 : s2.p1 > C.p1
+                                out.push(Sig.new(wantDown ? 2 : 5, s2.i1, s2.p1, not (lastLive and c + 2 == nAU - 1), weak))
+    out
+
+// ───────────────────────── 画图 ─────────────────────────
+var array<line>  gLines  = array.new<line>()
+var array<box>   gBoxes  = array.new<box>()
+var array<label> gLabels = array.new<label>()
+
+// 画图的 x：TradingView 只允许往回画 10000 根以内（xloc.bar_index），更早的夹到界线上
+xc(int x) => math.max(x, bar_index - 9990)
+
+clearAll() =>
+    for l in gLines
+        l.delete()
+    for b in gBoxes
+        b.delete()
+    for lb in gLabels
+        lb.delete()
+    gLines.clear(), gBoxes.clear(), gLabels.clear()
+
+drawCenter(Ctr z, int x0, int x1, color col, int w, bool withLabel) =>
+    st = z.live ? line.style_dashed : line.style_solid
+    gBoxes.push(box.new(x0, z.ZG, x1, z.ZD, border_color = col, border_width = w, border_style = st,
+         bgcolor = color.new(col, fillTr)))
+    if withLabel
+        gLabels.push(label.new(x0, z.ZG, str.format("[{0}, {1}]", str.tostring(z.ZD, format.mintick), str.tostring(z.ZG, format.mintick)),
+             style = label.style_label_lower_left, color = color.new(col, 80), textcolor = col, size = size.small))
+    if showUp and z.upZD.size() > 0
+        for [m, uzd] in z.upZD
+            uzg = z.upZG.get(m)
+            gBoxes.push(box.new(x0, uzg, x1, uzd, border_color = col, border_width = w + 2 * (m + 1), border_style = st,
+                 bgcolor = color.new(col, 100)))
+            gLabels.push(label.new(x0, uzg, "↑高" + array.from("一", "两", "三", "四").get(math.min(m, 3)) + "级",
+                 style = label.style_label_lower_left, color = color.new(col, 70), textcolor = color.white, size = size.small))
+    true
+
+if barstate.islast
+    clearAll()
+    n = aH.size()
+    off = math.max(0, n - calcBars)                   // 截取最近 calcBars 根；相对下标 i 在数组里是 off + i
+    base = bar_index - (n - 1) + off                  // 相对下标 i 对应的 bar_index = base + i（数组开头可能已被 shift 掉）
+    H = aH.slice(off, n)
+    L = aL.slice(off, n)
+    [sH, sL, sIH, sIL] = standardize(H, L)
+    fx = fractals(sH, sL, sIH, sIL)
+    pens = buildPens(fx, sH, sL)
+    segs = buildSegments(pens)
+    done = array.new<Unit>()
+    for s in segs
+        if not s.live
+            done.push(s)
+    pcs = findCenters(pens)
+    scs = findCenters(done)
+    x0Draw = n - 1 - drawBars - off                    // 相对下标：早于此的结构不画
+    np = pens.size()
+
+    if showPC
+        for z in pcs
+            a = pens.get(z.PI0).i0
+            b = pens.get(z.PI1).i1
+            if b >= x0Draw and gBoxes.size() < 480
+                drawCenter(z, xc(base + a), xc(base + b), penCol, 1, false)
+    if showSC
+        for z in scs
+            a = done.get(z.PI0).i0
+            b = done.get(z.PI1).i1
+            if b >= x0Draw and gBoxes.size() < 490
+                drawCenter(z, xc(base + a), xc(base + b), segCol, 2, true)
+    if showPen and np > 0
+        for t = 0 to np - 1
+            p = pens.get(t)
+            if p.i1 >= x0Draw and gLines.size() < 440
+                gLines.push(line.new(xc(base + p.i0), p.p0, xc(base + p.i1), p.p1, color = penCol, width = penW,
+                     style = t == np - 1 ? line.style_dashed : line.style_solid))
+    if showSeg
+        for s in segs
+            if s.i1 >= x0Draw and gLines.size() < 499
+                xe = s.i1
+                ye = s.p1
+                if s.live                              // 未完成段画到迄今的极值
+                    ye := isUp(pens.get(s.PI0)) ? s.hi : s.lo
+                    t = s.PI0
+                    while t <= s.PI1
+                        if pens.get(t).p1 == ye
+                            xe := pens.get(t).i1
+                        t += 1
+                gLines.push(line.new(xc(base + s.i0), s.p0, xc(base + xe), ye, color = segCol, width = segW,
+                     style = s.live ? line.style_dashed : line.style_solid))
+
+    segLevel = sigLevel == "线段中枢"
+    sigs = segLevel ? signalsOf(segs, scs, done.size(), segs.size() > done.size(), true, off) :
+                      signalsOf(pens, pcs, np, true, false, off)
+    names = array.from("一买", "二买", "三买", "一卖", "二卖", "三卖")
+    shows = array.from(show1B, show2B, show3B, show1S, show2S, show3S)
+    for s in sigs
+        if shows.get(s.kind - 1) and (s.confirmed or showPend) and s.bar >= x0Draw and gLabels.size() < 499
+            buy = s.kind <= 3
+            col = buy ? buyCol : sellCol
+            txt = names.get(s.kind - 1) + (s.weak ? "(弱)" : "") + (s.confirmed ? "" : "?")
+            gLabels.push(label.new(xc(base + s.bar), s.price, txt,
+                 style = buy ? label.style_label_up : label.style_label_down,
+                 color = s.confirmed ? col : color.new(col, 100), textcolor = s.confirmed ? color.white : col,
+                 size = size.small))
