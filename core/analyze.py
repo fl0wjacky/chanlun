@@ -12,6 +12,7 @@
     r["big"]    由「扩展」合成出来的更大级别中枢
     r["segs"]   线段（最后一条可能是未完成的，带 live=True）
     r["seg_centers"] 线段中枢 —— 只用**已完成**的线段算（未完成段的高低点还会变）
+    每个中枢的 z["up"]：延伸满 9 段时同时构成的高一级别中枢（满 27 段再升一级），见 center.upgrades
     r["tick"] / r["pen_rule"]   这次用的精度 / 成笔标准（口径一旦选定要一路保持）
 
 第 83 课：「由线段构成最小中枢，则不存在这个问题」—— 正规的最小中枢是线段中枢；
@@ -48,10 +49,11 @@ def analyze_file(fn, pen="old", **kw):
 
 def summarize(r):
     return ("原始 %d 根 → 标准化 %d 根 ｜ 分型 %d（顶 %d / 底 %d）"
-            " ｜ 笔 %d ｜ 类中枢 %d ｜ 大级别类中枢 %d ｜ 线段 %d ｜ 线段中枢 %d ｜ 精度 %s ｜ %s笔"
+            " ｜ 笔 %d ｜ 类中枢 %d（满 9 段升级 %d）｜ 大级别类中枢 %d ｜ 线段 %d ｜ 线段中枢 %d（升级 %d）｜ 精度 %s ｜ %s笔"
             % (len(r["bars"]), len(r["std"]), len(r["fx"]),
                sum(1 for f in r["fx"] if f["type"] == "top"),
                sum(1 for f in r["fx"] if f["type"] == "bot"),
-               len(r["pens"]), len(r["centers"]), len(r["big"]),
+               len(r["pens"]), len(r["centers"]), sum(bool(z["up"]) for z in r["centers"]), len(r["big"]),
                sum(not s.get("live") for s in r["segs"]), len(r["seg_centers"]),
+               sum(bool(z["up"]) for z in r["seg_centers"]),
                r["tick"], "老" if r["pen_rule"] == "old" else "新"))

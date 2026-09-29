@@ -12,15 +12,22 @@ def draw_layers(g, r, X, Y, keep=lambda a, b: True, bar_w=2):
 
     X(i) / Y(p)：K 线下标、价格 → 像素（X 给的是这根 K 线的中心）；
     keep(a, b)：下标区间 [a, b] 要不要画（分面板时筛本月）；bar_w：每根 K 线占的像素宽。
-    返回线段中枢的标签请求 [((x, y), 文本)]，交给 draw_labels 最后画。
+    返回标签请求 [((x, y), 文本) 或 ((x, y), 文本, 颜色)]，交给 draw_labels 最后画：
+    线段中枢的区间，以及满 9 段中枢的「↑高一级」标记（第 33 课，引擎 z["up"]；满 27 段标「↑高两级」）。
     """
     bars, pens, segs = r["bars"], r["pens"], r["segs"]
     done = [s for s in segs if not s.get("live")]     # 线段中枢的序号指向「已完成线段」
     labels = []
+
+    def up_mark(z, box):
+        if z.get("up"):
+            labels.append(((max(box[0], 0) + 8, box[1] - 36), "↑高%s级" % "一两三四"[len(z["up"]) - 1], AM))
+
     for z in r["centers"]:
         a, b = pens[z["PI0"]]["i0"], pens[z["PI1"]]["i1"]
         if keep(a, b):
             box = [X(a), Y(z["ZG"]), X(b), Y(z["ZD"])]
+            up_mark(z, box)
             if z["live"]:
                 dashed_rect(g, box, BL + (120,), width=2, fill=BL + (20,))
             else:
@@ -34,6 +41,7 @@ def draw_layers(g, r, X, Y, keep=lambda a, b: True, bar_w=2):
             else:
                 g.rectangle(box, fill=CY + (38,), outline=CY, width=5)
             labels.append(((max(box[0], 0) + 8, box[1] - 36), "[%g, %g]" % (round(z["ZD"], 2), round(z["ZG"], 2))))
+            up_mark(z, box)
     for i, b in enumerate(bars):                      # K 线：影线 + 实体
         if keep(i, i):
             col = UP if b["c"] >= b["o"] else DN
@@ -73,7 +81,9 @@ def draw_layers(g, r, X, Y, keep=lambda a, b: True, bar_w=2):
 def draw_labels(g, labels, font, col, placed=None):
     """带底色的标签，最后画；与已放下的框重叠就往上挪一行（最多 4 次）。"""
     placed = [] if placed is None else placed
-    for (x, y), text in labels:
+    for lab in labels:
+        (x, y), text = lab[0], lab[1]
+        c = lab[2] if len(lab) > 2 else col
         tw = g.textlength(text, font=font)
         box = lambda yy: (x - 6, yy - 2, x + tw + 6, yy + font.size + 8)
         for _ in range(4):
@@ -82,7 +92,7 @@ def draw_labels(g, labels, font, col, placed=None):
                 break
             y -= font.size + 12
         g.rounded_rectangle(box(y), 6, fill=BG + (215,))
-        g.text((x, y), text, font=font, fill=col)
+        g.text((x, y), text, font=font, fill=c)
         placed.append(box(y))
     return placed
 
@@ -105,6 +115,7 @@ def legend(d, x, y, font):
          "类中枢（对照）")
     item(lambda x0, y0: dashed_rect(d, [x0, y0 - 14, x0 + 70, y0 + 14], CY, 3, fill=CY + (20,), dash_len=12, gap=8),
          "仍在延续的中枢")
+    item(lambda x0, y0: d.text((x0 + 24, y0 - 16), "↑", font=font, fill=AM), "高一级 = 满 9 段的中枢（第 33 课）")
     return x
 
 

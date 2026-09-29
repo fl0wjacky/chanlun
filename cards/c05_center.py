@@ -38,14 +38,11 @@ def draw_box(d, pt, PI0, PI1, Y, ZG, ZD, col=BL, label=None, dy=-28, below=False
     return x0, x1
 
 
-def dashed_band(d, x0, x1, Y, ZG, ZD, col=BL, w=5, dl=18, gp=13):
+def ext_band(d, x0, x1, Y, ZG, ZD, col=BL, w=3):
+    """延续段：同一中枢往右长出去的部分 —— 实线细边、淡底（虚线只留给「未完成」，见 README 画法约定）。"""
     d.rectangle([x0, Y(ZG), x1, Y(ZD)], fill=(235, 242, 255, 26))
-    xx = x0
-    while xx < x1:
-        e = min(xx + dl, x1)
-        d.line([xx, Y(ZG), e, Y(ZG)], fill=col, width=w)
-        d.line([xx, Y(ZD), e, Y(ZD)], fill=col, width=w)
-        xx = e + gp
+    d.line([x0, Y(ZG), x1, Y(ZG)], fill=col, width=w)
+    d.line([x0, Y(ZD), x1, Y(ZD)], fill=col, width=w)
 
 
 def head_line(d, y0, y1, txt, desc, chip_dy=18):
@@ -80,10 +77,10 @@ def cell(d, x0, y0, w, title, tcol, pairs, pmin, pmax, notes, draw_fn, sub=None)
 
 def f_ext(d, m, pt, x0, w):
     draw_box(d, pt, 0, 2, m.Y, 108, 102, BL)
-    dashed_band(d, pt[3][0], pt[5][0], m.Y, 108, 102, BL)
+    ext_band(d, pt[3][0], pt[5][0], m.Y, 108, 102, BL)
     d.line([pt[3][0], m.Y(108), pt[3][0], m.Y(102)], fill=BL, width=4)
-    lchip(d, pt[0][0] + 4, m.Y(108) - 34, "实线 = 成立段", (205, 222, 255))
-    lchip(d, pt[3][0] + 6, m.Y(102) + 10, "虚线 = 延续段", AM)
+    lchip(d, pt[0][0] + 4, m.Y(108) - 34, "粗框 = 成立段", (205, 222, 255))
+    lchip(d, pt[3][0] + 6, m.Y(102) + 10, "细框 = 延续段", AM)
 
 
 def f_buy(d, m, pt, x0, w):
@@ -149,13 +146,13 @@ def draw_single(d):
     """C 单个中枢：延伸 还是 终结"""
     head_line(d, 1240, 1802, "C  延续，还是被终结", "第 22 课：「中枢有三种运动：延续、扩展、新生」", chip_dy=14)
     rz = analyze_file("zec15.json")
-    over9 = sum(z["npens"] > 9 for z in rz["centers"])
+    over9 = sum(bool(z["up"]) for z in rz["centers"])            # 满 9 段：同时是高一级别中枢
     cell(d, X0C[0], 1320, CWC, "C1 延续", BL, [(110, 100), (100, 108), (108, 102), (102, 107), (107, 103)],
          99.5, 111.5,
          ["Z 段仍与 [ZD,ZG] 重叠、没出三买三卖",
           "→ 同一中枢（中心定理一）。",
-          "超 9 段即成高一级（第 32/33 课），",
-          "引擎未做；ZEC 15m %d/%d 个超 9 笔" % (over9, len(rz["centers"]))], f_ext)
+          "满 9 段同时成高一级（第 33 课），",
+          "3+3+3 取重叠；ZEC 15m %d/%d 个" % (over9, len(rz["centers"]))], f_ext)
     cell(d, X0C[1], 1320, CWC, "C2 终结 · 三买", GR, [(110, 100), (100, 108), (108, 102), (102, 116), (116, 112)],
          99, 119,
          ["从区间里的 102 涨到 116 > ZG 108，",

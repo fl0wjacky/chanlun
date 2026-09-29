@@ -77,6 +77,25 @@ def classify_pair(A, B):
     return "区间重叠", "同一中枢"
 
 
+def upgrades(units, PI0, PI1):
+    """9 段升级（第 32 / 33 课；算法见第 64 课答疑「用结合律。例如原来九段的，三个三段结合起来看」）。
+
+    中枢从形成起共 n 段次级别走势（含形成的三段）：
+      n ≥ 9  → 同时构成高一级别中枢：前 9 段按 3+3+3 结成三段，各取高低点，重叠即其区间；
+      n ≥ 27 → 再高一级：前 27 段按 9+9+9 结成三段，同法；以此类推（3^(m+1) 段升 m 级）。
+    本级别照样是一个中枢（第 17 课答疑「一万年在一个区间里，那还是一个中枢」），两层都保留。
+    返回 [{up, ZD, ZG, groups}, ...]，up = 升几级；不够 9 段返回 []。
+    """
+    n, out, m = PI1 - PI0 + 1, [], 1
+    while 3 ** (m + 1) <= n:
+        g = 3 ** m
+        groups = [(min(u["lo"] for u in units[PI0 + t * g:PI0 + (t + 1) * g]),
+                   max(u["hi"] for u in units[PI0 + t * g:PI0 + (t + 1) * g])) for t in range(3)]
+        out.append(dict(up=m, ZD=max(x[0] for x in groups), ZG=min(x[1] for x in groups), groups=groups))
+        m += 1
+    return out
+
+
 def find_centers(pens):
     """pens: build_pens() 输出的笔列表。
 
@@ -118,6 +137,7 @@ def find_centers(pens):
                 term=(reason if reason else "仍在延续"),
                 npens=end - i + 1,
                 PI0=i, PI1=end,
+                up=upgrades(pens, i, end),            # 9 段升级：延伸满 9 段，同时是高一级别中枢
             )
             zs.append(z)
             # 终结时：end 与 nxt 之间是连接段，不属于任何中枢（第 49 课：前中枢 + 连接段 + 后中枢）
@@ -186,6 +206,15 @@ def check_centers(zs, units):
                 bad.append(("终点不对：%s 时应终于第 %d 段" % (ev[0], ev[1]), k))
             if k + 1 < len(zs) and zs[k + 1]["PI0"] < ev[2]:
                 bad.append(("下一个中枢起点早于连接段之后", k))
+        # 9 段升级：另写一遍（按组号累加，不调用 upgrades）
+        n, want, g = j - i + 1, [], 3
+        while 3 * g <= n:
+            lo = [min(units[q]["lo"] for q in range(i + t * g, i + t * g + g)) for t in range(3)]
+            hi = [max(units[q]["hi"] for q in range(i + t * g, i + t * g + g)) for t in range(3)]
+            want.append((len(want) + 1, max(lo), min(hi)))
+            g *= 3
+        if [(u["up"], u["ZD"], u["ZG"]) for u in z.get("up", [])] != want:
+            bad.append(("9 段升级不符（满 9 段升一级、27 段升两级，区间按三组重叠）", k))
         if k > 0:
             if i <= zs[k - 1]["PI1"]:
                 bad.append(("与前一个中枢重叠或乱序", k))

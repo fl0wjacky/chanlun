@@ -99,6 +99,15 @@ count("v1 中枢终结方式未被发现", 0 if caught else 1, "　（抓到 %d 
 caught = sum(len(check_hierarchy(extend_v1.build_hierarchy(R[t]["centers"], R[t]["pens"]), R[t]["centers"], R[t]["pens"]))
              for t in R)
 count("v1 扩展合成的毛病未被发现", 0 if caught else 1, "　（抓到 %d 处）" % caught)
+# 9 段升级：把一个满 9 段中枢的升级记录抹掉 / 把区间改一点，校验器必须报错
+import copy
+Zc = copy.deepcopy(R["ZEC 15m"]["centers"])
+k9 = next(k for k, z in enumerate(Zc) if z["up"])
+Zc[k9]["up"] = []
+count("漏掉的 9 段升级未被发现", 0 if check_centers(Zc, R["ZEC 15m"]["pens"]) else 1)
+Zc = copy.deepcopy(R["ZEC 15m"]["centers"])
+Zc[k9]["up"][0]["ZG"] += 0.01
+count("算错的升级区间未被发现", 0 if check_centers(Zc, R["ZEC 15m"]["pens"]) else 1)
 
 print("=" * 72)
 print("总违规数:", FAIL, "→", "全部通过" if FAIL == 0 else "有问题，需排查")
