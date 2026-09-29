@@ -20,8 +20,16 @@ def draw_layers(g, r, X, Y, keep=lambda a, b: True, bar_w=2):
     labels = []
 
     def up_mark(z, box):
-        if z.get("up"):
-            labels.append(((max(box[0], 0) + 8, box[1] - 36), "↑高%s级" % "一两三四"[len(z["up"]) - 1], AM))
+        """满 9 段：同一时间跨度上再画高一级别中枢的框（琥珀色细框，区间按 3+3+3 重叠）；满 27 段再画一层更粗的。"""
+        for u in z.get("up", []):
+            ub = [box[0], Y(u["ZG"]), box[2], Y(u["ZD"])]
+            w = 2 + 2 * u["up"]
+            if z["live"]:
+                dashed_rect(g, ub, AM, width=w)
+            else:
+                g.rectangle(ub, outline=AM + (230,), width=w)
+            labels.append(((max(box[0], 0) + 8, ub[1] - 36), "↑高%s级 [%g, %g]" % (
+                "一两三四"[u["up"] - 1], round(u["ZD"], 2), round(u["ZG"], 2)), AM))
 
     for z in r["centers"]:
         a, b = pens[z["PI0"]]["i0"], pens[z["PI1"]]["i1"]
@@ -115,7 +123,7 @@ def legend(d, x, y, font):
          "类中枢（对照）")
     item(lambda x0, y0: dashed_rect(d, [x0, y0 - 14, x0 + 70, y0 + 14], CY, 3, fill=CY + (20,), dash_len=12, gap=8),
          "仍在延续的中枢")
-    item(lambda x0, y0: d.text((x0 + 24, y0 - 16), "↑", font=font, fill=AM), "高一级 = 满 9 段的中枢（第 33 课）")
+    item(lambda x0, y0: d.rectangle([x0, y0 - 14, x0 + 70, y0 + 14], outline=AM, width=4), "高一级中枢（满 9 段，第 33 课）")
     return x
 
 
