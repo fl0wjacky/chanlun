@@ -9,7 +9,7 @@ import os, sys, json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import data
 from core.kline import standardize, fractals, _contains
-from core.pen import build_pens
+from core.pen import build_pens_v1 as build_pens   # 这个诊断是针对 v1 划笔写的
 
 
 def standardize_track(bars):

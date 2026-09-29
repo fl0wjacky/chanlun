@@ -8,14 +8,14 @@ import json, datetime
 from functools import lru_cache
 from collections import Counter
 from config import data
-from core import analyze
+from core import analyze, analyze_file
 
 FILES = {"15m": "zec15.json", "1h": "zec_1h.json", "2h": "zec_2h.json", "4h": "zec_4h.json"}
 
 
 @lru_cache(None)
 def run(tf):
-    return analyze(json.load(open(data(FILES[tf]), encoding="utf-8")))
+    return analyze_file(FILES[tf])
 
 
 def done_segs(tf):
@@ -45,7 +45,7 @@ def _meet(ta, za, tb, zb):
 
 
 def cross(tf_hi):
-    """15 分钟线段中枢（路径 A）vs 高一档周期的笔中枢（路径 B）。
+    """15 分钟线段中枢（路径 A）vs 高一档周期的类中枢（路径 B）。
 
     返回 dict(A=个数, B=个数, A_hit=A 中能在 B 里找到对应的个数, B_hit=反之)。
     """

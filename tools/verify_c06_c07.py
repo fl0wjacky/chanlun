@@ -11,12 +11,13 @@
 import os, sys, json
 from collections import Counter
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from core import analyze
+from core import analyze, analyze_file
 from config import data
 from cards import zec_data as zec
 
 # ---- 写死在图上的标称（改图时同步改这里） ----
-NESTED = dict(A=11, unmerged=2, B=13, hit=9, A_1h=4)   # 2026-09-29 改中心定理一口径后回算   # chart_nested：30m 合成 / 未合成 / 1h 笔中枢 / 对得上；1h 合成
+NESTED = dict(A=6, unmerged=1, B=5, hit=4, A_1h=3)   # v2 引擎（回头修正划笔、三买三卖终结、区间只看前三段）回算
+# chart_nested：30m 合并后 / 其中没合的 / 1h 类中枢 / 对得上；1h 合并后（图上是现算的，这里是标称快照）
 C07_MIN_MATCH = 50       # c07「结构层级大致对应」：个数最接近那档，两边互相对上的比例都应 ≥ 此值（%）
 
 FAIL = 0
@@ -30,7 +31,7 @@ def check(label, card, got, ok=None):
 
 
 def load(fn):
-    return analyze(json.load(open(data(fn), encoding="utf-8")))
+    return analyze_file(fn)
 
 
 def times(r, zs, units):
@@ -47,18 +48,18 @@ print("=" * 72)
 print("c06 走势类型 · ZEC 15 分钟相邻中枢：趋势 vs 扩展（卡片现算 vs 这里另算）")
 Z15 = load("zec15.json")
 mine = {}
-for name, zs in (("线段中枢", Z15["seg_centers"]), ("笔中枢", Z15["centers"])):
+for name, zs in (("线段中枢", Z15["seg_centers"]), ("类中枢", Z15["centers"])):
     k = Counter(zs[j]["kind"] for j in range(1, len(zs)))
     mine[name] = dict(n=len(zs) - 1, 趋势=k["趋势"], 扩展=k["扩展"], 同一中枢=k["同一中枢"])
     card = zec.pair_stats(zec.run("15m")["seg_centers" if name == "线段中枢" else "centers"])
     check("%s 对数 / 趋势 / 扩展 / 同一中枢" % name, tuple(card.values()), tuple(mine[name].values()))
-for name in ("线段中枢", "笔中枢"):
+for name in ("线段中枢", "类中枢"):
     m = mine[name]
     check("「扩展占多数」在%s上成立" % name, "扩展 > 趋势", "%d > %d" % (m["扩展"], m["趋势"]), m["扩展"] > m["趋势"])
 
-# ---- c07：ZEC 15 分钟线段中枢 vs 高周期笔中枢 ----
+# ---- c07：ZEC 15 分钟线段中枢 vs 高周期类中枢 ----
 print("=" * 72)
-print("c07 级别 · ZEC 15 分钟线段中枢（A）vs 高周期笔中枢（B）")
+print("c07 级别 · ZEC 15 分钟线段中枢（A）vs 高周期类中枢（B）")
 Ad = [s for s in Z15["segs"] if not s.get("live")]
 A, TA = Z15["seg_centers"], times(Z15, Z15["seg_centers"], Ad)
 rows = {}
@@ -77,15 +78,15 @@ check("「结构层级大致对应」（%s 两边 ≥%d%%）" % (best, C07_MIN_M
 
 # ---- chart_nested：AAPL 30 分钟 → 1 小时（写死在图上）----
 print("=" * 72)
-print("chart_nested · AAPL 30 分钟链式合成 vs 1 小时笔中枢（图上写死的数字）")
+print("chart_nested · AAPL 30 分钟扩展合并 vs 1 小时类中枢")
 R30, R1h = load("aaplusdt_30m.json"), load("aaplusdt_1h.json")
 BA, B1 = R30["big"], R1h["centers"]
 TA2, TB2 = times(R30, BA, R30["pens"]), times(R1h, B1, R1h["pens"])
 hit = sum(1 for i in range(len(BA)) if any(overlap(TA2[i], BA[i], TB2[j], B1[j]) for j in range(len(B1))))
-check("30m 合成 / 未合成 / 1h 笔中枢 / 对得上",
+check("30m 合并后 / 没合 / 1h 类中枢 / 对得上",
       (NESTED["A"], NESTED["unmerged"], NESTED["B"], NESTED["hit"]),
       (len(BA), sum(z["nmerge"] == 1 for z in BA), len(B1), hit))
-check("1h 链式合成个数", NESTED["A_1h"], len(R1h["big"]))
+check("1h 合并后个数", NESTED["A_1h"], len(R1h["big"]))
 
 # ---- 框架卡 model_dissent：验证表（卡片现算）----
 print("=" * 72)
@@ -95,20 +96,28 @@ card_rows = [(n, round(hi, 2), round(lo, 2), v) for _, n, _, hi, lo, v in gap_ro
 R4 = load("aaplusdt_4h.json")
 Z, P = R4["centers"], R4["pens"]
 mine = []
-for n, z in enumerate(Z, 1):                     # 另写：按中枢逐笔扫，离开 = 向上笔越过 ZG
+for n, z in enumerate(Z, 1):                     # 另写：按中枢逐笔扫，离开 = 向上笔越过 ZG；起点须在 [ZD, ZG] 内才可能是三买
     last = Z[n]["PI0"] if n < len(Z) else len(P)
     j = z["PI0"]
     while j + 1 < len(P) and j <= last:
         a, b2 = P[j], P[j + 1]
         if a["p1"] > a["p0"] and a["p1"] > z["ZG"] and b2["p1"] < b2["p0"]:
-            v = "三买" if b2["p1"] >= z["ZG"] else ("ZD 下方" if b2["p1"] < z["ZD"] else "假缝隙")
+            if b2["lo"] > z["ZG"]:                # 回试整笔在 ZG 之上：离开笔从区间里出发才是三买，否则是贯穿
+                v = "三买" if z["ZD"] <= a["p0"] <= z["ZG"] else "贯穿"
+            else:
+                v = "ZD 下方" if b2["lo"] < z["ZD"] else "假缝隙"
             mine.append((n, round(a["p1"], 2), round(b2["p1"], 2), v))
         j += 1
 check("逐行一致（%d 行）" % len(mine), len(card_rows), len(mine), card_rows == mine)
-last_is_buy = all(
-    [r[3] for r in mine if r[0] == n][-1] == "三买" and [r[3] for r in mine if r[0] == n].count("三买") == 1
-    for n in {r[0] for r in mine if r[3] == "三买"})
-check("「每个中枢成立的三买都是最后一次」", "成立", "成立" if last_is_buy else "不成立", last_is_buy)
+# 新口径下三买按定义就是中枢终结（第 38 课）。另写一遍：离开笔从 [ZD, ZG] 里出发向上、下一笔整笔在 ZG 之上。
+def is3b(z, q):
+    if q + 1 >= len(P):
+        return False
+    u, w = P[q], P[q + 1]
+    return u["p1"] > u["p0"] and z["ZD"] <= u["p0"] <= z["ZG"] and w["lo"] > z["ZG"]
+ok3 = all((is3b(z, z["PI1"] + 1) if z["term"] == "三买" else True) and
+          not any(is3b(z, q) for q in range(z["PI0"] + 3, z["PI1"] + 1)) for z in Z)
+check("「三买终结的中枢，三买就在终结处，内部没有更早的三买」", "成立", "成立" if ok3 else "不成立", ok3)
 
 print("=" * 72)
 print("全部一致" if FAIL == 0 else "有 %d 条对不上 —— 卡片上的数字或措辞过期了，回去改卡" % FAIL)

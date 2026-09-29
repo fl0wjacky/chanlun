@@ -4,7 +4,7 @@
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.center import find_centers
-from core import analyze
+from core import analyze, analyze_file
 from config import data
 import json
 
@@ -75,7 +75,7 @@ for nm, PS in (("D2 向上", [(110,100),(100,108),(108,102),(102,118),(118,104),
 print("=" * 66)
 print("引擎自检（真实数据）")
 for fn, tag in (("aaplusdt_4h.json", "4小时"), ("aaplusdt_30m.json", "30分钟")):
-    r = analyze(json.load(open(data(fn), encoding="utf-8")))
+    r = analyze_file(fn)
     ok = all(z["ZG"] > z["ZD"] and z["X1"] >= z["X0"] for z in r["centers"])
     print("   [%s] 中枢 %d 个，区间与横向范围全部合法: %s" % (tag, len(r["centers"]), ok))
     FAIL += not ok

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""ZEC 15 分钟 · 全量高清图（按月分面板版）：K线、笔、线段、线段中枢（笔中枢淡色对照），一根不省。
+"""ZEC 15 分钟 · 全量高清图（按月分面板版）：K线、笔、线段、线段中枢（类中枢 = 笔构成的中枢，淡色对照），一根不省。
 
 每根 K 线 2 像素宽，整张图约 4 万像素宽。按**自然月分面板**，每个面板纵轴按当月价格
 各自缩放 —— 这段 ZEC 从一两百涨到一千多，共用一根价格轴会把前几个月压成一条线。
@@ -10,14 +10,14 @@
 """
 import os, sys, json, math, datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import data, out
+from config import data, out, tick_of
 from render.style import *
 from render.full_common import draw_layers, draw_labels, legend
 from core import analyze
 
 PX = 2                                              # 每根K线的像素宽
 bars = json.load(open(data("zec15.json"), encoding="utf-8"))
-r = analyze(bars)
+r = analyze(bars, tick=tick_of("zec15.json"))
 pens, segs = r["pens"], r["segs"]
 done = [s for s in segs if not s.get("live")]
 n = len(bars)
@@ -102,8 +102,9 @@ t0, t1 = utc(bars[0]["t"]), utc(bars[-1]["t"])
 d.text((L, 36), "ZEC/USDT 永续 · 15 分钟 · 全量（按月分面板）：K线 / 笔 / 线段 / 线段中枢", font=f_t, fill=TX)
 d.text((L + 4, 108), "币安永续 ZECUSDT ｜ %s – %s（UTC）｜ %d 根K线 ｜ 每根 %d 像素 ｜ 按月分面板，纵轴各月自缩放（看价格请看本面板刻度）"
        % (t0.strftime("%Y-%m-%d %H:%M"), t1.strftime("%Y-%m-%d %H:%M"), n, PX), font=f_s, fill=MU)
-d.text((L + 4, 152), "笔 %d ｜ 笔中枢 %d ｜ 完成线段 %d（+%d 条未完成）｜ 线段中枢 %d（只用已完成线段计算，项目口径）｜ 最新收盘 %g"
-       % (len(pens), len(r["centers"]), len(done), len(segs) - len(done), len(r["seg_centers"]), bars[-1]["c"]),
+d.text((L + 4, 152), "笔 %d ｜ 类中枢 %d ｜ 完成线段 %d（+%d 条未完成）｜ 线段中枢 %d（只用已完成线段计算）｜ 精度 %g ｜ 老笔 ｜ 最新收盘 %g"
+       % (len(pens), len(r["centers"]), len(done), len(segs) - len(done), len(r["seg_centers"]),
+          r["tick"], bars[-1]["c"]),
        font=f_s, fill=TX)
 xe = legend(d, L + 4, 222, f_n)
 d.text((xe + 40, 208), "约定：未完成的笔 / 线段、仍在延续的中枢一律虚线 ｜ 冲浪者 · %s" % datetime.date.today().isoformat(),

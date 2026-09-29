@@ -5,7 +5,7 @@ import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cards.base import *
 import json
-from core import analyze
+from core import analyze, analyze_file
 from config import data
 
 W, H = 1400, 2990                    # 卡片尺寸；模块常量，各段函数直接用
@@ -130,7 +130,7 @@ def draw_definition(d):
     d.text((80, 698), "本例 = [ max(100,100,102) , min(110,108,108) ] = [ 102 , 108 ]", font=f_n, fill=AM)
     d.text((80, 734), "第 20 课：「但无论是哪种情况，中枢的公式都可以简化为[max(a2，c2)，min(a1，c1)]」—— 结果一样。",
            font=f_t, fill=MU)
-    d.text((80, 764), "口径：本卡用笔示意中枢（笔中枢是本项目口径）；原文最小级别中枢以线段为基础（第 65、78 课）。",
+    d.text((80, 764), "口径：本卡用笔示意；第 64 课「线段以下是没有中枢的，所以说是类中枢」—— 笔构成的只是类中枢。",
            font=f_t, fill=CY)
 
 
@@ -148,23 +148,26 @@ def draw_forms(d):
 def draw_single(d):
     """C 单个中枢：延伸 还是 终结"""
     head_line(d, 1240, 1802, "C  延续，还是被终结", "第 22 课：「中枢有三种运动：延续、扩展、新生」", chip_dy=14)
+    rz = analyze_file("zec15.json")
+    over9 = sum(z["npens"] > 9 for z in rz["centers"])
     cell(d, X0C[0], 1320, CWC, "C1 延续", BL, [(110, 100), (100, 108), (108, 102), (102, 107), (107, 103)],
          99.5, 111.5,
-         ["后续 Z 段仍与 [ZD,ZG] 重叠，",
-          "就是同一中枢（中心定理一）。",
-          "后果：框一直往右长，中枢迟迟不终结。",
-          "实测 4 小时：最长的覆盖了 13 笔。"], f_ext)
+         ["Z 段仍与 [ZD,ZG] 重叠、没出三买三卖",
+          "→ 同一中枢（中心定理一）。",
+          "超 9 段即成高一级（第 32/33 课），",
+          "引擎未做；ZEC 15m %d/%d 个超 9 笔" % (over9, len(rz["centers"]))], f_ext)
     cell(d, X0C[1], 1320, CWC, "C2 终结 · 三买", GR, [(110, 100), (100, 108), (108, 102), (102, 116), (116, 112)],
          99, 119,
-         ["向上离开 116 > ZG 108，回试只到 112，",
-          "没跌回 ZG 以内 → 三买 → 封口。",
-          "封口后：或新生（范围不碰 → 趋势），",
-          "或扩展成更大中枢（见 D2、D3）。"], f_buy)
+         ["从区间里的 102 涨到 116 > ZG 108，",
+          "回试只到 112 → 三买 → 当下终结。",
+          "离开段 102→116 是连接段，",
+          "不归任何中枢（第 38 / 49 课）。"], f_buy)
     cell(d, X0C[2], 1320, CWC, "C3 终结 · 三卖", RD, [(100, 110), (110, 102), (102, 108), (108, 94), (94, 98)],
          92, 113,
-         ["向下离开 94 < ZD 102，回抽只到 98，",
-          "没升破 ZD → 三卖 → 同样封口。",
-          "方向和 C2 相反，规则一样。"], f_sell)
+         ["从区间里的 108 跌到 94 < ZD 102，",
+          "回抽只到 98 → 三卖 → 当下终结。",
+          "从 ZG 上方一路穿下来的不算三卖，",
+          "由中心定理一兜底（Z 段整段在外）。"], f_sell)
 
 
 def draw_pair(d):
@@ -195,15 +198,15 @@ def draw_extended(d):
     """E 扩展出来的大中枢，区间怎么算"""
     callout(d, 2420, 2688, GR, 20)
     chip(d, 80, 2438, "扩展出来的大中枢，区间怎么算？", GR, f_p)
-    d.text((640, 2446), "第 49 课 + 第 52 课", font=f_n, fill=MU)
+    d.text((640, 2446), "第 49 / 52 / 54 课", font=f_n, fill=MU)
     d.text((86, 2494), "① 由什么构成：两个同级别中枢 ＋ 它们之间的连接段 = 三个次级别走势类型",
            font=f_n, fill=TX)
     d.text((86, 2528), "　 第 49 课：「相应连接两个次级别的，包含一个第三类买点，所以肯定也是一个次级别」",
            font=f_t, fill=MU)
-    d.text((86, 2562), "② 原文只给原则：A ＋ B ＋ C ＝ (A ＋ B ＋ C)", font=f_n, fill=AM)
-    d.text((86, 2596), "　 第 52 课：「其实就是 A+B+C=(A+B+C)，而后者符合更大的中枢定义」",
+    d.text((86, 2562), "② 区间：三段各按高低点（中枢取波动范围 [DD,GG]）取公共重叠；只看前三段，之后的只算震荡", font=f_n, fill=AM)
+    d.text((86, 2596), "　 第 54 课算例：三个 1 分钟中枢「当成线段……高低点就是这线段的端点」→「区间是[d2，g5]」",
            font=f_t, fill=MU)
-    d.text((86, 2626), "　 → 本项目口径：三段各取波动范围 [DD,GG]，再取公共重叠 [max(低), min(高)]（原文未写明）",
+    d.text((86, 2626), "　 第 52 课答疑「只看前三段的区间，后面都是震荡」；区间重叠的两中枢也要合（第 17/42/43 课：有重叠就必然扩展）",
            font=f_t, fill=MU)
 
 
@@ -211,9 +214,10 @@ def draw_data(d):
     """F 数据"""
     callout(d, 2716, 2816, GR, 22)
     d.text((86, 2730), "实测（币安合约 AAPLUSDT 永续 · 2026/07/26 – 09/27 UTC）", font=f_n, fill=GR)
-    r4, r30 = (analyze(json.load(open(data(fn), encoding="utf-8"))) for fn in ("aaplusdt_4h.json", "aaplusdt_30m.json"))
-    d.text((86, 2770), "笔中枢　4 小时 %d 根 → %d 个 → 合成 %d 个大中枢　｜　30 分钟 %d 根 → %d 个 → 链式合并后剩 %d 个（出图时现算）"
-           % (len(r4["bars"]), len(r4["centers"]), len(r4["big"]), len(r30["bars"]), len(r30["centers"]), len(r30["big"])),
+    r4, r30 = (analyze_file(fn) for fn in ("aaplusdt_4h.json", "aaplusdt_30m.json"))
+    nb = lambda r: sum(b["nmerge"] > 1 for b in r["big"])
+    d.text((86, 2770), "类中枢　4 小时 %d 根 → %d 个，合出 %d 个大中枢　｜　30 分钟 %d 根 → %d 个，合出 %d 个大中枢（出图时现算）"
+           % (len(r4["bars"]), len(r4["centers"]), nb(r4), len(r30["bars"]), len(r30["centers"]), nb(r30)),
            font=f_n, fill=TX)
 
 
@@ -228,8 +232,8 @@ def build():
     draw_pair(d)
     draw_extended(d)
     draw_data(d)
-    foot(d, "第 17/20 课（定义与公式）；第 22 课（三种运动）；第 49/52 课（扩展）；第 65/78 课（最小中枢）",
-         "延续何时停、扩展后大中枢区间怎么取，原文都只给原则；卡上的算法是本项目口径")
+    foot(d, "第 17/20 课（定义与公式）；第 18/38/72 课（三买三卖 = 中枢结束）；第 49/52/54 课（扩展）；第 64 课（类中枢）",
+         "终结：三买三卖为主、中心定理一兜底；三段重叠成一个价位也算（第 54 课「也就是一个价位」）")
     return im
 
 

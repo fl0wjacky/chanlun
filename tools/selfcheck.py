@@ -2,23 +2,28 @@
 # -*- coding: utf-8 -*-
 """引擎自检：跑一遍全部不变量检查。任何一项不为 0 都说明引擎有问题。
 
-K 线层（标准化 / 分型）→ 线段层（不变量 + 按原文定义独立复核）→ 中枢层（笔中枢、线段中枢）。
+K 线层（标准化 / 分型）→ 笔层（不变量 + 「笔内不能再切」独立复核 + 端点极值诊断）
+→ 线段层（不变量 + 按原文定义独立复核）→ 中枢层（类中枢、线段中枢：终结方式按定义重验）
+→ 扩展合成（区间只看前三段、有重叠必合、级别不乱添）。第 54 课算例另见 tools/verify_l54.py。
+每个校验都做了变异测试：喂进故意做错的输入，确认它真能报错（见文件末尾）。
 """
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import json
 from config import data
-from core import analyze, summarize, check_standardized, check_fractals_alternate
+from core import analyze, analyze_file, summarize, check_standardized, check_fractals_alternate
+from core.pen import check_pens, nonextreme_pens, unsplit_violations, build_pens_v1
 from core.segment import check_segments, verify_by_definition, nonextreme_endpoints
 from core.center import check_centers
+from core.extend import check_hierarchy
 
 DATASETS = [("aaplusdt_4h.json", "AAPL 4h"), ("aaplusdt_2h.json", "AAPL 2h"),
             ("aaplusdt_1h.json", "AAPL 1h"), ("aaplusdt_30m.json", "AAPL 30m"),
             ("zec15.json", "ZEC 15m")]
 
 FAIL = 0
-R = {tag: analyze(json.load(open(data(fn), encoding="utf-8"))) for fn, tag in DATASETS}
+R = {tag: analyze_file(fn) for fn, tag in DATASETS}
 
 
 def count(label, n, note=""):
@@ -44,14 +49,56 @@ for tag, r in R.items():
     bots = {f["k"] for f in r["fx"] if f["type"] == "bot"}
     count("顶分型 4条件≠只看高点", len(tops ^ only_h))
     count("底分型 4条件≠只看低点", len(bots ^ only_l))
+    # 笔层
+    P, std = r["pens"], m
+    count("笔不变量违规", len(check_pens(P, r["seq"], std, r["pen_rule"])))
+    count("笔内还能再切出三笔", len(unsplit_violations(P, r["fx"], std, r["pen_rule"])),
+          "　｜ 诊断：端点非极值 %d（剧烈扩张震荡，两道回头修正都救不回，只报数）" % len(nonextreme_pens(P, std)))
     # 线段层
     S, P = r["segs"], r["pens"]
     count("线段不变量违规", len(check_segments(S, P)))
     count("线段定义复核违规", len(verify_by_definition(S, P)),
           "　｜ 诊断：终点非段内极值 %d（原文未要求，只报数）" % len(nonextreme_endpoints(S)))
     # 中枢层
-    count("笔中枢不变量违规", len(check_centers(r["centers"], P)))
+    count("类中枢不变量违规", len(check_centers(r["centers"], P)))
+    count("类中枢扩展合成违规", len(check_hierarchy(r["big"], r["centers"], P)))
     count("线段中枢不变量违规", len(check_centers(r["seg_centers"], [s for s in S if not s.get("live")])))
+
+# ---- 变异测试：校验器必须能抓住故意做错的输入 ----
+print("=" * 72)
+print("[变异测试] 校验器对故意做错的输入必须报错")
+r = R["AAPL 30m"]
+P1, _ = build_pens_v1(r["fx"])                                   # v1 划笔：约三成端点不是极值
+caught = len(nonextreme_pens(P1, r["std"]))
+count("v1 划笔的非极值端点未被发现", 0 if caught else 1, "　（抓到 %d 笔）" % caught)
+seq = r["seq"]                                                   # 把连续三笔硬合成一笔
+merged = seq[:10] + seq[12:]
+from core.pen import _pens_of
+caught = len(unsplit_violations(_pens_of(merged), r["fx"], r["std"]))
+count("硬合并的三笔未被发现", 0 if caught else 1, "　（抓到 %d 笔）" % caught)
+bad_seq = seq[:5] + [dict(seq[5], k=seq[4]["k"] + 2)] + seq[6:]  # 把一个端点挪到离前一端点只隔 2 根
+count("隔得不够的笔未被发现", 0 if check_pens(_pens_of(bad_seq), bad_seq, r["std"]) else 1)
+
+# 线段：特征序列开头的包含若按 K 线的办法丢掉而不合并（v1 的毛病），独立复核必须报错。
+# 上面 5 组数据恰好不受影响，这里用 12 标的 15 分钟里的 BNB（会改变端点）。
+import core.segment as SG
+from core.kline import standardize
+rows = json.load(open(data("m15_sub.json"), encoding="utf-8"))["BNBUSDT"]
+Pb = analyze([dict(t=i, o=o, h=h, l=l, c=c) for i, (_, o, h, l, c) in enumerate(rows)])["pens"]
+_good, SG._feature_std = SG._feature_std, lambda xs, up: [dict(x, ih=x["i"], il=x["i"]) for x in standardize(xs)]
+caught = len(verify_by_definition(SG.build_segments(Pb), Pb))
+SG._feature_std = _good
+count("特征序列开头丢弃未被发现", 0 if caught else 1, "　（抓到 %d 处）" % caught)
+count("BNB 正常版本线段定义复核违规", len(verify_by_definition(SG.build_segments(Pb), Pb)))
+
+# 中枢：v1 只用中心定理一判终结（离开段被算进前中枢），新校验器必须报错
+from tools.v1_ref import center_v1, extend_v1
+caught = sum(len(check_centers(center_v1.find_centers(R[t]["pens"]), R[t]["pens"])) for t in R)
+count("v1 中枢终结方式未被发现", 0 if caught else 1, "　（抓到 %d 处）" % caught)
+# 扩展：v1 每合一次就重算区间、区间重叠不合并、级别乱添，新校验器必须报错
+caught = sum(len(check_hierarchy(extend_v1.build_hierarchy(R[t]["centers"], R[t]["pens"]), R[t]["centers"], R[t]["pens"]))
+             for t in R)
+count("v1 扩展合成的毛病未被发现", 0 if caught else 1, "　（抓到 %d 处）" % caught)
 
 print("=" * 72)
 print("总违规数:", FAIL, "→", "全部通过" if FAIL == 0 else "有问题，需排查")

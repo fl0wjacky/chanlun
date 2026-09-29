@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """全量顺滑版（任意标的 / 周期）：一根连续的对数价格轴，从头到尾不拼接、不变形。
 
-画 K线、笔、线段、线段中枢（笔中枢淡色对照），一根不省；中枢是水平带、笔和线段是直线。
+画 K线、笔、线段、线段中枢（类中枢 = 笔构成的中枢，淡色对照），一根不省；中枢是水平带、笔和线段是直线。
 用法：
     python3 render/chart_full_smooth.py btc_4h.json --name "BTC/USDT 永续" --tf "4 小时" --px 8 --ph 2400
     python3 render/chart_full_smooth.py zec15.json  --name "ZEC/USDT 永续" --tf "15 分钟" --px 2 --ph 3600
@@ -11,7 +11,7 @@
 """
 import os, sys, json, math, time, datetime, argparse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import data, out
+from config import data, out, tick_of
 from render.style import *
 from render.full_common import draw_layers, draw_labels, legend, price_ticks
 from core import analyze
@@ -23,7 +23,7 @@ STEP_MS = {"15 分钟": 15 * 60e3, "30 分钟": 30 * 60e3, "1 小时": 3600e3, "
 
 def render(fn, name, tf, px, ph, out_name=None):
     bars = json.load(open(data(fn), encoding="utf-8"))
-    r = analyze(bars)
+    r = analyze(bars, tick=tick_of(fn))
     pens, segs = r["pens"], r["segs"]
     done = [s for s in segs if not s.get("live")]
     n = len(bars)
@@ -81,8 +81,9 @@ def render(fn, name, tf, px, ph, out_name=None):
     d.text((L + 4, 108), "币安永续 ｜ %s – %s（UTC，末根为开盘时间%s）｜ %d 根K线 ｜ 每根 %d 像素 ｜ 全程同一根对数价格轴（不拼接、不变形）"
            % (t0.strftime("%Y-%m-%d %H:%M"), t1.strftime("%Y-%m-%d %H:%M"), "，尚未收盘" if last_open else "",
               n, px), font=f_s, fill=MU)
-    d.text((L + 4, 152), "笔 %d ｜ 笔中枢 %d ｜ 完成线段 %d（+%d 条未完成）｜ 线段中枢 %d（只用已完成线段计算，项目口径）｜ 最新价 %g"
-           % (len(pens), len(r["centers"]), len(done), len(segs) - len(done), len(r["seg_centers"]), bars[-1]["c"]),
+    d.text((L + 4, 152), "笔 %d ｜ 类中枢 %d ｜ 完成线段 %d（+%d 条未完成）｜ 线段中枢 %d（只用已完成线段计算）｜ 精度 %g ｜ %s笔 ｜ 最新价 %g"
+           % (len(pens), len(r["centers"]), len(done), len(segs) - len(done), len(r["seg_centers"]),
+              r["tick"], "老" if r["pen_rule"] == "old" else "新", bars[-1]["c"]),
            font=f_s, fill=TX)
     xe = legend(d, L + 4, 222, f_n)
     d.text((xe + 40, 208), "约定：未完成的笔 / 线段、仍在延续的中枢一律虚线 ｜ 冲浪者 · %s" % datetime.date.today().isoformat(),
@@ -90,7 +91,7 @@ def render(fn, name, tf, px, ph, out_name=None):
 
     path = out(out_name or fn.replace(".json", "_smooth.png"))
     im.save(path, optimize=True)
-    print("saved", path.split("/")[-1], im.size, "笔", len(pens), "笔中枢", len(r["centers"]),
+    print("saved", path.split("/")[-1], im.size, "笔", len(pens), "类中枢", len(r["centers"]),
           "完成线段", len(done), "线段中枢", len(r["seg_centers"]), "| 末根未收盘" if last_open else "")
     return path
 

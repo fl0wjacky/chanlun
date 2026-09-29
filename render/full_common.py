@@ -8,7 +8,7 @@ from render.style import *
 
 
 def draw_layers(g, r, X, Y, keep=lambda a, b: True, bar_w=2):
-    """在画布 g 上画：笔中枢（淡）→ 线段中枢 → K 线 → 笔 → 线段。
+    """在画布 g 上画：类中枢（笔构成，淡）→ 线段中枢 → K 线 → 笔 → 线段。
 
     X(i) / Y(p)：K 线下标、价格 → 像素（X 给的是这根 K 线的中心）；
     keep(a, b)：下标区间 [a, b] 要不要画（分面板时筛本月）；bar_w：每根 K 线占的像素宽。
@@ -102,7 +102,7 @@ def legend(d, x, y, font):
     item(lambda x0, y0: dashed_line(d, (x0, y0), (x0 + 70, y0), AM, 7, 22, 12), "未完成的线段")
     item(lambda x0, y0: d.rectangle([x0, y0 - 14, x0 + 70, y0 + 14], fill=CY + (38,), outline=CY, width=4), "线段中枢")
     item(lambda x0, y0: d.rectangle([x0, y0 - 14, x0 + 70, y0 + 14], fill=BL + (20,), outline=BL + (95,), width=2),
-         "笔中枢（对照）")
+         "类中枢（对照）")
     item(lambda x0, y0: dashed_rect(d, [x0, y0 - 14, x0 + 70, y0 + 14], CY, 3, fill=CY + (20,), dash_len=12, gap=8),
          "仍在延续的中枢")
     return x

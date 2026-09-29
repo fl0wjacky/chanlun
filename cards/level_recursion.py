@@ -5,7 +5,7 @@ import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import json
 from config import out, data
-from core import analyze
+from core import analyze, analyze_file
 from render.style import *
 
 f_t, f_s, f_b, f_m, f_n = F(50), F(30), F(34), F(27), F(24)
@@ -56,11 +56,12 @@ def draw_howto(d):
     y = 740
     d.rounded_rectangle([50, y, W - 50, y + 590], 22, fill=CARD, outline=LINE, width=2)
     d.text((86, y + 22), "实操上怎么分辨", font=f_s, fill=AM)
-    items = [("看构成零件", ["三个连续的「笔」重叠 = 笔中枢；三个连续的「线段」重叠 = 高一级别的中枢"]),
+    items = [("看构成零件", ["三个连续的「笔」重叠 = 类中枢（第 64 课）；三个连续的「线段」重叠 = 最小的正规中枢"]),
              ("看重叠升级", ["第 20 课中心定理二：前后两个同级别中枢，区间 [ZD,ZG] 不重叠、波动区间 [DD,GG] 重叠",
                            "→ 形成高级别中枢。第 52 课：「中枢扩展不能预先说是某级别的，因为扩展可以不断延续下去。」"]),
              ("看图周期", ["换小一级的图看，原来的「一笔」会展开成一段完整走势类型（趋势或盘整）—— 只是换镜片，不是换级别"]),
-             ("看延伸段数", ["同一中枢延伸出 9 段以上次级别走势，可解释成高一级的中枢（第 33 课）",
+             ("看延伸段数", ["延伸不能超过 9 个次级别，「否则就变成更大级别的」（第 32 课答疑；第 33 课：6 段延伸",
+                           "加形成中枢那 3 段「就构成更大级别的中枢了」）。本引擎的 9 段升级尚未实现，待办。",
                            "看段数，不看时间 —— 第 44 课：「中枢级别和幅度没有必然的关系。」"])]
     yy = y + 88
     for i, (a, lines) in enumerate(items):
@@ -73,20 +74,20 @@ def draw_howto(d):
 
 
 def draw_warning(d):
-    """警告：笔中枢稳定性极差（第 83 课）"""
+    """警告：类中枢（笔构成的中枢）稳定性极差（第 83 课）"""
     y = 1356
     d.rounded_rectangle([50, y, W - 50, y + 360], 22, fill=(RD[0], RD[1], RD[2], 30), outline=RD, width=3)
-    d.text((86, y + 22), "▲  关于「笔中枢」的一个硬伤", font=f_s, fill=RD)
+    d.text((86, y + 22), "▲  关于「类中枢」（笔构成的中枢）的一个硬伤", font=f_s, fill=RD)
     d.text((86, y + 82), "第 83 课原话：", font=f_n, fill=MU)
     d.text((86, y + 118), "「……用笔当成构成最小中枢的零件，但这样构造出来的系统，其稳定性极差。」",
            font=f_m, fill=TX)
     d.text((86, y + 162), "「……一笔的基础是顶和底分型，而一些瞬间的交易，就足以影响其结构。」", font=f_m, fill=TX)
-    Z = analyze(json.load(open(data("aaplusdt_4h.json"), encoding="utf-8")))["centers"]
-    z = min(Z, key=lambda c: c["ZG"] - c["ZD"])           # 出图时现算：最窄的那个笔中枢
-    d.text((86, y + 214), "CHANLUN 3.0 与本引擎画的都是「笔中枢」。本引擎 4 小时 %d 个中枢，最窄的 [%.2f, %.2f] 只有 %.2f 宽。"
+    Z = analyze_file("aaplusdt_4h.json")["centers"]
+    z = min(Z, key=lambda c: c["ZG"] - c["ZD"])           # 出图时现算：最窄的那个类中枢
+    d.text((86, y + 214), "本引擎 4 小时 %d 个类中枢，最窄的 [%.2f, %.2f] 只有 %.2f 宽（CHANLUN 3.0 画的也是这种）。"
            % (len(Z), z["ZD"], z["ZG"], z["ZG"] - z["ZD"]), font=f_n, fill=TX)
-    d.text((86, y + 250), "所以你会看到：很窄的中枢、最后一笔会重画、偶尔算不平。", font=f_n, fill=MU)
-    d.text((86, y + 292), "缠师本人的口径：正规的最小中枢应由「线段」构成。", font=f_m, fill=AM)
+    d.text((86, y + 250), "所以你会看到：很窄的中枢、笔会重画（多是最后一笔，回头修正时偶尔连带前 1–3 笔）、偶尔算不平。", font=f_n, fill=MU)
+    d.text((86, y + 292), "缠师本人的口径：正规的最小中枢由「线段」构成；第 91 课「笔是不能构成中枢的」。", font=f_m, fill=AM)
 
 
 def build():

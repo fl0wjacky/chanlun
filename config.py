@@ -37,6 +37,24 @@ if FONT is None:
 SCREENSHOT = os.path.join(UPLOADS, "photo_26B0F906.png")   # TradingView 截图（chart_annotate / chart_signals / extract_chart_pens 用）
 
 
+# 价格精度（第 64 课：「精度一旦预设，就一定要一路保持」）：按数据文件名前缀明写，取交易所最小价位。
+# 想换精度（比如 AAPL 取整到 0.1）就改这里 —— 改了，所有结构和卡上的数字都会跟着变。
+TICK = {
+    "aaplusdt": 0.01,     # 币安 AAPLUSDT 永续
+    "zec": 0.01,          # 币安 ZECUSDT 永续
+    "btc": 0.1,           # 币安 BTCUSDT 永续
+}
+
+
+def tick_of(fn):
+    """数据文件 → 精度。没写明的标的直接报错，不默默用原始价格。"""
+    base = os.path.basename(fn)
+    for k, v in TICK.items():
+        if base.startswith(k):
+            return v
+    raise KeyError("config.TICK 里没有给 %s 写明精度" % base)
+
+
 def data(name):
     return os.path.join(DATA, name)
 

@@ -4,6 +4,8 @@
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cards.base import *
+from core import analyze_file
+from core.pen import nonextreme_pens, build_pens_v1
 
 W, H = 1400, 2600
 OUTNAME = "c03_笔.png"
@@ -36,7 +38,7 @@ def draw_anatomy(d):
     d.line([Xa(2), 300, Xa(6), 300], fill=AM, width=3)
     d.line([Xa(2), 300, Xa(2), 318], fill=AM, width=3)
     d.line([Xa(6), 300, Xa(6), 318], fill=AM, width=3)
-    d.text((Xa(2) + 10, 266), "两个分型中心之间 = 5 根K线（第 77 课口径；第 81 课另有放宽的新笔标准）", font=f_n, fill=AM)
+    d.text((Xa(2) + 10, 266), "两个分型中心之间 = 5 根K线（第 77 课老笔；第 81 课新笔可选，默认老笔）", font=f_n, fill=AM)
     d.text((180, 656), "第 77 课：顶底之间至少一根K线不属于两分型 → 索引差 ≥ 4", font=f_n, fill=MU)
     d.text((820, 658), "底 = 底分型的最低点　顶 = 顶分型的最高点", font=f_n, fill=BL)
     d.text((820, 690), "笔 = 两个相邻的「顶」与「底」之间", font=f_n, fill=BL)
@@ -94,7 +96,7 @@ def cellc(d, x0, y0, w, h, no, title, verdict, vcol, bars, note,
 def draw_four_cases(d):
     """B 三种处理：分型 → 笔只有成笔 / 跳过 / 取更极端（本项目引擎口径）"""
     cw = section(d, 756, 1660, "分型 → 笔：三种处理（本项目引擎口径）")
-    d.text((80 + cw + 20, 782), "只看两件事：① 与末尾端点同类还是异类　② 间隔够不够 4", font=f_n, fill=MU)
+    d.text((80 + cw + 20, 782), "看三件事：同类/异类　间隔够不够 4　两头是不是极值", font=f_n, fill=MU)
 
     # ①② 成笔的两个方向
     P1 = [(100.0,100.2,98.8,99.2), (99.2,99.4,97.8,98.6), (98.6,100.0,98.4,99.6),
@@ -130,8 +132,8 @@ def draw_four_cases(d):
 
 
 def draw_rules(d):
-    """E 原文：两个条件、三步骤、唯一性（第 77 课）"""
-    section(d, 2166, 2384, "原文怎么划笔（第 77 课）")
+    """E 原文：两个条件、三步骤、唯一性（第 77 课）+ 端点必须是极值（第 66/70/71 课答疑）"""
+    section(d, 2166, 2438, "原文怎么划笔（第 77 课）")
     d.text((520, 2192), "缠师在这一课里把笔的定义和算法一次讲完了", font=f_n, fill=MU)
     d.text((86, 2230), "两个条件：① 顶和底之间至少有一根K线不属于顶分型与底分型（= 索引差 ≥ 4）",
            font=f_t, fill=TX)
@@ -142,19 +144,31 @@ def draw_rules(d):
     d.text((86, 2320), "　　　　三、处理后相邻顶底即一笔；若相邻同性质，取「最先一个」　→ 净效果 = 同类取更极端",
            font=f_t, fill=AM)
     d.text((86, 2350), "★ 缠师在本课用反证法自己证明了：按这三步走，笔的划分是唯一的。", font=f_t, fill=GR)
+    d.text((86, 2380), "★ 第 66/70/71 课答疑：「顶和底，当然一定是那一笔的最高最低，如果不是，那里面一定不只一笔」",
+           font=f_t, fill=GR)
+    d.text((86, 2408), "　→ 引擎：挨得太近被跳过、却更极端的分型，之后会让它回头作废上一笔重连（v1 没做，约两三成的笔不合格）",
+           font=f_t, fill=MU)
 
 
 def draw_real_data(d):
-    """C 真实数据：分型是廉价的，笔是筛出来的"""
+    """C 真实数据：分型是廉价的，笔是筛出来的（引擎现算）"""
     callout(d, 1690, 1924, GR, 24)
     d.text((86, 1704), "真实数据：分型是廉价的，笔是筛出来的", font=f_p, fill=GR)
-    d.text((86, 1740), "币安合约 AAPLUSDT 永续　4小时 384 根 ／ 30分钟 3072 根　2026/07/26 – 09/27（UTC）",
+    d.text((86, 1740), "币安合约 AAPLUSDT 永续　4小时 384 根 ／ 30分钟 3072 根　2026/07/26 – 09/27（UTC）　老笔",
            font=f_t, fill=MU)
-    d.text((86, 1774), "4 小时：127 个分型 → 25 条笔　（成笔 25 ／ 跳过 51 ／ 同类处理 50）", font=f_n, fill=TX)
-    d.text((86, 1806), "30 分钟：1057 个分型 → 232 条笔　（成笔 232 ／ 跳过 412 ／ 同类处理 412）", font=f_n, fill=TX)
-    d.text((86, 1838), "注：引擎只校验条件①（间隔）；按条件②复核，30 分钟另有 3 笔不合格，4 小时 0 笔。",
-           font=f_t, fill=MU)
-    d.text((86, 1870), "换算下来：平均约 5 个分型才筛出 1 条笔。", font=f_p, fill=AM)
+    rows = []
+    for fn, tag in (("aaplusdt_4h.json", "4 小时"), ("aaplusdt_30m.json", "30 分钟")):
+        r = analyze_file(fn)
+        v1, _ = build_pens_v1(r["fx"])
+        rows.append((tag, len(r["fx"]), len(r["pens"]), len(nonextreme_pens(r["pens"], r["std"])),
+                     len(v1), len(nonextreme_pens(v1, r["std"]))))
+    for k, (tag, nfx, npen, bad, nv1, badv1) in enumerate(rows):
+        d.text((86, 1774 + 32 * k), "%s：%d 个分型 → %d 条笔　（端点不是极值的 %d 条；v1 一遍扫过去是 %d 条，其中 %d 条不合格）"
+               % (tag, nfx, npen, bad, nv1, badv1), font=f_n, fill=TX)
+    if sum(r[3] for r in rows):
+        d.text((86, 1838), "注：剩下的是剧烈的扩张震荡 —— 顶一个比一个高、底一个比一个低又挨得太近，两道回头修正都救不回。",
+               font=f_t, fill=MU)
+    d.text((86, 1870), "换算下来：约 %d 个分型才筛出 1 条笔。" % round(rows[1][1] / rows[1][2]), font=f_p, fill=AM)
 
 
 def draw_dropped(d):
@@ -163,8 +177,8 @@ def draw_dropped(d):
     d.text((86, 1964), "被丢掉的那些分型，会不会把笔扯断？—— 不会", font=f_p, fill=LB)
     d.text((86, 2002), "第 62 课原文：「所谓笔，就是顶和底之间的其他波动，都可以忽略不算」", font=f_n, fill=TX)
     d.text((86, 2036), "所以被丢掉的分型不是「断口」，它只是被并进了这一笔的跨度里 —— 笔本身照样首尾相接。", font=f_n, fill=MU)
-    d.text((86, 2074), "实测：25 条笔首尾相接、0 处断点；逐根喂入 354 次，改动过的笔从未超过 1 条。", font=f_n, fill=AM)
-    d.text((86, 2108), "（本引擎只会改动最后一笔 —— 4 小时数据逐根喂入 354 次实测吻合）", font=f_t, fill=MU)
+    d.text((86, 2074), "逐根喂入实测：绝大多数时候只动最后一笔；回头修正时偶尔连带改前面 1–3 笔。", font=f_n, fill=AM)
+    d.text((86, 2108), "（AAPL 4h/1h、BTC 4h、ZEC 4h、AAPL 30m：一次改 ≥2 笔的占 0.2%–0.5%，最多一次改 4 笔）", font=f_t, fill=MU)
 
 
 def build():
@@ -176,8 +190,8 @@ def build():
     draw_rules(d)            # 原稿里 E 节先于 C / D 画，顺序不要动
     draw_real_data(d)
     draw_dropped(d)
-    foot(d, "第 62 课（顶/底的定义）；第 77 课（笔的精确双条件、划分三步骤、唯一性证明）",
-         "以为「有分型就有笔」—— 实际约八成分型连不上，画在图上全是噪音")
+    foot(d, "第 62 课（顶/底）；第 77 课（双条件、三步骤、唯一性）；第 66/70/71 课答疑（极值）；第 81 课（新笔）",
+         "以为「有分型就有笔」—— 实际约九成分型连不上，画在图上全是噪音")
     return im
 
 

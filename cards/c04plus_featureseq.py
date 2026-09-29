@@ -86,7 +86,7 @@ def draw_gap(d):
     d.rectangle([286, 1924, 374, 1990], fill=G2)            # 第二元素（高）
     d.rectangle([204, 1964, 286, 1990], fill=GR + (80,))
     d.text((392, 1966), "这段有重叠", font=f_t, fill=GR)
-    d.text((102, 2058), "→ 第一种情况：直接确认线段结束", font=f_t, fill=TX)
+    d.text((102, 2058), "→ 第一种情况：不等第二序列；第一笔终点被破才确认（71 课）", font=f_t, fill=TX)
 
     d.rounded_rectangle([710, 1864, W - 80, 2104], 14, fill=CARD, outline=RD, width=2)
     d.text((732, 1878), "有缺口（完全不重叠）", font=f_n, fill=RD)

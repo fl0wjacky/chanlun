@@ -32,7 +32,7 @@
     nonextreme_endpoints()      诊断：终点不是段内极值的线段（原文未要求，只报数）
 """
 
-from .kline import standardize, fractals
+from .kline import fractals
 
 
 def _dir(pen):
@@ -48,12 +48,32 @@ def _features(pens, i0, seg_dir):
     return out
 
 
+def _feature_std(elems, up):
+    """特征序列的非包含处理（第 67 课「标准特征序列」）。
+
+    与 K 线的 standardize 只差开头：K 线开头互相包含时还定不出方向，只能丢掉；
+    特征序列属于一条有方向的线段，开头就按**这条线段的方向**合并（向上段取高高、向下段取低低），
+    之后照常按「最后两根」定方向。丢掉开头会漏掉元素（第 66 / 71 / 78 课要求这里必须合并）。
+    elems: [{h, l, i}, ...]；返回同样结构，i 取合并组里最后一个元素的。
+    """
+    m = []
+    for e in elems:
+        if m and ((m[-1]["h"] >= e["h"] and m[-1]["l"] <= e["l"]) or (e["h"] >= m[-1]["h"] and e["l"] <= m[-1]["l"])):
+            a = m[-1]
+            go_up = up if len(m) < 2 else (a["h"] > m[-2]["h"])
+            pick = max if go_up else min
+            m[-1] = dict(h=pick(a["h"], e["h"]), l=pick(a["l"], e["l"]), i=e["i"], ih=e["i"], il=e["i"])
+        else:
+            m.append(dict(h=e["h"], l=e["l"], i=e["i"], ih=e["i"], il=e["i"]))
+    return m
+
+
 def _fractals_of(pens, i0, seg_dir, want):
     """在特征序列的标准形式上找分型。返回 [(hit, std, feats), ...]（按位置排序）"""
     feats = _features(pens, i0, seg_dir)
     if len(feats) < 3:
         return [], None, None
-    std = standardize([f[1] for f in feats])
+    std = _feature_std([f[1] for f in feats], seg_dir == "up")
     fx = fractals(std)
     return [f for f in fx if f["type"] == want], std, feats
 
@@ -212,7 +232,7 @@ def _case_at(pens, i, k, seg_dir):
     feats = [f for f in _features(pens, i + 1, seg_dir) if f[0] < k]
     if not feats or k + 1 >= len(pens):
         return None, None
-    E1 = standardize([f[1] for f in feats])[-1] if len(feats) > 1 else feats[0][1]
+    E1 = _feature_std([f[1] for f in feats], up)[-1]
     V = pens[k]["p1"]
     E2 = dict(h=pens[k + 1]["hi"], l=pens[k + 1]["lo"])
     if (up and V <= E1["h"]) or (not up and V >= E1["l"]):
@@ -329,9 +349,23 @@ def verify_by_definition(segs, pens):
       ③ 终点不落在更早候选的待定区间里（第一种情况：先破第一笔哪一头之前；第二种情况：
          第二特征序列出分型或被新高新低越过之前）；
       ④ 上一段以第一种情况结束时，本段终点不早于「本段第一笔结束位置被突破」那一笔。
-    与引擎共用的只有 standardize / fractals（K 线层已由 selfcheck 单独验证）。
+    与引擎共用的只有 fractals（K 线层已由 selfcheck 单独验证）；特征序列的非包含处理在这里另写一遍。
     """
     N = len(pens)
+
+    def std_feats(xs, up):
+        """非包含处理，另一种写法：先按线段方向把开头互相包含的并掉，再逐个按前两根定方向。"""
+        out = []
+        for x in xs:
+            h, l = x["h"], x["l"]
+            if out:
+                ph, pl = out[-1]
+                if (ph - h) * (pl - l) <= 0:          # 一方罩住另一方（含相等）
+                    rising = up if len(out) == 1 else out[-1][0] > out[-2][0]
+                    out[-1] = (max(ph, h), max(pl, l)) if rising else (min(ph, h), min(pl, l))
+                    continue
+            out.append((h, l))
+        return [dict(h=h, l=l, ih=0, il=0) for h, l in out]
 
     def judge(i, k, up):
         """候选 k 的判决：("yes", None) / ("no", None) / ("wait", r) —— r 为待定区间终止处。"""
@@ -340,7 +374,7 @@ def verify_by_definition(segs, pens):
         pre = [dict(h=pens[j]["hi"], l=pens[j]["lo"]) for j in range(i + 1, k, 2)]
         if not pre:
             return "no", None
-        e1 = standardize(pre)[-1] if len(pre) > 1 else pre[0]
+        e1 = std_feats(pre, up)[-1]
         v, first = pens[k]["p1"], pens[k + 1]
         beyond_v = (lambda p: p["hi"] > v) if up else (lambda p: p["lo"] < v)
         if (up and not v > e1["h"]) or (not up and not v < e1["l"]):
@@ -378,7 +412,7 @@ def verify_by_definition(segs, pens):
             tail.append(pens[r])
         feat = [dict(h=p["hi"], l=p["lo"]) for p in tail if (p["p1"] > p["p0"]) == up]
         want = "bot" if up else "top"
-        if len(tail) >= 3 and len(feat) >= 3 and any(f["type"] == want for f in fractals(standardize(feat))):
+        if len(tail) >= 3 and len(feat) >= 3 and any(f["type"] == want for f in fractals(std_feats(feat, not up))):
             return "yes", None
         return "wait", brk
 

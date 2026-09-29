@@ -64,12 +64,15 @@ def draw_theorems(d):
 
 
 def draw_evidence(d):
-    """C 实证：相邻中枢之间，扩展多还是趋势多（ZEC 线段中枢为主，笔中枢对照；出图时现算）"""
+    """C 实证：相邻中枢之间，扩展多还是趋势多（ZEC 线段中枢为主，类中枢对照；出图时现算）"""
+    from tools.v1_ref import center_v1
     r = zec.run("15m")
     seg, pen = zec.pair_stats(r["seg_centers"]), zec.pair_stats(r["centers"])
+    done = [s for s in r["segs"] if not s.get("live")]    # 同一批笔、线段，只换回 v1 的中枢终结口径
+    seg1, pen1 = zec.pair_stats(center_v1.find_centers(done)), zec.pair_stats(center_v1.find_centers(r["pens"]))
     more = seg["扩展"] > seg["趋势"]
-    section(d, 1268, 1700, "一个反直觉的实证", GR)
-    d.text((400, 1294), "相邻中枢之间：扩展多于趋势" if more else "相邻中枢之间：这段数据里趋势不少于扩展",
+    section(d, 1268, 1700, "一个实证：扩展多还是趋势多", GR)
+    d.text((560, 1294), "相邻中枢之间：扩展仍多于趋势，但差距比 v1 小" if more else "相邻中枢之间：这段数据里趋势不少于扩展",
            font=f_n, fill=MU)
     d.text((86, 1344), "数据：ZECUSDT 永续 15 分钟，%s（UTC），%d 根K线；本项目引擎，出图时现算"
            % (zec.date_range("15m"), len(r["bars"])), font=f_t, fill=MU)
@@ -79,23 +82,24 @@ def draw_evidence(d):
     for x, t in cols:
         d.text((x, 1386), t, font=f_t, fill=MU)
     yy = 1424
-    for name, zs, st, col in (("线段中枢（主）", r["seg_centers"], seg, TX), ("笔中枢（对照）", r["centers"], pen, MU)):
+    for name, zs, st, col in (("线段中枢（主）", r["seg_centers"], seg, TX), ("类中枢（对照）", r["centers"], pen, MU)):
         vals = [name, str(len(zs)), str(st["n"]), str(st["趋势"]), str(st["扩展"]), str(st["同一中枢"]),
                 "%d%%" % round(100 * st["趋势"] / st["n"])]
         for (x, _), v, c in zip(cols, vals, (col, MU, MU, GR, AM, MU, AM)):
             d.text((x, yy), v, font=f_n, fill=c)
         yy += 38
     d.line([86, yy + 4, W - 86, yy + 4], fill=LINE, width=2)
-    d.text((86, yy + 20), "★ 线段中枢 %d 对里：趋势 %d、扩展 %d —— 扩展约是趋势的 %.1f 倍；笔中枢里扩展同样占 %d%%"
-           % (seg["n"], seg["趋势"], seg["扩展"], seg["扩展"] / max(seg["趋势"], 1),
-              round(100 * pen["扩展"] / pen["n"])), font=f_n, fill=AM)
-    d.text((86, yy + 56), "　 线段中枢是正规最小中枢（第 83 课），但只有 %d 对，样本偏薄；笔中枢对数多，却属「稳定性极差」那一档。"
-           % seg["n"], font=f_t, fill=MU)
-    d.text((86, yy + 90), "　 第 21 课：「A、中枢扩张导致一个更大级别的中枢；……", font=f_t, fill=TX)
-    d.text((86, yy + 118), "　 B、中枢新生，就会形成一个上涨的趋势，这就是第三类买点后必然出现的两种情况。」",
-           font=f_t, fill=TX)
-    d.text((86, yy + 152), "　 原文只列出两种可能，没说孰多孰少；「扩展占多数」是本项目在这一段数据上的实测。",
+    rat = lambda st: st["扩展"] / max(st["趋势"], 1)
+    d.text((86, yy + 20), "★ 线段中枢 %d 对：趋势 %d、扩展 %d，扩展约是趋势的 %.1f 倍；类中枢是 %.1f 倍"
+           % (seg["n"], seg["趋势"], seg["扩展"], rat(seg), rat(pen)), font=f_n, fill=AM)
+    d.text((86, yy + 56), "　 同一批笔和线段，换回 v1 的终结口径：线段中枢趋势 %d / 扩展 %d（%.1f 倍），类中枢 %d / %d（%.1f 倍）"
+           % (seg1["趋势"], seg1["扩展"], rat(seg1), pen1["趋势"], pen1["扩展"], rat(pen1)), font=f_t, fill=TX)
+    d.text((86, yy + 86), "　 v1 只用中心定理一，把冲出中枢的离开段算进前中枢，撑大了它的波动范围 —— 差距有一部分是引擎造成的。",
            font=f_t, fill=MU)
+    d.text((86, yy + 116), "　 第 21 课：「A、中枢扩张导致一个更大级别的中枢；B、中枢新生，就会形成一个上涨的趋势」",
+           font=f_t, fill=TX)
+    d.text((86, yy + 146), "　 原文只列两种可能、没说孰多孰少；线段中枢只有 %d 对，样本偏薄，只能说「在这段数据上」扩展仍多。"
+           % seg["n"], font=f_t, fill=MU)
 
 
 def trap():
@@ -103,7 +107,7 @@ def trap():
     seg = zec.pair_stats(zec.run("15m")["seg_centers"])
     share = round(100 * seg["扩展"] / seg["n"])
     if seg["扩展"] > seg["趋势"]:
-        return "以为「趋势常见」—— 在这段数据上恰好反过来：相邻线段中枢 %d%% 是扩展" % share
+        return "以为「趋势常见」—— 这段数据上相邻线段中枢 %d%% 是扩展；但 v1 引擎曾把这个差距放大过" % share
     return "以为扩展或趋势哪个天然更常见 —— 这段数据里相邻线段中枢扩展只占 %d%%，要看数据说话" % share
 
 

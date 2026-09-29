@@ -29,7 +29,7 @@ for name, raw, expect in CASE:
     bars = [{"h": x[1], "l": x[2]} for x in raw]
     std = standardize(bars)
     fx = fractals(std)
-    pens, seq = build_pens(fx, 4)
+    pens, seq = build_pens(fx, std)
     bad = check_standardized(std)
     fxtxt = " ".join(("顶" if f["type"] == "top" else "底") + str(f["k"]) for f in fx)
     print("=" * 62)

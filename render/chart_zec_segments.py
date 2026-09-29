@@ -7,7 +7,7 @@
 """
 import os, sys, json, math, datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config import data, out
+from config import data, out, tick_of
 from PIL import Image, ImageDraw
 from render.style import *
 from render.full_common import draw_layers, draw_labels, legend
@@ -15,7 +15,7 @@ from core import analyze
 
 bars = json.load(open(data("zec15.json"), encoding="utf-8"))   # tools/fetch_klines.py ZECUSDT 15m 拉的最新数据
 D = lambda ms: datetime.datetime.fromtimestamp(ms / 1000, datetime.timezone.utc).strftime("%m/%d")
-r = analyze(bars)
+r = analyze(bars, tick=tick_of("zec15.json"))
 done = [s for s in r["segs"] if not s.get("live")]
 segs = r["segs"][-16:]                              # 只画最后 16 条线段，避免太挤
 a0 = segs[0]["i0"]                                  # 视窗：从这 16 条线段的起点到最后一根K线
@@ -64,7 +64,7 @@ up = sum(1 for s in segs if s["dir"] == "up")
 c1 = sum(1 for s in segs if s["case"] == 1)
 c2 = sum(1 for s in segs if s["case"] == 2)
 live = sum(1 for s in segs if s.get("live"))
-d.text((60, Y1 + 130), "全量：笔 %d 条 ｜ 完成线段 %d 条 ｜ 线段中枢 %d 个（笔中枢 %d 个）"
+d.text((60, Y1 + 130), "全量：笔 %d 条 ｜ 完成线段 %d 条 ｜ 线段中枢 %d 个（类中枢 %d 个）"
        % (len(r["pens"]), len(done), len(r["seg_centers"]), len(r["centers"])), font=f_s, fill=TX)
 d.text((60, Y1 + 180), "图中 16 条：向上 %d ／ 向下 %d　｜　第一种情况 %d ／ 第二种情况 %d ／ 未完成 %d"
        % (up, len(segs) - up, c1, c2, live), font=f_n, fill=MU)

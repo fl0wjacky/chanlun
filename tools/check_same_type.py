@@ -8,7 +8,7 @@
 import os, sys, json
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import data
-from core import analyze
+from core import analyze, analyze_file
 
 T = lambda f: "顶" if f["type"] == "top" else "底"
 
@@ -36,7 +36,7 @@ def trace(fx, min_gap=4):
 
 
 for fn, tag in (("aaplusdt_4h.json", "4小时"), ("aaplusdt_30m.json", "30分钟")):
-    r = analyze(json.load(open(data(fn), encoding="utf-8")))
+    r = analyze_file(fn)
     ev, seq = trace(r["fx"])
     n_same = sum(1 for _, a, _ in ev if a.startswith("同类"))
     n_skip = sum(1 for _, a, _ in ev if a.startswith("跳过"))

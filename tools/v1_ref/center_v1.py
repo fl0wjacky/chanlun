@@ -22,22 +22,16 @@
     因为笔的方向在标准化序列上严格交替，Z 段就是「覆盖区间里索引与第一笔
     同奇偶的笔」，即第 1、3、5… 段，不需要另行判断方向。
 
-终结：**第三类买卖点为主，中心定理一兜底**，按段逐个往后看，谁先出现算谁。
-    ① 第三类买卖点（第 20 课定义；第 38 课「第三类买卖点，和中枢延伸的结束是一回事情」；
-       第 18 / 72 课「盘整结束的标志就是第三类买卖点」）：
-       某一段**从中枢区间里出发**（起点在 [ZD, ZG] 内）向上（下）离开，下一段回试（回抽）
-       整段都在 ZG 之上（ZD 之下）→ 当下判定中枢终结。
-       中枢终于离开段的前一段；离开段是连接段（第 49 课：前中枢 + 连接段 + 后中枢；
-       第 54 课答疑：连接段「当然要和趋势本身是同向的」），不属于任何中枢；
-       下一个中枢从回试那一段找起。
-       「从中枢里出发」是关键：先涨破 ZG、再从上方一路穿过整个中枢跌破 ZD 的那一段，
-       起点不在区间里，不是三卖（v0 的误判，BTC 4h 上见过）。
-    ② 中心定理一（第 20 课）兜底：「若有 Zn，使得 dn>ZG 或 gn<ZD，则必然产生高级别的走势中枢，
-       或趋势，及中枢延续」—— 出现第一个整段在区间之外的 Z 段，中枢终于**最后一个仍重叠的
-       Z 段**，其间那一段是连接段，下一个中枢从离开的 Z 段找起。
-       （v1 只用这一条，会把离开段算进前中枢，把前中枢的 GG / DD 撑大，连接段反向的中枢对
-       永远判不成趋势。）
-    · 两者都没出现 → 仍在延续（live）。
+延续 / 终结：按**中心定理一**（第 20 课）逐个看 Z 段 ——
+    「走势中枢的延伸等价於任意区间[dn，gn]与[ZD，ZG]有重叠。换言之，若有 Zn，使得 dn>ZG 或 gn<ZD，
+      则必然产生高级别的走势中枢，或趋势，及中枢延续。」
+    · Z 段仍与 [ZD, ZG] 重叠 → 延续，中枢终点推到这个 Z 段；
+    · 出现第一个完全在区间之外的 Z 段（dn>ZG 或 gn<ZD）→ 中枢终结于**最后一个仍重叠的 Z 段**；
+      两者之间那一段是连接段（第 49 课：前中枢 + 连接段 + 后中枢），下一个中枢从离开的 Z 段找起；
+    · 数据走完都没出现离开的 Z 段 → 仍在延续（live）。
+    旧版用「第三类买卖点」判终结，只看终点、不看出发位置，会把「先涨破 ZG、再从上方一路穿过
+    整个中枢跌破 ZD」误判成三卖（BTC 4h 2026 线段中枢1 就是这样）。三类买卖点的定义不变，
+    只是不再拿它判中枢终结。
 """
 
 
@@ -89,22 +83,15 @@ def find_centers(pens):
         a, b, c = pens[i], pens[i + 1], pens[i + 2]
         ZG = min(a["hi"], b["hi"], c["hi"])
         ZD = max(a["lo"], b["lo"], c["lo"])
-        if ZG >= ZD:                                  # 三段确有公共重叠 → 成立（第 54 课：重叠成「一个价位」也算）
-            end, j, reason, nxt = i + 2, i + 3, None, None
-            while j < N:
-                u = pens[j]
-                if (j - i) % 2 == 0:                  # ② 中心定理一：Z 段整段在区间外 → 终结
-                    if u["lo"] > ZG or u["hi"] < ZD:
+        if ZG > ZD:                                   # 三段确有公共重叠 → 成立
+            end, j, reason = i + 2, i + 3, None
+            while j < N:                              # 中心定理一：逐个看 Z 段（与第一段同向）
+                if (j - i) % 2 == 0:
+                    u = pens[j]
+                    if u["lo"] > ZG or u["hi"] < ZD:  # dn>ZG 或 gn<ZD → 离开，中枢终结
                         reason = "Z 段向上离开" if u["lo"] > ZG else "Z 段向下离开"
-                        nxt = j                       # 下一个中枢从离开的 Z 段找起
                         break
-                    end = j                           # 仍重叠 → 延续到这个 Z 段
-                if j + 1 < N and ZD <= u["p0"] <= ZG:  # ① 第三类买卖点：从区间里出发离开、回试不回来
-                    w = pens[j + 1]
-                    if (u["p1"] > u["p0"] and w["lo"] > ZG) or (u["p1"] < u["p0"] and w["hi"] < ZD):
-                        reason = "三买" if u["p1"] > u["p0"] else "三卖"
-                        end, nxt = j - 1, j + 1       # 中枢终于离开段之前；离开段 = 连接段
-                        break
+                    end = j                           # 仍与 [ZD, ZG] 重叠 → 延续到这个 Z 段
                 j += 1
             DD, GG = _range(pens, i, end)
             DD_all, GG_all = _range_all(pens, i, end)
@@ -120,8 +107,9 @@ def find_centers(pens):
                 PI0=i, PI1=end,
             )
             zs.append(z)
-            # 终结时：end 与 nxt 之间是连接段，不属于任何中枢（第 49 课：前中枢 + 连接段 + 后中枢）
-            i = nxt if reason else end + 1
+            # 终结时：最后一个仍重叠的 Z 段（end）与离开的 Z 段（j）之间那一段是「连接段」，
+            # 不属于任何中枢（第 49 课：前中枢 + 连接段 + 后中枢）；下一个中枢从离开的 Z 段找起。
+            i = j if reason else end + 1
         else:
             i += 1
 
@@ -135,23 +123,11 @@ def find_centers(pens):
 
 
 def check_centers(zs, units):
-    """自检中枢（类中枢、线段中枢通用），不调用 find_centers 的逻辑，按定义逐条重验。返回违规列表（应为空）。
+    """自检中枢的不变量（笔中枢、线段中枢通用）。返回违规列表（应为空）。
 
     zs    : find_centers() 的输出
     units : 构成中枢的那一层（笔列表，或已完成的线段列表）
     """
-    def outside(u, z):                           # 整段在区间外：+1 上方 / -1 下方 / 0 有重叠
-        return 1 if u["lo"] > z["ZG"] else (-1 if u["hi"] < z["ZD"] else 0)
-
-    def leave3(q, z):                             # 第 q 段从区间里出发离开、下一段不回来 → +1 三买 / -1 三卖 / 0
-        if q + 1 >= len(units):
-            return 0
-        u, w = units[q], units[q + 1]
-        if not (z["ZD"] <= u["p0"] <= z["ZG"]):
-            return 0
-        d = 1 if u["p1"] > u["p0"] else -1
-        return d if outside(w, z) == d else 0
-
     bad = []
     for k, z in enumerate(zs):
         i, j = z["PI0"], z["PI1"]
@@ -160,32 +136,20 @@ def check_centers(zs, units):
         a, b, c = units[i], units[i + 1], units[i + 2]
         if (z["ZG"], z["ZD"]) != (min(a["hi"], b["hi"], c["hi"]), max(a["lo"], b["lo"], c["lo"])):
             bad.append(("区间与前三段重算不符（第 20 课公式）", k))
-        if not (z["ZG"] >= z["ZD"]):
-            bad.append(("ZG<ZD（三段没有公共重叠）", k))
+        if not (z["ZG"] > z["ZD"]):
+            bad.append(("ZG<=ZD", k))
         if not (z["DD"] <= z["ZD"] and z["GG"] >= z["ZG"]):
             bad.append(("波动范围未包住中枢区间", k))
         if z["nZ"] != (z["npens"] + 1) // 2 or z["npens"] != j - i + 1:
             bad.append(("段数计数不符", k))
-        if any(outside(units[q], z) for q in range(i, j + 1, 2)):
-            bad.append(("中枢内有 Z 段已整段在区间外（中心定理一）", k))
-        # 终结方式：从 i+3 起按段看，第一个事件必须就是标注的那个
-        ev = None
-        for q in range(i + 3, len(units)):
-            if (q - i) % 2 == 0 and outside(units[q], z):
-                ev = ("Z 段向上离开" if outside(units[q], z) > 0 else "Z 段向下离开", q - 2, q); break
-            d = leave3(q, z)
-            if d:
-                ev = ("三买" if d > 0 else "三卖", q - 1, q + 1); break
-        if ev is None:
-            if not z["live"]:
-                bad.append(("标为已终结，但其后既无第三类买卖点也无离开的 Z 段", k))
-        else:
-            if z["live"] or z["term"] != ev[0]:
-                bad.append(("终结方式标错：应为 %s" % ev[0], k))
-            if j != ev[1]:
-                bad.append(("终点不对：%s 时应终于第 %d 段" % (ev[0], ev[1]), k))
-            if k + 1 < len(zs) and zs[k + 1]["PI0"] < ev[2]:
-                bad.append(("下一个中枢起点早于连接段之后", k))
+        if (j - i) % 2:
+            bad.append(("终点不是 Z 段（中心定理一：终于最后一个仍重叠的 Z 段）", k))
+        if any(units[q]["lo"] > z["ZG"] or units[q]["hi"] < z["ZD"] for q in range(i, j + 1, 2)):
+            bad.append(("中枢内有 Z 段已离开区间", k))
+        nxt = j + 2                               # 已终结的：紧随其后的那个 Z 段必须完全在区间外
+        if not z["live"] and not (nxt < len(units) and
+                                  (units[nxt]["lo"] > z["ZG"] or units[nxt]["hi"] < z["ZD"])):
+            bad.append(("已终结，但其后的 Z 段并未离开区间", k))
         if k > 0:
             if i <= zs[k - 1]["PI1"]:
                 bad.append(("与前一个中枢重叠或乱序", k))

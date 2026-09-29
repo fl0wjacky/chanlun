@@ -8,7 +8,7 @@
 import os, sys, json, datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import data
-from core.analyze import analyze
+from core.analyze import analyze, analyze_file
 
 D = lambda ms: datetime.datetime.fromtimestamp(ms / 1000, datetime.timezone.utc)
 
@@ -22,7 +22,7 @@ print()
 
 # ---------- 2) 笔是否首尾相接 ----------
 for fn, tag in (("aaplusdt_4h.json", "4小时"), ("aaplusdt_30m.json", "30分钟")):
-    r = analyze(json.load(open(data(fn), encoding="utf-8")))
+    r = analyze_file(fn)
     p = r["pens"]
     gaps = [i for i in range(len(p) - 1)
             if not (p[i]["i1"] == p[i + 1]["i0"] and abs(p[i]["p1"] - p[i + 1]["p0"]) < 1e-9)]

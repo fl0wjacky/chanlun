@@ -15,6 +15,18 @@
 """
 
 
+def quantize(bars, tick):
+    """价格精度（第 64 课）：把最高 / 最低价按 tick 取整，差不到一个 tick 的看成相同。
+
+    「所有预设精度，唯一必须遵守的，就是精度一旦预设，就一定要一路保持。」
+    tick=None → 原样（即交易所的最小价位）。每个标的用什么精度，在 config.TICK 里明写。
+    """
+    if not tick:
+        return bars
+    q = lambda p: round(round(p / tick) * tick, 10)
+    return [dict(b, h=q(b["h"]), l=q(b["l"])) for b in bars]
+
+
 def _contains(a_h, a_l, b_h, b_l):
     """两根K线是否存在包含关系（任意一方完整罩住另一方）。
 

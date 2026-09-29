@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""第 54 课算例回算：三个 1 分钟中枢合成 5 分钟中枢，区间应为 [d2, g5]。
+
+原文条件「d1=g2，d2=g4」，走势从 g0=18.5 开始逐段下行；其余价位原文图上没有标数，
+这里取一组满足全部文字描述的数：g3 是第三类卖点（d3g3 碰不到 [d1, g1]）、g1d2 > g2d3 > g3d4 力度递减、
+g5 高于 d2（区间才非空）。每一小段都是「没有内部结构的线段」，按引擎的中枢公式算三个小中枢，
+再按引擎的大中枢区间公式合成。第二部分另验「只看前三段」：再接一个仍碰到区间的中枢，区间不变。
+"""
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from core.center import find_centers
+from core.extend import big_interval, build_hierarchy
+
+g0, d1, g1, d2, g2, d3, g3, d4, g4, d5, g5 = 18.5, 17.0, 17.8, 16.6, 17.0, 16.0, 16.5, 15.8, 16.6, 15.9, 16.8
+assert d1 == g2 and d2 == g4
+pts = [g0, d1, g1, d2, g2, d3, g3, d4, g4, d5, g5]
+units = [dict(p0=a, p1=b, hi=max(a, b), lo=min(a, b), i0=k, i1=k + 1) for k, (a, b) in enumerate(zip(pts, pts[1:]))]
+
+FAIL = 0
+
+
+def check(label, want, got):
+    global FAIL
+    ok = abs(want[0] - got[0]) < 1e-9 and abs(want[1] - got[1]) < 1e-9
+    FAIL += not ok
+    print("  %s %-40s 原文 [%g, %g]   引擎 [%g, %g]" % ("✓" if ok else "✗", label, want[0], want[1], got[0], got[1]))
+
+
+print("第 54 课：g0d5 = g0d1 + {(d1g1+g1d2+d2g2) + (g2d3+d3g3+g3d4) + (d4g4+g4d5+d5g5)}")
+first = find_centers(units[0:3])[0]                       # 走到 d2 时：[d1, g1]
+check("走到 d2 时的 1 分钟中枢", (d1, g1), (first["ZD"], first["ZG"]))
+Z0 = find_centers(units)[0]                               # 按段往后走：d2g2 仍是震荡，g2d3 离开、d3g3 碰不到 → g3 三卖
+ok = Z0["term"] == "三卖" and Z0["PI1"] == 3
+FAIL += not ok
+print("  %s %-40s 原文 d2g2 属震荡、g3 三卖   引擎 终于第 %d 段、%s" % ("✓" if ok else "✗", "[d1, g1] 中枢怎么结束", Z0["PI1"], Z0["term"]))
+A = find_centers(units[1:4])[0]                           # (d1g1+g1d2+d2g2)：原文「就是[d1，g2]，也就是一个价位」
+check("(d1g1+g1d2+d2g2) 的区间 = 一个价位", (d1, g2), (A["ZD"], A["ZG"]))
+B = find_centers(units[4:7])[0]
+C = find_centers(units[7:10])[0]
+spans = [(z["DD"], z["GG"]) for z in (A, B, C)]           # 「当成线段……高低点就是这线段的端点」
+check("三个 1 分钟中枢合成的 5 分钟中枢", (d2, g5), big_interval(spans))
+
+print("第 52 课答疑「中枢延伸的情况，只看前三段的区间，后面都是震荡」：")
+mk = lambda PI0, PI1, ZD, ZG, DD, GG: dict(PI0=PI0, PI1=PI1, ZD=ZD, ZG=ZG, DD=DD, GG=GG, X0=PI0, X1=PI1, live=False)
+pens = [dict(lo=10, hi=12)] * 20
+Z = [mk(0, 2, 10.0, 11.0, 9.5, 11.5), mk(4, 6, 11.2, 12.0, 11.1, 12.5), mk(8, 10, 10.5, 11.3, 10.2, 11.6),
+     mk(12, 14, 9.0, 10.8, 8.0, 12.9)]
+for z in Z:
+    z["rel"], z["kind"] = "", ""
+pens = [dict(lo=11.0, hi=11.4)] * 20                      # 连接段
+big = build_hierarchy(Z, pens)
+check("接上第 3、4 个中枢后区间不变", big_interval([(9.5, 11.5), (11.0, 11.4), (11.1, 12.5)]), (big[0]["ZD"], big[0]["ZG"]))
+print("   成员 %d 个，波动范围 [%g, %g]（随成员扩大）" % (big[0]["nmerge"], big[0]["DD"], big[0]["GG"]))
+print("全部一致" if FAIL == 0 else "有 %d 条对不上" % FAIL)
+sys.exit(1 if FAIL else 0)
