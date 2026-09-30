@@ -360,6 +360,57 @@ DOM_GLOBAL = "全局"    # 口径：同一句跨格**合并成一条**
 #     定义处自己仍是**手写常量** —— 与域词那张卡同一个残留形状。
 KEYFN = {"raw": lambda q: q, "norm": V.norm}
 DEDUP_KEYS = tuple(KEYFN)      # `--dedup` 的**全部**取值：从上面那张表**派生**，不再手写第二份
+
+# ★★★ 定义处**自己**的判据（`card-46bc267c-b70` 第四类）：名字 ↔ 行为，在**一个已知分叉点**上现问。
+#   前三类的收法都是"减到一处"；这一类**一处就够犯案** —— `KEYFN` 的**值**指错，
+#   屏上那两个数就互相配错，而**屏内自洽类检查全看不见**（名字与数**一起**翻 ⇒ 正反都自洽）。
+#
+#   ★ 为什么不是"两个钥匙互不相等"（v3 原样）：那一条逮**并码**（两个名字指同一个函数），
+#     逮不住**对调**（`raw` 与 `norm` 的值互换 —— 两边照样不等，只是名字换了主人）。
+#     本卡小栋拍的是 **③B（换靶：瞄还活着的那一格）** ⇒ 判据改成**逐个名字问它自己承诺的行为**：
+#       `raw` 承诺"原样"（`_key` 那句：`--dedup raw` 用**原文**）· `norm` 承诺"归一"。
+#     ⇒ 对调与并码**都**落在"名字说了假话"那一格上；而合法的正典两句都过。
+#
+#   ★ 三条（① **不测对象**；② ③ 测对象）：
+#     ① 探针**自证分叉**：`V.norm(P) != P` —— 绕过 `KEYFN`（归因那一半不许走被测对象）。
+#        没有它，② 的红分不清是「定义处错」还是「这个探针在这份环境里根本不分叉」。
+#        不成立 ⇒ **未判**（这一跑量不出分辨力）⇒ 走"拒绝出数"那张脸，**不进门的账**（@iris-64a1 §三）。
+#     ② `KEYFN["raw"](P) == P` ｜ ③ `KEYFN["norm"](P) != P`
+#   ★ 射程（照 @iris-64a1 那条写）：②③ 只结论「**在这个分叉点上**」，**不是**「两个函数处处相同」——
+#     构造一个只在别的字符上分叉的变异仍能穿过 ⇒ 这句话不许说大。
+#   ★ 不用 `assert` 写：`python -O` / `PYTHONOPTIMIZE=1` 会让 `assert` 静默消失而门照报数
+#     （@iris-64a1 16:39 §五.2）⇒ 一律 `if … : 判词 + 定 rc`。
+KEYFN_PROBE = "a，a"          # 同时踩 `PUNCT` 与 `FOLD` 两步（@iris-64a1 实测：只踩空格的那版更弱）
+KEYFN_PROBE_CTL = "！？"      # **反例对照**：`norm` 改不动它 ⇒ 用它证明①那一格不是恒绿
+
+
+def keyfn_contract_audit(probe=KEYFN_PROBE):
+    """定义处**自己**的门 —— 返回 `(verdict, detail)`。
+
+    `verdict`：
+      · `"ok"`       ⇒ 两句都成立
+      · `"names"`    ⇒ 那个两个名字有一个不在了（`raw`／`norm` 是屏上钥匙词的来源）
+      · `"unjudged"` ⇒ ① 不成立：**探针在这个环境里不分叉** ⇒ 这一跑**量不出分辨力**，
+                       **不是**"器有病" —— 两件事不许印成同一句话（归宿也不同：这条不进门的账）
+      · `"raw"`      ⇒ ② 不成立：`raw` 的行为不是"原样"（**对调**与**并码**都落这里）
+      · `"norm"`     ⇒ ③ 不成立：`norm` 在这个分叉点上不归一（两个名字都指"原样"一类的变异）
+    """
+    if "raw" not in KEYFN or "norm" not in KEYFN:
+        return "names", ("`KEYFN` 里没有 %s（屏上钥匙词的词汇表就是从它派生的）"
+                         % "、".join(n for n in ("raw", "norm") if n not in KEYFN))
+    if V.norm(probe) == probe:                       # ① 绕过 `KEYFN`：归因那一半不走被测对象
+        return "unjudged", ("探针 %r 在这份环境里**不分叉**：`norm` 改不动它"
+                            "（不写这一条，② 的红就分不清「定义处错」与「探针不给力」）" % probe)
+    got = KEYFN["raw"](probe)
+    if got != probe:                                 # ② `raw` 承诺"原样"
+        return "raw", ("**名字与行为对不上**：`KEYFN[\"raw\"]` 在 %r 上 ⇒ %r，"
+                       "而 `raw` 这个名字的承诺是**原样**（同一个点上 `KEYFN[\"norm\"]` ⇒ %r）"
+                       % (probe, got, KEYFN["norm"](probe)))
+    if KEYFN["norm"](probe) == probe:                # ③ `norm` 承诺"归一"
+        return "norm", ("**两把钥匙在这个分叉点上不可分**：`KEYFN[\"norm\"]` 对 %r ⇒ %r（没动）"
+                        "—— 而 `KEYFN[\"raw\"]` 也没动 ⇒ 这两个名字在这份环境里分不开" % (probe, probe))
+    return "ok", ""
+
 DOM_UNKNOWN = "未知"           # 只提域词、**没点钥匙**的那种提及（脚注那行）—— 只入名册，不入反向表
 # ★★ 域词印法的**唯一一处**：`dom_label` 与「域词·屏内自洽」门的抽取正则**都从这一行派生**。
 #   同源只管「**怎么认**」（正则怎么拼）；**「该有几个」另算**，从下面那几个定义处数出来
@@ -1539,6 +1590,12 @@ GATE_SITES = {
     #   （`DEDUP_KEYS`）；域词那两个是**常量**，不是旗标，所以不归任何轴。
     "域词·屏内自洽":      (("dedup",),
                           "同一跑印出的域词/钥匙与数互相打架（正/反/抽不到三条各喂一口）", True),
+    # ★ 与上一条**互不覆盖**（`card-46bc267c-b70` §射程）：上一条读**印出来的屏**（每个
+    #   （域词·钥匙）只许有一个数），这一条读**跑内那两个名字各自承诺的行为**。
+    #   并码/对调 ⇒ 上一条**看不见**（每个（域词·钥匙）仍只有一个数）；域词或数被动 ⇒ 这一条看不见。
+    "定义处·钥匙契约":    (("dedup",),
+                          "`KEYFN` 的**名字 ↔ 行为**：`raw` 承诺原样、`norm` 承诺归一"
+                          "（对调 / 并码 / 两名字都指原样 —— 三种各喂一口）", True),
     # 位点名                    (替哪些轴说话,                                          场合, 必响)
     "探测·挑不出正确值":  (("expect_corpus", "expect_judge", "expect_tree", "expect_flags"),
                           "四个 `--expect-*` 里挑不出「正确值」⇒ 那格不算测过", False),
@@ -2545,6 +2602,47 @@ def selfcheck_gate(a, argv):
     print("     残留入口（@nova-8980 已把两份手抄并成 `KEYFN`，入口 4→2）：`KEYFN` 的**值**"
           "仍是手写常量（表里翻一下 `raw`/`norm` 对哪个函数）＋ `main()` 里那个**显示用 token**。")
 
+    # ── ⑤m 定义处·钥匙契约（`card-46bc267c-b70` 第四类 · 小栋 ③B 换靶）────────────────
+    #   ★ 与 ⑤l 的分工：⑤l 读**印出来的屏**（名字与数互相自洽），本门读**跑内那两个名字
+    #     各自承诺的行为**。⑤l 自己写着"把 raw/norm 名字与数配对翻掉 ⇒ 看不见" ——
+    #     本门正是那一格的靶子（**换靶**：瞄还活着的那一格，不是已经逮到的那一格）。
+    #   ★ 三个坏态**都是真翻 `KEYFN` 的值**（finally 复原）—— 与真变异改的是同一处，
+    #     不是拿字符串演一遍（"能匹配 ≠ 能动行为"）。
+    #   ★ 第四口是**反例对照**：把探针换成 `KEYFN_PROBE_CTL`（`norm` 改不动它）⇒ 必须落
+    #     `unjudged`（未判），**不许**落红 —— 它证明①那一格不是恒绿，也证明"未判"与"发现"两张脸分得开。
+    print("\n⑤m 定义处·钥匙契约（门：正典绿 · 对调红 · 并码红 · 探针不分叉走「未判」）")
+    _k_canon, _d_canon = keyfn_contract_audit()
+    _sv_k = dict(KEYFN)
+    try:
+        globals()["KEYFN"] = {"raw": V.norm, "norm": lambda q: q}      # 对调（丙刀）
+        _k_swap, _d_swap = keyfn_contract_audit()
+        globals()["KEYFN"] = {"raw": V.norm, "norm": V.norm}           # 并码
+        _k_merge, _d_merge = keyfn_contract_audit()
+        globals()["KEYFN"] = {"raw": lambda q: q, "norm": lambda q: q}  # 两个名字都指"原样"
+        _k_ident, _d_ident = keyfn_contract_audit()
+    finally:
+        globals()["KEYFN"] = _sv_k
+    _k_ctl, _d_ctl = keyfn_contract_audit(KEYFN_PROBE_CTL)             # 反例：探针自己不分叉
+    ok = (_k_canon == "ok" and _k_swap == "raw" and _k_merge == "raw"
+          and _k_ident == "norm" and _k_ctl == "unjudged")
+    _hit("定义处·钥匙契约")
+    red += 0 if ok else 1
+    print("   正典（真表 `KEYFN`）        ⇒ %s"
+          % ("绿 ✓（`raw` 原样 · `norm` 归一）" if _k_canon == "ok" else
+             "✗ **正典就红**：[%s] %s" % (_k_canon, _cut(_d_canon, 50))))
+    print("   对调（`raw`↔`norm` 的值）   ⇒ %s"
+          % ("响 ✓ 脸=raw" if _k_swap == "raw" else "✗ **没响**（落 %s）" % _k_swap))
+    print("   并码（两个名字同一函数）    ⇒ %s"
+          % ("响 ✓ 脸=raw" if _k_merge == "raw" else "✗ **没响**（落 %s）" % _k_merge))
+    print("   两名字都指「原样」          ⇒ %s"
+          % ("响 ✓ 脸=norm" if _k_ident == "norm" else "✗ **没响**（落 %s）" % _k_ident))
+    print("   反例对照（探针 `%s`）      ⇒ %s"
+          % (KEYFN_PROBE_CTL, "「未判」（✓ 没混成红）" if _k_ctl == "unjudged"
+             else "✗ **落成了 %s**（未判与发现共用一张脸）" % _k_ctl))
+    print("   ★ 射程（照 @iris-64a1 那条写）：本门只结论「**在这个分叉点上**」——"
+          "不是「两个函数处处不同」；")
+    print("     构造一个只在别的字符上分叉的变异仍能穿过（**采样不是证明**，本器同一条尺）。")
+
     # ⑤k ★ 位点名册自己这道门（分母的账）：两面各查一次。
     _hit("位点名册")
     _unk, _unc, _dead, _deaf = gate_registry_audit()
@@ -2612,6 +2710,27 @@ def main():
         print("  ★ 修法：在 `COUNT_AXES`（进分母）或 `OTHER_AXES`（不进）里点名它 —— "
               "**两个单子都不写，就是这一格。**")
         return 9
+
+    # ★★ 器自己的**第二格**：定义处（`KEYFN`）的**名字 ↔ 行为**（`card-46bc267c-b70`）。
+    #   拦在这里（量之前、连 `--commit` 都还没查）的理由与轴单那条相同：
+    #   `KEYFN` 的值指错 ⇒ **下面印出去的每一个数都带着一个假标签**，
+    #   而屏内自洽那一类检查**结构上看不见**（名字与数一起翻 ⇒ 正反都自洽）。
+    #   ★ 两态分开（@iris-64a1 §三）：① 不成立 = **未判**（尺子量不出分辨力，exit=11 那一族）；
+    #     ②③ 不成立 = **发现**（器有病，exit=12）。**归宿不同、出口码也不同** ——
+    #     并进一个数，就会把"器有病"和"尺子坏了"印成同一张脸，而那正是本卡要治的那种同形。
+    _kv, _kd = keyfn_contract_audit()
+    if _kv == "unjudged":
+        print("★ 定义处那一格 **判不了** ⇒ **拒绝出数**（exit=11）。脸 = **探针不分叉**。")
+        print("  %s" % _kd)
+        print("  ★ 这不是「定义处有问题」：这一跑**量不出分辨力** —— 两件事不许印成同一句话，"
+              "归宿也不同（这条**不进门的账**）。")
+        return 11
+    if _kv != "ok":
+        print("★ 定义处（`KEYFN` 的名字 ↔ 行为）对不上 ⇒ **拒绝出数**（exit=12）。脸 = %s。" % _kv)
+        print("  %s" % _kd)
+        print("  ★ 这一格**一处就够犯案**：`KEYFN` 只有一行，值指错一次，屏上那两个数就互相配错，"
+              "而屏内自洽检查看不见。⇒ 修法不是「再加一处校验」，是**把那一行改回来**。")
+        return 12
 
     if a.tree is None:
         print("★ 没点对象 ⇒ **拒绝出数**（exit=4）。这支器量的是「某个提交的树」，")
