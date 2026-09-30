@@ -63,7 +63,7 @@ for tag, r in R.items():
     # 中枢层
     count("类中枢不变量违规", len(check_centers(r["centers"], P)))
     count("类中枢扩展合成违规", len(check_hierarchy(r["big"], r["centers"], P)))
-    count("买卖点复核违规", sum(len(check_signals(signals(r, lv, m), r, lv)) for lv in ("seg", "pen") for m in ("macd", "slope")))
+    count("买卖点复核违规", sum(len(check_signals(signals(r, lv, m), r, lv, m)) for lv in ("seg", "pen") for m in ("macd", "slope")))
     count("线段中枢不变量违规", len(check_centers(r["seg_centers"], [s for s in S if not s.get("live")])))
 
 # ---- 变异测试：校验器必须能抓住故意做错的输入 ----

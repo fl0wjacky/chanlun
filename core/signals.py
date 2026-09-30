@@ -122,9 +122,32 @@ def signals(r, level="seg", measure="macd", ratio=1.0, fast=12, slow=26, sig=9):
     return out
 
 
-def check_signals(sig, r, level="seg"):
-    """独立复核（只用中枢与单位的原始字段，按定义另写一遍关键条件）。返回违规列表（应为空）。"""
+def _strength_by_definition(u, hist, measure):
+    """第 24 课的力度，**独立另写一份**——本函数存在的唯一理由就是它不调 strength()。
+
+    为什么要抄一遍同样的公式：力度是背驰判据里唯一「算出来的量」，而 check_signals 原先
+    只复核结构（点是不是段终点、方向、三类点的位置…），**没有一条看着力度**。
+    实测：把 strength() 弄坏（斜率的 max(1, span) 换成 min，等长替换），ZEC 15m pen 的
+    90 个买卖点里 12 个换了位置，而 check_signals 照样报 0——门一声不响。
+    复核必须独立于被测实现，所以这里宁可重复一遍公式——和 check_centers「另写一遍、
+    不调用 upgrades」是同一个写法。**改 strength 的公式时这里要一起改**，这是这份独立的代价。
+    """
+    if measure == "slope":
+        span = u["i1"] - u["i0"]
+        return abs(u["p1"] - u["p0"]) / (span if span > 1 else 1)      # 同 max(1, span)，写法不同
+    seg = hist[u["i0"]:u["i1"] + 1]
+    if u["p1"] > u["p0"]:
+        return sum(h for h in seg if h > 0)
+    return -sum(h for h in seg if h < 0)
+
+
+def check_signals(sig, r, level="seg", measure="macd", ratio=1.0):
+    """独立复核（只用中枢与单位的原始字段，按定义另写一遍关键条件）。返回违规列表（应为空）。
+
+    measure / ratio 要跟产生 sig 的那次 signals() 调用一致，否则背驰那条会误报。
+    """
     AU, U, Z = _units(r, level)
+    hist = macd_hist(r["bars"]) if measure == "macd" else None
     bad = []
     for s in sig:
         u = AU[s["unit"]]
@@ -145,6 +168,15 @@ def check_signals(sig, r, level="seg"):
                 bad.append(("一类买卖点不在趋势的最后一个中枢之后", s["kind"], s["bar"]))
             if (u["lo"] >= z["DD"]) if buy else (u["hi"] <= z["GG"]):
                 bad.append(("一类买卖点的 C 段没创新低 / 新高", s["kind"], s["bar"]))
+            # 背驰：C 段力度 < A 段力度 × 比例。A 段的找法与 signals() 同一条规则，
+            # 但力度用 _strength_by_definition 独立算 —— 这一条是力度那一支唯一的守卫。
+            a = next((q for q in range(z["PI0"] - 1, -1, -1)
+                      if (AU[q]["p1"] < AU[q]["p0"]) == buy), None)
+            if a is None:
+                bad.append(("一类买卖点之前找不到同向的 A 段", s["kind"], s["bar"]))
+            elif not _strength_by_definition(u, hist, measure) < \
+                    _strength_by_definition(AU[a], hist, measure) * ratio:
+                bad.append(("背驰不成立：独立重算 C 段力度不小于 A 段 × 比例", s["kind"], s["bar"]))
         if s["kind"] in ("二买", "二卖"):
             first = [t for t in sig if t["kind"] == ("一买" if buy else "一卖") and t["unit"] == s["unit"] - 2]
             if not first or not first[0]["confirmed"]:
