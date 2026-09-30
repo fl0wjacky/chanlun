@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""全仓「」普查：**每一个**「…」/『…』配对都拿去 108 课原文核，按位置出四格。
+r"""全仓「」普查：**每一个**「…」/『…』配对都拿去 108 课原文核，按位置出四格。
 
 用法：
     python3 tools/quotes_census.py
@@ -103,14 +103,36 @@ git cat-file -p <blob> | grep "^PUNCT = "        # 或 git show <树>:tools/veri
 ⇒ 所以**阶梯不要指望指纹替你记，在口径块里写名字**：「阶梯：`norm` 一档」／
 「阶梯：`norm` ＋ 逐段核（省）」。一句话，比多取一个区可靠。
 
-**要用的指纹命令**（跑完自己印覆盖范围，别让它只吐一个数）：
+★★★ **要用的指纹命令 —— 它必须会"拒绝出哈希"，不是"印个覆盖让人自己看"：**
 
 ```
-git cat-file -p <blob> \
-  | awk '/^(FOLD|ELL|PUNCT) *=/{s=1} s{print} s&&/return FOLD/{c++} c==2{exit}' \
-  | sha256sum | cut -c1-16
-# 23274277 ⇒ e1511c94e8103383   （覆盖 :77–:100 共 24 行，含 FOLD/ELL/PUNCT/fold/norm）
+git cat-file -p <blob> | awk '
+  /^(FOLD|ELL|PUNCT) *=/ { s=1 }
+  s { buf[n++]=$0 }
+  s && /return FOLD/ { c++ }
+  c==2 { ok=1; exit }
+  END {
+    if (ok!=1) { printf "★ 不可比：第 2 个 return FOLD 不存在 ⇒ 区间退化到 EOF（%d 行），拒绝出哈希\n", n > "/dev/stderr"; exit 3 }
+    printf "区域 %d 行（含 FOLD/ELL/PUNCT/fold/norm）\n", n > "/dev/stderr"
+    for (i=0;i<n;i++) print buf[i]
+  }' | sha256sum | cut -c1-16
+# 23274277 ⇒ e1511c94e8103383   （区域 24 行）
 ```
+
+**为什么必须这样：终点那两条斜杠是"第 2 个 `return FOLD`"，而这正是你要改的那一行。**
+改 `norm` 时若把 `return FOLD` 一起去掉，终点**再也匹配不上** ⇒ 区间**一路跑到文件尾**：
+
+```
+  A / C / D（都留着 FOLD）  24 行
+  B（无 FOLD）             356 行  ← 含 split_ellipsis · hunt · main，把整个阶梯和 CLI 都吞进来
+```
+
+⇒ 于是 `B` 那个 `3c018b80da22136e` **不是"B 的指纹"**：A/C/D 那三个哈希的**对象是判据区**（24 行），
+  B 这个的对象是**判据区＋整个阶梯＋CLI**（356 行）。**同一列里放的不是同一种东西**（同 [[tool-success-is-not-correct-result]] ⑮ 混量纲）——
+  而且它还**更"灵敏"**（连区间外的阶梯都盖住了），看着比正牌那个还好，**恰恰是更不能用的那个**。
+⇒ 所以规则不是"印出覆盖行数"（那还是要人看），是**认不出终点就 `exit 3`、一个字都不许往 stdout 吐**
+  （上面用 `buf[]` 缓冲、验证通过才 `print` —— 边扫边 `print` 的话 `exit` 也拦不住已经漏出去的行）。
+  **"印出来但要人看" = 没有门；门要能红。**
 
 快筛（非结构性蕴含，别拿它当唯一判据）：`git merge-base --is-ancestor 51b377f <树>`。
 我把这 38 笔逐笔比过 `is-ancestor` 与"含字面 `*`"，**反例 0** —— 但 0 反例的理由是那几个
