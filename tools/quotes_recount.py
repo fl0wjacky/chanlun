@@ -148,6 +148,14 @@
        ② 加一个 `--bump` 且两个单子都不写 ⇒ 同样 `rc=9`。
        ★ 而**登记错**（真影响数的旗标被登记进 `OTHER_AXES`）它红不了：自查绿、数 331/302→338/309、
        印的那行不动、`--expect-flags` 照旧 rc=0 —— 那一半靠复核，别把边界当覆盖（见 `axis_audit`）。
+ 10  **离线自测里有门没响**（`--selfcheck-gate`）—— 租客同样是**维护者**，不许与 4/7/9 共用。
+     ★ 它是 9 号那扇"永远绿的门"的**另一半**：9 管"**漏登记**"（加了旗标、两个单子都不写），
+       10 管"**登记错**"（真影响数的旗标被登记进 `OTHER_AXES`）—— 后者只能靠"换一档看数动没动"，
+       而那件事机器判不出来 ⇒ **拿这条命令自己再跑十几遍**。
+     ★ 故意红（实测，我跑的）：给副本加一个真影响数的 `--bump` 并登记进 `OTHER_AXES` ⇒
+       自测在 ② 那行红 —— `bump 探针=1 ⇒ 合计 335/306（基线 331/302）`。
+     ★ 同一格"没测"也走 10（基线跑不出数 / 轴单里的轴没有旗标名）——**不许把"没测"印成"过"**。
+     ★ 代价：十几遍真扫（本机 ~16 s）⇒ **离线跑**，不许塞进常规验收（它跑的就是"量之前那几道门"）。
 
 ★★ 验收判据：**`grep -q '验收可用=是'`**（输出里那一行单值）。三个条件**必须写成"印了且 = 是"**：
 
@@ -416,11 +424,16 @@ COUNT_AXES = ("min_len", "face", "dedup", "v1ref", "unit", "ladder")
 # ★ 不进分母的旗标也**必须逐个点名** —— 否则自查红不了：登记不全与登记错长得一样，而能红的
 #   只有"没登记"那一半（`axis_audit` 的 docstring 写清了它**不**管什么，别把边界当覆盖）。
 OTHER_AXES = ("tree", "expect_corpus", "expect_judge", "expect_tree", "expect_flags")
+# ★ **模式开关**：它既不进数、也不是"换一档看数动没动"的旋钮（它连量都不量）——
+#   所以**单独点名**，不许塞进 `OTHER_AXES`：自测会拿 `OTHER_AXES` 逐项当"探针"跑一遍，
+#   混进去 ⇒ 自测自己调自己（`--selfcheck-gate` 递归）。这与对象轴 `--commit` 是**同一类豁免**：
+#   **点名豁免，不混进"不许动"那一堆**（照 `card-c9b12e05-1a0` 那条：豁免要按 dest 点名）。
+MODE_AXES = ("selfcheck_gate",)
 AXIS_FLAG = {"min_len": "--min-len", "face": "--face", "dedup": "--dedup",
              "v1ref": "--v1ref", "unit": "--unit", "ladder": "--ladder",
              "tree": "--commit", "expect_corpus": "--expect-corpus",
              "expect_judge": "--expect-judge", "expect_tree": "--expect-tree",
-             "expect_flags": "--expect-flags"}
+             "expect_flags": "--expect-flags", "selfcheck_gate": "--selfcheck-gate"}
 
 
 def axis_audit(ap):
@@ -434,8 +447,11 @@ def axis_audit(ap):
     两个反证跑都做过（见卡 `card-981814b5-15d`）：① 轴单里删掉 `min_len` ⇒ 红；
     ② 加 `--bump` 并登记进 `OTHER_AXES` ⇒ **绿，而数从 331/302 变 338/309**。
     ⇒ 它不是"测得准"，是"**漏登记会被拦下**"；登记错只能靠复核。
+    ★ **登记错**那一半现在有门了（`--selfcheck-gate`，见 `selfcheck_gate`）：把每个 `OTHER_AXES`
+      项各塞一个探针值跑一遍，要求**合计逐位不动** —— 真影响数的旗标被登记进 `OTHER_AXES`，
+      自测就会红（exit=10）。`axis_audit` 仍然只管道一半，两半各治各的。
     """
-    declared = set(COUNT_AXES) | set(OTHER_AXES)
+    declared = set(COUNT_AXES) | set(OTHER_AXES) | set(MODE_AXES)
     got = set(x.dest for x in ap._actions if x.dest != "help")
     return sorted(got - declared), sorted(declared - got)
 
@@ -476,7 +492,11 @@ def flagline(a):
     return " ".join("%s %s" % (AXIS_FLAG[d], getattr(a, d)) for d in COUNT_AXES)
 
 
-def main():
+def build_parser():
+    """构造解析器 —— ★ 抽出来是因为**自测要按同一份声明造第二份命令行**
+    （枚举每个轴的合法取值、给每个 `OTHER_AXES` 项塞一个'不影响数'的探针值）。
+    自测若自己另抄一份旗标清单，那份清单会**跟着漂**（手写的第二份声明 = 一扇永远绿的门）。
+    """
     ap = argparse.ArgumentParser()
     # ★ default 从 "." 改成 **None**（@atlas-791f 12:2x 的第三条反例）：
     #   原来不写对象 ⇒ 回落 "." ⇒ 照跑、照印一张表、**exit=0**，格式与一次合法读数一模一样
@@ -522,6 +542,209 @@ def main():
     ap.add_argument("--expect-flags", default=None, metavar="'<--名 值 …>'",
                     help="生效旗标串（解析后的值）逐字对不上就 exit=8。"
                          "不给 ⇒ 那一格自报「★ 没核」。★ 它含空格，**要用引号**。")
+    # ★ **离线自测**（`card-c9b12e05-1a0`）：不进正常跑法。
+    #   它把**同一条命令行**再跑十几遍，每次只翻一格，看门/数按不按登记单说的那样动。
+    #   要跑十几遍真扫（每次 ~1s）⇒ 别塞进常规验收，也别塞进 CI 的每次跑。
+    ap.add_argument("--selfcheck-gate", action="store_true",
+                    help="离线自测（不进正常跑法）：① 反向控制四格必须**拒绝出数**；"
+                         "② 每个 `OTHER_AXES` 项塞探针值 ⇒ **合计必须逐位不动**（登记错会红）；"
+                         "③ 每个计数轴换一档 ⇒ **印出的旗标行必须动**（数动没动只当提示）。"
+                         "有一道门没响 ⇒ exit=10。")
+    return ap
+
+
+# ── 离线自测（`--selfcheck-gate`）：把**同一条命令行**再跑十几遍，每次只翻一格 ─────────────
+def _strip_flag(argv, flag):
+    """从命令行里摘掉一个旗标 —— `--flag 值` 与 `--flag=值` 两种拼法都认。"""
+    out, i = [], 0
+    while i < len(argv):
+        t = argv[i]
+        if t == flag:
+            i += 2
+            continue
+        if t.startswith(flag + "="):
+            i += 1
+            continue
+        out.append(t)
+        i += 1
+    return out
+
+
+def _alt_value(act, cur):
+    """给一个轴挑一个**不同的合法值**（有 `choices` 就从中挑，整数就 +1）。
+
+    ★ 不另手写一份"第二取值表"：那种表会跟着漂，而漂掉的清单本身就是一扇永远绿的门
+      （`COUNT_AXES` 那一段已经栽过一次：手写的六格 vs 加进来的第七个旗标）。
+      挑不出来 ⇒ 返回 None，由调用方印成「**没测**」（不许当通过）。
+    """
+    if act.choices:
+        for c in act.choices:
+            if str(c) != str(cur):
+                return str(c)
+        return None
+    if act.type is int:
+        return str((cur if isinstance(cur, int) else 0) + 1)
+    return None
+
+
+def _run_once(argv):
+    """按同一条命令跑一遍**子进程** —— `(rc, 合计, 生效旗标行)`，没印出来的是 None。
+
+    走子进程不是图省事：这几道门都拦在"量之前"，只有真跑一遍才算数（同进程复用状态
+    会把"没量"演成"量过"）。`合计` 抽不到 ⇒ None，**"0 行"必须有别于"0 处"**。
+    """
+    r = subprocess.run([sys.executable, __file__] + argv, capture_output=True, text=True)
+    m = re.search(r"^\s*合计\s+(\d+) 处 /\s+(\d+) 条", r.stdout, re.M)
+    f = re.search(r"生效旗标\s+(--[^\n（]*)", r.stdout)
+    return (r.returncode,
+            "%s/%s" % (m.group(1), m.group(2)) if m else None,
+            f.group(1).strip() if f else None)
+
+
+def selfcheck_gate(a, argv):
+    """离线自测：**这一卡要治的那扇永远绿的门，在这里被做成会红的**（不进正常跑法）。
+
+    Why：`axis_audit`（exit=9）只拦得住"**漏登记**"（加了旗标、两个单子都没写）。"**登记错**"
+    （真影响数的旗标被登记进 `OTHER_AXES`）它红不了 —— 实测 `--bump 7` 那种：自查绿、
+    `合计` 331/302 → 338/309、而印出来的旗标行**逐字节不动**、`--expect-flags` 照旧 rc=0。
+    这一格的判据只能是"**换一档看数动没动**"，而这件事机器判不出来 ⇒ **拿命令自己跑**。
+
+    三块，**判据各不相同**（这一格治的正是"把三种不同的东西用一句绿盖住"）：
+
+      ① 反向控制（**门**）：语料/判据/树/旗标 四格各把**正确值**改坏一位 ⇒
+         必须**拒绝出数**（`合计` 抽不到）且 rc 各自是 3/5/6/8。
+      ② 登记错（**门**）：每个 `OTHER_AXES` 项塞一个探针值 ⇒ `合计` 必须**逐位不动**。
+         ★ 对象轴 `tree`（`--commit`）**点名豁免**：换对象 = 换一次测量，不是旋钮
+           —— 豁免要按 dest 点名，不许混进"不许动"那一堆（`--tree` 是同一个参数的另一拼法）。
+      ③ 计数轴（**门 + 提示**）：每项换一档 ⇒ **印出的旗标行必须动**（门）；
+         `合计` 动没动只印成**提示**、**不判红** —— 真轴在某个合法基点上**可以恒等**
+         （实测 `--unit all` 面上两档 `--ladder` 恒等），判红会制造**假红**，
+         而一次假红足以让人把整扇门关掉（与"永远绿"同害，方向相反）。
+
+    ★ 代价：十几遍真扫（每遍 ~1s）⇒ **离线跑**，别塞进常规验收。
+    ★ 期望值从哪儿来：①里那四个"正确值"是**器自己当场算的**（`V.fingerprint` / `judge_id()` /
+      对象自己说的树 / `flagline`）。这里**不是**"抄自己印的那一行"那个病：抄自己印的值当
+      **期望值**会让门变回音；而这里是**反向控制** —— 把正确值改坏，门**必须响**，
+      期望值对不对不影响这一格的结论（它要证明的是门会响，不是值有多对）。
+    """
+    # ★ 轴单里点名了、却**没给它旗标名**（`AXIS_FLAG` 少一格）⇒ 这个轴**名字都印不出来**：
+    #   `flagline()` 那行会漏掉它，而自测也没法给它塞探针 ⇒ 记成**没测**（红），不许静默跳过。
+    #   （`axis_audit` 只管"argparse 里的动作有没有被登记"，不管"登记了的有没有旗标名"。）
+    missing_name = [d for d in COUNT_AXES + OTHER_AXES if d not in AXIS_FLAG]
+    if missing_name:
+        print("★ 轴单里有 %s，但 `AXIS_FLAG` 里没有它的旗标名 ⇒ 这个轴连**名字都印不出来**"
+              % ", ".join(missing_name))
+        print("  ⇒ 自测**没测**它（exit=10）。先补 `AXIS_FLAG`。")
+        return 10
+
+    ap2 = build_parser()
+    acts = {x.dest: x for x in ap2._actions if x.dest != "help"}
+    base = _strip_flag(argv, "--selfcheck-gate")
+    # 基线 = **调用方那条命令**，只把**期望值**摘掉（那是自测自己要塞的东西）。
+    # ★★ 两个都不许摘，各有一次实测教训：
+    #   · **对象不许摘**（`tree`）：它是**测量对象**不是期望值 —— 我第一版把 `OTHER_AXES` 整串
+    #     都摘了，基线成了「没点对象」（rc=4）⇒ 整场自测退化成"没测"。
+    #   · **计数轴不许摘**：摘了 ⇒ 基线跑的是**默认值**，而 ② 那格塞进去的期望值是从**调用方
+    #     那条命令**算出来的 ⇒ 拿 A 的期望值去比 B 的实跑，`--expect-flags` 假红（实测 rc=8）；
+    #     ③ 那格同理：把 `--dedup raw` 换成默认的 `norm`，旗标行"没动"也是假的。
+    #   ⇒ 这条正好是本卡自己的规矩：**豁免要按 dest 点名**（对象轴），**基线要跟被测对象同一条命令**。
+    for d in tuple(x for x in OTHER_AXES if x != "tree"):
+        base = _strip_flag(base, AXIS_FLAG[d])
+    rc0, tot0, fl0 = _run_once(base)
+    print("自测    对象=%s · 基线 rc=%d · 合计=%s · 旗标行=%s"
+          % (a.tree, rc0, tot0, fl0))
+    if rc0 != 0 or not tot0:
+        print("★ 基线自己都跑不出数 ⇒ **自测没测**（exit=10）。先把这条命令跑通再来 ——")
+        print("  「没测」与「测了没过」不许共用一句话（今晚反复栽的那格）。")
+        return 10
+
+    docs = V.load()
+    obj_text, _ = which(a.tree)
+    mt = re.search(r"→ tree ([0-9a-f]{40})", obj_text)
+    good = {"expect_corpus": (V.fingerprint(docs)[0] if docs else None),
+            "expect_judge": judge_id()[0],
+            "expect_tree": mt.group(1) if mt else None,
+            "expect_flags": flagline(a)}
+    want = {"expect_corpus": 3, "expect_judge": 5, "expect_tree": 6, "expect_flags": 8}
+    gates = red = 0
+
+    print("\n① 反向控制（门：必须**拒绝出数**，`合计` 一行都不许有）")
+    for d in ("expect_corpus", "expect_judge", "expect_tree", "expect_flags"):
+        g = good[d]
+        if not g:
+            print("   %-15s ★ 挑不出「正确值」⇒ **没测**（记一笔）" % d)
+            gates += 1
+            red += 1
+            continue
+        if d == "expect_flags":
+            t = g.split()
+            t[1] = "0"
+            badv = " ".join(t)
+        else:
+            badv = g[:-1] + ("0" if g[-1] != "0" else "1")
+        rc, tot, _ = _run_once(base + [AXIS_FLAG[d], badv])
+        ok = (rc == want[d] and tot is None)
+        gates += 1
+        red += 0 if ok else 1
+        # ★ 证据要能看出**差在哪一位**：印两端会把"改坏了一位"藏起来（`--expect-flags` 那格改的是
+        #   第一个词、`sha` 那几格改的是末位 —— 一律印头或一律印尾都必然有一格看不见）。
+        k = next((i for i in range(min(len(g), len(badv))) if g[i] != badv[i]), 0)
+        print("   %-15s 好值 …%s… 改坏成 …%s… ⇒ rc=%d（要 %d）· 合计 %s ⇒ %s"
+              % (d, g[max(0, k - 4):k + 8], badv[max(0, k - 4):k + 8],
+                 rc, want[d], tot or "**没有**", "✓" if ok else "✗ **门没响**"))
+
+    print("\n② 登记错（门：非计数轴塞探针 ⇒ `合计` 必须**逐位不动**）")
+    print("   ★ 点名豁免：`tree`（--commit）—— 换对象 = 换一次测量，不是旋钮")
+    for d in OTHER_AXES:
+        if d == "tree":
+            continue
+        act = acts.get(d)
+        v = good.get(d)
+        if v is None and act is not None:
+            v = _alt_value(act, getattr(a, d, None))
+        if v is None:
+            print("   %-15s ★ 挑不出探针值 ⇒ **没测**（记一笔）" % d)
+            gates += 1
+            red += 1
+            continue
+        rc, tot, _ = _run_once(base + [AXIS_FLAG[d], v])
+        ok = (rc == 0 and tot == tot0)
+        gates += 1
+        red += 0 if ok else 1
+        print("   %-15s 探针=%s ⇒ rc=%d · 合计 %s（基线 %s）⇒ %s"
+              % (d, v[:20], rc, tot or "**没有**", tot0, "✓" if ok else "✗ **数动了 ⇒ 登记错**"))
+
+    print("\n③ 计数轴（门：印出的旗标行必须动 · 提示：数动没动**不判红**）")
+    ax_moved = ax_same = 0
+    for d in COUNT_AXES:
+        act = acts.get(d)
+        v = _alt_value(act, getattr(a, d, None)) if act is not None else None
+        if v is None:
+            print("   %-15s ★ 挑不出第二值 ⇒ **没测**（记一笔）" % d)
+            gates += 1
+            red += 1
+            continue
+        rc, tot, fl = _run_once(base + [AXIS_FLAG[d], v])
+        line_ok = (rc == 0 and fl is not None and fl != fl0)
+        moved = tot != tot0
+        ax_moved += 1 if moved else 0
+        ax_same += 0 if moved else 1
+        gates += 1
+        red += 0 if line_ok else 1
+        print("   %-15s →%-14s rc=%d · 合计 %s ⇒ 数%s · 旗标行%s ⇒ %s"
+              % (d, v, rc, tot or "**没有**", "动" if moved else "**恒等（提示，不判红）**",
+                 "动" if line_ok else "**没动**", "✓" if line_ok else "✗ **印的那行没跟着动**"))
+
+    print("\n★ 自测结论：门 %d 道，红了 %d 道 ⇒ %s"
+          % (gates, red, "全响（exit=0）" if not red else "**有门没响（exit=10）**"))
+    print("   （提示不算门：③ 只算「旗标行必须动」那 %d 道；"
+          "计数轴上「数动」的 %d 道、恒等的 %d 道都只是印出来给人看）"
+          % (len(COUNT_AXES), ax_moved, ax_same))
+    return 0 if not red else 10
+
+
+def main():
+    ap = build_parser()
     a = ap.parse_args()
 
     # ★ 器**自己**的自查先跑（exit=9）：轴单不全 ⇒ 这一行印出来的东西就不可信，
@@ -547,6 +770,10 @@ def main():
         print()
         print("  ★ 不写也能跑 = 「抄错也出数」：粘贴时漏掉对象，和一次合法读数在屏幕上分不开。")
         return 4
+    # ★ 离线自测：**不进正常跑法**（十几遍真扫）。拦在量之前 —— 它跑的就是"量之前那几道门"。
+    if a.selfcheck_gate:
+        return selfcheck_gate(a, sys.argv[1:])
+
     # ★ **别让新的门复刻旧病**（@nova-8980 12:5x 的警告）：三个 `--expect-*` 都是"我手打一串数"，
     #   打歪一位就**永远比不上** —— 而"常数写坏了"和"对象真的不对"会长成一个样（三态共用一个词，
     #   今天栽过好几回的那格）。⇒ 先验**形状**，说清是哪一种，再谈比不比得上。
