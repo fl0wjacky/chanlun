@@ -144,5 +144,39 @@ def main():
     print("06")
 
 
+
+
+# --- cardfit 失败分支声明（见 tools/cardfit.py 的 failure_modes()）--------------------------
+# **这张卡是 13 张里唯一真有「真实数据走不到的那一支」的**（实测，见 card-8b15761f-779）：
+# `more = seg["扩展"] > seg["趋势"]` 在这段数据上恒为 True ⇒ 那句 else 正文从来没被画过。
+def _cardfit_inject_trend_not_more():
+    """把「扩展 > 趋势」翻成不成立，逼出那句 else 正文。
+
+    **只翻关系、不改量级**：同一批计数值对调（趋势 4 / 扩展 14 → 14 / 4），位数不变 ⇒
+    量的还是这张卡的排版，不是我另外编的一组数。`n = 趋势 + 扩展`，对调不影响它。
+
+    签名对的是工具的约定：**本函数不接参数，返回 `install(mod) -> restore`**
+    （跟 `model_dissent._cardfit_inject_mismatch(n)` 同形；多接一个 `mod` 会在 restore 那步 TypeError）。
+    """
+    def install(mod):
+        orig = mod.zec.pair_stats
+
+        def swapped(zs):
+            d = orig(zs)
+            if d["扩展"] > d["趋势"]:
+                d = dict(d, 趋势=d["扩展"], 扩展=d["趋势"])
+            return d
+
+        def restore():
+            mod.zec.pair_stats = orig
+
+        mod.zec.pair_stats = swapped
+        return restore
+    return install
+
+
+# 注意列表里放的是**调用结果**（`install`），不是函数本身 —— 工具会执行 `install(mod)`。
+CARDFIT_FAILURES = [("趋势不少于扩展（真数据走不到的那支）", _cardfit_inject_trend_not_more())]
+
 if __name__ == "__main__":
     main()
