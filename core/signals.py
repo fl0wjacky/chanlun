@@ -21,22 +21,86 @@
 from .center import find_centers
 
 
-def macd_hist(bars, fast=12, slow=26, sig=9):
-    """MACD 柱 = DIF − DEA（与 TradingView 内置 MACD 的 histogram 同义；不乘 2，面积比不受影响）。
+def macd_lines(bars, fast=12, slow=26, sig=9):
+    """MACD 的两条线：返回 (DIF, DEA)。DIF = 快慢 EMA 之差（白线），DEA = DIF 的 EMA（黄线）。
 
     EMA 用第一根收盘价起算（Pine 版照此手写，不用 ta.ema 的 SMA 起算，两边逐根一致）。
+    macd_hist 就是从这两条线相减得来的 —— 拆出来是为了「B 段回抽 0 轴」那条需要**分别**看两条线。
     """
-    out = []
+    dif, dea = [], []
+    ef = es = None
+    d = 0.0
     for n, b in enumerate(bars):
         c = b["c"]
         if n == 0:
             ef = es = c
-            dea = 0.0
+            d = 0.0
         else:
             ef += (c - ef) * 2 / (fast + 1)
             es += (c - es) * 2 / (slow + 1)
-            dea += (ef - es - dea) * 2 / (sig + 1)
-        out.append(ef - es - dea)
+            d += (ef - es - d) * 2 / (sig + 1)
+        dif.append(ef - es)
+        dea.append(d)
+    return dif, dea
+
+
+def macd_hist(bars, fast=12, slow=26, sig=9):
+    """MACD 柱 = DIF − DEA（与 TradingView 内置 MACD 的 histogram 同义；不乘 2，面积比不受影响）。"""
+    dif, dea = macd_lines(bars, fast, slow, sig)
+    return [x - y for x, y in zip(dif, dea)]
+
+
+# ---- 「B 段回抽 0 轴附近」这条必要条件：口径 ----
+# ★ 原文只给了「附近」两个字，**下面四个量全是我们发明的**，一律不许挂课号（见 README「0 轴回抽」）。
+ZA_STAT = "mean|DIF| 与 mean|DEA|（B 中枢窗口内，两条线到 0 的平均距离）"
+ZA_WINDOW = "B 中枢的 K 线跨度：起 = 构成它的第一段的起点 i0，止 = 最后一段的终点 i1"
+ZA_REF = "该点的 A 段内 max|DIF|（除价格尺度，才可跨品种 / 级别比）"
+ZA_THRESHOLD = 0.30
+
+
+def zero_axis(points, r, level="seg", fast=12, slow=26, sig=9, threshold=ZA_THRESHOLD):
+    """量「B 段把 MACD 黄白线回抽 0 轴附近」这条必要条件。**只量，不改买卖点判定。**
+
+    原文（两条都是**答疑**里的话，不是正文）：
+      第 25 课答疑「用 MACD 判断背驰首先要有黄白线对 0 轴的回拉，这个都没有，
+                     在该级别就不存在什么背驰」
+      第 27 课答疑「如果 B 段不是回抽 0 轴附近，就根本不满足条件」
+    第 24 课正文说的是「B 这个中枢**一般会**把 MACD 的黄白线…回拉到 0 轴附近」—— 那是弱说法，
+    强说法出自上面两条答疑。
+
+    **口径（阈值的数是我们发明的）**：见 ZA_STAT / ZA_WINDOW / ZA_REF / ZA_THRESHOLD。
+    为什么不用 `min|DIF|`（"两条线最近贴到过 0 多近"）：DIF 在反转处必然穿 0 ⇒ 它**几乎恒为 0、
+    没有分辨力**（实测 7 个一买一卖里 4 个 < 0.005，其余最大 0.249）⇒ 分母再大也分不出来。
+    mean 在同样这 7 个上的读数是 0.205 ~ 0.610，分得开。
+
+    返回一买 / 一卖逐条读数：dict(kind, bar, center, win, r_dif, r_dea, r, ok)。
+    r = max(r_dif, r_dea) —— 两条线**都要**回抽，所以取差的那个；r ≤ threshold 记 ok。
+    """
+    dif, dea = macd_lines(r["bars"], fast, slow, sig)
+    AU, Z = _units(r, level)[0], _units(r, level)[2]
+    out = []
+    for s in points:
+        if s["kind"] not in ("一买", "一卖"):
+            continue
+        B = Z[s["center"] - 1]
+        if B["PI1"] >= len(AU) or B["PI0"] < 0:
+            continue
+        lo, hi = AU[B["PI0"]]["i0"], AU[B["PI1"]]["i1"]
+        if hi <= lo:
+            continue
+        a = next((q for q in range(B["PI0"] - 1, -1, -1)
+                  if (AU[q]["p1"] < AU[q]["p0"]) == s["kind"].endswith("买")), None)
+        if a is None:
+            continue
+        ref = max(abs(x) for x in dif[AU[a]["i0"]:AU[a]["i1"] + 1])
+        if ref <= 0:
+            continue
+        w = hi - lo + 1
+        r_dif = sum(abs(x) for x in dif[lo:hi + 1]) / w / ref
+        r_dea = sum(abs(x) for x in dea[lo:hi + 1]) / w / ref
+        rr = max(r_dif, r_dea)
+        out.append(dict(kind=s["kind"], bar=s["bar"], center=s["center"], win=hi - lo,
+                        r_dif=r_dif, r_dea=r_dea, r=rr, ok=rr <= threshold))
     return out
 
 
@@ -141,16 +205,23 @@ def _strength_by_definition(u, hist, measure):
     return -sum(h for h in seg if h < 0)
 
 
-def check_signals(sig, r, level="seg", measure="macd", ratio=1.0):
+def check_signals(sig, r, level="seg", measure="macd", ratio=1.0, check_zero_axis=False,
+                  za_threshold=ZA_THRESHOLD):
     """独立复核（只用中枢与单位的原始字段，按定义另写一遍关键条件）。返回违规列表（应为空）。
 
     measure / ratio 要跟产生 sig 的那次 signals() 调用一致，否则背驰那条会误报。
     **MACD 参数（fast / slow / sig）也要一致** —— 本函数没有这三个形参，它按默认 12 / 26 / 9
     重算 hist（下面 `macd_hist(r["bars"])`），所以调用方若给 signals() 换过参数，复核量的就不是
     同一条线（今天仓里没有这样的调用点：`tools/selfcheck.py:81` 传的都是默认值）。
+
+    check_zero_axis：**默认 False**。开了才把「B 段回抽 0 轴附近」这条必要条件算进违规。
+    默认关是拍过板的（2026-09-30 小栋）：这条的口径（统计量 / 窗口 / 阈值）**全是我们发明的数**，
+    原文只给了"附近"两个字，而全库样本又少 ⇒ 先只当检查、不接进买卖点判定。口径见 ZA_* 常量。
     """
     AU, U, Z = _units(r, level)
     hist = macd_hist(r["bars"]) if measure == "macd" else None
+    _za = ({(x["kind"], x["bar"]): x for x in zero_axis(sig, r, level, threshold=za_threshold)}
+           if check_zero_axis else {})
     bad = []
     for s in sig:
         u = AU[s["unit"]]
@@ -180,6 +251,10 @@ def check_signals(sig, r, level="seg", measure="macd", ratio=1.0):
             elif not _strength_by_definition(u, hist, measure) < \
                     _strength_by_definition(AU[a], hist, measure) * ratio:
                 bad.append(("背驰不成立：独立重算 C 段力度不小于 A 段 × 比例", s["kind"], s["bar"]))
+            x = _za.get((s["kind"], s["bar"]))
+            if x is not None and not x["ok"]:
+                bad.append(("B 段没把黄白线回抽 0 轴附近（r=%.3f > %.2f）" % (x["r"], za_threshold),
+                            s["kind"], s["bar"]))
         if s["kind"] in ("二买", "二卖"):
             first = [t for t in sig if t["kind"] == ("一买" if buy else "一卖") and t["unit"] == s["unit"] - 2]
             if not first or not first[0]["confirmed"]:

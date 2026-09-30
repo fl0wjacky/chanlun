@@ -17,7 +17,7 @@ from core.pen import check_pens, nonextreme_pens, unsplit_violations, build_pens
 from core.segment import check_segments, verify_by_definition, nonextreme_endpoints
 from core.center import check_centers
 from core.extend import check_hierarchy
-from core.signals import signals, check_signals
+from core.signals import signals, check_signals, zero_axis, ZA_THRESHOLD
 
 DATASETS = [("aaplusdt_4h.json", "AAPL 4h"), ("aaplusdt_2h.json", "AAPL 2h"),
             ("aaplusdt_1h.json", "AAPL 1h"), ("aaplusdt_30m.json", "AAPL 30m"),
@@ -79,6 +79,14 @@ for tag, r in R.items():
     count("类中枢不变量违规", len(check_centers(r["centers"], P)))
     count("类中枢扩展合成违规", len(check_hierarchy(r["big"], r["centers"], P)))
     count("买卖点复核违规", sum(len(check_signals(signals(r, lv, m), r, lv, m)) for lv in ("seg", "pen") for m in ("macd", "slope")))
+    # 「B 段回抽 0 轴附近」那条必要条件 —— **默认不接进买卖点判定**（2026-09-30 拍板）。
+    # 这里印的是**读数不是红**：口径（统计量 / 窗口 / 阈值）全是我们发明的数，原文只给"附近"两个字，
+    # 样本又少 ⇒ 先把数摆在明面上（谁、几个、r 多少），别让它藏在一个默认关的开关后面没人看得见。
+    _za = zero_axis(signals(r, "seg", "macd"), r, "seg") + zero_axis(signals(r, "pen", "macd"), r, "pen")
+    _off = [x for x in _za if not x["ok"]]
+    print("  %-26s: %d 个一买/一卖 · 没回抽（r > %.2f）%d 个%s" % (
+        "[0 轴回抽] 读数（非违规）", len(_za), ZA_THRESHOLD, len(_off),
+        "　← " + "、".join("%s @%d r=%.3f" % (x["kind"], x["bar"], x["r"]) for x in _off) if _off else ""))
     count("线段中枢不变量违规", len(check_centers(r["seg_centers"], [s for s in S if not s.get("live")])))
 
 # ---- 变异测试：校验器必须能抓住故意做错的输入 ----
@@ -178,6 +186,16 @@ if t is None or _alt is None:
 else:
     t["center"] = _alt
     count("不在下跌趋势里的一买未被发现", 0 if check_signals(s1, Rz, "pen") else 1)
+
+# 0 轴回抽那个开关：**默认关 ⇒ 复核违规一个数都不许变**；**开了必须真能说话**。
+# 两格都要：只测"关着是 0"就是装饰（一个永远绿的开关证明不了自己接上了），
+# 只测"开着会红"又证明不了默认没改判。这一对才是那条开关的验收。
+_n_off = sum(len(check_signals(signals(Rz, lv, "macd"), Rz, lv, "macd")) for lv in ("seg", "pen"))
+_n_on = sum(len(check_signals(signals(Rz, lv, "macd"), Rz, lv, "macd", check_zero_axis=True))
+            for lv in ("seg", "pen"))
+count("0 轴开关默认关：复核违规", _n_off, "　（关着变过数就是改了判定）")
+count("0 轴开关开了却没话说", 0 if _n_on > _n_off else 1,
+      "　｜ 开了 = %d 条，关着 = %d 条" % (_n_on, _n_off))
 
 # 断点层（不变量 A）：断点两侧永不合并。校验器必须抓得住「断点被吃掉」；
 # 同时切分不得扰动断点之前的结构 —— 各段独立跑，前缀必须逐字段不变。
