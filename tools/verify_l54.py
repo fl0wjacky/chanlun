@@ -74,7 +74,10 @@ check_prop("(d1g1+g1d2+d2g2) 的区间 = 一个价位",
 B = find_centers(units[4:7])[0]
 C = find_centers(units[7:10])[0]
 spans = [(z["DD"], z["GG"]) for z in (A, B, C)]           # 「当成线段……高低点就是这线段的端点」
-check("[原文-命题] 三个 1 分钟中枢合成的 5 分钟中枢", (d2, g5), big_interval(spans))
+# 这条**不标**「原文-命题」：want 是 (d2, g5)，这组 fixture 链上的两个点——原文图上没标数，
+# 数是这组自编数算出来的（原文命题「当成线段」已由上一行的 spans 取法承担）。
+# 它测的是 big_interval 从三段里挑端点挑对了，属「引擎重算」档，只当回归基准。
+check("[引擎重算] 三个 1 分钟中枢合成的 5 分钟中枢", (d2, g5), big_interval(spans))
 
 print("第 52 课答疑「中枢延伸的情况，只看前三段的区间，后面都是震荡」：")
 mk = lambda PI0, PI1, ZD, ZG, DD, GG: dict(PI0=PI0, PI1=PI1, ZD=ZD, ZG=ZG, DD=DD, GG=GG, X0=PI0, X1=PI1, live=False)
@@ -85,7 +88,13 @@ for z in Z:
     z["rel"], z["kind"] = "", ""
 pens = [dict(lo=11.0, hi=11.4)] * 20                      # 连接段
 big = build_hierarchy(Z, pens)
-check("[原文-命题] 接上第 3、4 个中枢后区间不变", big_interval([(9.5, 11.5), (11.0, 11.4), (11.1, 12.5)]), (big[0]["ZD"], big[0]["ZG"]))
+# want 里**不再调 big_interval**：它正是 build_hierarchy 内部用的那个函数（merge_extended → big_interval），
+# 拿它算 want = 让被测函数给自己的答案打分——它坏了两边一起动，这行照样打 ✓（实测：把 core/extend.py
+# 的 max/min 对调，改之前这行仍是 ✓）。改成手写第 20 课公式：公式独立于被测实现，坏得出来。
+_first3 = [(9.5, 11.5), (11.0, 11.4), (11.1, 12.5)]       # 只看前三段时的那三个 span（成员就是它们）
+check("[原文-命题] 接上第 3、4 个中枢后区间不变",
+      (max(s[0] for s in _first3), min(s[1] for s in _first3)),   # 第 20 课公式（手写，不调引擎）
+      (big[0]["ZD"], big[0]["ZG"]))
 print("   成员 %d 个，波动范围 [%g, %g]（随成员扩大）" % (big[0]["nmerge"], big[0]["DD"], big[0]["GG"]))
 print("全部一致" if FAIL == 0 else "有 %d 条对不上" % FAIL)
 sys.exit(1 if FAIL else 0)
