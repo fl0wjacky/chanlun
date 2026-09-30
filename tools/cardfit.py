@@ -215,18 +215,34 @@ class ContractError(Exception):
     """
 
 
+def _is_size(v):
+    """尺寸得是**正整数** —— `bool` 不算（`isinstance(True, int)` 是 `True`，见下）。
+
+    ★ 为什么单独抽出来：同一条件宽高各写一遍，改一处漏一处是迟早的。
+    ★ 为什么不写 `type(v) is int`：那会把 `class MyInt(int)` 这类**合法输入**一起拦死 ——
+      鸭子类型正是这条契约的立身之本（"非 PIL 但正整数必须放行"那条探针靠的就是它）。
+    ★ 为什么必须排 bool：`False/True` 是 int 的子类 ⇒ 旧判据会把 `True` 当尺寸**放行**，
+      而报告那行是 `W=%-5d` ⇒ 印成 `W=1`，**一个错都不报、也没有任何一处提示这是个 bool**
+      （比 `AttributeError` 那口更难发现：那口至少喊了）。出处：`card-734aa37a-424` 第 ⑥ 探针。
+    """
+    return isinstance(v, int) and not isinstance(v, bool) and v > 0
+
+
 def assert_card(im):
     """契约断言（契约见模块 docstring）。违约时抛**领域消息**，不让 AttributeError 露出去。
 
     **消息里不带卡名**：卡名由调用方（`measure()` 的汇总行）负责印 —— 这里再带一次，
     报告上同一个名字会出现两遍。**一个事实只印一处。**
+    ★ **消息里也不带任何数**：样本那件事（14/14 张真实卡是 `PIL.Image.Image`）留在模块 docstring 里，
+      那里写明了"是样本不是判据"。运行期消息塞一个"实测"的人口数 ⇒ 加一张卡它当场变假、且没人会重算
+      （`card-78a38f93-2d7` 整晚那条：**器会数自己的源码，数随版本变**）。
     """
     w = getattr(im, "width", None)
     h = getattr(im, "height", None)
-    if not (isinstance(w, int) and isinstance(h, int) and w > 0 and h > 0):
+    if not (_is_size(w) and _is_size(h)):
         raise ContractError(
             "build() 返回了 %s，不是一副图 —— 契约：有 .width / .height 两个正整数属性"
-            "（实测 14/14 张真实卡是 PIL.Image.Image）" % type(im).__name__)
+            % type(im).__name__)
     return im
 
 
