@@ -365,15 +365,23 @@ try:
         # ⇒ 按**行首约定**找它，找不到才退回原来那个数。**不给每把尺配一条正则** ——
         #   配正则就是"加一把尺要人去别处登记"，② 拆掉的前缀白名单正是这个形状。
         _rsn = None
+        # ★ 尺自己**点了名**的行，逐条收：`✗ <卡名>（<原因>）` 和 `[rc=<n>] <类名>：<数><单位>`。
+        #   判据要的是**两条通道**：rc 说"有事" ＋ 点名说"是什么"。只把 rc 带进聚合器、名字留在
+        #   子进程的 stdout 里，等于把定位成本推回给读报告的人（@atlas-791f 876 在 c923c9f 上量的：
+        #   透过来 **0 行** —— 报告里那句"（上面是它的原文）"指向了不存在的"上面"）。
+        #   按**行首约定**认这两类，不给每把尺配正则 —— 配正则就是"加一把尺要人去别处登记"，
+        #   ② 拆掉的前缀白名单正是这个形状。认不出的行不猜、也不补。
+        _named = []
         for _l in _lines:
             _s = _l.strip()
-            if _s.startswith("[rc=") or _s.startswith("退出原因:"):
+            if _s.startswith("✗ ") or _s.startswith("[rc="):
+                _named.append(_s)
+            if _rsn is None and (_s.startswith("[rc=") or _s.startswith("退出原因:")):
                 _rsn = _s
-                break
         _rc = _p.returncode
         if _rc != 0 or _why is not None:
             SCALES += 1
-        ROWS.append((_name, _rc, _val, _why, _what, _unit, _rsn))
+        ROWS.append((_name, _rc, _val, _why, _what, _unit, _rsn, _named))
         if _legacy:
             # 这三行的**格式和语义一个字不改** —— 别人卡面上的接受判据读的就是它们。
             if _vid:
@@ -393,7 +401,7 @@ try:
     # 每把尺一行：**名字 / rc / 它自己那个数 / 红没红**。旧版只有 cardfit 一行，
     # 其余几把尺"接上了没有"在报告里看不出来（@atlas-791f 那张表就是这么量出来的）。
     # ★ 这一行也是"加了第 N 把尺"的落点：表里加一行，这里自己多印一行。
-    for _name, _rc, _val, _why, _what, _unit, _rsn in ROWS:
+    for _name, _rc, _val, _why, _what, _unit, _rsn, _named in ROWS:
         _head = "[尺] %-8s rc=%s" % (_name, _rc)
         if _why is not None:
             print("%s  **查不了**：%s" % (_head, _why))
@@ -406,6 +414,13 @@ try:
                   % (_head, _what, _val, _unit))
         else:
             print("%s  %s：%d %s" % (_head, _what, _val, _unit))
+        # ★ 红／查不了时，把它自己点名的行**逐条透出来**（`_rsn` 上面那行已经印过，不印两遍）。
+        #   这一跳原来把尺的名字全丢了：rc 到了、`✗ <卡名>（…TypeError…）` 没到 —— 判据写的
+        #   "rc 说有事 ＋ 点名说是什么"在最后一跳只剩一半。透传，不加工。
+        if _why is not None or _rc != 0:
+            for _l in _named:
+                if _l != _rsn:
+                    print("      │ %s" % _l)
 except Exception as e:
     LAYOUT = -1
     SCALES = len(GATES)
@@ -419,12 +434,20 @@ if SKIP:
 # ★ 这两格**分开发言**、各带各的量纲，因为它们的**处置不一样**：
 #   缺字 → 换字体（或改卡片用了冷僻符号）；文件没扫成 → 先修那份文件，**换字体治不了**。
 #   合成一句就必然借其中一个的量纲说话，那正是原来那句「%d 个字符画不出来」的来路。
-if FONT_GAPS:
-    print("字体覆盖:", "查不了（不算通过）" if FONT_GAPS < 0 else "%d 个字符画不出来" % FONT_GAPS,
-          "→ 出图会静默出方框（处置：换一份含中日韩字形的 ttf，见上面几行）")
-if FONT_FILES:
-    print("字体覆盖:", "查不了（不算通过）" if FONT_FILES < 0 else "%d 个文件没扫成" % FONT_FILES,
-          "→ 那几份文件的字**一个都没进分母**，缺字结论不完整（**换字体治不了**：先修那份文件）")
+if FONT_GAPS < 0 or FONT_FILES < 0:
+    # ★ `-1` 那格**只印一句**，而且不借任何一边的处置：这一格我们**两件事都不知道**
+    #   （不知道缺不缺字、也不知道有没有文件没扫成）。原来它印两遍同一个标题、每遍各借一句处置，
+    #   其中一句还写"见上面几行" —— 上面根本没有那几行。同一个病（"不知道"借"知道"的措辞说话）
+    #   在这格上的副本（@iris-64a1 的 ④）。
+    print("字体覆盖:", "查不了（不算通过）",
+          "→ 这份字体/扫描本身就没读出来 ⇒ **缺字结论没有**，先修环境再谈（这条不是结论，是缺口）")
+else:
+    if FONT_GAPS:
+        print("字体覆盖:", "%d 个字符画不出来" % FONT_GAPS,
+              "→ 出图会静默出方框（处置：换一份含中日韩字形的 ttf，见上面那几行）")
+    if FONT_FILES:
+        print("字体覆盖:", "%d 个文件没扫成" % FONT_FILES,
+              "→ 那几份文件的字**一个都没进分母**，缺字结论不完整（**换字体治不了**：先修那份文件）")
 if PREMISE:
     print("判据前提:", "跑不了（不算通过）" if PREMISE < 0 else "config._notdef_mask 自测不过",
           "→ 上面那扇字体覆盖门的基准本身是错的，那扇门的数不可读（先修基准）")
