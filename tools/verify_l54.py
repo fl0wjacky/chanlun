@@ -88,7 +88,13 @@ for z in Z:
     z["rel"], z["kind"] = "", ""
 pens = [dict(lo=11.0, hi=11.4)] * 20                      # 连接段
 big = build_hierarchy(Z, pens)
-check("[原文-命题] 接上第 3、4 个中枢后区间不变", big_interval([(9.5, 11.5), (11.0, 11.4), (11.1, 12.5)]), (big[0]["ZD"], big[0]["ZG"]))
+# want 里**不再调 big_interval**：它正是 build_hierarchy 内部用的那个函数（merge_extended → big_interval），
+# 拿它算 want = 让被测函数给自己的答案打分——它坏了两边一起动，这行照样打 ✓（实测：把 core/extend.py
+# 的 max/min 对调，改之前这行仍是 ✓）。改成手写第 20 课公式：公式独立于被测实现，坏得出来。
+_first3 = [(9.5, 11.5), (11.0, 11.4), (11.1, 12.5)]       # 只看前三段时的那三个 span（成员就是它们）
+check("[原文-命题] 接上第 3、4 个中枢后区间不变",
+      (max(s[0] for s in _first3), min(s[1] for s in _first3)),   # 第 20 课公式（手写，不调引擎）
+      (big[0]["ZD"], big[0]["ZG"]))
 print("   成员 %d 个，波动范围 [%g, %g]（随成员扩大）" % (big[0]["nmerge"], big[0]["DD"], big[0]["GG"]))
 print("全部一致" if FAIL == 0 else "有 %d 条对不上" % FAIL)
 sys.exit(1 if FAIL else 0)
