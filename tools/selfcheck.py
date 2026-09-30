@@ -239,7 +239,11 @@ except Exception as e:
 print("=" * 72)
 FONT_GAPS = 0
 try:
-    from tools.fontcheck import scan
+    # ★ `ROOT` 必须**跟着进来**：`scan()` 返回的 `_p` 是 fontcheck 的绝对路径，
+    #   而这行拿 `os.path.relpath(_p, ROOT)` 印它 —— 下面 `if _skipped:` 那段一跑就 NameError。
+    #   而「有文件没扫成」**恰好就是那段存在的理由** ⇒ 干净树上这行永远不跑 ⇒ 隐性（不是已修）。
+    #   不自己再算一份 `ROOT`：同一个量两个定义，本仓反复栽的那个形状（@iris-64a1 的甲案）。
+    from tools.fontcheck import scan, ROOT
     _font, _missing, _conflict, _n, _files, _skipped = scan()
     FONT_GAPS = len(_missing) + len(_conflict) + len(_skipped)
     print("[字体覆盖] %s  （扫了 %d 个脚本%s）"
