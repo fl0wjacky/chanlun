@@ -24,6 +24,7 @@ DATASETS = [("aaplusdt_4h.json", "AAPL 4h"), ("aaplusdt_2h.json", "AAPL 2h"),
             ("zec15.json", "ZEC 15m")]
 
 FAIL = 0
+SKIP = 0
 R = {tag: analyze_file(fn) for fn, tag in DATASETS}
 
 
@@ -32,6 +33,20 @@ def count(label, n, note=""):
     global FAIL
     FAIL += n
     print("  %-26s: %d  (应为 0)%s" % (label, n, note))
+
+
+def skip(label, why):
+    """第三态：**本格未执行** —— 夹具 / 前提没造出来，判据压根没跑。
+
+    为什么既不能报 0 也不能报违规：报 0 是**假绿**（有东西没查，却说没事）；
+    报违规是把「工具没在岗」折进「被测对象有罪」。两个都是在编数。
+    所以给它自己的词、自己的计数、自己的非零退出码 —— **「工具在不在岗」必须自己喊，
+    不能靠"没问题"的结论替它证明**（今晚在变异扫上撞的就是这个：夹具一没造出来，
+    `next()` 抛裸 StopIteration，图上那一格被读成"判据抓住了"，其实判定根本没发生）。
+    """
+    global SKIP
+    SKIP += 1
+    print("  %-26s: 未执行  ← 判据没跑，别读成通过  （%s）" % (label, why))
 
 
 for tag, r in R.items():
@@ -74,12 +89,22 @@ P1, _ = build_pens_v1(r["fx"])                                   # v1 划笔：�
 caught = len(nonextreme_pens(P1, r["std"]))
 count("v1 划笔的非极值端点未被发现", 0 if caught else 1, "　（抓到 %d 笔）" % caught)
 seq = r["seq"]                                                   # 把连续三笔硬合成一笔
-merged = seq[:10] + seq[12:]
 from core.pen import _pens_of
-caught = len(unsplit_violations(_pens_of(merged), r["fx"], r["std"]))
-count("硬合并的三笔未被发现", 0 if caught else 1, "　（抓到 %d 笔）" % caught)
-bad_seq = seq[:5] + [dict(seq[5], k=seq[4]["k"] + 2)] + seq[6:]  # 把一个端点挪到离前一端点只隔 2 根
-count("隔得不够的笔未被发现", 0 if check_pens(_pens_of(bad_seq), bad_seq, r["std"]) else 1)
+if len(seq) < 12:                                                # 变异可以把笔数削到凑不出夹具
+    skip("硬合并的三笔未被发现", "seq 只有 %d 根，凑不出要合并的那三笔" % len(seq))
+else:
+    merged = seq[:10] + seq[12:]
+    caught = len(unsplit_violations(_pens_of(merged), r["fx"], r["std"]))
+    count("硬合并的三笔未被发现", 0 if caught else 1, "　（抓到 %d 笔）" % caught)
+# 把一个端点挪到离前一端点只隔 2 根。**取中间那根，不写死第 5 根** —— 这句判据的意图是
+# 「挪到只隔 2 根」，跟"第几根"无关；写死下标等于给夹具绑一个与被测对象无关的常数，
+# 变异把 seq 变短就 IndexError，而这一格**本来根本不必未执行**（判据一次都不用丢）。
+if len(seq) < 3:
+    skip("隔得不够的笔未被发现", "seq 只有 %d 根，挪不动端点" % len(seq))
+else:
+    i = max(1, len(seq) // 2)
+    bad_seq = seq[:i] + [dict(seq[i], k=seq[i - 1]["k"] + 2)] + seq[i + 1:]
+    count("隔得不够的笔未被发现", 0 if check_pens(_pens_of(bad_seq), bad_seq, r["std"]) else 1)
 
 # 线段：特征序列开头的包含若按 K 线的办法丢掉而不合并（v1 的毛病），独立复核必须报错。
 # 上面 5 组数据恰好不受影响，这里用 12 标的 15 分钟里的 BNB（会改变端点）。
@@ -104,21 +129,55 @@ count("v1 扩展合成的毛病未被发现", 0 if caught else 1, "　（抓到 
 # 9 段升级：把一个满 9 段中枢的升级记录抹掉 / 把区间改一点，校验器必须报错
 import copy
 Zc = copy.deepcopy(R["ZEC 15m"]["centers"])
-k9 = next(k for k, z in enumerate(Zc) if z["up"])
-Zc[k9]["up"] = []
-count("漏掉的 9 段升级未被发现", 0 if check_centers(Zc, R["ZEC 15m"]["pens"]) else 1)
-Zc = copy.deepcopy(R["ZEC 15m"]["centers"])
-Zc[k9]["up"][0]["ZG"] += 0.01
-count("算错的升级区间未被发现", 0 if check_centers(Zc, R["ZEC 15m"]["pens"]) else 1)
+k9 = next((k for k, z in enumerate(Zc) if z["up"]), None)
+if k9 is None:
+    # 变异可以把「满 9 段」整个消掉，夹具就造不出来。**这里不编数**：先问检查器对这份
+    # 输入有没有话说 —— 有 ⇒ 报它的裁决（那才是真的违规数，别从 StopIteration 后面漏掉）；
+    # 它也没话说 ⇒ 报「本格未执行」，绝不写死 1（写死 1 在盲区图上会变成"抓住了"）。
+    _n = len(check_centers(Zc, R["ZEC 15m"]["pens"]))
+    for _lab in ("漏掉的 9 段升级未被发现", "算错的升级区间未被发现"):
+        if _n:
+            count(_lab, _n, "　（没有可动的 up：报检查器对这份输入的裁决）")
+        else:
+            skip(_lab, "没有任何中枢带 up，夹具造不出，检查器也无话可说")
+else:
+    Zc[k9]["up"] = []
+    count("漏掉的 9 段升级未被发现", 0 if check_centers(Zc, R["ZEC 15m"]["pens"]) else 1)
+    Zc = copy.deepcopy(R["ZEC 15m"]["centers"])
+    Zc[k9]["up"][0]["ZG"] += 0.01
+    count("算错的升级区间未被发现", 0 if check_centers(Zc, R["ZEC 15m"]["pens"]) else 1)
 # 买卖点：把一个三买挪到离开段的终点、把一个一买挪到没创新低的位置，复核必须报错
 Rz = R["ZEC 15m"]
 S = signals(Rz, "pen")
-s3 = copy.deepcopy(S); t = next(x for x in s3 if x["kind"] == "三买")
-t["unit"] -= 1; t["bar"], t["price"] = Rz["pens"][t["unit"]]["i1"], Rz["pens"][t["unit"]]["p1"]
-count("挪错位置的三买未被发现", 0 if check_signals(s3, Rz, "pen") else 1)
-s1 = copy.deepcopy(S); t = next(x for x in s1 if x["kind"] == "一买")
-t["center"] = next(k + 1 for k, z in enumerate(Rz["centers"]) if z["rel"] != "下跌延续")
-count("不在下跌趋势里的一买未被发现", 0 if check_signals(s1, Rz, "pen") else 1)
+s3 = copy.deepcopy(S)
+t = next((x for x in s3 if x["kind"] == "三买"), None)
+if t is None:
+    # 实测：三买被消光时 check_signals(s3, …) = **0** —— 复核器一个字都没有。
+    # 所以这一格报 0 就是假绿，只能报「未执行」（见卡 card-75fbc68f-0c8 的逐站点测量）。
+    # 这格**确实有变异踩得到**，不是死代码：`core/pen.py` 的 maxmin（8 处）会把信号总数打成 0。
+    # 且这个数在补丁前后一样（main 上 0、合了 signals-blind-spot 之后还是 0）—— 不是"没量过"。
+    skip("挪错位置的三买未被发现", "引擎一个三买都没吐，夹具造不出；复核器对此也无话可说")
+else:
+    t["unit"] -= 1; t["bar"], t["price"] = Rz["pens"][t["unit"]]["i1"], Rz["pens"][t["unit"]]["p1"]
+    count("挪错位置的三买未被发现", 0 if check_signals(s3, Rz, "pen") else 1)
+s1 = copy.deepcopy(S)
+t = next((x for x in s1 if x["kind"] == "一买"), None)
+_alt = next((k + 1 for k, z in enumerate(Rz["centers"]) if z["rel"] != "下跌延续"), None)
+if t is None or _alt is None:
+    # 复核器有没有话说，**取决于是哪种"消光"，所以这里只能按返回值分支，不能写死一个数**：
+    #   只把 一买 挑掉、其余点还在（91 个）⇒ check_signals = **3**（三条"二买前面没有一买"）
+    #   整个信号列表空掉（`core/pen.py` 的 maxmin 真跑出来的那一态）⇒ **0**，一个字都没有
+    # 两个数都在 main 和"合了 signals-blind-spot 之后"各量过一次，**一样** —— 所以这段的顺序
+    # 依赖不存在，先合哪支都不影响这两格（我先前在群里担心过它会变，实测没变）。
+    # 写死 1 会把上面 3 这个真裁决漏掉；写死 0 会把"工具没在岗"说成"没事"。所以按返回值走。
+    _n = len(check_signals(s1, Rz, "pen"))
+    if _n:
+        count("不在下跌趋势里的一买未被发现", _n, "　（夹具造不出：报复核器对这份输入的裁决）")
+    else:
+        skip("不在下跌趋势里的一买未被发现", "一买或非下跌中枢不存在，夹具造不出，复核器也无话可说")
+else:
+    t["center"] = _alt
+    count("不在下跌趋势里的一买未被发现", 0 if check_signals(s1, Rz, "pen") else 1)
 
 # 断点层（不变量 A）：断点两侧永不合并。校验器必须抓得住「断点被吃掉」；
 # 同时切分不得扰动断点之前的结构 —— 各段独立跑，前缀必须逐字段不变。
@@ -129,16 +188,24 @@ from config import tick_of
 zbars = quantize(json.load(open(data("zec15.json"), encoding="utf-8")), tick_of("zec15.json"))
 m0 = standardize(zbars)
 merged = [k for k in range(1, len(m0)) if m0[k]["i"] > m0[k - 1]["i"] + 1]   # 所有真合并过原始K线的位置
-k = merged[len(merged) // 2]                                                # 取中段一根，别用序列开头那几根
-b = m0[k]["i"]                                                              # 把断点摆在它吃进去的那根上
-brk = [dict(i=b, reason="mutation")]
-count("被吃掉的断点未被发现", 0 if check_no_cross_break_merge(m0, brk) else 1,
-      "　（断点 %d，跨它合并的是第 %d 根）" % (b, k))
-m1 = standardize(zbars, breaks=brk)
-count("按断点切完仍有跨断点合并", len(check_no_cross_break_merge(m1, brk)))
-count("断点切分没起作用（切完与整段相同）", 0 if m1 != m0 else 1)
-count("断点输出的下标越界", sum(1 for x in m1 if not (0 <= x["ih"] <= x["i"] < len(zbars) and 0 <= x["il"] <= x["i"])))
-count("断点输出的下标未递增", sum(1 for a, c in zip(m1, m1[1:]) if c["i"] <= a["i"]))
+if not merged:
+    # standardize 一次都没吃进多根 K 线（变异能把它弄成这样）⇒ 断点摆不下去，整段夹具没了。
+    # 这 5 格**都**依赖那个断点，一起报「未执行」，别让一格把整段拖崩。
+    for _lab in ("被吃掉的断点未被发现", "按断点切完仍有跨断点合并",
+                 "断点切分没起作用（切完与整段相同）", "断点输出的下标越界",
+                 "断点输出的下标未递增"):
+        skip(_lab, "standardize 没产生任何「吃进多根」的位置，断点摆不下去")
+else:
+    k = merged[len(merged) // 2]                                            # 取中段一根，别用序列开头那几根
+    b = m0[k]["i"]                                                          # 把断点摆在它吃进去的那根上
+    brk = [dict(i=b, reason="mutation")]
+    count("被吃掉的断点未被发现", 0 if check_no_cross_break_merge(m0, brk) else 1,
+          "　（断点 %d，跨它合并的是第 %d 根）" % (b, k))
+    m1 = standardize(zbars, breaks=brk)
+    count("按断点切完仍有跨断点合并", len(check_no_cross_break_merge(m1, brk)))
+    count("断点切分没起作用（切完与整段相同）", 0 if m1 != m0 else 1)
+    count("断点输出的下标越界", sum(1 for x in m1 if not (0 <= x["ih"] <= x["i"] < len(zbars) and 0 <= x["il"] <= x["i"])))
+    count("断点输出的下标未递增", sum(1 for a, c in zip(m1, m1[1:]) if c["i"] <= a["i"]))
 count("breaks=[] 与整段口径不一致", 0 if standardize(zbars, breaks=[]) == R["ZEC 15m"]["std"] else 1)
 _adj, _brk = preprocess(zbars, adjust="none", session=None)
 count("preprocess 非恒等（不变量 C1）", 0 if (_adj == zbars and _brk == []) else 1)
@@ -177,7 +244,16 @@ except Exception as e:
 
 print("=" * 72)
 print("总违规数:", FAIL, "→", "引擎检查全部通过" if FAIL == 0 else "有问题，需排查")
+if SKIP:
+    print("未执行数:", SKIP, "→ **有格子的判据压根没跑**（夹具/前提没造出来）")
+    print("           这一条不是通过：上面每一行「未执行」都要有人去查为什么造不出夹具。")
 if FONT_GAPS:
     print("字体覆盖:", "查不了（不算通过）" if FONT_GAPS < 0 else "%d 个字符画不出来" % FONT_GAPS,
           "→ 出图会静默出方框")
-sys.exit(1 if (FAIL or FONT_GAPS) else 0)
+# 退出码只说"有东西不对"，不说"是谁不对"：三个数混在一个非 0 里，读的人猜不出来。
+# 这是 @iris-64a1 指出的洞 —— 在字体门本来就会红的机器上，干净跑和变异跑都是 exit=1，
+# 光看退出码**隔离不出** SKIP 有没有生效。打这一行：每个非 0 退出自己说出原因。
+print("退出原因: 总违规=%d  未执行=%d  字体缺字=%s  ⇒ exit=%d"
+      % (FAIL, SKIP, "查不了" if FONT_GAPS < 0 else FONT_GAPS,
+         1 if (FAIL or FONT_GAPS or SKIP) else 0))
+sys.exit(1 if (FAIL or FONT_GAPS or SKIP) else 0)
