@@ -294,32 +294,81 @@ except Exception as e:
 # 它不并进 FAIL（FAIL 是引擎不变量的数目），也不并进 FONT_GAPS（那是字体环境）——
 # 各给各的数，混成一个就说不清是谁的问题。
 print("=" * 72)
-LAYOUT = 0
+# ---- 尺子：**每把起一个子进程，各读各的桶** ------------------------------------
+# 上一版把几把尺的输出**拼成一个大 list**，再用 `startswith("[版式体检]")` 这类**前缀**去里面捞。
+# ⇒ 那是拿"行文本的形状"当接口：两把尺一旦有同前缀的行就**串台**。实测（`05f3e24` 上，
+#   把两把尺的输出按两种顺序拼起来，收集逻辑逐字照抄本文件）：
+#     `合计` 撞桶   卡片尺先跑 ⇒ `int(_tot[-1].split()[1])` 抛 **ValueError: …'条'**；
+#                   undrawn 先跑 ⇒ `_tot[-1]` 是卡片尺那行 ⇒ **静默读到它的 0**，看起来一切正常。
+#     `[分支覆盖]`  撞桶 ⇒ `_cov[0]` **只取第一条** ⇒ 换个顺序，**另一把尺那行消失**。
+#                   ⇒ 两种顺序下"消失"**必发生一次**：同一个 bug 的两副面孔。
+# ⇒ 改成**按子进程分桶**：每把尺只在自己的输出里找自己的行。
+# ⇒ 加第 N 把尺 = `SCALES`/`GATES` 表里加一行（不再伸手去改前缀白名单 —— 那正是本卡要拆的硬编码面）。
+GATES = [
+    # (短名, 脚本, 它报的那个数是什么, 单位, "这个数读得懂"的证据行前缀, 取数的正则, 旧格式?)
+    # `旧格式` 那一格是**过渡用的**：cardfit 那三行的格式和语义一个字不改（别人卡面上的接受判据
+    # 读的就是它们），等它的接受判据也改过来，这一格连着那三行一起删。
+    ("cardfit", "cardfit.py", "卡片文字越界/出框", "处", "[版式体检]",
+     r"^合计\s+(-?\d+)", True),
+    ("undrawn", "cardfit_undrawn.py", "所有跑法都没画到的字面量", "条", "[量法/对象]",
+     r"^合计.*：\s*(-?\d+)\s*条\s*$", False),
+]
+LAYOUT = 0     # ← 语义**不变**：cardfit 的越界处数（接受判据里 `版式=N` 读的就是它）
+SCALES = 0     # 新列：**有几把尺报红或查不了**（0 = 表里每一把都 rc=0 且报出了证据行+数）
+ROWS = []      # 每把尺一行，逐把印出来（谁红谁绿，不再靠猜）
 try:
     import subprocess
-    # 跑的就是人平时跑的那条命令（子进程），不另抄一份调用序 —— 否则门和人玩的不是同一把尺。
-    _cf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cardfit.py")
-    _p = subprocess.run([sys.executable, _cf], capture_output=True, text=True)
-    _lines = ((_p.stdout or "") + (_p.stderr or "")).splitlines()
-    _font = [l for l in _lines if l.startswith("[版式体检]")]
-    _tot = [l for l in _lines if l.startswith("合计")]
-    _cov = [l for l in _lines if l.startswith("[分支覆盖]")]
-    if not _tot:
-        raise RuntimeError("尺没报出「合计」（rc=%d）" % _p.returncode)
-    LAYOUT = int(_tot[-1].split()[1])
-    if _font:
-        print(_font[0])
-    else:
-        # 这一行是**这个数读不读得懂**的前提：同一棵树 Droid 0 处 / Noto 13 处，
-        # 不带字体的「0 处」和「13 处」在纸面上分不出来（stock 尺就是这个状态）。
-        LAYOUT = -1
-        print("[版式] 尺没打字体那行 ⇒ 下面的数不可读，按「查不出来不算通过」计")
-    print("[版式] 卡片文字越界/出框：%d 处（应为 0）" % LAYOUT if LAYOUT >= 0
-          else "[版式] 卡片文字越界/出框：查不了")
-    if _cov:
-        print("       %s" % _cov[0])
+    import re as _re
+    _here = os.path.dirname(os.path.abspath(__file__))
+    for _name, _fn, _what, _unit, _ev, _rx, _legacy in GATES:
+        # 跑的就是人平时跑的那条命令（子进程），不另抄一份调用序 —— 否则门和人玩的不是同一把尺。
+        _p = subprocess.run([sys.executable, os.path.join(_here, _fn)],
+                            capture_output=True, text=True)
+        _lines = ((_p.stdout or "") + (_p.stderr or "")).splitlines()
+        _vid = [l for l in _lines if l.startswith(_ev)]
+        _nums = [m.group(1) for l in _lines for m in [_re.match(_rx, l)] if m]
+        # 三样都齐（rc / 证据行 / 自己的数）才叫"这把尺报了数"：
+        #   缺一样就是"查不出来不算通过"，**不能拿 0 顶上**（那正是本仓反复栽的那个形状）。
+        _why = None
+        if not _vid:
+            _why = "没打出证据行（%s）：这个数读不读得懂没人验" % _ev
+        elif not _nums:
+            _why = "没报出「合计」，或那行读不出数"
+        _val = int(_nums[-1]) if _nums else None
+        _rc = _p.returncode
+        if _rc != 0 or _why is not None:
+            SCALES += 1
+        ROWS.append((_name, _rc, _val, _why, _what, _unit))
+        if _legacy:
+            # 这三行的**格式和语义一个字不改** —— 别人卡面上的接受判据读的就是它们。
+            if _vid:
+                print(_vid[0])
+            if _why is None:
+                LAYOUT = _val
+            else:
+                # 这一行是**这个数读不读得懂**的前提：同一棵树 Droid 0 处 / Noto 13 处，
+                # 不带字体的「0 处」和「13 处」在纸面上分不出来（stock 尺就是这个状态）。
+                LAYOUT = -1
+                print("[版式] 尺没打字体那行 ⇒ 下面的数不可读，按「查不出来不算通过」计")
+            print("[版式] 卡片文字越界/出框：%d 处（应为 0）" % LAYOUT if LAYOUT >= 0
+                  else "[版式] 卡片文字越界/出框：查不了")
+            _cov = [l for l in _lines if l.startswith("[分支覆盖]")]
+            if _cov:
+                print("       %s" % _cov[0])
+    # 每把尺一行：**名字 / rc / 它自己那个数 / 红没红**。旧版只有 cardfit 一行，
+    # 其余几把尺"接上了没有"在报告里看不出来（@atlas-791f 那张表就是这么量出来的）。
+    # ★ 这一行也是"加了第 N 把尺"的落点：表里加一行，这里自己多印一行。
+    for _name, _rc, _val, _why, _what, _unit in ROWS:
+        _head = "[尺] %-8s rc=%s" % (_name, _rc)
+        if _why is not None:
+            print("%s  **查不了**：%s" % (_head, _why))
+        elif _rc != 0:
+            print("%s  **它自己说有问题**：%s %d %s（上面是它的原文）" % (_head, _what, _val, _unit))
+        else:
+            print("%s  %s：%d %s" % (_head, _what, _val, _unit))
 except Exception as e:
     LAYOUT = -1
+    SCALES = len(GATES)
     print("[版式] 跑不了：%s" % e)
 
 print("=" * 72)
@@ -343,16 +392,24 @@ if LAYOUT < 0:
     print("版式体检: 查不了（不算通过） → 尺没跑起来，或它没说出自己是哪支字体量的 ⇒ 本格没有可读的数")
 elif LAYOUT:
     print("版式体检: %d 处文字越界/出框 → 那几处是卡片版式问题（上面那行写了是哪支字体量出来的）" % LAYOUT)
+# ★ 新列：**表里每一把尺**有没有报出数（rc=0 且证据行+数都在）。上面那行只管 cardfit 一把 ——
+#   旧版"接上了没有"在报告里**看不出来**：接了一把 rc 恒非 0 的尺，全篇一个字不变、exit 也不变。
+if SCALES:
+    # ⚠ 措辞：这里是**两件事共用一个数**（`rc≠0` ／ `查不了`）—— 说"没报数"会把"报了数但红了"
+    #   那句也盖进去（实测：red 那支印着「：7 条」却也被算进来）。所以只说"不过"，具体哪一种是上面那几行。
+    print("尺子: %d 把里 **%d 把不过**（rc≠0 或查不了，两种都在上面 `[尺]` 那几行里点过名）"
+          % (len(GATES), SCALES))
 # 退出码只说"有东西不对"，不说"是谁不对"：几个数混在一个非 0 里，读的人猜不出来。
 # 这是 @iris-64a1 指出的洞 —— 在字体门本来就会红的机器上，干净跑和变异跑都是 exit=1，
 # 光看退出码**隔离不出** SKIP 有没有生效。打这一行：每个非 0 退出自己说出原因。
 # 退出码只说"有东西不对"，不说"是谁不对"：几个数混在一个非 0 里，读的人猜不出来。
 # 这是 @iris-64a1 指出的洞 —— 在字体门本来就会红的机器上，干净跑和变异跑都是 exit=1，
 # 光看退出码**隔离不出** SKIP 有没有生效。打这一行：每个非 0 退出自己说出原因。
-print("退出原因: 总违规=%d  未执行=%d  判据前提=%s  警告措辞=%s  字体缺字=%s  版式=%s  ⇒ exit=%d"
+print("退出原因: 总违规=%d  未执行=%d  判据前提=%s  警告措辞=%s  字体缺字=%s  版式=%s  尺子=%s  ⇒ exit=%d"
       % (FAIL, SKIP, "跑不了" if PREMISE < 0 else ("不过" if PREMISE else "OK"),
          "跑不了" if WARN_WORDING < 0 else ("不过" if WARN_WORDING else "OK"),
          "查不了" if FONT_GAPS < 0 else FONT_GAPS,
          "查不了" if LAYOUT < 0 else LAYOUT,
-         1 if (FAIL or FONT_GAPS or SKIP or PREMISE or WARN_WORDING or LAYOUT) else 0))
-sys.exit(1 if (FAIL or FONT_GAPS or SKIP or PREMISE or WARN_WORDING or LAYOUT) else 0)
+         SCALES,
+         1 if (FAIL or FONT_GAPS or SKIP or PREMISE or WARN_WORDING or LAYOUT or SCALES) else 0))
+sys.exit(1 if (FAIL or FONT_GAPS or SKIP or PREMISE or WARN_WORDING or LAYOUT or SCALES) else 0)
