@@ -1,25 +1,43 @@
 # -*- coding: utf-8 -*-
 """**对账器**，不是判据 —— 把"某句话里的口径"翻成参数，跑出来对上／对不上。
 
-用法（四个旋钮各给一个值，跑法就是这一行）：
+用法（每个旋钮各给一个值，跑法就是这一行）：
     python3 tools/quotes_recount.py --tree 05f3e24 --min-len 6 --face literal \
         --dedup raw --v1ref skip
     python3 tools/quotes_recount.py --tree 05f3e24 --min-len 1 --face whole \
-        --dedup norm --v1ref keep --json
+        --dedup norm --v1ref keep --unit gone --ladder norm
+
+★ 头一行原先写 `--json` —— **这支器没有那个旗标**（argparse 里只有下面列的七个），
+  照着抄会直接报错。"文档里的写法跑不起来"和"数印出来了分母没跟来"是同族：
+  **通道一律报成功，读的人才知道不算。**
 
 它**故意不回答**「哪个才对」。它只回答一件事：**你写下的那句口径，跑出来是几**。
 判据在 `tools/quotes_census.py`（那支的三箱与 rc 才是门）；这一支的存在理由是
 "口径写成散文，两个人就实现成两条" —— 把散文翻成参数，分歧就变成**可跑的**，
 而不是两段各说各话的回忆。
 
-六个旋钮（就是这一支的全部输入，多一个都没有）：
-    --tree    <sha|.>    哪棵树（sha 走 `git archive | tar -x` 到临时目录，跑完删）
+八个旋钮（就是这一支的全部输入，多一个都没有）：
+    --commit  <sha|.>    哪棵树（sha 走 `git archive | tar -x` 到临时目录，跑完删）
+                         ★ 这格原来叫 `--tree`，而我传进去的 `05f3e24` 是 **commit**
+                           （`git cat-file -t` 说的），tree 是另一个 sha。参数名收得下
+                           commit-ish，标签却照参数名印 ⇒ 器在量产含混的标签。
+                           现在**印的是解析后的对象**：`commit X → tree Y`。
+                           旧拼法 `--tree` 保留可用。
     --min-len <n>        配对的**长度下限**（按 `norm()` 后的字数算，n=1 表示无下限）
     --face    whole|literal
                          whole   = 整篇正则在源码上扫（引文跨相邻字面量时中间夹 `",\\n"`）
                          literal = 逐字面量扫（拼接的引文被切断 ⇒ 那条判不到）
     --dedup   raw|norm   去重键：配对原文逐字，还是 `verify_quotes.norm(配对)`
     --v1ref   skip|keep  `tools/v1_ref` 跳不跳（其余 SKIP 一律跳：.git/archive/out/__pycache__）
+                         ★ 默认已从 skip 翻成 **keep**：卡面那段散文截面是
+                           「全仓 *.py 排除 .git/ 与 archive/」，`tools/v1_ref` 两个都不是
+                           ⇒ 照散文跑的人该拿到 331；旧的默认会**偷偷再窄一档**、裸跑印 325
+                           （实测差 6 处，全在 tools 那格）。默认窄于写下来的口径 = 漏口。
+    --expect-corpus <sha256前16位>
+                         语料指纹对不上 ⇒ **exit=3、不出数**。
+                         ★ 不给它，那行会自报「★ 没核」—— 因为`print(fingerprint)` 只是
+                           **印出来**，不是**核过**：换个 QL_CORPUS 指进来，器照样跑、
+                           照样印一个 sha256、照样出一张表。**印了 sha256 ≠ 验过语料。**
     --unit    all|gone   ★ 单位（分母的定义）：
                          all  = **每一个**配对都进分母
                          gone = 只把「在 108 课原文里**找不到**」的配对算进去
@@ -50,7 +68,13 @@
   `--min-len 1 --face whole --dedup raw --v1ref keep` 就发出去了，那一行跑出来是
   `577`，不是 `331`。**旋钮表里少了"分母是怎么定义的"这一格，等于没写口径。**
 
-退出：0 跑完 · 2 语料不在（**查不了 ≠ 通过**）
+  ★★ **那个 `577` 现在已经成了 `594`** —— 两者都"对"，差的是这一支后来**多印了一行**
+  （仓根的 `config.py`，unit=all 下 17 处）：577 + 17 = 594。⇒ **给表加一行，会把所有
+  先前发出去的总数**（unit=all 这条轴上的）**静默改掉**，屏幕上没有任何标记说"总数变了"。
+  凡把总数贴给别人，就要想到**表还会长**；这与"合计行漏一个它自己刚印过的行"是同一件事的
+  两头：**总数和表结构绑着，抄总数不抄表结构，就再也对不上。**
+
+退出：0 跑完 · 2 语料不在（**查不了 ≠ 通过**）· 3 语料指纹对不上（--expect-corpus）
 """
 import argparse, io, os, re, shutil, subprocess, sys, tempfile
 
@@ -105,6 +129,14 @@ def found(q, a):
     return any(corpus.chain_in(parts, j) for j in range(len(corpus.nums)))
 
 
+def pair(m):
+    """配对内容。**不许写 `m.group(1) or m.group(2)`** ——
+    内层为空时 `group(1) == ''` 是假值，`or` 会掉到 `group(2)`（None）⇒ 成员变成 NoneType。
+    当前 `Q` 的 `{1,400}` 下界为 1，够不到这个坑；但 `*` 版本的正则够得到（我今天在探针里真栽过：
+    差集一比就 TypeError）。**空值不许冒充成员。**"""
+    return m.group(1) if m.group(1) is not None else m.group(2)
+
+
 def count(base, cell, a):
     n = 0
     keys = set()
@@ -124,7 +156,7 @@ def count(base, cell, a):
             texts = [t] if a.face == "whole" else literal_bodies(t)
             for body in texts:
                 for m in Q.finditer(body):
-                    q = m.group(1) or m.group(2)
+                    q = pair(m)
                     k = V.norm(q)
                     if len(k) < a.min_len:
                         continue
@@ -156,15 +188,94 @@ def literal_bodies(text):
     return out
 
 
+def count_config(base, a):
+    """仓根的 config.py（不是一级目录 ⇒ `CELLS` 那轮走不到它，但它必须进合计）。"""
+    p = os.path.join(base, "config.py")
+    if not (os.path.isfile(p) and a.face == "whole"):
+        return None
+    t = io.open(p, encoding="utf-8").read()
+    n, keys = 0, set()
+    for m in Q.finditer(t):
+        q = pair(m)
+        k = V.norm(q)
+        if len(k) < a.min_len:
+            continue
+        if found(q, a):
+            continue
+        n += 1
+        keys.add(q if a.dedup == "raw" else k)
+    return n, len(keys)
+
+
+def tally(base, a):
+    """整表跑一遍 ⇒ (rows, tot)。rows = [(名字, 处, 条)]，合计由 rows 现加。
+
+    **抽成函数是为了能跑第二遍**：收尾那行要比"换一档"的差，就得真跑两次。
+    """
+    rows = []
+    for cell in CELLS:
+        n, k = count(base, cell, a)
+        rows.append((cell, n, k))
+    cf = count_config(base, a)
+    if cf is not None:
+        rows.append(("config.py", cf[0], cf[1]))
+    return rows, (sum(r[1] for r in rows), sum(r[2] for r in rows))
+
+
+def which(sha):
+    """参数**真正指的是什么** —— 标签由对象自己说，不许由参数名代说。
+
+    ★ @atlas-791f 12:12 抓的：这参数叫 `--tree`，可我一直传的是 `05f3e24`，
+      而 `git cat-file -t 05f3e24` ⇒ **commit**（tree 是另一个 sha）。
+      `git archive <commit-ish>` 照样出树，所以它一直"能用" —— 但器把
+      `tree=05f3e24` 当量法行印出来，等于**量产一个含混的标签**，
+      而卡上那条基准行要从它这儿抄格子。今天那次诊断就是死在"这东西是不是 tree"第①步。
+    """
+    def git(*args):
+        p = subprocess.run("git " + " ".join(args), shell=True, cwd=V.ROOT,
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        return p.stdout.decode("utf-8", "replace").strip()
+
+    if sha in (".", "", None):
+        # ★ 「就地」是个**不是对象的对象**（@nova-8980 卡上那条验收命令照抄实测出来的）：
+        #   同一条命令行，换一个人、换一个工作区、或者工作区脏了，数就变了。
+        #   实测：不给对象照抄 ⇒ 430/382；给了 05f3e24 ⇒ 331/302。**两个都"跑得出"。**
+        head = git("rev-parse", "--short", "HEAD") or "(没有 HEAD)"
+        st = git("status", "--porcelain")
+        n = len([x for x in st.splitlines() if x.strip()])
+        return ("就地 %s\n         ★ 它**不是任何一个 sha 的对象**：工作区 HEAD=%s%s\n"
+                "         ⇒ 要跟别人比数，必须点一个对象：`--commit <sha>`"
+                % (V.ROOT, head, "，且**脏**（%d 个文件已改）" % n if n else "，干净"))
+    kind = git("cat-file", "-t", sha)
+    if kind == "commit":
+        return "commit %s → tree %s（临时树，跑完删）" % (sha, git("rev-parse", sha + "^{tree}"))
+    if kind == "tree":
+        return "tree %s（临时树，跑完删）" % sha
+    return "%s（认不出类型，git cat-file 说 %r）" % (sha, kind)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tree", default=".")
+    ap.add_argument("--commit", "--tree", dest="tree", default=".",
+                    help="哪棵 commit（也收 tree/sha）。★ 旧拼法 --tree 保留可用："
+                         "卡上已经贴出去的命令不能因为改名跑不动。")
     ap.add_argument("--min-len", type=int, default=6)
     ap.add_argument("--face", choices=("whole", "literal"), default="whole")
     ap.add_argument("--dedup", choices=("raw", "norm"), default="norm")
-    ap.add_argument("--v1ref", choices=("skip", "keep"), default="skip")
+    # ★ 默认从 skip 翻成 keep（@nova-8980 ① 12:16 抓的）：
+    #   卡面写死的截面是「全仓 *.py 排除 .git/ 与 archive/」—— `tools/v1_ref` 两个都不是
+    #   ⇒ 按那段散文跑的人应该拿到 331；而默认 skip 会**偷偷再窄一档**，裸跑印 325
+    #   （实测：tools 182→176，差 6 处）。**默认值窄于写下来的口径 = ⑬ 扫面自己的漏口**：
+    #   分母少了一块，报告照印一个正常的数，屏幕上没有一处说"我少扫了"。
+    ap.add_argument("--v1ref", choices=("skip", "keep"), default="keep")
     ap.add_argument("--unit", choices=("all", "gone"), default="all")
     ap.add_argument("--ladder", choices=("norm", "norm+ellipsis"), default="norm")
+    # ★ @atlas-791f 12:19 抓的：指纹是**印出来**的，不是**核过**的。
+    #   原来只有 `print(fingerprint(docs))`，全支没有一处比对 ⇒ 换个 QL_CORPUS 指进来，
+    #   这支器**照样跑、照样印一个 sha256、照样出数**，只有人眼去比才发现。
+    #   ⇒ 有门才叫验过：对不上 exit=3（2 已经给了"语料不在"）。
+    ap.add_argument("--expect-corpus", default="", metavar="<sha256前16位>",
+                    help="语料指纹对不上就 exit=3。不给 ⇒ 那行会自报「★ 没核」。")
     a = ap.parse_args()
 
     docs = V.load()
@@ -177,39 +288,50 @@ def main():
     d = tree_dir(a.tree)
     base = d or V.ROOT
     try:
-        print("量法   口径参数：tree=%s · unit=%s · min-len(norm后)=%d · face=%s · "
+        print("量法   口径参数：commit=%s · unit=%s · min-len(norm后)=%d · face=%s · "
               "dedup=%s · v1_ref=%s · ladder=%s"
               % (a.tree, a.unit, a.min_len, a.face, a.dedup, a.v1ref, a.ladder))
-        print("对象   %s" % base)
-        print("语料   sha256:%s" % V.fingerprint(docs)[0])
+        print("对象   %s" % which(a.tree))
+        fp, fbytes = V.fingerprint(docs)
+        if a.expect_corpus and fp != a.expect_corpus:
+            print("★ 语料指纹对不上 ⇒ **拒绝出数**（exit=3）。这一格是门，不是装饰：")
+            print("  期望 --expect-corpus %s" % a.expect_corpus)
+            print("  实际（%d 字节语料）      %s" % (fbytes, fp))
+            print("  ★ 换个 QL_CORPUS 指进来，这支器照样跑、照样印一个 sha256、照样出数 —— "
+                  "只有这道门能把「看起来验过」和「验过」分开。")
+            return 3
+        print("语料   sha256:%s%s" % (
+            fp, "  （已核：== --expect-corpus）" if a.expect_corpus
+                else "  （★ **没核**：没给 --expect-corpus，这个 sha256 只是印出来的）"))
         print()
-        tot = [0, 0]
-        for cell in CELLS:
-            n, k = count(base, cell, a)
-            tot[0] += n
-            tot[1] += k
-            print("  %-8s %4d 处 / %4d 条" % (cell, n, k))
-        # config.py 在仓根，不是一级目录 ⇒ 上面那轮走不到它。**它必须进合计**：
-        # 卡面那四格是 cards / core+render / tools / **config.py**，
-        # 331 = 78+57+182+14。先前这行只加前四桶 ⇒ 印 317，跟卡面差正好 14，
-        # 而读到的人只会以为"对不上"。**合计行漏一个它自己刚印过的行 = 自证造不一致。**
-        c = os.path.join(base, "config.py")
-        if os.path.isfile(c) and a.face == "whole":
-            t = io.open(c, encoding="utf-8").read()
-            cn, ck = 0, set()
-            for m in Q.finditer(t):
-                q = m.group(1) or m.group(2)
-                k = V.norm(q)
-                if len(k) < a.min_len:
-                    continue
-                if found(q, a):
-                    continue
-                cn += 1
-                ck.add(q if a.dedup == "raw" else k)
-            print("  %-8s %4d 处 / %4d 条" % ("config.py", cn, len(ck)))
-            tot[0] += cn
-            tot[1] += len(ck)
-        print("  %-8s %4d 处 / %4d 条  ← 卡面那四格是 331 / 302" % ("合计", tot[0], tot[1]))
+        rows, tot = tally(base, a)
+        for name, n, k in rows:
+            print("  %-8s %4d 处 / %4d 条" % (name, n, k))
+        print("  %-8s %4d 处 / %4d 条" % ("合计", tot[0], tot[1]))
+        print()
+        # ★ 收尾行**不许并列两把梯子**（@atlas-791f 12:11 抓的）：
+        #   原来这行印的是字面量 `← 卡面那四格是 331 / 302` ——
+        #   **形状是比较，实质是断言**：换一档它照印 331/302，读者只会去找一个不存在的差错。
+        #   这正是本卡在治的病（数印出来了、分母没跟来），复发在为治它而刚写的器里。
+        #   ⇒ 同一棵树、同一口径参数，**只换 --ladder 再跑一遍**，印出来的才是"比较"。
+        #   这个 Δ 是**能失败的数**（阶梯若失效它会是 0），不是字面量。
+        other = "norm" if a.ladder == "norm+ellipsis" else "norm+ellipsis"
+        here = a.ladder
+        a.ladder = other
+        try:
+            orows, otot = tally(base, a)
+        finally:
+            a.ladder = here
+        print("  同一棵树、同一口径参数，**只换 --ladder %s** ⇒ %d 处 / %d 条"
+              "（差 %+d 处 / %+d 条）"
+              % (other, otot[0], otot[1], otot[0] - tot[0], otot[1] - tot[1]))
+        om = dict((r[0], r) for r in orows)
+        print("  逐格：%s" % " · ".join(
+            "%s %+d/%+d" % (r[0], om[r[0]][1] - r[1], om[r[0]][2] - r[2])
+            for r in rows if r[0] in om))
+        if a.unit == "all":
+            print("  ★ unit=all 时两档**必然**同数（分母不判「原文有没有」，逐段档无从参与）"
+                  "—— 这个 0 有理由，不是阶梯坏了。")
         print()
         print("★ 这一支不判对错，只把口径跑成数。判据看 tools/quotes_census.py 的三箱。")
     finally:
