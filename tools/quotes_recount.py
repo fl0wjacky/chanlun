@@ -23,6 +23,9 @@
                            commit-ish，标签却照参数名印 ⇒ 器在量产含混的标签。
                            现在**印的是解析后的对象**：`commit X → tree Y`。
                            旧拼法 `--tree` 保留可用。
+                         ★ **不写这一格 ⇒ exit=4、不出数**（原来是 default="."，见 main）：
+                           点 sha = 要跟别人比数；`--commit .` = 明确表示"我知道我在扫工作目录"。
+                           两种意图分开写，因为**它们只差一个漏写的参数**。
     --min-len <n>        配对的**长度下限**（按 `norm()` 后的字数算，n=1 表示无下限）
     --face    whole|literal
                          whole   = 整篇正则在源码上扫（引文跨相邻字面量时中间夹 `",\\n"`）
@@ -75,6 +78,7 @@
   两头：**总数和表结构绑着，抄总数不抄表结构，就再也对不上。**
 
 退出：0 跑完 · 2 语料不在（**查不了 ≠ 通过**）· 3 语料指纹对不上（--expect-corpus）
+      · 4 没点对象（`--commit`/`--tree` 一个都没写）—— 见下面 `--commit` 那格
 """
 import argparse, io, os, re, shutil, subprocess, sys, tempfile
 
@@ -265,7 +269,13 @@ def which(sha):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--commit", "--tree", dest="tree", default=".",
+    # ★ default 从 "." 改成 **None**（@atlas-791f 12:2x 的第三条反例）：
+    #   原来不写对象 ⇒ 回落 "." ⇒ 照跑、照印一张表、**exit=0**，格式与一次合法读数一模一样
+    #   ⇒ 「抄错也出数」：粘贴时漏掉对象和一次合法读数，屏幕上分不开。
+    #   我那三行警告字全对，但只在**打印**这一条通道上说话，退出码那条通道什么都没说。
+    #   ⇒ 现在把两种意图**分开写**：点 sha = 要比数；`--commit .` = 明确表示"我知道我在扫工作目录"。
+    #     不写 ⇒ **exit=4、不出数**。已发布命令全带对象，所以不破任何一条（逐条核过）。
+    ap.add_argument("--commit", "--tree", dest="tree", default=None,
                     help="哪棵 commit（也收 tree/sha）。★ 旧拼法 --tree 保留可用："
                          "卡上已经贴出去的命令不能因为改名跑不动。")
     ap.add_argument("--min-len", type=int, default=6)
@@ -287,6 +297,15 @@ def main():
                     help="语料指纹对不上就 exit=3。不给 ⇒ 那行会自报「★ 没核」。")
     a = ap.parse_args()
 
+    if a.tree is None:
+        print("★ 没点对象 ⇒ **拒绝出数**（exit=4）。这支器量的是「某个提交的树」，")
+        print("  不是「此刻谁的工作目录」—— 而这两件事**只差一个漏写的参数**：")
+        print()
+        print("    --commit <sha|tree>   要跟别人比数 ⇒ 用这个")
+        print("    --commit .            确实要扫**当前工作目录**（含未跟踪）⇒ 也请明确写出来")
+        print()
+        print("  ★ 不写也能跑 = 「抄错也出数」：粘贴时漏掉对象，和一次合法读数在屏幕上分不开。")
+        return 4
     docs = V.load()
     if docs is None:
         print("语料不在 ⇒ 什么都没查（exit=2）。先跑 tools/fetch_chanlun108.py")
