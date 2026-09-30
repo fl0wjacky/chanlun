@@ -56,7 +56,7 @@ CORPUS = os.environ.get("QL_CORPUS") or ROOT
 TXT_REL = os.path.join("archive", "chanlun108", "text")
 SKIP = (".git", "archive", "out", "__pycache__", "tools/v1_ref")
 
-STRICT = ("逐字原样", "折叠叠字后", "规范化后", "逐段核（省）")
+STRICT = ("逐字原样", "折叠叠字后", "规范化后", "逐段核（省）", "逐段·折叠", "逐段·规范")
 LOOSE = ("首尾短词", "中段短词", "首 7 字")
 
 ELL = re.compile(r"…+|\.{3,}|﹍+|—{2,}")
@@ -110,11 +110,12 @@ class Corpus(object):
     """把 108 课拼成一条串 + 课号边界表，一次扫描就能定课号。"""
 
     def __init__(self, docs, xform):
-        self.starts, self.nums, parts = [], [], []
+        self.starts, self.ends, self.nums, parts = [], [], [], []
         pos = 0
         for n, body in docs:
             t = xform(body)
             self.starts.append(pos)
+            self.ends.append(pos + len(t))
             self.nums.append(n)
             parts.append(t)
             pos += len(t) + 1                     # +1 = 连接用的换行
@@ -131,6 +132,26 @@ class Corpus(object):
                 out.append(self.nums[j])
             i = self.blob.find(needle, i + 1)
         return sorted(out)
+
+    def pos(self, needle):
+        """needle 的全部落点（字符下标）——「顺序一致」那一判要的就是它。"""
+        if not needle:
+            return []
+        out, i = [], self.blob.find(needle)
+        while i >= 0:
+            out.append(i)
+            i = self.blob.find(needle, i + 1)
+        return out
+
+    def chain_in(self, parts, j):
+        """parts 能否按**原顺序**落在第 j 课里（贪心取最小递增落点）。"""
+        lo, hi, cur = self.starts[j], self.ends[j], -1
+        for p in parts:
+            nxt = [x for x in self.pos(p) if lo <= x < hi and x > cur]
+            if not nxt:
+                return False
+            cur = min(nxt)
+        return True
 
 
 def collect():
@@ -168,17 +189,37 @@ def collect():
     return out
 
 
-def segments(q):
-    """按省略号切段；≥2 段、每段 ≥4 字，才算「带省略号的引文」。
+TAILP = re.compile(r"[\s。，、；：！？\"'）”’]+$")
 
-    为什么必须有这一档：**语料里一个「……」都没有**（108 课实测 0 处），
+
+def split_ellipsis(q):
+    """按省略号切段，返回 (段列表, 类别)。
+
+    判据不是「省略号在句内还是段间」，是 **省略号后面还有没有东西**（口径人：@nova-8980）：
+
+        截尾/掐头（省略号在头或尾，另一侧空无一物）
+            ⇒ 不存在"两段被读成一句"的风险，留下的那一整段逐字可核
+            ⇒ **无条件合规**，单开一类「截单段」，算严档
+        中间挖洞（省略号两侧都有内容）
+            ⇒ 必须逐段核：每段都在原文里逐字找到、**顺序一致**、不许拼接
+
+    为什么必须有这几档：**双省略号「……」在原语料里 0 处**，
     所以「原文……省略号」这种写法**按构造就永远逐字搜不到**。
     仓内先例 cards/c05_center.py:207 就是这个形状，而它其实是合规的 ——
-    旧的仪器把一条合规的引文报进了「搜不到」，和真编造的引文混在一个箱子里。
+    旧仪器把一条合规的引文报进了「搜不到」，和真编造的引文混在一个箱子里。
+
+    ⚠ 但单省略号「…」原语料里**有**（26 处 / 13 课）—— 源文自带的省略号是
+    **必须原样保留**的，不是要立规矩的那类。这一档不用管它：逐字那三档先跑，
+    源文自带的整串会先命中，轮不到切段。
     """
-    parts = [p.strip() for p in ELL.split(q)]
+    body = TAILP.sub("", q)
+    if not ELL.search(body):
+        return [], "无"          # 没有省略号 ⇒ 这一档不该插手（逐字那三档管它）
+    parts = [p.strip() for p in ELL.split(body)]
     parts = [p for p in parts if len(norm(p)) >= 4]
-    return parts if len(parts) >= 2 else []
+    if not parts:
+        return [], "无"
+    return parts, ("截单段" if len(parts) == 1 else "多段")
 
 
 def hunt(corpus, q):
@@ -237,21 +278,19 @@ def main():
                               else (fold(q) if how == "折叠叠字后" else norm(q)))
             if hits:
                 return hits, how
-        # 带省略号的引文：**逐段核** —— 每一段都得对上（逐字/折叠/规范任一口径），
-        # 且所有段要落在同一课。这是"人怎么核省略号引文"的机械化版本。
-        segs = segments(q)
+        # 带省略号的引文，按「省略号后面还有没有东西」分两类处理（口径：@nova-8980）
+        segs, kind = split_ellipsis(q)
         if segs:
-            hits = None
-            for p in segs:
-                h = c_raw.where(p) or c_fold.where(fold(p)) or c_norm.where(norm(p))
-                if not h:
-                    hits = None
-                    break
-                hits = set(h) if hits is None else (hits & set(h))
-                if not hits:
-                    break
-            if hits:
-                return sorted(hits), "逐段核（省）"
+            for tag, corp, xf in (("逐段核（省）", c_raw, lambda s: s),
+                                  ("逐段·折叠", c_fold, fold),
+                                  ("逐段·规范", c_norm, norm)):
+                # 单段 = 截尾/掐头 ⇒ 那段逐字可核就合规
+                # 多段 = 中间挖洞 ⇒ 每段对上**且顺序一致**、同课、不许拼接
+                # 单段也要给全三档口径，别只认逐字 —— 语料是 OCR 抓的，
+                # 105/108 课带相邻同字重复，截出来那一段照样可能需要折叠才中。
+                hits = [j for j in range(len(docs)) if corp.chain_in([xf(p) for p in segs], j)]
+                if hits:
+                    return sorted(corp.nums[j] for j in hits), tag
         return hunt(Corpus(docs, norm), q)
 
     ok, wrong, gone = [], [], []
