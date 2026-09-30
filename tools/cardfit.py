@@ -23,6 +23,19 @@ anchor 按 PIL 语义处理：l 起点 / m 中点 / r 终点。
 多出来的 13 处是**同一个机制**（卡片的小标签框按「字号+内边距」定高，不是逐个字量的；
 Noto 的汉字在同一字号下墨迹低 3~4px，就戳出标签底框）。所以下面 main() 会先把字体打出来。
 **换字体是发卡前的指定项，不是无关项。**
+
+**`build()` 的契约 —— 什么算「一张成功的卡」**（`check()` 在返回处断言，违约抛 `ContractError`）：
+
+    build() 成功  =  返回**一副画好的图**，判据三条（全部可读、与具体实现无关）：
+      ① 有 `.width` 和 `.height` 两个属性；
+      ② 两者都是**正整数**（`_violations(recs, W, H)` 拿它们做比较，不是数会变成另一类错）；
+      ③ 样本（**不是判据**）：`cf76e2a` 上 **14/14** 张真实卡返回 `PIL.Image.Image`。
+
+    为什么不是"用 except AttributeError 兜住"就算：那样读者拿到的仍是 Python 的原话
+    （`'bool' object has no attribute 'width'`），还得自己翻译成"哪张卡的 build() 违约了"。
+    契约写在**返回处**、违约时抛**领域消息**，翻译这一步就没有了。
+    ★ 违约消息里**不带"第 N 张"**：报告里从来不印序号，写 N 等于让读者再翻译一次；
+      卡名由汇总行（`measure()`）负责印 —— **一个事实只印一处**。
 """
 import os, sys, glob, importlib
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -195,9 +208,31 @@ def _fingerprint(recs):
     return tuple((xy, str(t)) for xy, t, _f, _a in recs)
 
 
+class ContractError(Exception):
+    """卡没满足 cardfit 的契约 —— 不是「这张卡画得不好看」，是「它压根没交出一副图」。
+
+    与「版式越界」是两个病，**别并进一个数**：越界 = 交了图、但画出了界；违约 = 没交图。
+    """
+
+
+def assert_card(im):
+    """契约断言（契约见模块 docstring）。违约时抛**领域消息**，不让 AttributeError 露出去。
+
+    **消息里不带卡名**：卡名由调用方（`measure()` 的汇总行）负责印 —— 这里再带一次，
+    报告上同一个名字会出现两遍。**一个事实只印一处。**
+    """
+    w = getattr(im, "width", None)
+    h = getattr(im, "height", None)
+    if not (isinstance(w, int) and isinstance(h, int) and w > 0 and h > 0):
+        raise ContractError(
+            "build() 返回了 %s，不是一副图 —— 契约：有 .width / .height 两个正整数属性"
+            "（实测 14/14 张真实卡是 PIL.Image.Image）" % type(im).__name__)
+    return im
+
+
 def check(mod, name):
     RECORDS.clear(); PANELS.clear()
-    im = mod.build()
+    im = assert_card(mod.build())
     recs = list(RECORDS)
     return (im.width, im.height, len(recs),
             sorted(_violations(recs, im.width, im.height), reverse=True),
