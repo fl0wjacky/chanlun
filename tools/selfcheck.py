@@ -151,11 +151,17 @@ print("=" * 72)
 FONT_GAPS = 0
 try:
     from tools.fontcheck import scan
-    _font, _missing, _conflict, _n, _files = scan()
-    FONT_GAPS = len(_missing) + len(_conflict)
-    print("[字体覆盖] %s  （扫了 %d 个脚本）" % (getattr(_font, "path", "?"), _files))
+    _font, _missing, _conflict, _n, _files, _skipped = scan()
+    FONT_GAPS = len(_missing) + len(_conflict) + len(_skipped)
+    print("[字体覆盖] %s  （扫了 %d 个脚本%s）"
+          % (getattr(_font, "path", "?"), _files,
+             "，**跳过 %d 个**" % len(_skipped) if _skipped else ""))
+    if _skipped:
+        for _p, _e in _skipped:
+            print("  ! 没扫成 %s —— %s" % (os.path.relpath(_p, ROOT), _e))
+        print("    这几个文件的字一个都没进来，缺字结论不完整 —— 按「查不出来不算通过」计进违规。")
     if FONT_GAPS:
-        print("  ✗ 字面量里 %d 个不同字符，有 %d 个画不出来：%s"
+        print("  ✗ 会画上去的字符串里 %d 个不同字符，有 %d 个画不出来：%s"
               % (_n, len(_missing), "".join(_missing[:40]) + ("…" if len(_missing) > 40 else "")))
         if _conflict:
             print("  ⚠ cmap 与渲染分歧 %d 个：%s" % (len(_conflict), "".join(_conflict[:20])))
