@@ -6,7 +6,7 @@
 import json
 from PIL import Image, ImageDraw, ImageFont
 
-from config import FONT as FONT_PATH, _NOTDEF_CHARS
+from config import FONT as FONT_PATH, _NOTDEF_CHARS, _notdef_mask
 
 # ---- 配色 ----
 BG    = (16, 18, 24)      # 页面底色
@@ -100,6 +100,11 @@ def F(size):
 # 三个码位里两个相同 → 那个就是 .notdef（另有一个被映射了）；三个互不相同 → **判不了**，
 # 抛异常，不猜。清单直接取 config.py 那份（它挑字体用的是同一套）：**两份私用区清单是最容易
 # 被改一份忘一份的东西**，这个仓已经为"同一格两条判据分家"付过一次账。
+#
+# **实现也只有一份**：`.notdef` 的推断直接用 `config._notdef_mask`，本文件不再抄一套 ——
+# `config.py` 与 `render/style.py` 是同一形状的两个调用点，改法各写一套就会各漏一个角
+# （@atlas-791f 的 `card-5ddb51d2-003` 记的就是 config 那一份在「私用区→空白字形」上的缺口；
+#   一份实现意味着那个缺口一修、两处同时好，也意味着**它没修之前两处同时带病**）。
 _NOTDEF_PROBES = _NOTDEF_CHARS
 
 
@@ -115,24 +120,6 @@ def _cmap_codepoints(font_path):
         if t.isUnicode():
             out |= set(t.cmap.keys())
     return out
-
-
-def _notdef_mask(font):
-    """这支字体给「没有字形的码位」画的遮罩；**判不了返回 None**。
-
-    多数票：三个私用区码位里若有两个遮罩相同，那个就是 .notdef（另有一个被映射了）；
-    三个互不相同 → 这支字体的私用区被映射得不只一个，挑不出基准 → 判不了。
-
-    None 和「一个遮罩」是两回事：混起来就成了今晚反复栽的那个坑——**判不了被读成没问题**。
-    """
-    masks = [bytes(font.getmask(c)) for c in _NOTDEF_PROBES]   # ImagingCore 没有 .tobytes()
-    counts = {}
-    for m in masks:
-        counts[m] = counts.get(m, 0) + 1
-    for m, n in counts.items():
-        if n >= 2:
-            return m
-    return None
 
 
 def glyph_gaps(text, font=None):
