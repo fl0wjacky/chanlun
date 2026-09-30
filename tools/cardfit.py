@@ -239,10 +239,13 @@ def _is_size(v):
       两步合起来，**理由（"真值不许冒充尺寸"）与正文同宽** —— 这正是本卡今晚立的那条。
     · **射程就到这儿**：本判据认这两种"布尔声明"。别的库若既不是 Python `bool`、也不声明 `dtype.kind`，
       不在射程内 —— 这是**有意划的界**，不是遗漏（要覆盖它就得"按库认类型"，那种规则会随库版本变）。
-    · ★ **射程外第一格 =「问不出口」，不是「不是正整数」**：`TypeError` 以外**任何**异常
-      （`.dtype.kind` 自己抛、`__index__` 自己抛）⇒ 抛 `Unaskable`，**不许压成第一张脸**。
-      切法**切在异常类型上**：`operator.index` 的协议里 `TypeError` **就是"我不是整数"这个合法的否定答案**
-      （⇒ `False`），其余异常都不是答案、是**没答上来**。**不采用** blanket `except Exception: return False`
+    · ★ **射程外第一格 =「问不出口」，不是「不是正整数」**：`operator.index(v)` 那一行**以外**的任何异常
+      ⇒ 抛 `Unaskable`，**不许压成第一张脸**。
+      ★ 切法**切在位点上，不切在异常类型上**：`operator.index` 的协议里 `TypeError` **就是"我不是整数"这个
+      合法的否定答案**（⇒ `False`）—— 但**只有那一行**有这个意思。`.dtype` / `.kind` 那两处**探测自己抛的
+      `TypeError` 一样是"没答上来"**：`except` 的宽度是**代码**的属性，不是**异常类型**的属性
+      ⇒ 三个位点各接各的（`card-8ce1d0ca-087`：把探测抛的 `TypeError` 读成"不是整数"，
+      就等于把**一句没发生过的问答印成答案**）。**不采用** blanket `except Exception: return False`
       —— 那样会把**判据自己的毛病**印成"这张卡违约"，拿一个假结论换一句原话（比现状更坏）。
     · ★ **射程外第二格（写下来的约定，不是遗漏）**：`v.dtype` **自己抛 `AttributeError`** 与"**没有** `dtype`"
       在 Python 里走**同一条路**（`getattr(x, 名, default)` 的第三个参数就是一条写不出 `except` 字样的吞）
@@ -251,17 +254,25 @@ def _is_size(v):
       —— 静默点从"没人知道"变成"**写下来的**"。
     · 非正、浮点、字符串、None 一律拦住。
     """
+    if isinstance(v, bool):
+        return False
     try:
-        if isinstance(v, bool):
-            return False
-        try:
-            d = v.dtype
-        except AttributeError:      # ★ 第二格：与"没有 dtype"同路，写成字面
-            d = None
-        if getattr(d, "kind", None) == "b":
-            return False
+        d = v.dtype
+    except AttributeError:          # ★ 第二格：与"没有 dtype"同路，写成字面
+        d = None
+    except Exception as e:          # ★ 探测自己抛 ⇒ **问不出口**（`TypeError` 在这里**不是**"答案"）
+        raise Unaskable("%s: %s" % (type(e).__name__, e)) from e
+    try:
+        kind = getattr(d, "kind", None)
+    except AttributeError:          # ★ 同上：按"没有 kind"读，写成字面
+        kind = None
+    except Exception as e:
+        raise Unaskable("%s: %s" % (type(e).__name__, e)) from e
+    if kind == "b":
+        return False
+    try:
         return operator.index(v) > 0
-    except TypeError:               # ★ 协议里合法的否定答案 ⇒ 第一张脸：**不是正整数**
+    except TypeError:               # ★ **只有这一行**：协议里合法的否定答案 ⇒ 第一张脸（不是正整数）
         return False
     except Exception as e:          # ★ 其余 = **问不出口** ⇒ 第二张脸（原话附在后面）
         raise Unaskable("%s: %s" % (type(e).__name__, e)) from e
