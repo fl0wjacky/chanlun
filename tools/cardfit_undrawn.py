@@ -43,6 +43,27 @@ os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PIL import Image, ImageDraw  # noqa: E402
 
 
+def _named(name, why):
+    """点名行的**唯一**拼装函数：`<名字>（<原因>）`（印的时候行首加 `        ✗ `）。
+
+    ★ 为什么必须**只有一种形态**（`card-b9149c38-fab`，@nova-8980 裁决）：
+
+    `tools/selfcheck.py` 那条把尺子输出透传进报告的过滤器（`selfcheck.py:377`）只认行首
+    `"✗ "` 或 `"[rc="`。而这张尺原先印「带名字的行」有 **8 种形态**
+    （`✗✗ 解析不了（…）：<文件>` ／ 裸名单行 ／ `★ ` ／ `· ` ／ 整句…），
+    ⇒ 除「跳过」那一类外，**最需要点名的几类在报告里只剩类名和数，一个名字都没有**。
+
+    ★ **不在线侧加名单**（那是**追不上**的路）：加完还剩 5 种没认，其中 3 种在 rc 里；而且
+      "每加一格判据就得回线侧登记一条"正是本仓今天杀掉的病（`card-bb535907-bff` 的三处硬编码、
+      本文件当年的前缀白名单，同一个形状）。
+    ⇒ 收敛在**尺侧**：所有点名行共用这一个函数，**线侧一个字不改**。
+      **加一个新类 = 调 `_named()`** —— 形状自动跟着走，不用回来给谁登记。
+
+    ⚠ 这里只管**拼装**；印的那一行由下面各处的 `print("        ✗ %s" % …)` 出，**格式只有那一串**。
+    """
+    return "%s（%s）" % (name, why)
+
+
 def card_names():
     """覆盖表：扫 `cards/*.py` 里**定义了 `build()`** 的。**不写名单、不补名字。**
 
@@ -64,7 +85,8 @@ def card_names():
             #   这不是假想：我自己的"第 15 张卡"测试就是这么变的 —— 掐声明掐出个 unmatched ')'，
             #   覆盖表照印 **14 张**、rc=0，而那张卡根本不在分母里。
             #   同一形状的第四个来源（前面三个：目录不在 / 一张 build() 都没有 / 抽到 0 条字面量）。
-            bad.append("%s（%s 行 %s）" % (fn, e.__class__.__name__, e.lineno))
+            bad.append(_named(fn, "解析不了：%s 行 %s ⇒ **不在上面那个分母里**"
+                              % (e.__class__.__name__, e.lineno)))
             continue
         if any(isinstance(n, ast.FunctionDef) and n.name == "build" for n in tree.body):
             out.append(fn[:-3])
@@ -239,17 +261,17 @@ for name in names:
         mod = importlib.import_module("cards." + name)
         lits = literals_that_can_be_drawn("cards/%s.py" % name)
     except Exception as e:                   # noqa: BLE001
-        skipped.append("%s（%s: %s）" % (name, type(e).__name__, e))
+        skipped.append(_named(name, "%s: %s" % (type(e).__name__, e)))
         continue
     runs, dead = all_runs(mod)
     if not runs:                             # 真数据那一跑就没成 ⇒ 这张卡等于没量
-        skipped.append("%s（%s）" % (name, dead[0]))
+        skipped.append(_named(name, dead[0]))
         continue
-    dead_all += ["%s → %s" % (name, d) for d in dead]
+    dead_all += [_named(name, "支没测：%s" % d) for d in dead]
     injected_ok += len(runs) - 1
     lits_total += len(lits)
     if not lits:
-        zero_lit.append(name)
+        zero_lit.append(_named(name, "抽到 0 条字面量 ⇒ 本尺在这张卡上**什么也没量到**，不是「没有缺陷」"))
     union = set().union(*[txt for _, txt in runs])
     # **只认 `l in dt` 一个方向。** 反过来那条 `dt in l`（"画出来的字是字面量的一部分"）
     # 看着合理，实际是个**假阴性机器**：`扩展`、`中枢` 这种 2 字的绘制会命中任何含它的长句，
@@ -275,41 +297,51 @@ for name in names:
     undrawn += len(never)
     modes = getattr(mod, "CARDFIT_FAILURES", None)
     if modes is None:
-        undeclared.append(name)
+        undeclared.append(_named(name, "没声明 CARDFIT_FAILURES ⇒ **没查过 ≠ 通过**"))
     elif modes:
         declared_some.append(name)
         if never:
-            uncovered_by_modes.append("%s（声明 %d 支，仍有 %d 条没画到）" % (name, len(modes), len(never)))
+            uncovered_by_modes.append(_named(name, "声明 %d 支，仍有 %d 条没画到" % (len(modes), len(never))))
     else:
         declared_none.append((name, getattr(mod, "CARDFIT_NO_FAILURE", "").strip()))
         if never:
-            contradict.append("%s（声明「无失败分支」，实测 %d 条没有任何一跑画到）" % (name, len(never)))
+            contradict.append(_named(name, "声明「无失败分支」，实测 %d 条没有任何一跑画到" % len(never)))
 
 print("-" * 104)
 print("合计「所有跑法都没画到」的字面量：%d 条" % undrawn)
 print("[覆盖] 扫到 %d 张 · 量成 %d 张 · **跳过 %d 张**"
       % (len(names), len(names) - len(skipped), len(skipped)))
+# ★ 下面**所有**点名行共用一个形态、一行一个：`_named()` 拼 + `print("        ✗ %s" % …)`。
+#   线侧那张过滤器（`selfcheck.py:377`）认的就是行首这个 `✗ `，所以这几类（以及**以后新加的类**）
+#   一起被透传进报告，**不用回线侧登记**。由来与为什么不走线侧名单：见 `_named()` 的 docstring。
+#   ⚠ 上面那张**逐卡表**（`%-22s %-8d …`）和各卡的小结行（`      · ` / `      ★ ` / `      ↳ `）
+#     **不在**这里收敛：它们不是「点名某张卡 / 某个文件」的行，是表体与表内细节（卡名在表的第一列）。
 for u in unparsable:
-    print("        ✗✗ 解析不了（**不在上面那个分母里**）：%s" % u)
+    print("        ✗ %s" % u)
 for s in skipped:
     print("        ✗ %s" % s)
 print("[分支覆盖] 注入支 %d 支生效 · **%d 支没测**" % (injected_ok, len(dead_all)))
 for d in dead_all:
-    print("        ★ %s" % d)
+    print("        ✗ %s" % d)
 print("[声明] 声明失败支 %d 张 · 声明「无失败分支」%d 张 · **没声明 %d 张**"
       % (len(declared_some), len(declared_none), len(undeclared)))
 if undeclared:
-    print("        %s" % "、".join(undeclared))
+    for x in undeclared:
+        print("        ✗ %s" % x)
     print("        ↑ 这 %d 张是**没查过**，不是通过 —— 进退出码（见文末 ②）" % len(undeclared))
 if declared_none:
     if "--why" in sys.argv:
         for n, why in declared_none:
-            print("        %-22s %s" % (n, why))
+            # ⚠ 理由**空着就照实说空着**，不许编一句填进去（`card-b9149c38-fab` 门槛⑥：
+            #   「没有名字可以印的时候不许编」的同一形状 —— 没有理由可印的时候也不许编。）
+            print("        ✗ %s" % _named(n, why or "**理由空着（CARDFIT_NO_FAILURE 是空串）**"))
     else:
         print("        理由写在卡里（加 `--why` 打出来）")
 if zero_lit:
-    print("[口径] 抽到 0 条字面量的卡 %d 张 —— 本尺在这些卡上**什么也没量到**，不是「没有缺陷」：%s"
-          % (len(zero_lit), "、".join(zero_lit)))
+    print("[口径] 抽到 0 条字面量的卡 %d 张 —— 本尺在这些卡上**什么也没量到**，不是「没有缺陷」"
+          % len(zero_lit))
+    for x in zero_lit:
+        print("        ✗ %s" % x)
 if uncovered_by_modes:
     # ⚠ 这里原来写的是「**不进退出码**：声明的支可以只针对几何，不必然对应「没画到的正文」」。
     #   那句话说的是**归因**（这条正文为什么没被画到）；这份 list 数的是**事实**
@@ -318,10 +350,10 @@ if uncovered_by_modes:
     #   必须把它们一起豁免，可它们早就在 rc 里。⇒ 它是三类里**唯一被豁免的一格** = 免死金牌。
     print("[声明的支没盖住] %d 张（声明了 N 支，这条正文**仍没被任何一跑画到**）" % len(uncovered_by_modes))
     for u in uncovered_by_modes:
-        print("        · %s" % u)
+        print("        ✗ %s" % u)
 print("[声明可信] 矛盾 %d 张（声明「无失败分支」而实测有）" % len(contradict))
 for c in contradict:
-    print("        ★ %s" % c)
+    print("        ✗ %s" % c)
 # ---- 退出码：**从下面这份 list 生成**，不再手写那句"只有三样"------------------
 # 上一版这里是一行手写的转述（`rc = 1 if (skipped or dead_all or contradict) else 0`
 # 加一句人写的解释）。它是**转述**不是**分解**：往上面再加一个该进 rc 的 list，
