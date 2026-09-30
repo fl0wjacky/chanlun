@@ -91,13 +91,26 @@
        —— ★ `tag` 也是有效 ref：`-t v2.4` 印的是 `tag`、rc=0，**不 peel 会把它判成"我解不出"**）；
      否则 `git cat-file -t <第二栏>` ⇒ `blob` ⇒ 走 (a″)；
      **两条都不成立 ⇒ 第三态：我这库答不了** —— 既不是 (a)，也不是 (a″)（**`tree` 一类也落在这一态**）。
-     ★ 第三态的两条 stderr **要分开**（**同一个 rc=128、字面不同**，别合成一句"抄错了"）：
-       `fatal: Not a valid object name <x>`                ⇒ **名字就不合法**（坐标抄错 / 笔误）
-       `fatal: git cat-file: could not get object info`     ⇒ **名字合法、我这库里没有**（对象不在 / ref 没 fetch）
+     ★ 第三态**还要说清"是哪一种解不出"** —— 但分流键**不是 stderr 的字面**，是 **(哪条命令) × (第几行)**：
+       · 那两条字面取自**第②步**（`cat-file -t`），只在**"名字合法、库里没有"**与**"名字不合法"**之间分：
+         `fatal: Not a valid object name <x>`                ⇒ **名字就不合法**（坐标抄错 / 笔误）
+         `fatal: git cat-file: could not get object info`     ⇒ **名字合法、我这库里没有**（对象不在 / ref 没 fetch）
+       · ★ **第②步对 `tree` / `tag→tree` / `tag→blob` 是哑的**：`-t <tree>` 印 `tree` rc=0、`-t <tag>` 印 `tag` rc=0，
+         **stderr 空** ⇒ 这三种成员的诊断**全在第①步**：
+         `error: <x>^{commit}: expected commit type, but the object dereferences to <tree|blob> type`。
+       · ★ **同一段 stderr 有两行**：`cat-file -t '<x>^{commit}'` 印**两行**（先 `error: …dereferences…`、后 `fatal: …`），
+         而 `rev-parse --verify -q` **只印第一行** ⇒ **引一行 = 引了一个成员** ⇒ 「哪条命令」必须写出来
+         （不写，同一颗对象换个写法就读出两样"证据"）。
+       · ★ **别按字面分流**：`Not a valid object name <x>^{commit}` 那句**带 `^{commit}` 后缀**，
+         在「名字本来就不合法」与「名字合法、只是剥不到 commit（树）」上**逐字相同**
+         ⇒ 按字面分 = **把两个因并成一个**。
      ★ 同一颗对象上 `-t` 与 `-e` 的 rc **不同** ⇒ 这两条**不是同一条命令的两样写法**：
        `cat-file -t 132c2e0e…` ⇒ **rc=128** `could not get object info` ｜ `cat-file -e 132c2e0e…` ⇒ **rc=1**（静默）。
-     ★ **假警报有一格，本仓 0 例**：annotated tag 若**剥不到 commit**（tag→tree / tag→blob）也会落到第三态，
-       而那是一条**有效 ref** ⇒ 假警报。本仓 `for-each-ref refs/tags` 共 6 个，**全是 `tag -> commit`** ⇒ **无样本**。
+     ★ **`tag` 剥不到 commit**（tag→tree / tag→blob）也落这一态 —— ★ **这不是假警报**：
+       `<path> @ <tagname>` **本来就不在三支写法之内**（`<path> @ <blob>` 那一支要的是 40-hex，不是 tag 名）
+       ⇒ 落第三态**是对的**，欠的只是"说清是哪一种"（上一格）。
+       本仓 `for-each-ref refs/tags` 共 6 个、**全是 `tag -> commit`** ⇒ 这两种**本仓 0 例**；
+       真样本是自造的（@iris-64a1 的 `workspace/probe-tag2tree`；我也在一次性 scratch 仓复现：`-t` rc=0、stderr 空）。
      ★ 但「**我这棵库里没有**」**≠「坐标抄错」**：见 (a″) 的 ⓑ —— 那类坐标**可能完全成立**。
    (b) **评论本体** ⇒ `<card id> · <cmt id>`；判法 = **读得到**（不依赖任何 ref；评论**不可变**）。
    ★ 拿 (b) 去跑 (a) 的命令必然 ✗ —— 那不是它的判法。文件类会**随后续提交变**、报时现算；
