@@ -225,19 +225,25 @@ print("=" * 72)
 #   却只留一个名字）就是今晚 `FONT_GAPS`/`FONT_FILES` 那次 —— 那次并的是量纲，这次并的是前提。
 #   `PREMISE` 那个汇总数**留着**（退出那格需要一个值），但**话由这张表说**。
 PREMISES = []          # [(名字, 状态, 处置句)] —— 状态 0=过 ／ 1=不过 ／ -1=跑不了
+# ★ 处置句**不许指方向**（「上面那扇门」「下面那把尺」这种）—— 它印在哪儿由**印的地方**决定
+#   （现在只印在文末汇总那段，但那是印的地方的事，不是这张表的事）。
+#   实测（card-6adfd2c9-dca，@atlas-791f ① 那处）：句子从「就地印」搬进这张表时，
+#   位置词没跟着搬 —— 编出来的时候下面还有一排 `[尺]` 行，可汇总段**在那一排下面**
+#   ⇒ `[判据前提] … 下面那把 `undef` 尺 …` 这句话在默认报告里**指反了**（[尺] 行在它上方）。
+#   ⇒ 处置句一律**点名**（`[字体覆盖]` / `[尺] undef`），不点位置。加一句新处置 = 照这个写。
 try:
     from tools.verify_notdef import run as _notdef_selftest
     _n_bad = _notdef_selftest(verbose=False)        # 通过的格不逐条打（一屏已经很长），不过的永远打
     if _n_bad:
         PREMISES.append(("config._notdef_mask 自测", 1,
-                         "那扇字体覆盖门的基准本身是错的，那扇门的数不可读（先修基准）"))
+                         "`[字体覆盖]` 那扇门的基准本身是错的，那扇门的数不可读（先修基准）"))
         print("[判据前提] config._notdef_mask 自测：%d 格不过 ← 下面那扇字体覆盖门的基准本身是错的" % _n_bad)
         print("           那扇门会把真缺的字报成「一个都不缺」（静默假绿）。**先修基准，再读那扇门。**")
     else:
         PREMISES.append(("config._notdef_mask 自测", 0, ""))
         print("[判据前提] config._notdef_mask 自测通过 ⇒ 下面那扇门拿的 .notdef 基准可信")
 except Exception as e:
-    PREMISES.append(("config._notdef_mask 自测", -1, "那扇门的基准没人验过"))
+    PREMISES.append(("config._notdef_mask 自测", -1, "`[字体覆盖]` 那扇门的基准没人验过"))
     print("[判据前提] 跑不了：%s" % e)
     print("           自测没跑成 = 那扇门的基准没人验过 ⇒ 按「查不出来不算通过」计。")
 
@@ -252,14 +258,14 @@ try:
     _u_bad += _undef_paired(verbose=False)       # 成对读数：同一棵树上 +1 个探针 ⇒ 正好多 1 处并点名
     if _u_bad:
         PREMISES.append(("undef_scan 自测", 1,
-                         "下面那把 `undef` 尺**自己的判据坏了**，它那份「0 处」不可读"
+                         "`[尺] undef` 那条**自己的判据坏了**，它那份「0 处」不可读"
                          "（先修扫描器，不是去修它扫出来的东西）"))
         print("[判据前提] undef_scan 自测：**%d 格不过** ← 下面那把尺那份「0 处」不可读" % _u_bad)
     else:
         PREMISES.append(("undef_scan 自测", 0, ""))
         print("[判据前提] undef_scan 自测通过（探针全对 + 同树成对读数成立）⇒ 下面那把尺报的数可信")
 except Exception as e:
-    PREMISES.append(("undef_scan 自测", -1, "那把尺自己没验过 ⇒ 它那份「0 处」不可读"))
+    PREMISES.append(("undef_scan 自测", -1, "`[尺] undef` 那条自己没验过 ⇒ 它那份「0 处」不可读"))
     print("[判据前提] undef_scan 自测跑不了：%s" % e)
     print("           尺自己没验过 ⇒ 它那份「0 处」按「查不出来不算通过」计。")
 
@@ -490,7 +496,10 @@ if PREMISE:
     # ★ 名字和处置都从 `PREMISES` 来，**一个字都不写死**：坏的是哪个前提，就说哪个、说那个的处置。
     #   （写死过一个 → @atlas-791f 908 量到它指错文件、指错动作；见上面 `PREMISES` 那段注释。）
     #   名字本身就是"<谁> 自测" ⇒ 这里拼**不过**（不拼"自测不过"，否则读成"…自测：自测不过"）。
-    #   config 那一句拼出来和原来**逐字相同**（`config._notdef_mask 自测不过`）。
+    #   ⚠ 这里原来写着「config 那一句拼出来和原来**逐字相同**」—— 那句话**实测不成立**（@atlas-791f ①）：
+    #     名字那半确实逐字相同（`config._notdef_mask 自测` + `不过` = 原来那一串），但**整行**还含处置句，
+    #     而处置句是**重打**的、掉了「上面」两个字 ⇒ 断言写大了，断的是整行、验的只有半行。
+    #     现在处置句**故意**不再逐字相同：改成点名（见上面 `PREMISES` 那段），因为那张表会印在别处。
     for _pn, _ps, _pact in PREMISES:
         if _ps:
             print("判据前提:", "%s%s" % (_pn, "跑不了（不算通过）" if _ps < 0 else "不过"),
