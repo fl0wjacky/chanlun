@@ -154,6 +154,8 @@ t = next((x for x in s3 if x["kind"] == "三买"), None)
 if t is None:
     # 实测：三买被消光时 check_signals(s3, …) = **0** —— 复核器一个字都没有。
     # 所以这一格报 0 就是假绿，只能报「未执行」（见卡 card-75fbc68f-0c8 的逐站点测量）。
+    # 这格**确实有变异踩得到**，不是死代码：`core/pen.py` 的 maxmin（8 处）会把信号总数打成 0。
+    # 且这个数在补丁前后一样（main 上 0、合了 signals-blind-spot 之后还是 0）—— 不是"没量过"。
     skip("挪错位置的三买未被发现", "引擎一个三买都没吐，夹具造不出；复核器对此也无话可说")
 else:
     t["unit"] -= 1; t["bar"], t["price"] = Rz["pens"][t["unit"]]["i1"], Rz["pens"][t["unit"]]["p1"]
@@ -162,8 +164,12 @@ s1 = copy.deepcopy(S)
 t = next((x for x in s1 if x["kind"] == "一买"), None)
 _alt = next((k + 1 for k, z in enumerate(Rz["centers"]) if z["rel"] != "下跌延续"), None)
 if t is None or _alt is None:
-    # 实测：一买被消光时 check_signals(s1, …) = **3** —— 复核器自己有话说。
-    # 那就报它的裁决，别写死 1（等于把 33 / 3 这两个真裁决从 StopIteration 后面漏掉）。
+    # 复核器有没有话说，**取决于是哪种"消光"，所以这里只能按返回值分支，不能写死一个数**：
+    #   只把 一买 挑掉、其余点还在（91 个）⇒ check_signals = **3**（三条"二买前面没有一买"）
+    #   整个信号列表空掉（`core/pen.py` 的 maxmin 真跑出来的那一态）⇒ **0**，一个字都没有
+    # 两个数都在 main 和"合了 signals-blind-spot 之后"各量过一次，**一样** —— 所以这段的顺序
+    # 依赖不存在，先合哪支都不影响这两格（我先前在群里担心过它会变，实测没变）。
+    # 写死 1 会把上面 3 这个真裁决漏掉；写死 0 会把"工具没在岗"说成"没事"。所以按返回值走。
     _n = len(check_signals(s1, Rz, "pen"))
     if _n:
         count("不在下跌趋势里的一买未被发现", _n, "　（夹具造不出：报复核器对这份输入的裁决）")
@@ -236,4 +242,10 @@ if SKIP:
 if FONT_GAPS:
     print("字体覆盖:", "查不了（不算通过）" if FONT_GAPS < 0 else "%d 个字符画不出来" % FONT_GAPS,
           "→ 出图会静默出方框")
+# 退出码只说"有东西不对"，不说"是谁不对"：三个数混在一个非 0 里，读的人猜不出来。
+# 这是 @iris-64a1 指出的洞 —— 在字体门本来就会红的机器上，干净跑和变异跑都是 exit=1，
+# 光看退出码**隔离不出** SKIP 有没有生效。打这一行：每个非 0 退出自己说出原因。
+print("退出原因: 总违规=%d  未执行=%d  字体缺字=%s  ⇒ exit=%d"
+      % (FAIL, SKIP, "查不了" if FONT_GAPS < 0 else FONT_GAPS,
+         1 if (FAIL or FONT_GAPS or SKIP) else 0))
 sys.exit(1 if (FAIL or FONT_GAPS or SKIP) else 0)
