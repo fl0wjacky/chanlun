@@ -96,12 +96,34 @@ def callout(d, y0, y1, col, alpha=22):
     d.rounded_rectangle([56, y0, W - 56, y1], 20, fill=col + (alpha,), outline=col, width=3)
 
 
+def _ink_rows(text, font):
+    """真画一遍，量这串字的墨迹上下沿（相对绘制原点）。
+
+    不能用 textbbox：那个底带字体自带的 descent，比真墨迹低 1~3px，
+    拿它摆字会把字摆得比实际需要的更高。墨迹才是"看得见的那个东西"。
+    """
+    im = Image.new("L", (600, 80), 0)
+    ImageDraw.Draw(im).text((20, 30), text, font=font, fill=255)
+    rows = [y for y in range(80) if any(im.getpixel((x, y)) for x in range(600))]
+    return None if not rows else (rows[0] - 30, rows[-1] - 30)
+
+
 def lchip(d, x, y, text, col, anchor="l"):
-    """带底色的小标签 —— 压在线/框上也读得清。anchor="r" 时 x 是右端。"""
+    """带底色的小标签 —— 压在线/框上也读得清。anchor="r" 时 x 是右端。
+
+    框高是写死的 27px（y-4..y+23）—— 所以**字要按字体的墨迹在框里摆正**：
+    原来字画在 y，墨迹底在 Droid 下到 y+24（比框底低 1px）、Noto 下到 y+27（低 4px），
+    框没小，是字太靠下。按墨迹居中后，框的落点一个像素都不动 ⇒ 不会去压下面的线/框。
+    """
     tw = d.textlength(text, font=f_t)
     bx = x if anchor == "l" else x - tw
-    d.rounded_rectangle([bx - 7, y - 4, bx + tw + 7, y + 23], 6, fill=CARD + (240,))
-    d.text((bx, y), text, font=f_t, fill=col)
+    top, bot = y - 4, y + 23
+    ty = y
+    ink = _ink_rows(text, f_t)
+    if ink:
+        ty = top + (bot - top - (ink[1] - ink[0])) // 2 - ink[0]
+    d.rounded_rectangle([bx - 7, top, bx + tw + 7, bot], 6, fill=CARD + (240,))
+    d.text((bx, ty), text, font=f_t, fill=col)
     return tw
 
 
