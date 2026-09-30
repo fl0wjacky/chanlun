@@ -16,7 +16,10 @@
 "口径写成散文，两个人就实现成两条" —— 把散文翻成参数，分歧就变成**可跑的**，
 而不是两段各说各话的回忆。
 
-十一个旋钮（就是这一支的全部输入，多一个都没有；`--commit` 还收旧拼法 `--tree`，`-h` 不算）：
+十三个旋钮（就是这一支的全部输入，多一个都没有；`--commit` 还收旧拼法 `--tree`，`-h` 不算）：
+★ 这个数**又数错过一次**（写"十一"的时候下面其实是十三个）：散个数会烂，**数的定义是
+  `COUNT_AXES + OTHER_AXES + MODE_AXES`**，自查 9 号管得住"有没有登记"、管不住这句话里的数 ——
+  **散文里的计数是没人负责的租客**，所以加旗标时**连这句话一起改**（本轮 `--speaker`/`--expect-speaker`）。
 ★ 这句原来说"八个"而下面列着十个 —— **散文里的计数会烂**，而这一次它烂在了"这支器有几个入口"
   这一格上（`axis_audit` 管得了"有人加了旗标没登记"，**管不了这句话里的数**）。
     --commit  <sha|.>    哪棵树（sha 走 `git archive | tar -x` 到临时目录，跑完删）
@@ -77,6 +80,29 @@
     --unit    all|gone   ★ 单位（分母的定义）：
                          all  = **每一个**配对都进分母
                          gone = 只把「在 108 课原文里**找不到**」的配对算进去
+    --speaker <tsv>      ★ **旁档**（说话人判词）：它**不改数，它归类数**。
+                         不变量**单向**：旁档**每一行**都必须联上器数出来的一条
+                         （悬空的判词是错，不是「未判」）；器 → 旁档**不要求**
+                         （没判到的落「（空）=没判过」，旁档自己标 `未判` 的另算一态）。
+                         任何一格不成 ⇒ **exit=11、不出数**，并在印出来那行**点名是哪一张脸**。
+                         ★ 联结键 = `sha1(引文**原始串** utf-8)` 前 16 位 —— 对**原始**串算，
+                           不经任何转义（旁档第 2 栏是**显示用**的，它把 `\n` 换成了 `⏎`，
+                           拿它去联会在含换行的键上**全查不到**，而"联不上"长得就像"它没有"）。
+                         ★ 列**按表头里的名字取**（`# columns` 那一行），**不按位置取**：
+                           按位置取，旁档里加一栏就会静默错读一整列，而屏幕上数还是对的。
+                         ★ 它是**非计数轴**（`OTHER_AXES`）且**点名豁免探针**（`PROBE_EXEMPT`）：
+                           换一份旁档 = 换一次测量，不是旋钮（同 `--commit` 那一格）。
+    --expect-speaker <语义指纹前16位>
+                         旁档的**语义指纹**对不上 ⇒ **exit=11、不出数**。
+                         ★ 指纹对**排序后的 `(key_sha1, 判词)` 对**算 —— **不是**文件 sha256。
+                           @iris-64a1 给旁档加了一行 `# columns` 机器可读表头，**一个判词都没改**，
+                           文件 sha256 就变了 ⇒ **字节 sha 是"文件长相"的函数**，只能当
+                           「我读的是不是同一份文件」的对角线（所以那一行把**文件名**跟它印在一起），
+                           **不能当门**。@nova-8980 的仓规：**凡当门用的指纹，必须指名它的定义域。**
+                         ★ 它与旁档自陈的 `# 分母：N 处 / M 条`、`# tree <40位>` 是三格**独立**的门：
+                           旁档那一行自己写着"当场算、当场印，非写死" ⇒ 它是**坐标**，不是注释。
+                           换一档旗标（`--face`/`--ladder`/`--min-len`）时**旁档一行不变、逐行联结照样全中**，
+                           只有"分母/对象"那两格拦得住 —— 那正是"同一份旁档配了另一套旗标"这个坑。
     --ladder  norm|norm+ellipsis
                          ★ 阶梯（用哪档判据判"原文里有"）：
                          norm          = 整串规范化后查一次（卡面那套）
@@ -156,6 +182,23 @@
        自测在 ② 那行红 —— `bump 探针=1 ⇒ 合计 335/306（基线 331/302）`。
      ★ 同一格"没测"也走 10（基线跑不出数 / 轴单里的轴没有旗标名）——**不许把"没测"印成"过"**。
      ★ 代价：十几遍真扫（本机 ~16 s）⇒ **离线跑**，不许塞进常规验收（它跑的就是"量之前那几道门"）。
+     ★ ⑤（旁档读入侧）：正臂必须出数、**七条脸各喂一次红**（悬空/表头/未声明的值/重复键/
+       分母对不上/对象对不上/指纹）+ ⑤e「探针那一跑**没出数**」那一口。
+       ★ 为什么单列一块：读入侧一口气加了七张脸，只印不喂 ⇒ 那七张脸本身就成了**一批新的
+         "不可能失败的门"**（④ 那一课：刚落地这条修法的人最容易在新那一层复犯旧病）。
+       ★ 实测两处红（我跑的）：把 ⑤e 那支退回原样 ⇒ ⑤e 红（病名点回「登记错」）；
+         把「（空）」那一行的类键退回成它的标签 ⇒ **正臂红**（等式印「不成立（器自己坏了）」）——
+         后者正是我第一版真犯的 bug，**是 ⑤ 正臂先抓出来的**。
+ 11  **旁档这一格拒绝出数**（`--speaker` / `--expect-speaker`）。
+     ★ 一个出口码，**十一张脸**（都在印出来那行点名）：读不到 / 表头 / 栏数不齐 / 空表 /
+       重复键 / 未声明的值 / 悬空 / 对象对不上 / 分母对不上 / 指纹 / 没给旁档却给了期望值。
+     ★ 为什么不拆成十一个码：它们不是"谁的错"各不相同那一类（4/7/9 那种），
+       而是**同一条流水线的十一个阶段** —— 拦下来的动作是同一个（不出数）。
+       与"三态共用一个词"的区别在**脸**：出口码管"拒绝出数"，印出来那行管"为什么"，
+       两者都点名 ⇒ 不混。（若哪天有一格需要**别人自动区分**，再拆码。）
+     ★ 故意红（实测）：改坏一位 `key_sha1` ⇒ `脸 = 悬空`；`--face literal` 配同一份旁档
+       ⇒ `脸 = 分母对不上`（**逐行联结照样全中**，只有这一格拦得住）；
+       `--expect-speaker` 不给 `--speaker` ⇒ `脸 = 没给旁档却给了期望值`。
 
 ★★ 验收判据：**`grep -q '验收可用=是'`**（输出里那一行单值）。三个条件**必须写成"印了且 = 是"**：
 
@@ -177,7 +220,7 @@
   ⇒ 也**不许借 `★` 当判据**：验收命令**自己**就印 ★（`★ 这一支不判对错…`，在第 15 行）
     ⇒ 按"输出里没有 ★"判会把**正确的那跑**判红。（借别人也在用的字符当接口，本仓栽过。）
 """
-import argparse, hashlib, io, os, re, shutil, subprocess, sys, tempfile
+import argparse, collections, hashlib, io, os, re, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -358,62 +401,374 @@ def _pad(t, w):
     return t + " " * max(1, w - d)
 
 
-def speaker_axis(sites, tot, a):
-    """说话人轴：把合计拆成三栏，**恒印**（@nova-8980 13:18 落给本卡的第三根轴）。
+# ── 旁档（说话人判词）读入侧 ──────────────────────────────────────────────────
+#   ★ 这一格治的还是同一件事：**「没给」与「给了个空的」共用一张脸**。⇒ 下面几种**分开报**，
+#     因为它们的修法各不相同（合起来报 = 没报）：
+#       没给 --speaker ／ 读不到 ／ 表头不合格 ／ 栏数不齐 ／ 有表头没数据行 ／ 重复键 ／
+#       未声明的值 ／ 悬空行 ／ 对象对不上 ／ 分母对不上 ／ 指纹对不上
+#   ★ 出口**只有一个**（exit=11），但**脸各不相同**：出口码管"拒绝出数"，印出来那行管"为什么"。
+#     一个出口码叫不出十一种病因 —— 今晚「三态共用一个词」已经是老病，别在新那一层复犯。
+SPEAK_HDR = "# columns"
+SPEAK_NEED = ("判词", "key_sha1")
+# ★ 旁档里「没判过」那一态写成**空串**（@iris-64a1 15:2x 表头注解：「（空）=没判过」），
+#   而 `未判` 是**另一态**（「判过·判不了」）。两个不许合并 —— `SPEAK_UNDECIDED` 那两格。
+SPEAK_EMPTY = ""
+SPEAK_EMPTY_LABEL = "（空）"
+SPEAK_DECLARED = tuple(k for k, _w in SPEAK_CLASSES) + ("未判", SPEAK_EMPTY)
+# ★ 面：旁档那一列写 `混合`，器算出来写 `两面` —— **同一个东西两个名字**。
+#   在读入侧对齐（一处声明，两个名字都收），**不改旁档、也不改器的算法**：
+#   名字是给人看的，判据是那个集合本身。
+FACE_ALIAS_2 = ("两面", "混合")
+FACE_COLS = ("卡片面", "代码面", "两面")
 
-    缺 (c) 这一栏，`合计 331 处` 就会被读成「**331 处引文失真**」——**超额声明**：
-    里面混着两类完全不同的东西（引文的问题 / 引号的问题），还有一类没判。
+
+def _face_names(f):
+    """列名 → 它认的**全部**拼法（唯一一处别名声明）。"""
+    return FACE_ALIAS_2 if f == FACE_COLS[2] else (f,)
+
+
+def speak_key(q):
+    """旁档的联结键：`sha1(原始引文 utf-8).hexdigest()[:16]`。
+
+    ★ 规格**不是我猜的**：@iris-64a1 给了两条算例，我当场反算、**逐位相同**
+      （`查不出来不算通过` ⇒ `3e63a74d7d8a76644becabba5bf85b9526347da8`）。
+      **无 strip、无 norm、无换行替换** —— 任何"顺手清一下"都会让 285 行全部联不上，
+      而那时候报出来的脸长得就像"旁档写错了"（旁档 :29 记的正是这一类：**联不上不报错，
+      它长得就像「它没有」**）。
+    ★ 全长算、**截断在读入侧**：旁档哪天改成 40 位，只动这一处，不动"算法"。
+    """
+    return hashlib.sha1(q.encode("utf-8")).hexdigest()[:16]
+
+
+def _speak_class_of(v):
+    """旁档 `判词` 的值 → 声明里的类名（`None` = **没声明**）。
+
+    ★ 值可以带一个括号注解（实测：`配对伪影（对象完好·键含源码语法）` /
+      `自陈整理版（上一行写明非逐字·意思忠实）`）—— 那是**同一个类名 + 注解**，不是两个类
+      ⇒ 认法：**恰好等于类名**，或**以 `类名（` 开头且以 `）` 结尾**。
+    ★ 不许用裸前缀认（`v.startswith(name)`）：那会让 `省略` 吃掉 `省略xx` 这种**另一个
+      没声明的值**，而"没声明的值必须报错"正是这一格的判据（`SPEAK_CLASSES` 顶上写着）。
+    """
+    for name in SPEAK_DECLARED:
+        if v == name:
+            return name
+        if name and v.startswith(name + "（") and v.endswith("）"):
+            return name
+    return None
+
+
+def _speak_gloss(v, name):
+    """注解那一截（`配对伪影（…）` → `…`）—— **照印**。
+
+    ★ 旁档 :37 自己写了理由：那半句不能省 —— 名字若只写「配对伪影」，下一个人会读成
+      "这 13 个地点没有引文" = **静默少报**。⇒ 注解不是装饰，是那半句的落点。
+    """
+    if name and v != name and v.startswith(name + "（") and v.endswith("）"):
+        return v[len(name) + 1:-1]
+    return ""
+
+
+def _per_quote(sites):
+    """引文 → 它出现在哪几格（**条的层面**）。
+
+    ★ 只写这一份：分母（`条`）、面、旁档的覆盖数**全从它派生**。另抄一份 = 手写的第二处声明，
+      而"两份手写声明会漂"这一课今晚已经上过（`COUNT_AXES` 那一段）。
+    """
+    per = {}
+    for cell, q in sites:
+        per.setdefault(q, set()).add(cell)
+    return per
+
+
+def _face_of(per):
+    """条 → 面（`卡片面` / `代码面` / `两面`）。★ 面是**算出来的**，不是常量。
+
+    ★ 撤回记录（@nova-8980 的反例，我照抄坐标）：我原来在这里印过一句
+      「(a)/(b) 的**定义域 = 卡片面**」—— **错的**：`core/segment.py:8` 是 core/（代码面），
+      而那个文件自己的 `:5` 写着「核心（第 67 课原文）：」⇒ 判词**合法地落在代码面**。
+      ⇒ 「面」是**统计量**（这处引文出现在哪些格），不是"有没有定义"的判据；
+        拿它当判据 = 拿统计量当判据（今晚第三次）。**器里没有、也不许有「定义域」这道门。**
+    """
+    out = {}
+    for q, cs in per.items():
+        card = bool(cs & set(FACE_CELLS[0][1]))
+        code = bool(cs & set(FACE_CELLS[1][1]))
+        out[q] = "两面" if (card and code) else ("卡片面" if card else "代码面")
+    return out
+
+
+def load_speaker(path, sites):
+    """读旁档 → `(rec, err)`；`err = (脸, 说明行…)` ⇒ 调用方拒绝出数（exit=11）。
+
+    ★ 列**按表头里的名字取，不按位置取**：按位置取，旁档里加一栏就会**静默错读一整列**，
+      而屏幕上印出来的数还是对的（@iris-64a1 15:2x 就当场加过一行 `# columns`）。
+    ★ 判据是**单向**的：旁档 → 器，**每一行都必须联上器数出来的一条**（悬空的判词是错，
+      不是"未判"）；器 → 旁档**不要求**（没判到的进「未判」/「空」）。
+      ⇒ 反向那道门会当场拒掉合法数据（@iris-64a1 的旁档判满 285 条，而器数出来是 331 处）。
+    """
+    keys = set(speak_key(q) for q in set(q for _c, q in sites))
+    try:
+        rawb = open(path, "rb").read()
+    except OSError as e:
+        return None, ("读不到", ["旁档读不出来：%s" % e,
+                                "★ 「没给 --speaker」与「给了个读不到的」是**两件事**，这是第二件。"])
+    try:
+        txt = rawb.decode("utf-8")
+    except UnicodeDecodeError as e:
+        return None, ("读不到", ["旁档不是 UTF-8：%s" % e,
+                                "★ 字节解不开 ⇒ 后面每一格都无从谈起，不猜编码。"])
+    lines = txt.split("\n")
+
+    hdr_i = next((i for i, l in enumerate(lines) if l.startswith(SPEAK_HDR)), None)
+    if hdr_i is None:
+        why = ["旁档里**没有一行**以 `%s` 开头 ⇒ 列名拿不到，**拒绝按位置猜**。" % SPEAK_HDR,
+               "★ 按位置取列 = 旁档加一栏就静默错读一整列，而屏幕上数还是对的。"]
+        bad = [l for l in lines[:80] if "<TAB>" in l]
+        if bad:
+            why.append("★ 且我**看见了元凶**：第 %d 行里有**字面** `<TAB>`（四个字符，不是制表符）。"
+                       "「人读那一行」与「机器读那一行」长得很像，读入侧**不替作者猜**："
+                       % (lines.index(bad[0]) + 1))
+            for l in bad[:3]:
+                why.append("      %s" % l[:100])
+        return None, ("表头", why)
+    cells = lines[hdr_i].split("\t")
+    if cells and cells[0].strip() == SPEAK_HDR:
+        cells = cells[1:]
+    elif cells:
+        cells[0] = cells[0].strip()[len(SPEAK_HDR):].strip()
+    names = [c.strip() for c in cells]
+    miss = [n for n in SPEAK_NEED if n not in names]
+    if miss:
+        return None, ("表头", ["旁档表头缺**必需**的列名：%s" % "、".join(miss),
+                              "表头给的是：%s" % names,
+                              "★ 必需的两栏：`%s`（联结键，对**原始串**算）与 `%s`（判词）。"
+                              % SPEAK_NEED])
+
+    rows, bad_w = [], []
+    for i, l in enumerate(lines, 1):
+        if not l.strip() or l.startswith("#"):
+            continue
+        f = l.split("\t")
+        if len(f) != len(names):
+            bad_w.append((i, len(f)))
+            continue
+        rows.append(dict(zip(names, f)))
+    if bad_w:
+        return None, ("栏数不齐", ["旁档第 %s 行的栏数与表头不符（表头说 %d 栏）：%s"
+                                 % ("、".join(str(i) for i, _n in bad_w[:6]), len(names),
+                                    "、".join("%d 行有 %d 栏" % (i, n) for i, n in bad_w[:6])),
+                                "★ 半对半错的旁档最危险：**读得下去**、数看着正常。"])
+    if not rows:
+        return None, ("空表", ["旁档有表头、**0 行数据** ⇒ 拒绝把它当「已判」。",
+                              "★ 「没给旁档」与「给了个空的旁档」共用一张脸，正是这一格要治的病。"])
+
+    dup = sorted(k for k, n in collections.Counter(r["key_sha1"] for r in rows).items() if n > 1)
+    if dup:
+        return None, ("重复键", ["同一个 `key_sha1` 出现多次：%s（共 %d 个键）"
+                               % ("、".join(d[:16] for d in dup[:5]), len(dup)),
+                               "★ **不取「最后一行赢」**：一条引文两个判词是一件要人裁的事，"
+                               "不是一次静默覆盖（@iris-64a1 今晚就栽过一次「把末行的列当首行的」）。"])
+
+    bad_v = []
+    for r in rows:
+        if _speak_class_of(r["判词"]) is None and r["判词"] not in bad_v:
+            bad_v.append(r["判词"])
+    if bad_v:
+        return None, ("未声明的值", ["旁档 `判词` 里有**没在声明里**的值：%s"
+                                   % "、".join(repr(v) for v in bad_v[:5]),
+                                   "声明的是：%s"
+                                   % "、".join(repr(x) if x else "（空串=没判过）" for x in SPEAK_DECLARED),
+                                   "★ 不许「忽略」、也不许折成「未判」—— 枚举写死在读入侧，"
+                                   "**不从数据里学**（从数据学 = 静默剪掉还没出现过的值）。"])
+
+    dangling = [r for r in rows if r["key_sha1"] not in keys]
+    if dangling:
+        why = ["旁档有 %d 行**联不上器数出来的任何一条** ⇒ 拒绝出数（悬空的判词是错，不是「未判」）。"
+               % len(dangling),
+               "★ 单向不变量：旁档 → 器 **每一行**都必须联上；器 → 旁档 **不要求**。"]
+        for r in dangling[:5]:
+            why.append("      key_sha1 %s · 引文前20字 %s"
+                       % (r["key_sha1"][:16], (r.get("引文") or "")[:20]))
+        if len(dangling) > 5:
+            why.append("      …还有 %d 行" % (len(dangling) - 5))
+        why.append("★ 最常见的成因**不是**「旁档写错了」，是**两边口径不同**（换了旗标/换了对象/"
+                   "键算错了）⇒ 这一格**先核坐标**（下面印的对象/分母），再怀疑内容。")
+        return None, ("悬空", why)
+
+    verdict = {}
+    for r in rows:
+        verdict[r["key_sha1"]] = _speak_class_of(r["判词"])
+    sem = "\n".join("%s\t%s" % (r["key_sha1"], r["判词"])
+                    for r in sorted(rows, key=lambda r: r["key_sha1"]))
+    decl_tree = decl_denom = None
+    for l in lines:
+        if not l.startswith("#"):
+            continue
+        m = re.match(r"#\s*tree\s+([0-9a-f]{40})\s*$", l.strip())
+        if m and decl_tree is None:
+            decl_tree = m.group(1)
+        m = re.search(r"分母[：:]\s*(\d+)\s*处\s*/\s*(\d+)\s*条", l)
+        if m and decl_denom is None:
+            decl_denom = (int(m.group(1)), int(m.group(2)))
+    return {"path": path, "names": names, "rows": rows, "verdict": verdict,
+            # ★ 两把指纹，**只有一把是门**（@nova-8980 15:3x 合成的仓规：
+            #   凡当门用的指纹，必须指名它的定义域）：
+            #   语义指纹（门）= 对**排序后的 `(key_sha1, 判词)` 对**算 ⇒ 加注释栏、调列序都不动
+            #   字节 sha（对角）= 加一栏就会变，只能答"我读的是不是同一份文件"
+            "fp_sem": hashlib.sha256(sem.encode("utf-8")).hexdigest()[:16],
+            "sha_bytes": hashlib.sha256(rawb).hexdigest()[:16], "nbytes": len(rawb),
+            "gloss": sorted(set(_speak_gloss(r["判词"], verdict[r["key_sha1"]])
+                                for r in rows) - {""}),
+            "decl_tree": decl_tree, "decl_denom": decl_denom,
+            "uncovered": sorted(k for k in keys if k not in verdict)}, None
+
+
+def _cut(t, w):
+    """按**显示宽度**截断（`_pad` 的孪生：一个补、一个切，都按 CJK 算 2 列）。"""
+    out, d = "", 0
+    for c in t:
+        d += 2 if ord(c) > 0x2E80 else 1
+        if d > w:
+            return out + "…"
+        out += c
+    return out
+
+
+def speaker_axis(sites, tot, a, sp=None):
+    """说话人轴：**双轴**（类别 × 面），**恒印**。
+
+    缺「未判」这一栏，`合计 331 处` 就会被读成「**331 处引文失真**」—— **超额声明**。
 
     ★ 分母两把尺，**各带口径**（@nova-8980 裁定 + @iris-64a1 量）：
-        处 = **不去重**（每次出现各算一次）⇒ 归类是**划分** ⇒ `a+b+c` 可以对到合计（331）
+        处 = **不去重**（每次出现各算一次）⇒ 归类是**划分** ⇒ 各类可以对到合计（331）
         条 = **必须全局去重**（raw 钥匙 = 285）⇒ 302 是 **Σ逐格去重**，同一句横跨两格各记一次
              ⇒ 拿 302 拆栏，**每一栏都虚高，而总数看起来还是对的**（最难发现的那种错）
       ⇒ 判据（@nova-8980）：一个数能不能被归类拆分，看它的**去重范围**是否 ⊇ 归类范围。
 
-    ★ 本函数现在只印**机械的那一半**（人还没给判词 ⇒ 全落 (c)）：
-        (a)/(b) 印 `—`（**没给**），**不许印 0** —— 与 `--expect-*` 那三态同一课。
+    ★★ @nova-8980 15:0x 的**双轴**裁决：`面` 是**分母的一部分，不是注释**
+      ⇒ 主数字**分行印两面**（三列：卡片面 / 代码面 / 两面），不许只印一个合计再附一行面表。
+      ★ 三列而不是两列：`两面` 折进任一面都是把一个「跨」写成一个「是」。
+
+    ★ 旁档未给 ⇒ **每一类都印 `—`**（**没给**），**不许印 0** —— 与 `--expect-*` 那三态同一课。
+      给了 ⇒ 数字从旁档来；旁档没覆盖到的条落「**（空）=没判过**」，
+      旁档自己标 `未判` 的落「未判 = 判过·判不了」—— **两个态分行印，不许合并**。
     """
-    per = {}                       # 引文 → 它出现在哪几格（条的层面）
-    for cell, q in sites:
-        per.setdefault(q, set()).add(cell)
+    per = _per_quote(sites)
     raw = list(per)
     nrm = len(set(V.norm(q) for q in raw))
-    face_of = {}
-    for q, cs in per.items():
-        card = bool(cs & set(FACE_CELLS[0][1]))
-        code = bool(cs & set(FACE_CELLS[1][1]))
-        face_of[q] = "两面" if (card and code) else ("卡片面" if card else "代码面")
-    print("说话人轴（各类 + 未判**恒印** —— 缺「未判」这一栏，「合计 %d 处」就会被读成"
+    face_of = _face_of(per)
+    occ_of = collections.Counter(q for _c, q in sites)
+    have = sp is not None
+    cls_of = {}
+    if have:
+        for q in raw:
+            # ★ 旁档没覆盖到的条 → **空**（没判过），不是 `未判`（判过·判不了）：两个态不许合并。
+            cls_of[q] = sp["verdict"].get(speak_key(q), SPEAK_EMPTY)
+
+    def counts(clsname):
+        qs = [q for q in raw if cls_of.get(q) == clsname]
+        return (sum(occ_of[q] for q in qs), len(qs),
+                dict((f, (sum(occ_of[q] for q in qs if face_of[q] in _face_names(f)),
+                          sum(1 for q in qs if face_of[q] in _face_names(f)))) for f in FACE_COLS))
+
+    print("说话人轴（**双轴**：类别 × 面 · 恒印 —— 缺「未判」这一栏，「合计 %d 处」就会被读成"
           "「%d 处引文失真」）" % (tot[0], tot[0]))
     print("   分母：**处** = %d（不去重：每次出现各算一次）· **条** = 全局去重（raw 钥匙）= %d"
           "（norm 钥匙 = %d）" % (tot[0], len(raw), nrm))
     print("         ★ 不是 %d：那是 **Σ逐格去重**（同一句横跨两格各记 1）⇒ **只能说「处」**；"
           "条那一列必须走全局去重" % tot[1])
-    for name, why in SPEAK_CLASSES:
-        print("   %s%s   —   ★ 旁档未给 ⇒ **没给**，不是 0" % (_pad(name, 10), _pad(why, 44)))
-    print("   %s%s%4d 处 / %4d 条   ←「拆不出说话人」这句话**只有人能撤销**；器不替人填"
-          % (_pad("未判", 10), _pad("判过·判不了", 56), tot[0], len(raw)))
-    print("   等式核（各类 + 未判 = 合计）：**没核** —— 旁档未给 ⇒ 只有「未判」有值，"
-          "这条等式**现在不可能失败**")
-    print("         （「一条不可能失败的门不是门」：等旁档进来它才成为一条真判据。）")
-    segs = []
-    for name, cells in FACE_CELLS:
-        qs = [q for q in raw if face_of[q] == name]
-        occ = sum(1 for _c, q in sites if face_of[q] == name)
-        segs.append("%s %4d 处 / %4d 条" % (name, occ, len(qs)))
-    qs = [q for q in raw if face_of[q] == "两面"]
-    segs.append("两面 %4d 处 / %4d 条" % (
-        sum(1 for _c, q in sites if face_of[q] == "两面"), len(qs)))
-    card_occ = sum(1 for _c, q in sites if face_of[q] == "卡片面")
-    print("   面（引文**出现在哪几格** · 只看落点）：%s" % " · ".join(segs))
-    print("   ★ (a)/(b) 的**定义域 = 卡片面**：本对象 **%d 处**（%d 处**不在定义域里**）"
-          % (card_occ, tot[0] - card_occ))
-    print("         ⇒ 「331 处里有多少引文失真」这句话**问错了**：另外 %d 处的「」"
-          "本来就不是在引谁（判据在引号外面那几行，对它们**不成立**）" % (tot[0] - card_occ))
-    print("         ★ 「两面」单列：折进任一面都是把一个「跨」写成一个「是」")
+    if not have:
+        print("   旁档   ★ **没给**（没写 --speaker）—— 「没给」不是「给了个 0」：下面是 `—`。")
+    else:
+        print("   旁档   %s · %d 行 · 覆盖 %d/%d 条 · 语义指纹 sha256:%s（%s）"
+              % (sp["path"], len(sp["rows"]), len(raw) - len(sp["uncovered"]), len(raw),
+                 sp["fp_sem"],
+                 "已核：== --expect-speaker" if a.expect_speaker else "★ **没核**：没给 --expect-speaker"))
+        print("          文件 sha256:%s（%d 字节）—— ★ **仅供对角**（同名文件改前/改后），"
+              "**门没装在这把尺上**：加一栏、调列序都会让它变，而判词一个没改"
+              % (sp["sha_bytes"], sp["nbytes"]))
+        print("          ★ 单向不变量：旁档 → 器 **每行都要联上**（悬空 %d 行）·"
+              " 器 → 旁档 **不要求**（未判/空照实印）" % 0)
+        if sp["gloss"]:
+            for g in sp["gloss"]:
+                print("          ★ 旁档那条判词的**后半截**（不许丢）：%s" % _cut(g, 90))
+    print("   类别 × 面（**处/条**；@nova-8980：面轴是**分母**，不是注释）")
+    print("      %s%s%s%s%s"
+          % (_pad("类别", 14) + _pad("（说明）", 34),
+             _pad("卡片面", 11), _pad("代码面", 11), _pad("两面", 11), "合计"))
+    unk = sum(1 for q in raw if cls_of.get(q) is None) if have else 0
+    tot_occ = tot_q = 0
+    # ★ 三格：**印出来的名字**（`（空）`）/ **说明** / **类键**（`""`）——
+    #   第一版把「印的名字」当类键用，于是 `counts("（空）")` 永远数不到 `""`
+    #   ⇒ 未覆盖的条**哪儿都没落**、那一行恒印 0/0，而等式印「不成立（器自己坏了）」。
+    #   ★ 这恰好是这一格要治的病在器自己身上复发：「**没判过**」被写成 0，
+    #     而 0 与「没给」共用一张脸。**是 ⑤ 正臂把它抓出来的**（喂红之前，先喂了一次绿）。
+    lines_out = [(k, w, k) for k, w in SPEAK_CLASSES] + [("未判", "判过·判不了", "未判"),
+                                                        (SPEAK_EMPTY_LABEL,
+                                                         "没判过（旁档里是空串）", SPEAK_EMPTY)]
+    for name, why, key in lines_out:
+        if not have:
+            cells = ["—" for _f in FACE_COLS]
+            print("      %s%s%s%s%s%s"
+                  % (_pad(name, 14), _pad(_cut(why, 32), 34),
+                     _pad("—", 11), _pad("—", 11), _pad("—", 11), "—"))
+            continue
+        o, n, pf = counts(key)
+        tot_occ += o
+        tot_q += n
+        cells = ["%d/%d" % pf[f] for f in FACE_COLS]
+        print("      %s%s%s%s%s%d/%d"
+              % (_pad(name, 14), _pad(_cut(why, 32), 34),
+                 _pad(cells[0], 11), _pad(cells[1], 11), _pad(cells[2], 11), o, n))
+    if have:
+        pf = dict((f, (sum(occ_of[q] for q in raw if face_of[q] in _face_names(f)),
+                       sum(1 for q in raw if face_of[q] in _face_names(f)))) for f in FACE_COLS)
+        print("      %s%s%s%s%s%d/%d"
+              % (_pad("合计", 14), _pad("", 34), _pad("%d/%d" % pf[FACE_COLS[0]], 11),
+                 _pad("%d/%d" % pf[FACE_COLS[1]], 11), _pad("%d/%d" % pf[FACE_COLS[2]], 11),
+                 tot[0], len(raw)))
+        # ★ 等式**现在能核了**，但要说清它是**恒等式**：联结完整 + 值域闭合 ⇒ 它必然成立。
+        #   真判据在**联结那一侧**（悬空/值域/表头/重复键），那几格都喂过红（见 --selfcheck-gate ⑤）。
+        ok = (tot_occ == tot[0] and tot_q == len(raw))
+        # ★ 措辞里**不许再套一层 `**`**：原来写成 `"**%s**"` 而值本身带着 `**` ⇒
+        #   屏幕上成了 `****不成立（器自己坏了）****`，而 ⑤ 正臂那条正则当场就抽不到它
+        #   （「抽不到」与「不成立」共用一张脸 —— 又是同一课）。
+        print("   等式核（各类 + 未判 + 空 = 合计）：%d 处 / %d 条 = 合计 %d 处 / %d 条 ⇒ %s"
+              % (tot_occ, tot_q, tot[0], len(raw),
+                 "成立" if ok else "**不成立（器自己坏了）**"))
+        print("         ★ 但它是**恒等式**（联结完整时必然成立）⇒ **它不是门**。"
+              "门在联结那一侧，各喂过一次红。")
+    else:
+        print("   等式核（各类 + 未判 + 空 = 合计）：**没核** —— 旁档未给 ⇒ 每一类都是 `—`，"
+              "这条等式**现在不可能失败**")
+        print("         （「一条不可能失败的门不是门」：等旁档进来它才成为一条真判据。）")
+    print("   面（引文**出现在哪几格** · 只看落点）：%s"
+          % " · ".join("%s %4d 处 / %4d 条"
+                       % (f, sum(1 for _c, q in sites if face_of[q] in _face_names(f)),
+                          sum(1 for q in raw if face_of[q] in _face_names(f)))
+                       for f in FACE_COLS))
+    if have and "面" in sp["names"]:
+        # ★ 两条**独立**的路算「面」（旁档自陈 vs 器的 `_sites()`）⇒ 逐条比，能失败。
+        #   名字不同不算不同（旁档写 `混合`，器写 `两面`）—— 别名对齐在读入侧。
+        dis = [r for r in sp["rows"]
+               if r["面"] not in _face_names(face_of.get(_q_by_key(sites, r["key_sha1"]), ""))]
+        print("   面（旁档自陈 vs 器算，逐条比）：一致 %d/%d%s"
+              % (len(sp["rows"]) - len(dis), len(sp["rows"]),
+                 "" if not dis else " · **不一致 %d**（前 3：%s）"
+                 % (len(dis), "、".join("%s→%s" % (r["key_sha1"][:8], r["面"]) for r in dis[:3]))))
     assert len(raw) == sum(1 for q in raw if face_of[q]), "面分类漏项"
-    assert sum(len([q for q in raw if face_of[q] == n]) for n, _c in FACE_CELLS) \
-        + len(qs) == len(raw), "面分类不划分"
+    assert sum(len([q for q in raw if face_of[q] in _face_names(f)]) for f in FACE_COLS) \
+        == len(raw), "面分类不划分"
+    if have:
+        assert unk == 0, "有条没落到任何一类（读入侧漏了态）"
+
+
+def _q_by_key(sites, k):
+    """联结键 → 引文原文（由 sites 现算，**不另存一份**）。"""
+    for _c, q in sites:
+        if speak_key(q) == k:
+            return q
+    return None
 
 
 def which(sha):
@@ -516,7 +871,24 @@ def judge_id():
 COUNT_AXES = ("min_len", "face", "dedup", "v1ref", "unit", "ladder")
 # ★ 不进分母的旗标也**必须逐个点名** —— 否则自查红不了：登记不全与登记错长得一样，而能红的
 #   只有"没登记"那一半（`axis_audit` 的 docstring 写清了它**不**管什么，别把边界当覆盖）。
-OTHER_AXES = ("tree", "expect_corpus", "expect_judge", "expect_tree", "expect_flags")
+OTHER_AXES = ("tree", "expect_corpus", "expect_judge", "expect_tree", "expect_flags",
+              "speaker", "expect_speaker")
+# ★ **探针豁免**：② 那格会给每个 `OTHER_AXES` 项塞一个"不影响数"的探针值，再要求
+#   `合计` 逐位不动。以下两项**不能被那样测**，理由各异，所以**按 dest 点名豁免**：
+#     · `tree`    （--commit）换对象 = 换一次测量，不是旋钮（原来的豁免，见 ② 的 docstring）
+#     · `speaker` （--speaker）**同一族**：换一份旁档 = 换一次测量。它连"换个值数该不该动"
+#       都问不出来 —— 探针值（另一个不存在的路径）会让器 exit=11 **不出数**，
+#       而 ② 判的正是"出数且合计不动" ⇒ 拿它当探针只会得一个假红。
+#   ★ 不许把它们塞进"不许动"那一堆：混进去 = 自测自己调自己，与 `MODE_AXES` 同一类错。
+#   ★ 值是**理由**（不是 `True`）：豁免必须在屏幕上说出自己为什么被豁免 ——
+#     一个不说理由的豁免，下一个人分不出"它不该测"和"我忘了测"。
+PROBE_EXEMPT = {
+    "tree": "换对象 = 换一次测量，不是旋钮",
+    "speaker": "换旁档 = 换一次测量；探针值只会让器 exit=11 **不出数**，"
+               "而这格判的正是「出数且合计不动」⇒ 拿它当探针只会得一个假红",
+    "expect_speaker": "它的『正确值』**就是旁档的指纹**，而基线那条命令压根没有旁档 "
+                      "⇒ 挑不出探针值。它的门在 ⑤ 里**单独喂**（红7 指纹），不在这儿重复一遍",
+}
 # ★ **模式开关**：它既不进数、也不是"换一档看数动没动"的旋钮（它连量都不量）——
 #   所以**单独点名**，不许塞进 `OTHER_AXES`：自测会拿 `OTHER_AXES` 逐项当"探针"跑一遍，
 #   混进去 ⇒ 自测自己调自己（`--selfcheck-gate` 递归）。这与对象轴 `--commit` 是**同一类豁免**：
@@ -526,7 +898,8 @@ AXIS_FLAG = {"min_len": "--min-len", "face": "--face", "dedup": "--dedup",
              "v1ref": "--v1ref", "unit": "--unit", "ladder": "--ladder",
              "tree": "--commit", "expect_corpus": "--expect-corpus",
              "expect_judge": "--expect-judge", "expect_tree": "--expect-tree",
-             "expect_flags": "--expect-flags", "selfcheck_gate": "--selfcheck-gate"}
+             "expect_flags": "--expect-flags", "selfcheck_gate": "--selfcheck-gate",
+             "speaker": "--speaker", "expect_speaker": "--expect-speaker"}
 
 
 def axis_audit(ap):
@@ -635,6 +1008,19 @@ def build_parser():
     ap.add_argument("--expect-flags", default=None, metavar="'<--名 值 …>'",
                     help="生效旗标串（解析后的值）逐字对不上就 exit=8。"
                          "不给 ⇒ 那一格自报「★ 没核」。★ 它含空格，**要用引号**。")
+    # ★★ 旁档（说话人判词）—— 第四个输入，**不是**计数轴：它不改数，它**归类**数。
+    #   换一份旁档 = 换一次测量（同 `--commit`），所以进 `OTHER_AXES` 并点名豁免探针。
+    ap.add_argument("--speaker", default=None, metavar="<tsv>",
+                    help="说话人旁档（TSV）。不变量：**每一行都必须联上器数出来的一条**"
+                         "（悬空的判词是错，不是「未判」）；没判到的条进「未判」。"
+                         "★ 联结键 = `sha1(引文原文 utf-8)` 前 16 位。")
+    #   ★ 指纹分两把，**只有一把是门**（@nova-8980 15:3x 合成的仓规：凡当门用的指纹，
+    #     必须指名它的定义域）：
+    #       语义指纹（门）  对**排序后的 `(key_sha1, 判词)` 对**算 ⇒ 加注释栏、调列序都不动
+    #       字节 sha（对角） `sha256(文件)` ⇒ **加一栏就会变**，只能用来对"我读的是不是同一份文件"
+    ap.add_argument("--expect-speaker", default=None, metavar="<语义指纹前16位>",
+                    help="旁档的**语义指纹**（`(key_sha1, 判词)` 对）对不上就 exit=11。"
+                         "不给 ⇒ 那行自报「★ 没核」。★ 不是文件 sha256 —— 见 `--speaker` 的注。")
     # ★ **离线自测**（`card-c9b12e05-1a0`）：不进正常跑法。
     #   它把**同一条命令行**再跑十几遍，每次只翻一格，看门/数按不按登记单说的那样动。
     #   要跑十几遍真扫（每次 ~1s）⇒ 别塞进常规验收，也别塞进 CI 的每次跑。
@@ -799,6 +1185,34 @@ def _verdict(diff, want_keys):
     return diff is not None and sorted(diff) == sorted(want_keys)
 
 
+def _run_out(argv):
+    """跑一遍、**连 stdout 一起还回来** —— 给"那一行**印了什么**"这类判据用。
+
+    ★ `_run_once` 只还数字与坐标行；而 ⑤ 那些门的判据里有一条是「等式核那一行必须印『成立』」，
+      拿不到 stdout 就只能核 rc ⇒ 又回到"只看动了没有"。
+    """
+    r = subprocess.run([sys.executable, __file__] + argv, capture_output=True, text=True)
+    return r.returncode, r.stdout
+
+
+def _probe_face(rc, tot, tot0, dif):
+    """② 那格的**病名** —— 抽成纯函数**只为一件事：让它能喂红**（见 `selfcheck_gate` ⑤e）。
+
+    ★ 原来的写法把病名和"没出数"混在一起判，于是 @nova-8980 15:4x 复现出一条**红对了、名字错了**
+      的判词：探针那一跑 **`tot is None`**（数根本没印出来），而打印走了 `tot != tot0`
+      ⇒ 印「数动了 ⇒ 登记错」。**登记本来是对的**，下一个读的人会去改登记。
+      ⇒ 「红对了」不等于「判对了」：病名指错方向时，红会**把人送到错的地方去**（比没红更坏）。
+    ★ 三种脸，三种修法（`_diff_text` 那条规矩的同一课）：**没出数** / 数动了 / 坐标动了。
+    """
+    if tot is None:
+        return "判不了：探针那一跑**没出数**（rc=%d）⇒ 这格**没测**" % rc
+    if tot != tot0:
+        return "数动了 ⇒ 登记错"
+    if dif is None:
+        return "判不了 ⇒ 先修抽行/探针（**没测**）"
+    return "坐标动了 ⇒ 这个探针不止碰一根轴"
+
+
 def _run_once(argv):
     """按同一条命令跑一遍**子进程** —— `(rc, 合计, 生效旗标行, 坐标行)`，没印出来的是 None。
 
@@ -920,11 +1334,12 @@ def selfcheck_gate(a, argv):
                  rc, want[d], tot or "**没有**", "✓" if ok else "✗ **门没响**"))
 
     print("\n② 登记错（门：非计数轴塞探针 ⇒ `合计` **逐位不动** 且 **坐标行逐字重述**）")
-    print("   ★ 点名豁免：`tree`（--commit）—— 换对象 = 换一次测量，不是旋钮")
+    for d in PROBE_EXEMPT:
+        print("   ★ 点名豁免 `%s`（%s）" % (d, PROBE_EXEMPT[d]))
     print("   ★ 坐标行 = 器自己印的 量法/对象/语料/判据 四行；**差哪一处都要点名**"
           "（只核「动了没有」的话，「动两根」和「动一根」同签名 —— @iris-64a1 抓的）")
     for d in OTHER_AXES:
-        if d == "tree":
+        if d in PROBE_EXEMPT:
             continue
         act = acts.get(d)
         v = good.get(d)
@@ -942,10 +1357,7 @@ def selfcheck_gate(a, argv):
         red += 0 if ok else 1
         print("   %-15s 探针=%s ⇒ rc=%d · 合计 %s（基线 %s）· 坐标 %s ⇒ %s"
               % (d, v[:20], rc, tot or "**没有**", tot0, _diff_text(dif),
-                 "✓" if ok else "✗ **%s**" % (
-                     "数动了 ⇒ 登记错" if tot != tot0
-                     else ("判不了 ⇒ 先修抽行/探针（**没测**）" if dif is None
-                           else "坐标动了 ⇒ 这个探针不止碰一根轴"))))
+                 "✓" if ok else "✗ **%s**" % _probe_face(rc, tot, tot0, dif)))
 
     print("\n③ 计数轴（门：印出的旗标行必须动 · 提示：数动没动**不判红**）")
     ax_moved = ax_same = 0
@@ -1029,6 +1441,112 @@ def selfcheck_gate(a, argv):
         print("   一次碰两根（%s）⇒ 坐标 %s ⇒ 按「只许差一处」判 ⇒ %s"
               % ("+".join("%s→%s" % (d, v) for d, v in pair), _diff_text(dif),
                  "**不通过**（判据会红，✓）" if refused else "**通过**（✗ 这条判据是 no-op！）"))
+
+    # ── ⑤ 旁档读入侧（`card-5fd27a3a-aab`）：**每条门各喂一次红** ───────────────────
+    #   ★ 为什么要有这一块：④ 那一课说得很清楚 ——「刚落这条修法的人，最容易在新那一层复犯旧病」。
+    #     读入侧一口气加了 7 张脸（悬空/表头/值域/重复键/空表/分母/对象），
+    #     若只印出来、不各喂一次红，那 7 张脸本身就成了**一批新的"不可能失败的门"**。
+    #   ★ 旁档从**器自己数出来的条**造（⇒ 联结按构造成立），再逐格改坏：
+    #     这样"正臂绿"与"红臂红"的**唯一差**就是那一处故意的改动，没有别的变量。
+    print("\n⑤ 旁档读入侧（门：正臂必须出数 · 每条门各喂一次红 ⇒ rc=11 **且脸要对**）")
+    ba = build_parser().parse_args(base)
+    bd = tree_dir(ba.tree)
+    try:
+        ba.corpus = V.Corpus(docs, V.norm) if ba.unit == "gone" else None
+        bsites = list(_sites(bd or V.ROOT, ba))
+    finally:
+        if bd:
+            shutil.rmtree(bd, ignore_errors=True)
+    bper = _per_quote(bsites)
+    bface = _face_of(bper)
+    bq = dict((speak_key(q), q) for q in bper)
+    bkeys = sorted(bq)[:3]
+
+    def _mk(path, rows, hdr=True, denom=None, tree=None):
+        """造一份旁档 —— ★ 它**不是**任何一次真读数，所以行里那几栏故意写「自测」。"""
+        L = ["# 自测造的旁档（不是任何一次真读数；对象/分母都由自测按需塞进去）"]
+        if tree:
+            L.append("# tree %s" % tree)
+        if denom:
+            L.append("# 分母：%d 处 / %d 条" % denom)
+        if hdr:
+            L.append("# columns\t" + "\t".join(
+                ["面", "引文", "判词", "坐标", "判据", "key_sha1"]))
+        for k, v in rows:
+            # ★ `bq.get`：红1 那一行**故意**是个联不上的键 ⇒ 显示栏只能空着
+            #   （第一版用 `bq[k]`，自测自己在造红那一行时先崩了 —— KeyError）。
+            q = bq.get(k, "")
+            L.append("\t".join([bface.get(q, "代码面"),
+                                _cut(q.replace("\n", "⏎").replace("\t", " "), 30),
+                                v, "自测", "自测", k]))
+        open(path, "w", encoding="utf-8").write("\n".join(L) + "\n")
+
+    spdir = tempfile.mkdtemp(prefix="speakself")
+    try:
+        good_rows = [(bkeys[0], "a"), (bkeys[1], "省略"), (bkeys[2], "b")]
+        pp = os.path.join(spdir, "ok.tsv")
+        _mk(pp, good_rows)
+        rec, err = load_speaker(pp, bsites)
+        if err is not None:
+            print("   %-14s ★ 自测自己造的旁档都读不进来（脸=%s）⇒ **没测**（记一笔）"
+                  % ("正臂", err[0]))
+            gates += 1
+            red += 1
+        else:
+            rc, out = _run_out(base + ["--speaker", pp, "--expect-speaker", rec["fp_sem"]])
+            # ★ 判据的两侧都**不许靠加粗**：原来写成 `⇒ **成立**`，另一面写成 `⇒ **不成立**`，
+            #   而"抽不到"与"不成立"共用一张脸 ⇒ 正臂那一格自己先假红。
+            #   ⇒ 正则里 `**` 当**可选**，判词按**字**取。
+            m = re.search(r"等式核（[^\n]*⇒ \*{0,2}(成立|不成立（器自己坏了）)", out)
+            ok = (rc == 0 and m is not None and m.group(1) == "成立")
+            gates += 1
+            red += 0 if ok else 1
+            print("   %-14s rc=%d · 等式核 %s ⇒ %s"
+                  % ("正臂（3 条全联上）", rc, (m.group(1) if m else "**没印出来**"),
+                     "✓" if ok else "✗ **旁档进来了却出不了数/等式不成立**"))
+            for lab, kw in (
+                    ("红1 悬空", dict(rows=[(bkeys[0], "a"),
+                                            (bkeys[1][:-1] + ("0" if bkeys[1][-1] != "0" else "1"), "省略")])),
+                    ("红2 表头", dict(rows=good_rows, hdr=False)),
+                    ("红3 未声明的值", dict(rows=[(bkeys[0], "c"), (bkeys[1], "省略")])),
+                    ("红4 重复键", dict(rows=[(bkeys[0], "a"), (bkeys[0], "b")])),
+                    ("红5 分母对不上", dict(rows=good_rows, denom=(1, 1))),
+                    ("红6 对象对不上", dict(rows=good_rows, tree="0" * 40))):
+                want = lab.split()[-1]
+                q = os.path.join(spdir, "r.tsv")
+                _mk(q, kw.pop("rows"), **kw)
+                rc, out = _run_out(base + ["--speaker", q])
+                got = re.search(r"脸 = (\S+)", out)
+                ok = (rc == 11 and got is not None and got.group(1) == want)
+                gates += 1
+                red += 0 if ok else 1
+                print("   %-14s rc=%d（要 11）· 脸 = %s（要 %s）⇒ %s"
+                      % (lab, rc, got.group(1) if got else "**没印**", want,
+                         "✓" if ok else "✗ **这扇门没响，或响错了名字**"))
+            # 红7 指纹：唯一一道**不在文件里**的门（`--expect-speaker` 比的是器算的语义指纹）
+            q = os.path.join(spdir, "f.tsv")
+            _mk(q, good_rows)
+            bad = rec["fp_sem"][:-1] + ("0" if rec["fp_sem"][-1] != "0" else "1")
+            rc, out = _run_out(base + ["--speaker", q, "--expect-speaker", bad])
+            got = re.search(r"脸 = (\S+)", out)
+            ok = (rc == 11 and got is not None and got.group(1) == "指纹")
+            gates += 1
+            red += 0 if ok else 1
+            print("   %-14s rc=%d（要 11）· 脸 = %s（要 指纹）⇒ %s"
+                  % ("红7 指纹", rc, got.group(1) if got else "**没印**", "✓" if ok else "✗ **没响**"))
+    finally:
+        shutil.rmtree(spdir, ignore_errors=True)
+
+    # ⑤e ★ 喂一口**"探针那一跑没出数"**（@nova-8980 15:4x 复现的那口）：
+    #   病名必须落在「**没出数**」上，**不许**落在「数动了 ⇒ 登记错」上 ——
+    #   后者会让下一个读的人去改**本来是对的**登记（红对了、判错了，比没红更坏）。
+    #   ★ 这里**不重跑子进程去凑**那个局面（那是寻绿）：直接拿已知输入喂纯函数。
+    f_totnone = _probe_face(6, None, "331/302", None)
+    ok = ("没出数" in f_totnone and "登记错" not in f_totnone)
+    gates += 1
+    red += 0 if ok else 1
+    print("   ⑤e           探针跑 rc=6 且 tot=None ⇒ 判词「%s」⇒ %s"
+          % (_cut(f_totnone, 46), "✓" if ok else "✗ **病名点回「登记错」了**"))
 
     print("\n★ 自测结论：门 %d 道，红了 %d 道 ⇒ %s"
           % (gates, red, "全响（exit=0）" if not red else "**有门没响（exit=10）**"))
@@ -1244,12 +1762,53 @@ def main():
         print()
         # ★ 落点**扫一次**：合计与说话人轴的分母出自同一份（漂了没人红 = 两份手写声明的病）
         sites = list(_sites(base, a))
+        # ★★ 旁档**读在印数之前**：读不成 ⇒ exit=11，**一个数都不许印出来**。
+        #   （放在 per-cell 表之后就成了「拒绝出数」的空话 —— 数已经印了。）
+        sp = None
+        if a.expect_speaker is not None and a.speaker is None:
+            print("★ `--expect-speaker` 给了、却没给 `--speaker` ⇒ **拒绝出数**（exit=11）。")
+            print("  这道门没有可比的对象 —— 「看起来验过」与「验过」的区别正是这一格。")
+            return 11
+        if a.speaker is not None:
+            sp, err = load_speaker(a.speaker, sites)
+            if err is not None:
+                print("★ 旁档这一格**拒绝出数**（exit=11）。脸 = %s" % err[0])
+                for w in err[1]:
+                    print("   %s" % w)
+                return 11
+            per_now = _per_quote(sites)
+            if sp["decl_tree"] and got_tree and sp["decl_tree"] != got_tree:
+                print("★ 旁档与本次跑的**对象**对不上 ⇒ **拒绝出数**（exit=11）。脸 = 对象对不上")
+                print("  旁档自己声明（`# tree` 那行）  %s" % sp["decl_tree"])
+                print("  本次跑解析出来的对象            %s" % got_tree)
+                print("  ★ 旁档的判词是**对某一棵树的某一处**作的判 —— 换树必须重判，"
+                      "拿旧树的判词配新树的处就是把两个对象当一个用。")
+                return 11
+            if a.expect_speaker is not None and sp["fp_sem"] != a.expect_speaker:
+                print("★ 旁档的**语义指纹**对不上 ⇒ **拒绝出数**（exit=11）。脸 = 指纹")
+                print("  期望 --expect-speaker %s" % a.expect_speaker)
+                print("  实际（对排序后的 `(key_sha1, 判词)` 对算）  %s" % sp["fp_sem"])
+                print("  ★ 门装在**语义指纹**上，不是文件 sha256：@iris-64a1 今天给旁档加了一行"
+                      "`# columns` 机器可读表头，**一个判词都没改**，文件 sha(65fc…→67072a40…) 就变了。")
+                print("    字节 sha 是「**文件长相**」的函数 —— 它只能答「我读的是不是同一份文件」"
+                      "（所以我在旁档那行把文件名跟它印在一起），**不能当门**。")
+                return 11
         rows, tot = tally(base, a, sites)
+        if sp is not None and sp["decl_denom"] and sp["decl_denom"] != (tot[0], len(_per_quote(sites))):
+            print("★ 旁档与本次跑的**分母**对不上 ⇒ **拒绝出数**（exit=11）。脸 = 分母对不上")
+            print("  旁档自己声明（`# 分母：` 那行）  %d 处 / %d 条" % sp["decl_denom"])
+            print("  本次跑现场算出来的            %d 处 / %d 条（全局去重 raw）"
+                  % (tot[0], len(_per_quote(sites))))
+            print("  ★ 这一格是「**同一份旁档配了另一套旗标**」的专用出口："
+                  "旁档那一行自己写着「当场算、当场印，非写死」⇒ 它是坐标，不是注释。")
+            print("    例：`--face literal` / 换 `--ladder` / 换 `--min-len` 都会挪分母，"
+                  "而旁档的行数**一行不变** —— 那时逐行联结照样全中，只有这一格拦得住。")
+            return 11
         for name, n, k in rows:
             print("  %-8s %4d 处 / %4d 条" % (name, n, k))
         print("  %-8s %4d 处 / %4d 条" % ("合计", tot[0], tot[1]))
         print()
-        speaker_axis(sites, tot, a)
+        speaker_axis(sites, tot, a, sp)
         print()
         # ★ 收尾行**不许并列两把梯子**（@atlas-791f 12:11 抓的）：
         #   原来这行印的是字面量 `← 卡面那四格是 331 / 302` ——
