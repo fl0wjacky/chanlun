@@ -287,6 +287,40 @@ except Exception as e:
     WARN_WORDING = -1
     print("[警告措辞] 跑不了：%s" % e)
     print("           自测没跑成 = 那句话的分寸没人验过 ⇒ 按「查不出来不算通过」计。")
+# ---- 版式体检：上面每一条判「数对不对」，这一条判「画出来的字有没有出框」 ----
+# 为什么要有这一条：`tools/cardfit.py` 是今晚全队所有版式结论的那把尺，而 selfcheck 里
+# **0 次**引用它 ⇒ **尺退化没有任何自动发现机制**（@atlas-791f 那条 verify_warn 是同一形状，
+# 区别只是那把尺至少会自己印一句「注入 0 支」）。手跑的数是真的，但手跑不能发现"尺坏了"。
+# 它不并进 FAIL（FAIL 是引擎不变量的数目），也不并进 FONT_GAPS（那是字体环境）——
+# 各给各的数，混成一个就说不清是谁的问题。
+print("=" * 72)
+LAYOUT = 0
+try:
+    import subprocess
+    # 跑的就是人平时跑的那条命令（子进程），不另抄一份调用序 —— 否则门和人玩的不是同一把尺。
+    _cf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cardfit.py")
+    _p = subprocess.run([sys.executable, _cf], capture_output=True, text=True)
+    _lines = ((_p.stdout or "") + (_p.stderr or "")).splitlines()
+    _font = [l for l in _lines if l.startswith("[版式体检]")]
+    _tot = [l for l in _lines if l.startswith("合计")]
+    _cov = [l for l in _lines if l.startswith("[分支覆盖]")]
+    if not _tot:
+        raise RuntimeError("尺没报出「合计」（rc=%d）" % _p.returncode)
+    LAYOUT = int(_tot[-1].split()[1])
+    if _font:
+        print(_font[0])
+    else:
+        # 这一行是**这个数读不读得懂**的前提：同一棵树 Droid 0 处 / Noto 13 处，
+        # 不带字体的「0 处」和「13 处」在纸面上分不出来（stock 尺就是这个状态）。
+        LAYOUT = -1
+        print("[版式] 尺没打字体那行 ⇒ 下面的数不可读，按「查不出来不算通过」计")
+    print("[版式] 卡片文字越界/出框：%d 处（应为 0）" % LAYOUT if LAYOUT >= 0
+          else "[版式] 卡片文字越界/出框：查不了")
+    if _cov:
+        print("       %s" % _cov[0])
+except Exception as e:
+    LAYOUT = -1
+    print("[版式] 跑不了：%s" % e)
 
 print("=" * 72)
 print("总违规数:", FAIL, "→", "引擎检查全部通过" if FAIL == 0 else "有问题，需排查")
@@ -305,9 +339,20 @@ if WARN_WORDING:
 # 退出码只说"有东西不对"，不说"是谁不对"：三个数混在一个非 0 里，读的人猜不出来。
 # 这是 @iris-64a1 指出的洞 —— 在字体门本来就会红的机器上，干净跑和变异跑都是 exit=1，
 # 光看退出码**隔离不出** SKIP 有没有生效。打这一行：每个非 0 退出自己说出原因。
-print("退出原因: 总违规=%d  未执行=%d  判据前提=%s  警告措辞=%s  字体缺字=%s  ⇒ exit=%d"
+if LAYOUT < 0:
+    print("版式体检: 查不了（不算通过） → 尺没跑起来，或它没说出自己是哪支字体量的 ⇒ 本格没有可读的数")
+elif LAYOUT:
+    print("版式体检: %d 处文字越界/出框 → 那几处是卡片版式问题（上面那行写了是哪支字体量出来的）" % LAYOUT)
+# 退出码只说"有东西不对"，不说"是谁不对"：几个数混在一个非 0 里，读的人猜不出来。
+# 这是 @iris-64a1 指出的洞 —— 在字体门本来就会红的机器上，干净跑和变异跑都是 exit=1，
+# 光看退出码**隔离不出** SKIP 有没有生效。打这一行：每个非 0 退出自己说出原因。
+# 退出码只说"有东西不对"，不说"是谁不对"：几个数混在一个非 0 里，读的人猜不出来。
+# 这是 @iris-64a1 指出的洞 —— 在字体门本来就会红的机器上，干净跑和变异跑都是 exit=1，
+# 光看退出码**隔离不出** SKIP 有没有生效。打这一行：每个非 0 退出自己说出原因。
+print("退出原因: 总违规=%d  未执行=%d  判据前提=%s  警告措辞=%s  字体缺字=%s  版式=%s  ⇒ exit=%d"
       % (FAIL, SKIP, "跑不了" if PREMISE < 0 else ("不过" if PREMISE else "OK"),
          "跑不了" if WARN_WORDING < 0 else ("不过" if WARN_WORDING else "OK"),
          "查不了" if FONT_GAPS < 0 else FONT_GAPS,
-         1 if (FAIL or FONT_GAPS or SKIP or PREMISE or WARN_WORDING) else 0))
-sys.exit(1 if (FAIL or FONT_GAPS or SKIP or PREMISE or WARN_WORDING) else 0)
+         "查不了" if LAYOUT < 0 else LAYOUT,
+         1 if (FAIL or FONT_GAPS or SKIP or PREMISE or WARN_WORDING or LAYOUT) else 0))
+sys.exit(1 if (FAIL or FONT_GAPS or SKIP or PREMISE or WARN_WORDING or LAYOUT) else 0)
