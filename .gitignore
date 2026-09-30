@@ -14,3 +14,9 @@ archive/oneoff/trim_paper_round*.py
 archive/debug_crops/
 # 生成物：卡片、全景图、PDF，都能用脚本重出
 out/
+# Claude Code 的本地会话文件
+.claude/
+# 早期脚本存错位置的旧产物（现在一律输出到 out/）
+/*.png
+/*.pdf
+cards/*.png
