@@ -41,6 +41,13 @@
                          ★ 不给它，那行会自报「★ 没核」—— 因为`print(fingerprint)` 只是
                            **印出来**，不是**核过**：换个 QL_CORPUS 指进来，器照样跑、
                            照样印一个 sha256、照样出一张表。**印了 sha256 ≠ 验过语料。**
+    --expect-tree <40位 tree sha>
+                         **对象**解析出来的树，对不上 ⇒ **exit=6、不出数**。
+                         ★ 上面两道门都钉在"你写了什么"上，这道钉在"你指的是哪棵树"上。
+                           实测那条刀（@nova-8980 12:5x）：`git tag 05f3e24 335e3a3` 之后，
+                           `--commit 05f3e24` **拼法一字不变**，解析出来的树从 `de39cdf7` 变成
+                           `45056e42`、数从 331/302 变成 400/360，而门照印「是」。
+                         ★ **名字是给人看的，树是给判据用的。**
     --expect-judge <sha256前16位>
                          **判据**（`verify_quotes.py`）的指纹，对不上 ⇒ **exit=5、不出数**。
                          ★ 门原来只核两个输入，但**读数由三个输入决定**：
@@ -86,9 +93,12 @@
   两头：**总数和表结构绑着，抄总数不抄表结构，就再也对不上。**
 
 退出：0 跑完 · 2 语料不在（**查不了 ≠ 通过**）· 3 语料指纹对不上（--expect-corpus）
-      · 4 没点对象（`--commit`/`--tree` 一个都没写）—— 见下面 `--commit` 那格
+      · 4 **参数不合格，器还没开始量**：没点对象（`--commit`/`--tree` 一个都没写）
+          见下面 `--commit` 那格；或某个 `--expect-*` 给的不是它该有的长度
+          （「参数写坏了」和「对不上」共用一句"红"就分不出是哪个 —— 先验形状）
       · 5 **判据**指纹对不上（--expect-judge）—— 数和 3 **分开出口**：3 与 5 都"拒绝出数"，
         但**原因不同**，而今天反复栽的就是"红是对的、原因是错的"那一格
+      · 6 **对象解析出来的树**对不上（--expect-tree）—— 名字一样 ≠ 对象一样
 
 ★★ 验收判据：**`grep -q '验收可用=是'`**（输出里那一行单值）。三个条件**必须写成"印了且 = 是"**：
 
@@ -288,11 +298,15 @@ def which(sha):
                 "         ⇒ 要跟别人比数，必须点一个对象：`--commit <sha>`"
                 % (V.ROOT, head, len(st), len(mod), len(unt)), False)
     kind = git("cat-file", "-t", sha)
-    if kind == "commit":
-        return ("commit %s → tree %s（临时树，跑完删）"
-                % (sha, git("rev-parse", sha + "^{tree}")), True)
-    if kind == "tree":
-        return ("tree %s（临时树，跑完删）" % sha, True)
+    # ★ 两格**合并写**（我跑自己的判据模板时抓到的）：原来 `tree` 那格只回显**传进来的拼法**，
+        #   传 `e8944076` 就印 `tree e8944076（…）` —— 40 位的树 sha **一次都不出现**。
+        #   指望"对象"那一行当身份的人（我那个模板就是）会**静默解析失败**，
+        #   而失败长得和"对象不对"一模一样：**红是对的、原因是错的**，今天栽过好几回的同一格。
+        #   ⇒ 统一印 `→ tree <40位>`：这一行的身份由**对象自己**说（`rev-parse`），不由传参的拼法说。
+        #     传短 sha、传长 sha、传 tree、传 commit，印出来的都是同一个 40 位。
+    if kind in ("commit", "tree"):
+        return ("%s %s → tree %s（临时树，跑完删）"
+                % (kind, sha, git("rev-parse", sha + "^{tree}")), True)
     return ("%s（认不出类型，git cat-file 说 %r）" % (sha, kind), False)
 
 
@@ -354,6 +368,11 @@ def main():
     ap.add_argument("--expect-judge", default="", metavar="<sha256前16位>",
                     help="判据 verify_quotes.py 的指纹对不上就 exit=5。"
                          "不给 ⇒ 那行会自报「★ 没核」。")
+    # ★ 第三个洞（@nova-8980 12:5x）：`git tag 05f3e24 335e3a3` ⇒ 拼法不变、对象换了、门照印「是」。
+    #   ⇒ 前三道门都钉在「你写了什么」上，这一道钉在「你指的是哪棵树」上。
+    ap.add_argument("--expect-tree", default="", metavar="<40位 tree sha>",
+                    help="对象解析出来的树 sha 对不上就 exit=6。"
+                         "不给 ⇒ 判据那格会说出「树没核」。")
     a = ap.parse_args()
 
     if a.tree is None:
@@ -365,6 +384,18 @@ def main():
         print()
         print("  ★ 不写也能跑 = 「抄错也出数」：粘贴时漏掉对象，和一次合法读数在屏幕上分不开。")
         return 4
+    # ★ **别让新的门复刻旧病**（@nova-8980 12:5x 的警告）：三个 `--expect-*` 都是"我手打一串数"，
+    #   打歪一位就**永远比不上** —— 而"常数写坏了"和"对象真的不对"会长成一个样（三态共用一个词，
+    #   今天栽过好几回的那格）。⇒ 先验**形状**，说清是哪一种，再谈比不比得上。
+    for flag, val, n, name in (("--expect-corpus", a.expect_corpus, 16, "sha256 前16位"),
+                               ("--expect-judge", a.expect_judge, 16, "sha256 前16位"),
+                               ("--expect-tree", a.expect_tree, 40, "40位 tree sha")):
+        if val and not re.fullmatch(r"[0-9a-f]{%d}" % n, val):
+            print("★ %s 给的**不是一个%s**（你给的是 %r，%d 个字符）⇒ **器还没开始量**（exit=4）。"
+                  % (flag, name, val, len(val)))
+            print("  ★ 这不是「对不上」，是**参数写坏了**：两件事共用一句'红'，就分不出是哪个了。")
+            print("  ★ 抄常数的时候，长度对不对是**唯一能当场自查**的那一格 —— 所以先查它。")
+            return 4
     docs = V.load()
     if docs is None:
         print("语料不在 ⇒ 什么都没查（exit=2）。先跑 tools/fetch_chanlun108.py")
@@ -380,6 +411,18 @@ def main():
               % (a.tree, a.unit, a.min_len, a.face, a.dedup, a.v1ref, a.ladder))
         obj_text, obj_is_obj = which(a.tree)
         print("对象   %s" % obj_text)
+        # ★★ 对象那一行里，**是身份的是 `→ tree <40位>`，不是前面那个名字**（@nova-8980 12:5x 的刀）：
+        #   `git tag 05f3e24 335e3a3` —— 之后的 `--commit 05f3e24` **拼法一字不变**，
+        #   解析出来的却是另一棵树，而门照印「是」。⇒ 名字是**给人看的**，树是**给判据用的**。
+        m = re.search(r"→ tree ([0-9a-f]{40})", obj_text)
+        got_tree = m.group(1) if m else ""
+        if a.expect_tree and got_tree != a.expect_tree:
+            print("★ 树对不上 ⇒ **拒绝出数**（exit=6）。名字一样**不等于**对象一样：")
+            print("  期望 --expect-tree %s" % a.expect_tree)
+            print("  实际（对象自己说的）  %s" % (got_tree or "没有树（就地跑）"))
+            print("  ★ 实测那条刀：`git tag 05f3e24 335e3a3` ⇒ 同一个拼法，树从 de39cdf7 变成"
+                  " 45056e42，数从 331/302 变成 400/360 —— 上一版门在这跑里印「是」。")
+            return 6
         fp, fbytes = V.fingerprint(docs)
         if a.expect_corpus and fp != a.expect_corpus:
             print("★ 语料指纹对不上 ⇒ **拒绝出数**（exit=3）。这一格是门，不是装饰：")
@@ -425,9 +468,10 @@ def main():
         #      它**能失败**：少给一个 --expect-corpus 就会翻成 否（下面的 else 会说出少了哪一条）。
         corpus_ok = bool(a.expect_corpus)   # 对不上在前面已 exit=3，走到这儿就是核过了
         judge_ok = bool(a.expect_judge)     # 对不上在前面已 exit=5，走到这儿就是核过了
-        if obj_is_obj and corpus_ok and judge_ok:
-            print("验收可用=是    （对象=%s · 语料 sha256:%s 已核 · 判据 sha256:%s 已核）"
-                  % (a.tree, fp, jsha))
+        tree_ok = bool(a.expect_tree)       # 对不上在前面已 exit=6，走到这儿就是核过了
+        if obj_is_obj and corpus_ok and judge_ok and tree_ok:
+            print("验收可用=是    （树=%s · 语料 sha256:%s 已核 · 判据 sha256:%s 已核）"
+                  % (got_tree, fp, jsha))
         else:
             why = []
             if not obj_is_obj:
@@ -438,6 +482,9 @@ def main():
             if not judge_ok:
                 why.append("没给 --expect-judge（**判据**只是印出来的，没核过 —— "
                            "而判据一换数就变，门原来在这两跑里都照印「是」）")
+            if not tree_ok:
+                why.append("没给 --expect-tree（**对象名**只是拼法，没核过它指的是哪棵树 —— "
+                           "`git tag 05f3e24 <别的提交>` 之后，拼法一模一样、数是另一棵树的）")
             print("验收可用=否    —— 不是「跑不动」（这跑是正当用法、exit 照常），"
                   "是**这张表不能当验收读数**：")
             for w in why:
