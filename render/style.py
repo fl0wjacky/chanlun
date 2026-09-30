@@ -80,6 +80,66 @@ def F(size):
     return ImageFont.truetype(FONT_PATH, size)
 
 
+# ---- 字体覆盖：字体文件在 ≠ 字体画得出这些字 ----
+#
+# config.py 只查 os.path.exists。字体能加载、能返回 ImageFont 句柄，但里面没有这个字形时，
+# PIL **不报错**，静默画一个 .notdef 方框——selfcheck 照样「总违规 0 → 全部通过」。
+# README 那句「STHeiti / 冬青黑缺 ✓ ✗ ₁₂₃（显示成方框）」说的就是这一格，只是没进代码。
+#
+# 判据不另走加载路径：**拿 F() 的句柄**，文件路径从句柄上读（.path），所以验的和画的是
+# 同一个对象、同一个文件——不存在「检查器读到另一个 ttf」的分叉。
+#
+# .notdef 的指纹用**位图字节**，不能用尺寸：DejaVu 下 .notdef 是 (14,21)，而位图尺寸同为
+# (14,21) 的真字形有 10 个（U+14A6、U+14AB…）。拿尺寸当指纹，这 10 个字会被误报成缺字
+# ——那就成了「对正确的活报错」。4764 个真字形里，字节指纹误判 0 个。
+_NOTDEF_PROBE = ""          # 私用区，任何正常字体都不该有它；再自检一道，见下
+
+
+def _cmap_codepoints(font_path):
+    """字体自己声明的 Unicode 码位。没装 fontTools 就返回 None（降级成只看渲染）。"""
+    try:
+        from fontTools.ttLib import TTFont
+    except ImportError:
+        return None
+    ft = TTFont(font_path, lazy=True)
+    out = set()
+    for t in ft["cmap"].tables:
+        if t.isUnicode():
+            out |= set(t.cmap.keys())
+    return out
+
+
+def glyph_gaps(text, font=None):
+    """text 里**画不出来**的字。
+
+    返回 (missing, conflict)，都按首次出现顺序去重：
+      missing  —— 会画成 .notdef 方框的字
+      conflict —— 两条判据结论不一致的字：cmap 说「有」而渲染是方框（或反之）。
+                  这种字体单看哪一条都不可信，单独报出来给人看，不并进 missing。
+
+    检测器先自检：拿已知存在的 'A' 试一次。若 'A' 也判成 .notdef，说明这套判据在这份字体上
+    失灵——**抛异常**，不返回「整串都缺」：一个对什么都说缺的检查，是另一种静默通过。
+    """
+    font = font if font is not None else F(24)
+    notdef = bytes(font.getmask(_NOTDEF_PROBE))
+    if bytes(font.getmask("A")) == notdef:
+        raise RuntimeError("字形检测器失灵：%s 里连 'A' 都被判成 .notdef，缺字结论不可信"
+                           % getattr(font, "path", "?"))
+    cmap = _cmap_codepoints(font.path) if getattr(font, "path", None) else None
+
+    missing, conflict = [], []
+    for ch in dict.fromkeys(text):            # 去重、保序
+        if ch.isspace() or ord(ch) < 0x20:
+            continue
+        by_render = bytes(font.getmask(ch)) == notdef
+        by_cmap = (cmap is not None) and (ord(ch) not in cmap)
+        if cmap is not None and by_render != by_cmap:
+            conflict.append(ch)
+        elif by_render:
+            missing.append(ch)
+    return missing, conflict
+
+
 def load_bars(path):
     """读 K 线 json。"""
     return json.load(open(path, encoding="utf-8"))

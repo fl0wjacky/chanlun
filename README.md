@@ -119,6 +119,9 @@ python3 tools/build_pdf.py                 # 概念卡合集 PDF（先跑上一�
 - **字体不同，字宽就不同**：macOS 默认用 Arial Unicode —— 中文和 ✓ ✗ ₁₂₃ 都有，字宽与黑体相差 <1%，
   但基线比黑体低约 4px。STHeiti / 冬青黑缺 ✓ ✗ ₁₂₃（显示成方框），只作后备。
   要与 Minis 沙箱逐像素一致，把 `DroidSansFallbackFull.ttf` 放进项目，用 `CHANLUN_FONT` 指过去。
+- **字体文件存在 ≠ 字体画得出这些字**：`config.py` 只查文件在不在；字体里没有这个字形时 PIL
+  静默画一个 `.notdef` 方框，不报错、不返回空，`selfcheck` 照样全绿。跑
+  `python3 tools/fontcheck.py` 查当前字体画不出脚本里哪些字（退出码非 0 = 有缺字）。
 
 ---
 
