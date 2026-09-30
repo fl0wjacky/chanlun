@@ -75,14 +75,14 @@ def draw_evidence(d):
         for (x, _), v, col in zip(cols, vals, (TX if hot else MU, BL, GR, AM, AM)):
             d.text((x, yy), v, font=f_n, fill=col if hot else MU)
         yy += 40
-    d.text((86, yy + 2), "「对得上」= 起止时间与中枢区间都有交叠（宽松匹配）；ZECUSDT 永续 %s（UTC），出图时由本引擎现算"
+    d.text((86, yy + 2), "对得上 = 起止时间与中枢区间都有交叠（宽松匹配）；ZECUSDT 永续 %s（UTC），出图时由本引擎现算"
            % zec.date_range("15m"), font=f_t, fill=MU)
     d.line([86, yy + 36, W - 86, yy + 36], fill=LINE, width=2)
     d.text((86, yy + 50), "★ 个数最接近的是 %s（%d vs %d），两边约 %d%% / %d%% 能互相对上 —— 结构层级大致对应。"
            % (name[best_tf], best["A"], best["B"], round(100 * best["A_hit"] / best["A"]),
               round(100 * best["B_hit"] / best["B"])), font=f_n, fill=AM)
     d.text((86, yy + 86), "　 对不上的那部分正说明：级别是结构长出来的，不是换到哪一档周期就等于哪一级。", font=f_t, fill=TX)
-    d.text((86, yy + 114), "　 个数相近也不能证明「15 分钟线段 = %s笔」，只说明两种看法看到的结构大体一致。" % name[best_tf],
+    d.text((86, yy + 114), "　 个数相近也不能证明 15 分钟线段 = %s笔，只说明两种看法看到的结构大体一致。" % name[best_tf],
            font=f_t, fill=TX)
     d.text((86, yy + 146), "　（路径 B 是类中枢，属下面第 83 课所说稳定性差的口径；路径 A 线段中枢只有 %d 个，样本偏薄）"
            % best["A"], font=f_t, fill=MU)
@@ -112,7 +112,7 @@ def build():
     draw_evidence(d)
     draw_boundaries(d)
     foot(d, "第 17 课（递归定义 + 最低级别）；第 63 / 77 课（显微镜比喻、级别与图无关）；第 64 / 83 课（类中枢）",
-         "把「级别」等同于「K线周期」—— 级别是结构层级，周期只是看它的镜片")
+         "把级别等同于K线周期 —— 级别是结构层级，周期只是看它的镜片")
     return im
 
 

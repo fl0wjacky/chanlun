@@ -55,7 +55,7 @@ def draw_rule(d):
     d.rounded_rectangle([56, 200, W - 56, 336], 16, fill=(AM[0], AM[1], AM[2], 26), outline=AM, width=3)
     d.text((86, 214), "一句话记住规则", font=f_p, fill=AM)
     d.text((86, 256), "无缺口 → 【第一种情况】第一笔属「中间地带」（第 71 课）：先破其终点才确认，先破其起点则旧段延续。", font=f_n, fill=TX)
-    d.text((86, 292), "有缺口 → 【第二种情况】要等「另一个特征序列」也出现分型，才回头确认那一点是终点。", font=f_n, fill=TX)
+    d.text((86, 292), "有缺口 → 【第二种情况】要等另一个特征序列也出现分型，才回头确认那一点是终点。", font=f_n, fill=TX)
 
 
 def draw_cells(d):
