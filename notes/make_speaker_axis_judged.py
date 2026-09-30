@@ -72,6 +72,57 @@ if a.expect_judge:
               u"本脚本的绿集是判据的函数，换一把 norm 可以整条改掉尺C/尺D 的结果，而产物不会自己红。")
         sys.exit(5)
 
+# ---- 闸6：尺的字节 == 本读数**声明的那棵树**上那份尺的字节 ----
+#   ★★ 这一条是我 2026-09-30T15:1x 踩出来的，比"判据换了"更准：
+#     本文件顶上说「判据全部取自上面那棵树的 blob」（声明了 tree X），
+#     而我量它的时候 import 的是**另一棵更老的树**上的同名文件 ——
+#     **两个声明都写在同一个文件里，而没有任何东西把它们比过一次。**
+#   ⇒ 现在比。判据：**一个读数声称取自某棵树，它的尺就必须是那棵树上的那一份**；
+#     做不到 ⇒ 这个数归因不到那棵树，不许出门。
+raw = io.open(a.tsv, encoding="utf-8").read()          # ★ 在这里读：下面两条闸（6 / 表头钉值）都要它
+TREE_RE = re.compile(u"^#\\s*tree\\s+([0-9a-f]{40})\\s*$", re.M)
+_mt = TREE_RE.search(raw)
+DECL_TREE = _mt.group(1) if _mt else None
+
+
+def _git(args):
+    try:
+        r = subprocess.run(["git"] + args, cwd=os.path.dirname(os.path.abspath(a.tsv)),
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        return r.returncode, (r.stdout or "").strip()
+    except Exception:                                     # noqa
+        return 999, ""
+
+
+print(u"★ 闸6 本读数的树：表头声明 %s" % (DECL_TREE or u"**没声明**"))
+if not DECL_TREE:
+    print(u"   ⇒ **表头没声明树 ⇒ 这一层没参与**（不声明对象的读数，本来就无从判「尺是不是它的」）")
+else:
+    _rc, _top = _git(["rev-parse", "--show-toplevel"])
+    _rp = os.path.relpath(os.path.abspath(VFILE), _top) if (_rc == 0 and _top) else ""
+    _rc, MY_BLOB = _git(["hash-object", os.path.abspath(VFILE)])
+    _decl = _git(["rev-parse", "%s:%s" % (DECL_TREE, _rp)])[1] if _rp and not _rp.startswith("..") else u""
+    _head = _git(["rev-parse", "HEAD:%s" % _rp])[1] if _rp and not _rp.startswith("..") else u""
+    print(u"   尺（本跑）        %s" % (VFILE or u"**取不到**"))
+    print(u"     sha256[:16] %s ｜ git blob %s" % (JSHA, MY_BLOB or u"**算不出**"))
+    print(u"   声明树那份         %s" % (_decl or u"**取不到**"))
+    print(u"   HEAD 那份          %s" % (_head or u"**取不到**"))
+    # ★ 三态，**不许并成两态**（"没比"／"比了、相同"／"比了、不同"是三件事）
+    if not _rp or _rp.startswith(".."):
+        print(u"   ⇒ ★ **判不了**：尺不在本仓里 ⇒ 拿不到它在树里的路径。"
+              u"这一次**没有**这一层的保护（别把「判不了」读成「对得上」）。")
+    elif MY_BLOB and MY_BLOB == _decl:
+        print(u"   ⇒ ✓ **尺 = 本读数声明的那棵树上的那份**（这一层干净）")
+    elif MY_BLOB and MY_BLOB == _head:
+        print(u"   ⇒ ★★ **尺 = HEAD 那份，但不是声明树那份** ⇒ 树已经走过："
+              u"本读数声称取自 %s，而尺来自**更晚的树**。" % DECL_TREE[:12])
+        print(u"      ★ 这不一定是错（今天就是无害的：两份都含 `*`，fp3 同为 7f6cd29d）——"
+              u"但**必须印出来**，否则「没过界」和「过了界而恰好没事」共用一张脸。")
+    else:
+        print(u"   ⇒ ★★ **第三份**：尺既不是声明树那份、也不是 HEAD 那份 ⇒ 拒绝出数（exit=6）")
+        print(u"      —— 来路不明的尺，量出来的数归因不到任何一棵树。**本跑没写文件。**")
+        sys.exit(6)
+
 # ---- 语料（只认 lesson-*.txt；扫面随读数一起印）----
 files = [f for f in sorted(os.listdir(a.corpus)) if re.match(r"lesson-\d+\.txt$", f)]
 per_ws, per_norm = {}, {}
