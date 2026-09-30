@@ -8,9 +8,21 @@
 包起来，问它**每一次到底被要求把哪串字画在哪个坐标**，再拿字体自己的字宽去量。
 
 口径（与卡片自身一致）：
-  右边距   W − 56      （页脚分隔线、各段标题都守这条）
-  越界     right > W   （真的画到画布外，会被裁掉）
+  横向  右边距  W − 56    （页脚分隔线、各段标题都守这条）
+        越界    right > W （真的画到画布外，会被裁掉）
+  纵向  出画布  ink_bottom > H            —— 真的画到画布下沿外，会被裁掉（**不容忍**，1px 也是被裁）
+        出面板  ink_bottom > 面板底 + 1   —— 字还在画布内，但下半截画在面板外面
+                                            （容忍 1px：那 1px 还在面板 width=2 的描边里，报了是噪音）
 anchor 按 PIL 语义处理：l 起点 / m 中点 / r 终点。
+
+**纵向量的是墨迹、不是 bbox**：两者差几个像素，而"有没有戳出面板"由墨迹决定。
+（2026-09-30 实测：`model_dissent` 那一处 bbox 底说 +6px，墨迹说 +7px。**量法不同数不同。**）
+
+**「合计 N 处」必须连着字体（名字 + sha256）读** —— 同一个仓库同一个提交，两支字体会给出两个数，
+而且差的不是零头：Droid `97320619` 合计 3 处 / Noto `2c76254f` 合计 16 处，
+多出来的 13 处是**同一个机制**（卡片的小标签框按「字号+内边距」定高，不是逐个字量的；
+Noto 的汉字在同一字号下墨迹低 3~4px，就戳出标签底框）。所以下面 main() 会先把字体打出来。
+**换字体是发卡前的指定项，不是无关项。**
 """
 import os, sys, importlib
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -18,8 +30,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PIL import Image, ImageDraw
 
 MARGIN = 56
-RECORDS = []
+PANEL_TOL = 1        # 「出面板」容忍 1px：那 1px 还在面板描边（width=2）里，报了就是噪音
+RECORDS = []          # 文字：(xy, text, font, anchor)
+PANELS = []           # 面板矩形：[x0, y0, x1, y1]
 _ORIG = ImageDraw.ImageDraw.text
+_ORIG_RR = ImageDraw.ImageDraw.rounded_rectangle
+_ORIG_RECT = ImageDraw.ImageDraw.rectangle
 
 
 def _spy(self, xy, text, *a, **kw):
@@ -27,22 +43,76 @@ def _spy(self, xy, text, *a, **kw):
     return _ORIG(self, xy, text, *a, **kw)
 
 
+def _mk_rect_spy(orig):
+    """面板探针：**只记不判**。哪个矩形算"面板"不在这里定 —— 判断时按
+    「包含这行文字顶部的最内层矩形」取，卡片自己的画法说了算。"""
+    def spy(self, xy, *a, **kw):
+        try:
+            x0, y0, x1, y1 = xy
+        except (TypeError, ValueError):
+            return orig(self, xy, *a, **kw)
+        PANELS.append((x0, y0, x1, y1))
+        return orig(self, xy, *a, **kw)
+    return spy
+
+
 def _install():
     """装上探针。**这一步漏了的话，下面的检查会一边倒地报「全部 OK」**——
     本文件第一版就是这样：`_spy` 写好了、忘了赋值，14 张卡全报「文字 0 处」。
     所以装上之后立刻自检一次（见 main 开头），不靠人记得。"""
     ImageDraw.ImageDraw.text = _spy
+    ImageDraw.ImageDraw.rounded_rectangle = _mk_rect_spy(_ORIG_RR)
+    ImageDraw.ImageDraw.rectangle = _mk_rect_spy(_ORIG_RECT)
 
 
 def _selftest():
     """探针自检：拿一张 1×1 的图真画一次字，探针必须看得见；看不见就抛。"""
-    RECORDS.clear()
+    RECORDS.clear(); PANELS.clear()
     im = Image.new("RGB", (8, 8))
-    ImageDraw.Draw(im).text((0, 0), "x")
-    got = len(RECORDS)
-    RECORDS.clear()
+    d = ImageDraw.Draw(im)
+    d.text((0, 0), "x")
+    d.rounded_rectangle([0, 0, 4, 4], 1)
+    got, gotp = len(RECORDS), len(PANELS)
+    RECORDS.clear(); PANELS.clear()
     if got != 1:
         raise RuntimeError("版式探针没装上：画了 1 次字、探针只看到 %d 次" % got)
+    if gotp != 1:
+        raise RuntimeError("面板探针没装上：画了 1 个圆角矩形、探针只看到 %d 个" % gotp)
+
+    # 墨迹口径自证：`_ink_rows` 报的行范围，必须和「真画一遍再逐行找像素」一模一样。
+    # 这条是 2026-09-30 立的，代价是一次真错：我当时在**整张已画好的卡**上扫墨迹行来量某一行字，
+    # 于是把**面板自己的描边**算成了这行字的墨迹，报出 +11px —— 真值是 +7，多算 4px，
+    # 而这个错数被三个人引用过。**工具报的数，它自己得能复算**；不能复算的数，改的是别人的代码。
+    from render.style import F as _F
+    _f = _F(22)
+    for s, x0, y0 in (("三卖", 10, 6), ("[102,108]", 10, 6), ("Ag", 10, 6)):
+        canvas = Image.new("L", (260, 60), 0)
+        ImageDraw.Draw(canvas).text((x0, y0), s, font=_f, fill=255)
+        rows = [y for y in range(60) if any(canvas.getpixel((x, y)) for x in range(260))]
+        ink = _ink_rows(s, _f)
+        got = (y0 + ink[0], y0 + ink[1]) if ink else None
+        want = (rows[0], rows[-1]) if rows else None
+        if got != want:
+            raise RuntimeError("墨迹口径自证不过：%r 真画一遍是 %s..%s，_ink_rows 报 %s"
+                               % (s, want and want[0], want and want[1], got))
+    RECORDS.clear(); PANELS.clear()
+
+
+def _font_id():
+    """正在量的那支字体：**全路径** + sha256 前 8 位。
+
+    路径给全，是因为 `CHANLUN_FONT` 只认全路径（给文件名 config 直接 FileNotFoundError）——
+    报数时只印文件名，别人照着复现会先撞一个和结论无关的错。
+    sha256 是因为**同名两支字体是有的**（见 memory 里那两支 Droid：`97320619` 有 ✔✗✘、
+    `23920155` 两样都缺），只写文件名认不出是哪一支。
+    """
+    import hashlib
+    from config import FONT as _FP
+    try:
+        h = hashlib.sha256(open(_FP, "rb").read()).hexdigest()[:8]
+    except OSError as e:
+        return "%s（读不出 sha256：%s）" % (_FP, e)
+    return "%s  sha256:%s" % (_FP, h)
 
 
 def _extent(x, text, font, anchor):
@@ -56,12 +126,46 @@ def _extent(x, text, font, anchor):
     return x, x + w
 
 
-def check(mod, name):
-    RECORDS.clear()
-    im = mod.build()
-    W = im.width
+def _ink_rows(text, font):
+    """文字**墨迹**的行范围（相对文字原点）；空串/空白返回 None。
+
+    不是 bbox：bbox 是字体给的行盒，墨迹是真正落下去的那几行像素。两者差几像素，
+    而"有没有戳出面板"由墨迹决定 —— 拿 bbox 判会把"差 3px 就戳出来"读成"没戳出来"。
+    多行文本按整块算（mask 的每一行，行间空白不计）。
+    """
+    s = str(text)
+    if not s.strip():
+        return None
+    bb = font.getbbox(s)
+    m = font.getmask(s)
+    w, h = m.size
+    if not w or not h:
+        return None
+    b = bytes(m)
+    rows = [y for y in range(h) if any(b[y * w:(y + 1) * w])]
+    if not rows:
+        return None
+    return bb[1] + rows[0], bb[1] + rows[-1]
+
+
+def _panel_of(x, ink_top):
+    """包含 (x, ink_top) 的**最内层**矩形；没有就返回 None。
+
+    "最内层"= 面积最小那个：卡片会在面板里再叠高亮块，取包含它的最小矩形才不会
+    把内层高亮当成面板底。
+    """
+    best = None
+    for x0, y0, x1, y1 in PANELS:
+        if x0 <= x <= x1 and y0 <= ink_top <= y1:
+            if best is None or (x1 - x0) * (y1 - y0) < (best[2] - best[0]) * (best[3] - best[1]):
+                best = (x0, y0, x1, y1)
+    return best
+
+
+def _violations(recs, W, H):
+    """判据：**一条都没动**，只是从 check() 里挪出来，好让注入跑的正文也过同一套。"""
     bad = []
-    for xy, text, font, anchor in RECORDS:
+    for xy, text, font, anchor in recs:
         if font is None or not str(text).strip():
             continue
         left, right = _extent(xy[0], text, font, anchor)
@@ -69,31 +173,134 @@ def check(mod, name):
             bad.append((right - W, "越界", xy, text, left, right))
         elif right > W - MARGIN:
             bad.append((right - (W - MARGIN), "破边距", xy, text, left, right))
-    return W, len(RECORDS), sorted(bad, reverse=True)
+        ink = _ink_rows(text, font)
+        if ink is None:
+            continue
+        ink_top, ink_bot = xy[1] + ink[0], xy[1] + ink[1]
+        if ink_bot > H:
+            bad.append((ink_bot - H, "纵向出画布", xy, text, ink_top, ink_bot))
+            continue
+        p = _panel_of(xy[0], ink_top)
+        if p is not None and ink_bot > p[3] + PANEL_TOL:
+            bad.append((ink_bot - p[3], "出面板", xy, text, ink_top, ink_bot))
+    return bad
+
+
+def _fingerprint(recs):
+    """这一次到底画了哪些字（位置 + 内容）。字体对象不可哈希，不带。
+
+    只用来回答一个问题：**注入之后，画出来的东西变了吗？**
+    没变 ⇒ 那一支根本没走到 ⇒ "覆盖过了"这句话自己成了代理量。见 INJECT。
+    """
+    return tuple((xy, str(t)) for xy, t, _f, _a in recs)
+
+
+def check(mod, name):
+    RECORDS.clear(); PANELS.clear()
+    im = mod.build()
+    recs = list(RECORDS)
+    return (im.width, im.height, len(recs),
+            sorted(_violations(recs, im.width, im.height), reverse=True),
+            _fingerprint(recs))
+
+
+# ---- 失败分支注入 -----------------------------------------------------------
+# 为什么需要这一节：探针包在 `ImageDraw.text` 上 —— **谁画它看见谁**。真实数据下
+# `cards/model_dissent.py` 的 `cross_check` 返空清单，那条「× 两处实现分家 N 处：…」的正文
+# 就一次都画不出来，于是它一次都没被量过。实测那一支比成功支还宽 14px（1560.3 vs 1546.0），
+# 而且**宽度是 N 的函数、不是常数**：那串 `中枢1(卡=…/引擎=…)` 随分家条数变长，
+# n=1/2/3 一行装得下，n≥4 起破边距（实测表见 card-47bb914a-6c2）。
+#
+# 所以这一节**不是加判据**（判据一条没动），是**把失败分支真逼出来画一遍**，
+# 让现有判据自己开口。代价最小：一个桩，不碰判据。
+#
+# **每条注入都要自证**：注入后画出来的字和干净跑一模一样 ⇒ 报「注入未生效」并计入退出码。
+# 打歪了的桩比不打更危险 —— 它会让"这一支覆盖过了"变成新的代理量，而且长得跟真的一样。
+#
+# 注入**写在卡那边**（模块属性 `CARDFIT_FAILURES`），不写在这张表里：见 failure_modes()。
+
+
+def failure_modes(mod):
+    """卡**自己**声明的失败分支。本工具不认识任何一张卡的内脏。
+
+    约定：模块可选地定义
+
+        CARDFIT_FAILURES = [(模式名, 注入函数), …]
+        注入函数(mod) -> 还原函数；装完后必须真的改变画出来的字。
+
+    为什么把注入放在卡那边、不放在这张表里：支的名字叫 `cross_check`、叫 `MISMATCH`，
+    那是**卡的内部**。工具一旦知道某张卡的内脏，加一张卡就得改工具，而工具是大家共用的热文件。
+    谁拥有卡，谁拥有它的失败分支。
+
+    **没有这个属性的卡 = 没声明失败分支**，报告末尾会点名，别把「合计 0 处」读成"全卡都查过了"。
+    """
+    modes = getattr(mod, "CARDFIT_FAILURES", None) or []
+    for item in modes:
+        name, install = item
+        if not callable(install):
+            raise RuntimeError("%s.CARDFIT_FAILURES 里的 %r 不是可调用的注入函数" % (mod.__name__, name))
+    return list(modes)
+
+
+def _print_bad(bad, indent="    "):
+    for over, kind, xy, text, a, b in bad:
+        t = str(text).replace("\n", "⏎")
+        where = ("x=%-4d→%-6.0f" % (xy[0], b) if kind in ("越界", "破边距")
+                 else "y=%-5.0f→%-6.0f" % (a, b))
+        print("%s%-8s %+6.0fpx  %-14s %s" % (indent, kind, over, where, t[:70]))
 
 
 def main():
     _install()
     _selftest()
+    print("[版式体检] 字体 %s" % _font_id())
     from cards.build_all import CARDS
     extra = [("model_dissent", "M1 机会模型"), ("level_recursion", "M2 级别递归")]
     total = 0
+    injected = effective = dead = 0
+    uncovered = []
     for name, title in [(n, t) for n, t in CARDS] + extra:
         try:
             mod = importlib.import_module("cards." + name)
         except Exception as e:
             print("%-22s 跳过：%s: %s" % (name, type(e).__name__, e))
             continue
-        W, n, bad = check(mod, name)
+        W, H, n, bad, clean_fp = check(mod, name)
         total += len(bad)
-        head = "%-22s W=%-5d 文字 %3d 处  %s" % (
-            name, W, n, "OK" if not bad else "★ %d 处越界/破边距" % len(bad))
-        print(head)
-        for over, kind, xy, text, left, right in bad:
-            s = str(text).replace("\n", "⏎")
-            print("    %s %+6.0fpx  x=%-4d→%-6.0f  %s" % (kind, over, xy[0], right, s[:78]))
+        print("%-22s W=%-5d H=%-5d 文字 %3d 处  %s" % (
+            name, W, H, n, "OK" if not bad else "★ %d 处" % len(bad)))
+        _print_bad(bad)
+        modes = failure_modes(mod)
+        if not modes:
+            uncovered.append(name)
+            continue
+        for mode, install in modes:
+            restore = install(mod)
+            try:
+                _W, _H, _n, bad2, fp = check(mod, name)
+            finally:
+                restore()
+            injected += 1
+            if fp == clean_fp:
+                # 桩没打进那一支 —— 这一支算**没测**，不算通过。计入退出码，但单列出来，
+                # 免得和"版式越界"混成一个数（两者根本不是一个病）。
+                dead += 1
+                print("  ├ %-20s ★ 注入未生效 —— 这一支没走到，**不算覆盖**" % mode)
+                continue
+            effective += 1
+            total += len(bad2)
+            print("  ├ %-20s 文字 %3d 处  %s" % (
+                mode, _n, "OK" if not bad2 else "★ %d 处" % len(bad2)))
+            _print_bad(bad2)
     print("\n合计 %d 处" % total)
-    return 1 if total else 0
+    if dead:
+        print("注入未生效 %d 支 —— 那几支**没测**，不是通过" % dead)
+    print("[分支覆盖] 注入 %d 支（%d 支确认改了画法）；另有 %d 张卡没声明注入"
+          % (injected, effective, len(uncovered)))
+    if uncovered:
+        print("           %s" % "、".join(uncovered))
+        print("           ↑ 这几张本次**只覆盖了成功路径**。合计 0 处 ≠ 全卡都查过了。")
+    return 1 if (total or dead) else 0
 
 
 if __name__ == "__main__":
