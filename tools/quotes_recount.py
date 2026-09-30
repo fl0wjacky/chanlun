@@ -554,13 +554,21 @@ def build_parser():
 
 
 # ── 离线自测（`--selfcheck-gate`）：把**同一条命令行**再跑十几遍，每次只翻一格 ─────────────
-def _strip_flag(argv, flag):
-    """从命令行里摘掉一个旗标 —— `--flag 值` 与 `--flag=值` 两种拼法都认。"""
+def _strip_flag(argv, flag, takes_value=True):
+    """从命令行里摘掉一个旗标 —— `--flag 值` 与 `--flag=值` 两种拼法都认。
+
+    ★ `takes_value=False` 是给**不取值**的旗标用的（`action="store_true"`，如 `--selfcheck-gate`）。
+      第一版一律按"它一定带一个值"摘，于是**紧跟其后的那个词被一起吃掉**：
+      `… --selfcheck-gate --unit all` ⇒ 基线成了 `… all`（`all` 成了野位置参数）⇒ 基线 rc=2
+      ⇒ 整支自测 exit=10。**同一组生效值、只把 `--unit` 往前挪一位，判词就翻面**
+      （@nova-8980 那条 A/E 判据当场逮住的；这也正是本卡的「身份不是写法」——
+      helper 里对**旗标形状**的假设，和我从 argv 里找默认值是同一类错）。
+    """
     out, i = [], 0
     while i < len(argv):
         t = argv[i]
         if t == flag:
-            i += 2
+            i += 2 if takes_value else 1
             continue
         if t.startswith(flag + "="):
             i += 1
@@ -760,7 +768,7 @@ def selfcheck_gate(a, argv):
 
     ap2 = build_parser()
     acts = {x.dest: x for x in ap2._actions if x.dest != "help"}
-    base = _strip_flag(argv, "--selfcheck-gate")
+    base = _strip_flag(argv, "--selfcheck-gate", takes_value=False)
     # 基线 = **调用方那条命令**，只把**期望值**摘掉（那是自测自己要塞的东西）。
     # ★★ 两个都不许摘，各有一次实测教训：
     #   · **对象不许摘**（`tree`）：它是**测量对象**不是期望值 —— 我第一版把 `OTHER_AXES` 整串
@@ -882,17 +890,27 @@ def selfcheck_gate(a, argv):
         gates += 1
         num_ok = moved or (alive is True)
         red += 0 if (line_ok and one_ok and num_ok) else 1
+        # ★ ✗ 也得**分脸**：**没做成的比较**不许印成**做成了的比较**
+        #   （@atlas-791f 那条：另一基点没测时，✗ 列原先照样印"这根轴是哑的"——
+        #    那是把"我没量"说成"对象如此"，两句话要的下一步正相反）。
+        if not line_ok:
+            tail = "印的那行没跟着动"
+        elif dif is None:
+            tail = "判不了 ⇒ 先修抽行/探针（**没测**）"
+        elif not one_ok:
+            tail = "坐标不止动一根 ⇒ 这跑的数归因不了"
+        elif moved or alive is True:
+            tail = "（不该到这）"
+        elif alive is False:
+            tail = "接上了但数没跟（**这两个基点**都不动 —— 两点比较，**不蕴含**「任何基点都不动」）"
+        else:
+            tail = "**判不了：另一基点没能比较 ⇒ 这格「没测」**（不许当绿，也不许印成「哑轴」）"
         print("   %-15s →%-14s rc=%d · 合计 %s ⇒ 数%s · 旗标行%s · 坐标差 %s ⇒ %s"
               % (d, v, rc, tot or "**没有**",
                  "动" if moved else ("**恒等**" + ("（%s）" % why_num if why_num else "（提示，不判红）")),
                  "动" if line_ok else "**没动**",
                  ("只 %s（其余逐字同）" % MEASURE_KEY[d]) if one_ok else _diff_text(dif),
-                 "✓" if (line_ok and one_ok and num_ok) else "✗ **%s**"
-                 % ("印的那行没跟着动" if not line_ok else
-                    ("判不了 ⇒ 先修抽行/探针（**没测**）" if dif is None
-                     else ("坐标不止动一根 ⇒ 这跑的数归因不了" if not one_ok
-                           else "接上了但数没跟（这两个基点都不动"
-                                "—— 两点比较，**不蕴含**「任何基点都不动」）")))))
+                 "✓" if (line_ok and one_ok and num_ok) else "✗ **%s**" % tail))
 
     # ★ ④ 这条门**自己也得能被喂红**：把两根轴一次碰掉 ⇒ 上面那条判据**必须**说"不通过"。
     #   不喂这一口的话，"只许差一处"就成了一条**不能失败的检查** —— 而它长得和成功一模一样
