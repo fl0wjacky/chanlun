@@ -82,13 +82,14 @@ def scan(paths=None):
     最后一个**必须**往下传：跳过的文件里的字一个都没进集合，但缺字结论照样出。
     「查不出来，就不算通过」—— 调用方看到它非空就该让退出码非 0。
     """
-    from render.style import F, glyph_gaps, _NOTDEF_PROBE
+    from render.style import F, glyph_gaps, _NOTDEF_PROBES
     font = F(24)
     chars, files, skipped = literal_chars(paths if paths is not None else default_paths())
-    # 探测字符是检测器自己的哨兵（render/style.py 里那个私用区码位），不是卡片内容。
-    # 不排掉它，扫 cards/ + render/ 会把自己那个哨兵报成"卡片缺字"——检测器举报自己。
+    # 探测字符是检测器自己的哨兵（render/style.py 里那几个私用区码位），不是卡片内容。
+    # 不排掉它们，扫 cards/ + render/ 会把自己那几个哨兵报成"卡片缺字"——检测器举报自己。
+    # **三个都要排**：只排第一个，另外两个会被当成"卡片里缺这三个字"报出来。
     keep = "".join(sorted(c for c in chars
-                          if not c.isspace() and ord(c) >= 0x20 and c != _NOTDEF_PROBE))
+                          if not c.isspace() and ord(c) >= 0x20 and c not in _NOTDEF_PROBES))
     missing, conflict = glyph_gaps(keep, font)
     return font, missing, conflict, len(chars), len(files), skipped
 
@@ -254,6 +255,28 @@ def selftest():
             check("检测器失灵时抛异常", False, "它没抛——这就是「对什么都说缺」的静默通过")
         except RuntimeError as e:
             check("检测器失灵时抛异常", "检测器失灵" in str(e))
+
+        # 私用区被映射：**探针撞上真字形时，真缺的字会不会被报成"有"**。
+        # 反例是现造的：把 U+E000 指到 'B' 的字形（一个真字形），再删掉 中/文/枢 的映射。
+        # 单探针时代这格的 missing 是**空的**，三个真缺的字落在 conflict —— 读 missing 的人
+        # 看到的是一张干净白名单，而这正是"假绿"的定义（@bram-9d29 量到的形状）。
+        # 三个码位取多数票之后基准回到真 .notdef，三个字回到 missing，真字形仍然不误报。
+        try:
+            from fontTools.ttLib import TTFont
+            gname_b = TTFont(src).getBestCmap()[ord("B")]
+            probe_font = _variant(src, os.path.join(tmp, "probe-maps-B.otf"),
+                                  {0xE000: gname_b, 0x4E2D: None, 0x6587: None, 0x67A2: None},
+                                  text="中文枢B0A")
+        except Exception as e:                   # 含没装 fontTools / 造不出这支夹具
+            skipped.append("探针撞真字形时缺字仍报缺")
+            skipped.append("同一支夹具上真字形不被误报")
+            print("  ！这两项跳过：造不出探针夹具（%s: %s）" % (type(e).__name__, e))
+        else:
+            m, c = glyph_gaps("中文枢", ImageFont.truetype(probe_font, 24))
+            check("探针撞上真字形时，真缺的 3 个字仍进 missing", m == ["中", "文", "枢"] and not c,
+                  "缺 %r 分歧 %r" % (m, c))
+            m, c = glyph_gaps("B0A", ImageFont.truetype(probe_font, 24))
+            check("同一支夹具上，真字形不被误报", not m and not c, "缺 %r 分歧 %r" % (m, c))
 
     print("自检：%d 项通过%s" % (sum(ok), "，%d 项跳过" % len(skipped) if skipped else ""))
     if skipped:
