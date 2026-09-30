@@ -1,5 +1,5 @@
 // This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
-// 冲浪者 · 缠论结构（chanlun_mag 引擎 v2.2 的 Pine 移植）
+// 冲浪者 · 缠论结构（chanlun 引擎 v2.3 的 Pine 移植）
 //
 // 与 Python 引擎（core/）同一套口径，逐步照搬：
 //   K线包含处理（第 65 课）→ 分型 → 笔（第 77 课，端点必为极值、带回头修正；可选第 81 课新笔）
