@@ -62,7 +62,7 @@ def draw_diagram(d):
 
     # 回试点标记
     d.ellipse([520-15, 668-15, 520+15, 668+15], fill=BG, outline=RD, width=5)
-    d.text((520, 668), "✗", font=F(26), fill=RD, anchor="mm")
+    d.text((520, 668), "×", font=F(26), fill=RD, anchor="mm")
     d.text((540, 690), "① 回试跌回 ZG 以内 → 中枢延伸，不是机会", font=f_m, fill=RD)
     d.ellipse([680-15, 556-15, 680+15, 556+15], fill=BG, outline=GR, width=5)
     d.text((680, 556), "✓", font=F(26), fill=GR, anchor="mm")
@@ -179,7 +179,7 @@ def draw_evidence(d):
     yy += 56
     for t, n, z, hi, lo, v in rows:
         col = GR if v == "三买" else RD
-        mark = {"三买": "✓ 三买", "假缝隙": "✗ 假缝隙", "ZD 下方": "✗ 跌到 ZD 下方", "贯穿": "✗ 贯穿，非三买"}[v]
+        mark = {"三买": "✓ 三买", "假缝隙": "× 假缝隙", "ZD 下方": "× 跌到 ZD 下方", "贯穿": "× 贯穿，非三买"}[v]
         for x, txt in zip(xs[:5], [t, "中枢%d" % n, "%.2f" % hi, "%.2f" % lo, "[%.2f, %.2f]" % (z["ZD"], z["ZG"])]):
             d.text((x, yy), txt, font=f_n, fill=TX)
         d.text((xs[5], yy), mark, font=f_n, fill=col)
@@ -206,7 +206,7 @@ def draw_evidence(d):
     nok, MISMATCH[:] = cross_check(rows, Z)
     if MISMATCH:
         d.text((86, yy0 + 34),
-               "　 ✗ 两处实现分家 %d 处：%s —— 本卡与 core/center.py 的判定已经不一致，先查哪个错。"
+               "　 × 两处实现分家 %d 处：%s —— 本卡与 core/center.py 的判定已经不一致，先查哪个错。"
                % (len(MISMATCH),
                   "、".join("中枢%d(卡=%s/引擎=%s)" % (n, "三买" if cb else "非三买", t)
                             for n, cb, t, _ in MISMATCH)),
