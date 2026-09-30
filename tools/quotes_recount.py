@@ -645,8 +645,21 @@ def _coord_diff(c0, c1):
     return diffs
 
 
-def _alt_base(argv):
+def _alt_base(argv, cur):
+    """★ 参数 `cur` 是**解析出来的生效值**，不是从 argv 里找的 —— @nova-8980 当场抓的那条：
+    旗标**没写**时它取默认值，而从 argv 里找只会找到 `None` ⇒ 我第一版把它当成 `all`
+    ⇒ 当默认本来就是 `all` 时，"另一基点"和基点**一模一样** ⇒ 白跑两遍还照旧判：
+    `--commit 05f3e24 --selfcheck-gate`（默认跑法）下 `--ladder` 那格被**假红**。
+    ⇒ 生效值只能从 parser 那儿拿（这正是本卡那条：**身份不是写法**）。
+    """
     """给"这根计数轴是不是**哑的**"另找一个基点 —— 只动 `--unit` 一档（`all` ↔ `gone`）。
+
+    ★ **只试一个，且它是从调用方那条命令里派生的**（把它自己的 `--unit` 翻到另一个合法值）：
+      · 不是一张写死的候选表（那张表会跟着漂），
+      · **更不是"搜到动为止"** —— 那是**寻绿**：一根真哑的轴只要在某个稀奇基点上凑出"动"
+        就会被判成"被掩住"，而寻绿是假绿的上游（@iris-64a1 的落前一问）。
+      ⇒ "换基点会动"这半句的证据力来自它**是一次两点受控比较**：那两跑只差这一个轴的值
+        ⇒ 数动了 ⇒ 这个轴真的进分母（哑轴在任何基点都动不了）。
 
     ★ 为什么需要它（实测，不是推的）：同一根轴 `--min-len 1→2`
       在 `--unit gone` 面上 **恒等**（331/302 → 331/302），
@@ -656,14 +669,6 @@ def _alt_base(argv):
       会造**假红**；而"**任何**基点都不动"是真缺陷（登记成计数轴、却接不上分母）。
       ⇒ 只给"没动"的那几根多跑两遍，把这两种分开（@iris-64a1 点的那格）。
     """
-    cur = None
-    for i, t in enumerate(argv):
-        if t == "--unit" and i + 1 < len(argv):
-            cur = argv[i + 1]
-        elif t.startswith("--unit="):
-            cur = t.split("=", 1)[1]
-    if cur is None:
-        return list(argv) + ["--unit", "all"]
     return _strip_flag(argv, "--unit") + ["--unit", "gone" if cur != "gone" else "all"]
 
 
@@ -864,12 +869,12 @@ def selfcheck_gate(a, argv):
         #   （活轴被基点掩住 ⇒ 提示；任何基点都不动 ⇒ 红，脸=「接上了但数没跟」）。
         alive, why_num = None, ""
         if not moved and line_ok and one_ok:
-            alt = _alt_base(base)
+            alt = _alt_base(base, getattr(a, "unit", None) or "all")
             rcA, totA, flA, _ = _run_once(alt)
             rcB, totB, _, _ = _run_once(alt + [AXIS_FLAG[d], v])
             if rcA == 0 and rcB == 0 and totA and totB:
                 alive = (totA != totB)
-                why_num = "另一基点(%s) ⇒ %s → %s ⇒ %s" % (
+                why_num = "另一基点**试了 1 个**（调用方命令只翻 --unit，不搜）: %s ⇒ %s → %s ⇒ %s" % (
                     flA or "旗标行没印", totA, totB,
                     "动（这根轴是活的，被这个基点掩住）" if alive else "**也不动**")
             else:
@@ -886,7 +891,8 @@ def selfcheck_gate(a, argv):
                  % ("印的那行没跟着动" if not line_ok else
                     ("判不了 ⇒ 先修抽行/探针（**没测**）" if dif is None
                      else ("坐标不止动一根 ⇒ 这跑的数归因不了" if not one_ok
-                           else "接上了但数没跟（**换个基点也不动 ⇒ 这根轴是哑的**）")))))
+                           else "接上了但数没跟（这两个基点都不动"
+                                "—— 两点比较，**不蕴含**「任何基点都不动」）")))))
 
     # ★ ④ 这条门**自己也得能被喂红**：把两根轴一次碰掉 ⇒ 上面那条判据**必须**说"不通过"。
     #   不喂这一口的话，"只许差一处"就成了一条**不能失败的检查** —— 而它长得和成功一模一样
