@@ -343,8 +343,8 @@ FACE_CELLS = (("卡片面", ("cards", "render")), ("代码面", ("core", "tools"
 #   ★ 顺序 = 印出来的顺序；`未判` 与 `没判过` **两个态**（一百〇二），不许合并。
 #   ★ 旁档里出现**没在这里声明的值** ⇒ 不是"忽略"，是**报错并点名那个值**（下一笔的读入侧照这条）。
 SPEAK_CLASSES = (
-    ("a", "引文失真：本来是缠师的话，字句不对"),
-    ("b", "引号用错：本来就不是缠师的话"),
+    ("a", "引文失真：本来是缠师的话，字句不对（**只在卡片面**）"),
+    ("b", "引号用错：本来就不是缠师的话（**只在卡片面**）"),
     ("省略", "忠实省略：缠师原话＋忠实省略号（**档位的账**）"),
     ("配对伪影", "**器的账**：配对吞了源码（坏的是键，不是写法）"),
     ("自陈整理版", "上一行自陈「非逐字」（机器判据到不了）"),
@@ -404,7 +404,12 @@ def speaker_axis(sites, tot, a):
     qs = [q for q in raw if face_of[q] == "两面"]
     segs.append("两面 %4d 处 / %4d 条" % (
         sum(1 for _c, q in sites if face_of[q] == "两面"), len(qs)))
+    card_occ = sum(1 for _c, q in sites if face_of[q] == "卡片面")
     print("   面（引文**出现在哪几格** · 只看落点）：%s" % " · ".join(segs))
+    print("   ★ (a)/(b) 的**定义域 = 卡片面**：本对象 **%d 处**（%d 处**不在定义域里**）"
+          % (card_occ, tot[0] - card_occ))
+    print("         ⇒ 「331 处里有多少引文失真」这句话**问错了**：另外 %d 处的「」"
+          "本来就不是在引谁（判据在引号外面那几行，对它们**不成立**）" % (tot[0] - card_occ))
     print("         ★ 「两面」单列：折进任一面都是把一个「跨」写成一个「是」")
     assert len(raw) == sum(1 for q in raw if face_of[q]), "面分类漏项"
     assert sum(len([q for q in raw if face_of[q] == n]) for n, _c in FACE_CELLS) \
