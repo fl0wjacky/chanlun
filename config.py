@@ -45,18 +45,31 @@ _FONTS = [
 # 正常字体三个码位都渲成 .notdef（同一个遮罩）；被映射的那个会不一样。
 # 取多数票：三个里有两个相同 → 那个就是 .notdef；三个互不相同 → **判不了**，不猜。
 _NOTDEF_CHARS = ("\ue000", "\ue001", "\uf8ff")
-# 哨兵字取自卡片真的会画出来的字符（cards/ + render/ 的字面量统计：origin/main 上 882 个字）。
+# 哨兵字取自卡片真的会画出来的字符。**口径必须写全，因为这个数随口径变**：`cards/` + `render/`
+# 的字符串字面量、排 docstring、排空白、排探测器自己的哨兵 `U+E000` —— 在 `origin/main` 上是
+# **834 个不同字符**（同一个扫描器不排 docstring 则是 911）。上界链上的数字离开定义就没法接。
 # 三类独立计数：某一类缺就说那一类，不因为"整体看着还行"把它吞掉。
 #
-# **刻意不收「符号」类**（`× — ↑ ① ★ ✓ ✗` 那一族，Droid 上是 0/29）。理由不是它不要紧，而是
-# 它放进这里只会制造一个**永远响、且永远没法按它办**的警告：实测没有一支候选字体同时具备中文和
-# `✗`（Droid 0/29，Noto 也只差 `✗` 一个），所以「换一支覆盖更全的字体」这句建议在 Linux 上是空话，
-# 而按字体的探针会每次运行都响，跟卡片改没改无关。缺 `✗` 是**卡片用字**问题，由 tools/fontcheck.py
-# 报（rc=1），那是它该管的事——两个地方各报一遍、严重程度还不一样，只会让人两边都不信。
+# 第四类「符号」原先刻意不收，理由是「收了就是一条永远响、又永远没法照办的警告——没有一支候选
+# 字体同时有中文和 `✗`」。**那个理由绑在具体哪一支字体上，换一支就失效**：2026-09-30 维护者装了
+# `/home/cumora/fonts/DroidSansFallbackFull.ttf`（sha256 97320619…，4529044 字节），它同时有中文和
+# `✔✗✘✓×`，只缺 `⟺`（`⟺` 只活在 docstring 里、永远画不到图上，不进语料）。⇒ 在这一支上，符号类
+# 的警告是**能照办的**：换掉它就消掉。
+#
+# 但「某类缺了就报」在**没有任何候选覆盖它**时仍然会变成噪音。所以判据不变、覆盖面变大之后，
+# 由 `_warn_incomplete` 自己判该不该出声：**只有候选里还真有一支覆盖得更全，才劝人换**；
+# 一支候选都没有那样东西时，改成陈述事实（谁缺什么），不给空话建议。
+#
+# 不收它就有一个具体代价（实测 2026-09-30）：Droid 97320619 与 Noto 2c76254f 在只比这三类时
+# **同分 (1, 3)**，`max` 平局取 `_FONTS` 里靠前的——于是「选出覆盖更全的那支」这件事退化成
+# **列表顺序**，而这两支真正的差别恰好就在符号类（Noto 缺 `✔✗✘`，实测 `_missing` → `✔✗✘✔`）。
 _PROBES = (
     ("拉丁字母/数字/ASCII 标点", "Aaz09%(),.[]"),
     ("中文",                     "中枢线段买点背驰趋势"),
     ("全角标点",                 "、。《》「」（）"),
+    # 从语料里取的（只在 cards/ + render/ 的**字符串字面量**、排 docstring、排探测器哨兵 U+E000），
+    # 重算：见 README「字体覆盖」一节。手写会随语料漂，这串是现算的，28 个。
+    ("符号/圈号/箭头",           "±·×–—“”…↑→↓↔≠≤≥①②③④⑤⑥⑦▲★✓✔✗✘"),
 )
 _PROBE_CACHE = {}
 
@@ -86,9 +99,7 @@ def _missing(font_path, probe, size=16):
     key = (font_path, probe, size)
     if key not in _PROBE_CACHE:
         try:
-            from PIL import ImageFont
-            f = ImageFont.truetype(font_path, size)
-            notdef = _notdef_mask(f)
+            f, notdef = _load(font_path, size)          # 字体对象按 (路径, 字号) 缓存，别每类重载
             if notdef is None:
                 _PROBE_CACHE[key] = None
             else:
@@ -96,6 +107,24 @@ def _missing(font_path, probe, size=16):
         except Exception:
             _PROBE_CACHE[key] = probe                   # 加载不了就当它一个都画不出来，不猜
     return _PROBE_CACHE[key]
+
+
+_FONT_CACHE = {}
+
+
+def _load(font_path, size):
+    """(字体对象, .notdef 遮罩或 None)，按 (路径, 字号) 缓存。
+
+    **不加这层缓存的话，每一类探针都会重新 `truetype()` 一次**——4.5MB 的字体一次 20ms 上下，
+    而 `config` 是每个 headless 工具都会 import 的：实测 import 从 6ms 涨到 64ms，其中大头就是
+    同一支字体被加载 4 遍。缓存之后回到 20ms 量级。
+    """
+    key = (font_path, size)
+    if key not in _FONT_CACHE:
+        from PIL import ImageFont
+        f = ImageFont.truetype(font_path, size)
+        _FONT_CACHE[key] = (f, _notdef_mask(f))
+    return _FONT_CACHE[key]
 
 
 def _font_probe(font_path):
@@ -116,7 +145,19 @@ def _font_score(font_path):
     return (1 if ok else 0, len(_PROBES) - len(gaps))
 
 
-def _warn_incomplete(font_path, why):
+def _best_alternative(font_path, cands):
+    """cands 里有没有真比 font_path 覆盖得更全的一支。**没有就别劝人换。**"""
+    ok, gaps = _font_probe(font_path)
+    for c in cands or ():
+        if c == font_path:
+            continue
+        ok2, gaps2 = _font_probe(c)
+        if ok2 and len(gaps2) < len(gaps):
+            return c
+    return None
+
+
+def _warn_incomplete(font_path, why, cands=None):
     ok, gaps = _font_probe(font_path)
     if not ok:
         print("[字体] 警告（%s）：%s 的私用区码位被映射了，取不到可比的 .notdef，"
@@ -124,10 +165,16 @@ def _warn_incomplete(font_path, why):
               "请用 CHANLUN_FONT 指定一支能验的字体。"
               % (why, os.path.basename(font_path)), file=sys.stderr)
     elif gaps:
-        print("[字体] 警告（%s）：%s 缺 %s；这些字会被画成方框而且不会报错，"
-              "请用 CHANLUN_FONT 指定一支覆盖更全的字体。"
-              % (why, os.path.basename(font_path),
-                 "、".join("%s（%s）" % (n, m) for n, m in gaps)), file=sys.stderr)
+        detail = "、".join("%s（%s）" % (n, m) for n, m in gaps)
+        alt = _best_alternative(font_path, cands)
+        if alt:
+            tail = "换成 %s 能覆盖得更多。" % alt
+        else:
+            # 候选里没有一支覆盖得更全 —— 那就只陈述事实，不给一条照办不了的建议。
+            tail = ("候选表（_FONTS，本机命中 %d 条）里没有一支覆盖得更全，"
+                    "换字体解决不了这类缺字。" % (len(cands) if cands else 1))
+        print("[字体] 警告（%s）：%s 缺 %s；这些字会被画成方框而且不会报错。%s"
+              % (why, os.path.basename(font_path), detail, tail), file=sys.stderr)
 
 
 def _pick_font():
@@ -136,7 +183,9 @@ def _pick_font():
     if env:
         if not os.path.exists(env):
             raise FileNotFoundError("CHANLUN_FONT 指向的字体不存在：%s" % env)
-        _warn_incomplete(env, "来自 CHANLUN_FONT")
+        # 显式指定时，警告里要能说清「换哪一支更好」，所以把别的候选也带上（人指定了就不推翻）。
+        others = [f for f in _FONTS if f and f != env and os.path.exists(f)]
+        _warn_incomplete(env, "来自 CHANLUN_FONT", others)
         return env
     cands = [f for f in _FONTS if f and os.path.exists(f)]
     if not cands:
@@ -144,8 +193,12 @@ def _pick_font():
     # 取覆盖最全的，同分取靠前的（保留 _FONTS 的偏好顺序；max 遇平局取第一个）。
     # 为什么不是"按顺序取第一支过线的"：Linux 上 Droid 排第一但只覆盖 2/4，
     # 第一支过线的会把 Noto 挡在身后——那正是这次这个坑。
+    #
+    # 同分仍然只由列表顺序决定，这是既定行为、不是判据（2026-09-30 复核：只比三类时
+    # Droid 97320619 与 Noto 2c76254f 同分 (1,3)，喂入顺序一换结论就反）。**要动的是
+    # 「比几类」，不是偏好顺序**——收了符号类之后这两支不再同分（(1,4) vs (1,3)）。
     best = max(cands, key=_font_score)
-    _warn_incomplete(best, "候选里没有一支覆盖完整")
+    _warn_incomplete(best, "候选里没有一支覆盖完整", cands)
     return best
 
 
