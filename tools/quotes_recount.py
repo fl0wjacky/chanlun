@@ -92,7 +92,7 @@
                            按位置取，旁档里加一栏就会静默错读一整列，而屏幕上数还是对的。
                          ★ 它是**非计数轴**（`OTHER_AXES`）且**点名豁免探针**（`PROBE_EXEMPT`）：
                            换一份旁档 = 换一次测量，不是旋钮（同 `--commit` 那一格）。
-    --expect-speaker <语义指纹前16位>
+    --expect-speaker <语义指纹(key_sha1·判词) 前16位>
                          旁档的**语义指纹**对不上 ⇒ **exit=11、不出数**。
                          ★ 指纹对**排序后的 `(key_sha1, 判词)` 对**算 —— **不是**文件 sha256。
                            @iris-64a1 给旁档加了一行 `# columns` 机器可读表头，**一个判词都没改**，
@@ -680,7 +680,7 @@ def speaker_axis(sites, tot, a, sp=None):
     if not have:
         print("   旁档   ★ **没给**（没写 --speaker）—— 「没给」不是「给了个 0」：下面是 `—`。")
     else:
-        print("   旁档   %s · %d 行 · 覆盖 %d/%d 条 · 语义指纹 sha256:%s（%s）"
+        print("   旁档   %s · %d 行 · 覆盖 %d/%d 条 · 语义指纹(key_sha1·判词) sha256:%s（%s）"
               % (sp["path"], len(sp["rows"]), len(raw) - len(sp["uncovered"]), len(raw),
                  sp["fp_sem"],
                  "已核：== --expect-speaker" if a.expect_speaker else "★ **没核**：没给 --expect-speaker"))
@@ -1111,7 +1111,7 @@ def build_parser():
     #     必须指名它的定义域）：
     #       语义指纹（门）  对**排序后的 `(key_sha1, 判词)` 对**算 ⇒ 加注释栏、调列序都不动
     #       字节 sha（对角） `sha256(文件)` ⇒ **加一栏就会变**，只能用来对"我读的是不是同一份文件"
-    ap.add_argument("--expect-speaker", default=None, metavar="<语义指纹前16位>",
+    ap.add_argument("--expect-speaker", default=None, metavar="<语义指纹(key_sha1·判词) 前16位>",
                     help="旁档的**语义指纹**（`(key_sha1, 判词)` 对）对不上就 exit=11。"
                          "不给 ⇒ 那行自报「★ 没核」。★ 不是文件 sha256 —— 见 `--speaker` 的注。")
     # ★ **离线自测**（`card-c9b12e05-1a0`）：不进正常跑法。
@@ -2115,7 +2115,7 @@ def main():
         print("    登记了没旗标：%s" % (", ".join(missing) or "（无）"))
         # ★ 第二半（`card-5ed92625-4f5`）：登记了，但**没在任何一张表上露面**的那一类。
         #   它比"漏登记"更难看见：不炸、不红，只是**默默变盲**或**默默当上探针**。
-        print("    没上表（登记了却没身份）：%s" % ("；".join(unreg) or "（无）"))
+        print("    表对不上（**逐条自带身份**，别按这个表头归类）：%s" % ("；".join(unreg) or "（无）"))
         print("  ★ 为什么要拦在量之前：「生效旗标 …」那一行是从 `COUNT_AXES` 拼出来的，"
               "漏登记一个影响数的旗标 ⇒ **数会动、印的那行不动**；")
         print("    而 `--expect-flags` 拿它当判据词汇表 ⇒ 两个都漏的人串相等 ⇒ 一扇永远绿的门。")
@@ -2354,8 +2354,8 @@ def main():
                   "而旁档的行数**一行不变** —— 那时逐行联结照样全中，只有这一格拦得住。")
             return 11
         for name, n, k in rows:
-            print("  %-8s %4d 处 / %4d 条" % (name, n, k))
-        print("  %-8s %4d 处 / %4d 条" % ("合计", tot[0], tot[1]))
+            print("  %-8s %4d 处 / %4d 条(逐格)" % (name, n, k))
+        print("  %-8s %4d 处 / %4d 条(逐格)" % ("合计", tot[0], tot[1]))
         print()
         speaker_axis(sites, tot, a, sp)
         print()
