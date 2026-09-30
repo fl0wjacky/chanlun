@@ -99,15 +99,20 @@ def _selftest():
 
 
 def _font_id():
-    """正在量的那支字体：名字 + sha256 前 8 位。**同名两支字体是有的**（见 memory 里那两支
-    Droid：`97320619` 有 ✔✗✘、`23920155` 两样都缺），只写文件名认不出是哪一支。"""
+    """正在量的那支字体：**全路径** + sha256 前 8 位。
+
+    路径给全，是因为 `CHANLUN_FONT` 只认全路径（给文件名 config 直接 FileNotFoundError）——
+    报数时只印文件名，别人照着复现会先撞一个和结论无关的错。
+    sha256 是因为**同名两支字体是有的**（见 memory 里那两支 Droid：`97320619` 有 ✔✗✘、
+    `23920155` 两样都缺），只写文件名认不出是哪一支。
+    """
     import hashlib
     from config import FONT as _FP
     try:
         h = hashlib.sha256(open(_FP, "rb").read()).hexdigest()[:8]
     except OSError as e:
         return "%s（读不出 sha256：%s）" % (_FP, e)
-    return "%s  sha256:%s" % (os.path.basename(_FP), h)
+    return "%s  sha256:%s" % (_FP, h)
 
 
 def _extent(x, text, font, anchor):
