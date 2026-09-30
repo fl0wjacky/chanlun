@@ -53,10 +53,13 @@ def literal_chars(paths):
 
 def scan(paths=None):
     """返回 (font, missing, conflict, 字面量字符数, 扫过的文件数)。"""
-    from render.style import F, glyph_gaps
+    from render.style import F, glyph_gaps, _NOTDEF_PROBE
     font = F(24)
     chars, files = literal_chars(paths if paths is not None else default_paths())
-    keep = "".join(sorted(c for c in chars if not c.isspace() and ord(c) >= 0x20))
+    # 探测字符是检测器自己的哨兵（render/style.py 里那个私用区码位），不是卡片内容。
+    # 不排掉它，扫 cards/ + render/ 会把自己那个哨兵报成"卡片缺字"——检测器举报自己。
+    keep = "".join(sorted(c for c in chars
+                          if not c.isspace() and ord(c) >= 0x20 and c != _NOTDEF_PROBE))
     missing, conflict = glyph_gaps(keep, font)
     return font, missing, conflict, len(chars), len(files)
 
