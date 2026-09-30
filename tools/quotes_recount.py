@@ -41,6 +41,14 @@
                          ★ 不给它，那行会自报「★ 没核」—— 因为`print(fingerprint)` 只是
                            **印出来**，不是**核过**：换个 QL_CORPUS 指进来，器照样跑、
                            照样印一个 sha256、照样出一张表。**印了 sha256 ≠ 验过语料。**
+    --expect-judge <sha256前16位>
+                         **判据**（`verify_quotes.py`）的指纹，对不上 ⇒ **exit=5、不出数**。
+                         ★ 门原来只核两个输入，但**读数由三个输入决定**：
+                           `数 = f(对象, 语料, 判据)`。实测（@nova-8980 12:4x）：
+                           判据 `93fbf2ad` ⇒ 331/302「是」；判据换成旧版 `b31431b3` ⇒ **336/307，照样「是」、rc=0**
+                           ⇒ 一个**换错了判据**的人会拿到一张自称验收通过、数却不对的表。
+                         ★ 尺：sha256（与 `--expect-corpus` 同一把，一个 `sha256sum` 就能独立复算）。
+                           同文件另印 git blob 短 sha（团队一直贴的那串），**两把尺各自带名**——不混。
     --unit    all|gone   ★ 单位（分母的定义）：
                          all  = **每一个**配对都进分母
                          gone = 只把「在 108 课原文里**找不到**」的配对算进去
@@ -79,12 +87,14 @@
 
 退出：0 跑完 · 2 语料不在（**查不了 ≠ 通过**）· 3 语料指纹对不上（--expect-corpus）
       · 4 没点对象（`--commit`/`--tree` 一个都没写）—— 见下面 `--commit` 那格
+      · 5 **判据**指纹对不上（--expect-judge）—— 数和 3 **分开出口**：3 与 5 都"拒绝出数"，
+        但**原因不同**，而今天反复栽的就是"红是对的、原因是错的"那一格
 
 ★★ 验收判据：**`grep -q '验收可用=是'`**（输出里那一行单值）。三个条件**必须写成"印了且 = 是"**：
 
 ```
 验收可用=是        ✓ 过
-验收可用=否        ✗ 红（下面会说出少了哪一条：对象不是 sha ／ 语料没核）
+验收可用=否        ✗ 红（下面会说出少了哪一条：对象不是 sha ／ 语料没核 ／ 判据没核）
 （没有这一行）      ✗ 红  ← **旧版器就是这一格**：判据若写成"没有 否就算过"，它静默通过
 ```
   ⇒ 这门装的是**这个数是什么**，不是"参数写没写"：`--commit .` 是正当用法（exit 照常 0），
@@ -92,7 +102,7 @@
   ⇒ 也**不许借 `★` 当判据**：验收命令**自己**就印 ★（`★ 这一支不判对错…`，在第 15 行）
     ⇒ 按"输出里没有 ★"判会把**正确的那跑**判红。（借别人也在用的字符当接口，本仓栽过。）
 """
-import argparse, io, os, re, shutil, subprocess, sys, tempfile
+import argparse, hashlib, io, os, re, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -286,6 +296,30 @@ def which(sha):
     return ("%s（认不出类型，git cat-file 说 %r）" % (sha, kind), False)
 
 
+def judge_id():
+    """判据的身份 —— **是我真导进来的那个文件**（`V.__file__`），不是"我猜它在哪"。
+
+    ★ 为什么必须钉它：这支器的读数 = **f(对象, 语料, 判据)**。门原来只核前两个
+      ⇒ 判据一换，数就变，而门照印「是」、rc=0。两条独立路径量到（@nova-8980 12:4x ·
+      @atlas-791f 12:5x）：
+        判据换回旧版 `b31431b3`            ⇒ 331/302 → **336/307**，两跑都「是」
+        判据里 `norm` 改成恒等、器一字节不动 ⇒ 331/302 → **365/333**
+      ⇒ **一个换错了判据的人，会拿到一张自称验收通过、数却不对的表。**
+
+    ★ 只说"这个文件"的 sha256，**不说"判据已钉死"**：那是**闭包断言**。
+      今天成立是量出来的（`verify_quotes.py` 只有一行 import，全是标准库 ⇒ 无下游），
+      但哪天它自己 import 了第三个文件，那句话就假了 —— 而**假掉的断言不会自己红**。
+      所以这里只报事实，闭包由卡上那句"什么时候要重新量"守着。
+    """
+    p = getattr(V, "__file__", None)
+    if not p or not os.path.exists(p):
+        return None, None, p
+    b = open(p, "rb").read()
+    return (hashlib.sha256(b).hexdigest()[:16],
+            hashlib.sha1(b"blob %d\0" % len(b) + b).hexdigest()[:8],
+            p)
+
+
 def main():
     ap = argparse.ArgumentParser()
     # ★ default 从 "." 改成 **None**（@atlas-791f 12:2x 的第三条反例）：
@@ -314,6 +348,12 @@ def main():
     #   ⇒ 有门才叫验过：对不上 exit=3（2 已经给了"语料不在"）。
     ap.add_argument("--expect-corpus", default="", metavar="<sha256前16位>",
                     help="语料指纹对不上就 exit=3。不给 ⇒ 那行会自报「★ 没核」。")
+    # ★ 第二个洞（@nova-8980 12:4x 量到、@atlas-791f 12:5x 独立变异复现）：
+    #   门核的是「对象 + 语料」，可这支器的数**由三个输入决定** —— 判据是第三个。
+    #   ⇒ 照 --expect-corpus 那把尺再钉一次（**不另发明概念**）：同一个模样、同一个出口形态。
+    ap.add_argument("--expect-judge", default="", metavar="<sha256前16位>",
+                    help="判据 verify_quotes.py 的指纹对不上就 exit=5。"
+                         "不给 ⇒ 那行会自报「★ 没核」。")
     a = ap.parse_args()
 
     if a.tree is None:
@@ -351,6 +391,28 @@ def main():
         print("语料   sha256:%s%s" % (
             fp, "  （已核：== --expect-corpus）" if a.expect_corpus
                 else "  （★ **没核**：没给 --expect-corpus，这个 sha256 只是印出来的）"))
+        # ★★ 第三个输入：**判据自己**（@nova-8980 量出的第二个洞）。
+        #   这行**无条件印**（@nova-8980 12:5x 的 ①）："没核"和"核过"必须**分开印**，
+        #   否则又回到"看起来验过"那一格 —— 和语料那行同一个模样。
+        jsha, jblob, jpath = judge_id()
+        if a.expect_judge and jsha != a.expect_judge:
+            print("★ 判据指纹对不上 ⇒ **拒绝出数**（exit=5）。门原来只核两个输入，可"
+                  "**读数由三个决定**：")
+            print("  期望 --expect-judge %s" % a.expect_judge)
+            print("  实际（我导进来的那个文件）     %s" % (jsha or "拿不到"))
+            print("  ★ 判据一换、器一字节不动，数就变：旧判据 `b31431b3` ⇒ 331/302→336/307；"
+                  "`norm` 改成恒等 ⇒ →365/333。")
+            print("  ★ 而**上一版门在这两跑里都印「是」、rc=0** —— 一个换错判据的人会拿到一张"
+                  "自称验收通过、数却不对的表。")
+            return 5
+        if jsha is None:
+            print("判据   ★ **拿不到判据文件**（`V.__file__`=%r）⇒ 这个数连「谁算的」都说不出来"
+                  % (jpath,))
+        else:
+            print("判据   %s sha256:%s（git blob %s）%s"
+                  % (os.path.basename(jpath), jsha, jblob,
+                     "  （已核：== --expect-judge）" if a.expect_judge
+                     else "  （★ **没核**：没给 --expect-judge，这个 sha256 只是印出来的）"))
         # ★★ 验收判据做成**专用单值**（@iris-64a1 14:3x 量出的洞 + 她先提的"门挪到输出匹配"）：
         #   ① 洞：`--commit .` 是**正当用法**（该跑、该 exit=0），但它不是任何一个对象
         #      ⇒ **换个拼法就绕过"不写对象"那道门**（明写 `.`，照样出数）。
@@ -362,8 +424,10 @@ def main():
         #   ⇒ 一行单值：`验收可用=是` / `验收可用=否`。检查方：`grep -q '验收可用=是'`。
         #      它**能失败**：少给一个 --expect-corpus 就会翻成 否（下面的 else 会说出少了哪一条）。
         corpus_ok = bool(a.expect_corpus)   # 对不上在前面已 exit=3，走到这儿就是核过了
-        if obj_is_obj and corpus_ok:
-            print("验收可用=是    （对象=%s · 语料 sha256:%s 已核）" % (a.tree, fp))
+        judge_ok = bool(a.expect_judge)     # 对不上在前面已 exit=5，走到这儿就是核过了
+        if obj_is_obj and corpus_ok and judge_ok:
+            print("验收可用=是    （对象=%s · 语料 sha256:%s 已核 · 判据 sha256:%s 已核）"
+                  % (a.tree, fp, jsha))
         else:
             why = []
             if not obj_is_obj:
@@ -371,6 +435,9 @@ def main():
                            "**你脚下那份树的快照**，换个人、换个脏法就换个数）")
             if not corpus_ok:
                 why.append("没给 --expect-corpus（语料只是印出来的，**没核过**）")
+            if not judge_ok:
+                why.append("没给 --expect-judge（**判据**只是印出来的，没核过 —— "
+                           "而判据一换数就变，门原来在这两跑里都照印「是」）")
             print("验收可用=否    —— 不是「跑不动」（这跑是正当用法、exit 照常），"
                   "是**这张表不能当验收读数**：")
             for w in why:
