@@ -69,10 +69,14 @@ def main():
         starts, ends, nums, parts = [], [], [], []
         pos = 0
         for n, body in docs:
-            starts.append(pos); ends.append(pos + len(body)); nums.append(n)
-            parts.append(body); pos += len(body) + 1
+            # ★★ 语料也必须 `norm()` 过 —— 器的 `Corpus(docs, V.norm)` 就是这么建的，
+            #    而链上的零件是 `norm(段)`。**归一化只做在一侧 ⇒ 一个都找不到**（我这个 bug
+            #    第一版就犯在这里：拿 norm 过的零件去 find 没归一化的语料 ⇒ 一片假红）。
+            t = norm(body)
+            starts.append(pos); ends.append(pos + len(t)); nums.append(n)
+            parts.append(t); pos += len(t) + 1
         blob = "\n".join(parts)
-        print(u"语料：%d 课 · blob %d 字（器外自拼，不用 V.Corpus）" % (len(docs), len(blob)))
+        print(u"语料：%d 课 · blob %d 字（**norm 后**；器外自拼，不用 V.Corpus）" % (len(docs), len(blob)))
 
         # ---- 逐条 ----
         rows = []

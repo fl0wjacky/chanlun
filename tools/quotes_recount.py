@@ -684,6 +684,14 @@ def speaker_axis(sites, tot, a, sp=None):
               % (sp["path"], len(sp["rows"]), len(raw) - len(sp["uncovered"]), len(raw),
                  sp["fp_sem"],
                  "已核：== --expect-speaker" if a.expect_speaker else "★ **没核**：没给 --expect-speaker"))
+        # ★★ @nova-8980 17:3x：把**门的定义域**印出来（逐字）——
+        #   「一个核了东西的门，得说清它核的是**哪几栏**；不说，读的人会把"指纹没动"读成
+        #    "整个文件没动"」。实测（她从 iris 入库的 tsv 复算）：只动**第 7 栏**一格 ⇒
+        #    语义指纹（二元组）**不动**、而生成器那侧的三元组 fp3 **动**
+        #    ⇒ 两个数都在屏幕上，但**说的是两件事**；不写定义域，它们长得一样。
+        print("          门 = **(key_sha1, 判词) 二元组** 排序后 sha256（只这**两栏**）"
+              "—— ★ **第 7 栏（依据的变换）不在门的定义域里**，"
+              "它由**旁档生成器那侧**的 fp3（三元组）自己核 ⇒ 「本体指纹没动」**不等于**「文件没动」")
         print("          文件 sha256:%s（%d 字节）—— ★ **仅供对角**（同名文件改前/改后），"
               "**门没装在这把尺上**：加一栏、调列序都会让它变，而判词一个没改"
               % (sp["sha_bytes"], sp["nbytes"]))
@@ -889,6 +897,31 @@ PROBE_EXEMPT = {
     "expect_speaker": "它的『正确值』**就是旁档的指纹**，而基线那条命令压根没有旁档 "
                       "⇒ 挑不出探针值。它的门在 ⑤ 里**单独喂**（红7 指纹），不在这儿重复一遍",
 }
+# ★★ **坐标臂的分辨力**（`card-5ed92625-4f5`）：哪些轴上，② 那一格的「坐标」**根本看不见东西**。
+#   洞：`_coords()` 抽的是 量法/对象/语料/判据 四行，并**按设计切掉注解**（理由写在它自己的
+#   docstring 里）；而 `--expect-*` 这四个**声明的常数**只印在注解里 ⇒ 拿它们当探针，
+#   坐标行**必然**"逐字相同"。⇒ ② 那一格的 ✓ **就是那条盲本身**，不是"核过了"
+#   （@atlas-791f 量的：那四行印出来和计数轴的 ✓ **长得一模一样**）。
+#   ⇒ 修法（@atlas-791f 选的 **B**）：**给它们自己的脸**，点名"这一格没有坐标臂"，
+#     并把**真正有分辨力的那条臂**写在同一行 —— 不许让一个盲的 ✓ 长得像核过的 ✓。
+#   ★ 为什么不选修法 A（把声明的常数塞进坐标）：@atlas-791f 当场量出 A 会让 ② **永久红**
+#     —— ② 的判据就是"坐标逐字重述"，塞进去就等于每一跑都差一处。
+#   ★ 值是 `(本轴为什么不在坐标里, 真正核它的那条臂)`，不是 `True`：同 `PROBE_EXEMPT` 那条 ——
+#     一个不说理由的登记，下一个人分不出"它不该在坐标里"和"我忘了把它放进去"。
+#   ★★★ 本表**不是**判据：判据是**现量**的（给/不给这个旗标，两跑坐标逐字比，见 `_coord_arm_face`）。
+#     本表只缴两件事：① 这张盲脸**被登记过**（新的这类轴进来必须点名，不许默默盲）；
+#     ② 盲的时候**谁有分辨力**要印在旁边。表与实测不符 ⇒ 那一格 ✗。
+COORD_BLIND = {
+    "expect_corpus": ("本轴的值只印在 `语料` 行的**注解**里",
+                      "① 改坏一位 ⇒ rc=3 且**不出数**"),
+    "expect_judge": ("本轴的值只印在 `判据` 行的**注解**里",
+                     "① 改坏一位 ⇒ rc=5 且**不出数**"),
+    "expect_tree": ("本轴的值只在**拒绝出数**那条分支里才印（成功跑里不印）",
+                    "① 改坏一位 ⇒ rc=6 且**不出数**"),
+    "expect_flags": ("本轴的值只印在 `验收可用=是` 那行的**注解**里",
+                     "① 改坏一位 ⇒ rc=8 且**不出数**"),
+}
+
 # ★ **模式开关**：它既不进数、也不是"换一档看数动没动"的旋钮（它连量都不量）——
 #   所以**单独点名**，不许塞进 `OTHER_AXES`：自测会拿 `OTHER_AXES` 逐项当"探针"跑一遍，
 #   混进去 ⇒ 自测自己调自己（`--selfcheck-gate` 递归）。这与对象轴 `--commit` 是**同一类豁免**：
@@ -920,6 +953,39 @@ def axis_audit(ap):
     declared = set(COUNT_AXES) | set(OTHER_AXES) | set(MODE_AXES)
     got = set(x.dest for x in ap._actions if x.dest != "help")
     return sorted(got - declared), sorted(declared - got)
+
+
+def registry_audit():
+    """轴单的**第二半**：`COUNT_AXES ∪ OTHER_AXES` 里的每一根，**在哪张表上露面**。
+
+    三张表、三种身份，**每个轴恰好落在一张上**：
+      · `MEASURE_KEY`  —— 它在 `量法` 行有字段名 ⇒ ② 的坐标半句**看得见**它
+      · `PROBE_EXEMPT` —— 它有旗标、但**不该被当 ② 的探针**
+      · `COORD_BLIND`  —— 它可以当探针，但**坐标半句看不见它**（@atlas-791f 量的那四个）
+
+    ★ 为什么要这条：@atlas-791f 说的「四处齐补」少补一处的手法**不止一种** ——
+      漏在 `MEASURE_KEY` ⇒ 印红时 KeyError（@nova-8980 逮的那口）；
+      漏在 `PROBE_EXEMPT`/`COORD_BLIND` ⇒ 它**默默当上探针或默默变盲**。
+      ⇒ 判据是「**每根都必须露面**」，不是「没红所以没事」（@nova-8980 16:5x 的原话）。
+    ★★ 冲突那两条**是实测定的，不是照抄**：@atlas-791f 提的 `MEASURE_KEY ∩ PROBE_EXEMPT = ∅`
+      **今天就是假的** —— `tree` 同时在两张表上（`MEASURE_KEY["tree"]="commit"` 是 ③ 要的坐标字段名；
+      `PROBE_EXEMPT["tree"]` 是"别拿换对象当探针"）。那是**两个身份**，不是重复登记。
+      **真会自相矛盾**的是另外两条（有键名却声称坐标臂看不见它 / 既豁免又要当盲），
+      所以门钉的是那两条，并把这条被否掉的理由写在代码里 —— 免得下一个人再来一遍。
+    """
+    bad = []
+    cover = set(MEASURE_KEY) | set(PROBE_EXEMPT) | set(COORD_BLIND)
+    for d in sorted(set(COUNT_AXES) | set(OTHER_AXES)):
+        if d not in cover:
+            bad.append("%s **一根表都没上** ⇒ 要么补 `MEASURE_KEY`（它有坐标字段名）、"
+                       "要么进 `PROBE_EXEMPT`（不当探针）、要么进 `COORD_BLIND`（坐标臂看不见它）" % d)
+    for d in sorted(set(MEASURE_KEY) & set(COORD_BLIND)):
+        bad.append("%s 同时在 `MEASURE_KEY` 和 `COORD_BLIND` ⇒ 自相矛盾："
+                   "在 `量法` 行有字段名（坐标臂看得见），却声称坐标臂看不见它" % d)
+    for d in sorted(set(PROBE_EXEMPT) & set(COORD_BLIND)):
+        bad.append("%s 同时在 `PROBE_EXEMPT` 和 `COORD_BLIND` ⇒ 两头登记："
+                   "② 压根不会拿它当探针，它的「盲」无从谈起" % d)
+    return bad
 
 
 def flags_shape_bad(s):
@@ -1218,6 +1284,38 @@ def _run_out(argv):
     return r.returncode, r.stdout
 
 
+def _dif_face(dif, own):
+    """**全仓唯一一处**给坐标差 `dif` 分脸的地方 —— 返回 `(形状码, 判词)`。
+
+    形状码 ∈ `{"没印","没动","本轴","名字对不上","不止一根"}`：
+      · 没印       ⇒ **判不了**（"没印"与"逐字相同"是两件事）
+      · 没动       ⇒ 差 0 处
+      · 本轴       ⇒ 恰 1 处，且**就是本轴的登记名** ⇒ ④ 登记错
+      · 名字对不上 ⇒ 恰 1 处，但那处**不是本轴的登记名**（含本轴没有登记名）⇒ ③b
+      · 不止一根   ⇒ ≥2 处 ⇒ ③a
+
+    ★★ 为什么边界条件**只许在这一个函数里**（@nova-8980 17:2x 的判据，可 `grep` 核）：
+      ③a 与 ③b **下一步正相反** —— 一个让你去查**别的轴**、一个让你去查**名字**。
+      共用一张脸时，人会照着「不止一根」去找别的轴，而那儿什么都没有
+      （@atlas-791f 实测：只手把印法那一处改掉 `min-len`→`minlen` ⇒ 现场**只动了一处**，
+       旧判词却印「不止碰一根轴」）。
+    ★ 今晚那族病的原样是：**修法落到第二处就被复刻一次，第三处还会长出来**（@nova-8980）
+      ⇒ 两个调用点（`_probe_face` / ③）都只调这里，**不许再内联一遍 `len(dif)`**。
+    """
+    if dif is None:
+        return "没印", "判不了 ⇒ 先修抽行/探针（**没测**）"
+    if not dif:
+        return "没动", "坐标**逐字没动**（差 0 处）"
+    if len(dif) == 1:
+        if own is not None and dif[0] == own:
+            return "本轴", "差的那一处**就是本轴自己**（%s）" % own
+        return "名字对不上", ("判不了：差的那一处印的是「%s」，本轴登记的是「%s」 ⇒ **先核名字**"
+                              "（登记名 ↔ 印出的字段名是两条路径，同一次量里互不核对）"
+                              % (dif[0], own or "（本轴没有登记名）"))
+    return "不止一根", "坐标**动了**：这个探针**不止碰一根轴**（差 %d 处：%s）" % (
+        len(dif), "/".join(dif))
+
+
 def _probe_face(rc, tot, tot0, dif, own=None):
     """② 那格的**病名** —— 抽成纯函数**只为一件事：让它能喂红**（见 `selfcheck_gate` ⑤e）。
 
@@ -1236,11 +1334,164 @@ def _probe_face(rc, tot, tot0, dif, own=None):
         return "判不了：探针那一跑**没出数**（rc=%d）⇒ 这格**没测**" % rc
     if tot != tot0:
         return "数动了 ⇒ 登记错"
-    if dif is None:
-        return "判不了 ⇒ 先修抽行/探针（**没测**）"
-    if own is not None and len(dif) == 1 and dif[0] == own:
+    # ★ 分脸的边界条件**全在 `_dif_face` 里**（唯一一处，@nova-8980 的可 grep 判据）——
+    #   这里只把形状码翻成这一格的病名，**不许**再内联 `len(dif)`。
+    code, txt = _dif_face(dif, own)
+    if code == "没动":
+        # ★★ 第五张脸（@iris-64a1 16:5x 核到的）：空的 `dif` 说的是"坐标**压根没看见**这个轴"
+        #   ⇒ 这一格**没有坐标臂**，那和"不止碰一根轴"是**两回事**（一个是"没测"，一个是"测到了动两根"）。
+        #   ★ 它之前**不可达**：四个 `expect_*` 的 `[d]` 先炸了（@nova-8980 逮的 KeyError）
+        #     ⇒ "炸"和"以一个确定的错名字通过"是同一个洞的两张脸。
+        return ("**这一格没有坐标臂**（数没动、坐标也**逐字没动**）—— `%s` 没登记 ⇒"
+                " ② 的坐标半句对它**无分辨力**，这不叫「不止碰一根轴」" % (own or "本轴"))
+    if code == "本轴":
         return "登记错（数没动，但坐标差的那一处**就是本轴自己**）"
-    return "坐标动了 ⇒ 这个探针不止碰一根轴"
+    return txt                      # 没印 / 名字对不上 / 不止一根：判词在 `_dif_face` 里，一处
+
+
+def _coord_arm_face(axis, dif):
+    """② 那格的**坐标那一半**有没有分辨力（`card-5ed92625-4f5`）—— 返回 `(有没有坐标臂, 判词)`。
+
+    · `dif is None`（坐标行抽不齐）            ⇒ `(None, …)`：**判不了**（不许当"相同"）
+    · `dif == []`（给/不给这个旗标，**逐字相同**）⇒ `(False, …)`：**盲** ⇒ **这一格没有坐标臂**
+    · `dif` 非空                                ⇒ `(True, …)`：坐标**真的看见**了这个轴
+
+    ★ 判据是**两点受控比较**（那一跑 vs 基点那一跑，**只差这一个轴的值**），
+      **不是**把值拿去坐标行里**找**。找是坏判据，当场有反例：`--expect-tree` 的值
+      **正好就是** `对象` 行里那个树 sha —— 它**一直在坐标里**，而那与"这个旗标进没进坐标"
+      毫无关系（`expect_tree` 成功跑里**一次都不印**，见 `COORD_BLIND`）。
+      ⇒ 「值在不在坐标里」和「这个轴进没进坐标」是两个对象，词和东西之间没有门。
+    ★ `axis in COORD_BLIND` ⇒ 判词必须把**真正有分辨力的那条臂**一起印出来：说"盲"是**半句**，
+      不说是"谁在核它"，读的人只会得到"这格没测"而不知道该信谁。
+    ★ 盲而**没登记** ⇒ 判词里点名「没登记」：新的这类轴进来必须**当场**被看见，
+      不许默默盲（同 `PROBE_EXEMPT` 那条：不说理由的登记分不出"不该测"和"忘了测"）。
+    """
+    if dif is None:
+        return None, "**判不了**（坐标行抽不齐 ⇒ 本格**没测**）"
+    if not dif:
+        reg = COORD_BLIND.get(axis)
+        if reg is None:
+            # ★ `AXIS_FLAG.get`（**不是** `[axis]`）：这一支的存在理由就是"**没登记**的轴"，
+            #   而没登记的轴**本来就可能连旗标名也没有** ⇒ `[axis]` 会在这条路上再炸一次
+            #   —— 我今天就原地犯了一次（@iris-64a1：「⑤h 若还是喂字面量，钉的仍是函数」）。
+            return False, ("**盲**（给/不给 `%s` ⇒ 坐标**逐字相同**）—— ★ **没登记**："
+                           "本轴为什么没有坐标臂、谁在核它，两样都得点名"
+                           "（新的这类轴不许默默盲）"
+                           % AXIS_FLAG.get(axis, "（连旗标名都没有：%s）" % axis))
+        why, arm = reg
+        return False, ("**盲**（给/不给 `%s` ⇒ 坐标**逐字相同**）—— %s ⇒ **本格没有坐标臂**；"
+                       "这个常数靠 **%s**" % (AXIS_FLAG[axis], why, arm))
+    return True, "**有分辨力**（差 %d 处：%s）" % (len(dif), "/".join(dif))
+
+
+# 「谁在核它」那一栏**必须是一个可核的坐标**，不是一句安慰。@nova-8980 16:5x：
+#   「不许写"红会抓" —— 那等于没人核」（今天那句"绿的定义就是盲"的同一面：
+#    红也只在**它的**坐标臂有分辨力时才抓得住东西）。
+_ARM_OK = re.compile(r"(①|②|③|④|⑤|rc=|自测)")
+_ARM_NONE = ("**无**", "**无**（今天没有任何一条臂核它 —— 这一栏空着本身就是读数）")
+
+
+def _arm_is_concrete(arm):
+    """`COORD_BLIND` 的"谁在核它"那一栏的判据 —— **能红**（⑤h 喂了一口 `红会抓`）。"""
+    return bool(_ARM_OK.search(arm)) or arm.strip() in _ARM_NONE
+
+
+def _probe_tail(axis, rc, tot, tot0, dif):
+    """② 那一格 ✗ 的**病名** —— 抽成函数只为两件事（@iris-64a1 的规矩）：
+
+    ① **调用点那行不再自己求值 `MEASURE_KEY[axis]`** —— @nova-8980 16:4x 逮的 KeyError 就在那儿，
+       而 `expect_*` 四个 dest 在 `MEASURE_KEY` 里**一个键都没有** ⇒ 那四行的红支**从没被执行过**
+       （绿的支不求职）⇒ 「不是没喂过红，是**喂了会炸**」。
+    ② 让它**能喂红**，而喂的必须是**真会红的那根轴**：「编出来的东西**没有那一行**」——
+       正例的判据是"它必须红在那一行"，所以正例只许用真轴（`expect_tree` 一个形状合法的错值 ⇒ rc=6）。
+       编出来的轴名/值**只许当负例**（判据是"它必须被拒"，拒不需要那一行）。
+    """
+    if rc != 0:
+        return "探针那一跑 rc=%d ⇒ 这格**没测**（**不是**「没动」）" % rc
+    if tot != tot0:
+        # `.get`：非计数轴**可能没有键名**（那四个）⇒ 缺键时交回"本格没有坐标臂"那张脸，
+        # 而不是"不止碰一根轴"（@iris-64a1 16:5x 核到的那个"很确定的错名字"）。
+        return _probe_face(rc, tot, tot0, dif, MEASURE_KEY.get(axis))
+    coord_arm, coord_txt = _coord_arm_face(axis, dif)
+    if coord_arm is None:
+        return coord_txt
+    if coord_arm is True:
+        # 坐标**真的动了** ⇒ 交给 `_probe_face` 那张表（它才分得出"差的那一处**恰是本轴自己**"
+        # 还是"碰了别的轴"）：本轴**有键名**时才问得出 —— 差的那处恰是本轴 ⇒ 第 4 张脸
+        # 「登记错」（@nova-8980 补的那张；反向控制里用 `ladder` 走这一支行）。
+        # 没键名的轴 ⇒ `own=None` ⇒ 它没有"自己那一格"，任何坐标差都**不是它** ⇒
+        # 「不止碰一根轴」正是它该说的话。
+        return _probe_face(rc, tot, tot0, dif, MEASURE_KEY.get(axis))
+    return "坐标臂对 `%s` 是**盲**的，而这一格**没登记** ⇒ 补进 `COORD_BLIND`（%s）" % (axis, coord_txt)
+
+
+def _probe_row(axis, val, base, cd0, tot0):
+    """② 的**一行**（跑一遍 + 判 + 出那张脸）—— 返回 `(是不是绿, 那一行文字)`。
+
+    ★ 抽成函数**不是为好看**：@nova-8980 ⑤i 那条要的是「**走真调用点**」——
+      本卡的 KeyError 就发生在这行的**打印语句**里（求值 `MEASURE_KEY[d]`），
+      函数级喂红抓不到它（@iris-64a1：「⑤h 若还是喂字面量，钉的仍是函数」）。
+      ⇒ 自测拿**真会红的真轴**（`expect_tree` 给一个形状合法的错值 ⇒ rc=6）调这一行，
+        走的就是主跑那一行；要求：**不 traceback**、且那行里**不含「坐标动了」**。
+    ★ @iris-64a1 对负例的定规也照办：**编出来的轴名/值只许当负例**（判据是"必须被拒"），
+      正例一律用真轴（判据是"必须红在那一行"，而编出来的东西**没有那一行**）。
+    """
+    rc, tot, _, cd = _run_once(base + [AXIS_FLAG[axis], val])
+    dif = _coord_diff(cd0, cd)
+    coord_arm, coord_txt = _coord_arm_face(axis, dif)
+    # 门 = rc=0 · 合计**逐位不动** · 坐标那格**分类与实测一致**：
+    #   · `coord_arm is False`（实测盲）且**登记过** ⇒ 这一格的 ✓ **只由前两条支撑**，
+    #     而屏幕上那行会自己说"本格没有坐标臂" —— 这就是本卡的修法 B：**不许让盲的 ✓
+    #     长得像核过的 ✓**。判据**没变**（还是"坐标逐字相同"）；变的是**那张脸**，
+    #     加上一条新的义务：**新的这类轴进来必须点名**（没登记 ⇒ 红）。
+    #   · `coord_arm is True`（坐标真的动了）⇒ 非计数轴却动了坐标 ⇒ 红（② 要报的登记错）。
+    ok = (rc == 0 and tot == tot0 and coord_arm is False and axis in COORD_BLIND)
+    # ★★ @iris-64a1 的收口：「范围那半句得用**另一种字形**印 —— 不是多打一行解释，
+    #   解释会被跳过」。⇒ 盲的那几行**不印 `✓`**，印 `✓（**不含坐标臂**）`：
+    #   同一列、同一位置、另一种字形，**扫一眼**就分得出自己那个 ✓ 的分母是哪两半。
+    mark = ("✓（**不含坐标臂**）" if (ok and coord_arm is False)
+            else ("✓" if ok else "✗ **%s**" % _probe_tail(axis, rc, tot, tot0, dif)))
+    return ok, ("   %-15s 探针=%s ⇒ rc=%d · 合计 %s（基线 %s）· 坐标臂 %s ⇒ %s"
+                % (axis, val[:20], rc, tot or "**没有**", tot0, coord_txt, mark))
+
+
+def _key_names_aligned(field_names):
+    """`MEASURE_KEY` 的值集必须**等于** `量法` 行**实际印出的字段集** —— `(相等吗, 判词)`。
+
+    ★ 为什么这条必须是门而不是注释（@iris-64a1 17:0x，两条独立路径撞在同一格上）：
+      登记名（`MEASURE_KEY`）和印出来的字段名是**两条独立路径**，而 `_coord_diff` 比的是
+      **两跑之间** ⇒ 名字**同时**漂（改名只改一处、或改成一个谁也没印的名）在坐标差里
+      **根本看不见** —— 两跑都印同一个错名，差里当然没有它。
+    ★ 它是那次 `min-len(norm后)` 改名事件的**机器版**：当时靠"③ 那行仍须印只 min-len"
+      当证据 —— 证据是**当场跑出来给人看的**，不是门；没人跑就没人核。
+    ★ 两个方向都要报：**多印的**（印了个不在册的字段 ⇒ `_coord_diff` 会拿它比，而 `_verdict`
+      永远等不到它）与**少印的**（在册却没印 ⇒ 那一轴在坐标里恒等 ⇒ ② 恒盲）。
+    """
+    got, want = set(field_names), set(MEASURE_KEY.values())
+    if got == want:
+        return True, "**相等（%d 个）**：%s" % (len(want), "、".join(sorted(want)))
+    return False, ("**不相等**：印的 %s ｜ 册上 %s ⇒ 多印 %s ／ 少印 %s"
+                   % ("、".join(sorted(got)), "、".join(sorted(want)),
+                      "、".join(sorted(got - want)) or "（无）",
+                      "、".join(sorted(want - got)) or "（无）"))
+
+
+def _inj_face(n_bad, n_tested, bad_name=None):
+    """`量法` 那行对六轴旗标值是不是**单射**（`card-5ed92625-4f5` 第二件）—— `(是不是好, 判词)`。
+
+    ★ 它是 **② 的前置条件**：两个不同值印出**同一个字段** ⇒ 该轴在坐标里**恒等**
+      ⇒ ② 在这一轴上怎么探都"逐字相同" ⇒ 假绿。⇒ ② 的分辨力**全**来自这一条。
+    ★ 为什么带**分母**：@atlas-791f 量过今天 **6/6 单射**。一个不带分母的「6/6」，
+      和"我只量到一根"印出来是**同一张脸** —— 本组今晚第五次遇到同一个病。
+    ★ 为什么不印成"全绿"就完事：`n_tested == 0`（一根轴的旗标行都没动）**不是**"全单射"，
+      是**没测**；那时 ② 那一格什么都没资格说（同 `_verdict` 的 `diff is None`）。
+    """
+    if not n_tested:
+        return False, "**没测**（一根轴的旗标行都没动 ⇒ 分母 0，不许当绿）"
+    if n_bad:
+        return False, ("**不是单射**：%s（两个不同值印出**同一个字段** ⇒ ② 在这一轴上**恒盲**）"
+                       % (bad_name or "一根"))
+    return True, "**%d/%d 单射**" % (n_tested, n_tested)
 
 
 def _run_once(argv):
@@ -1375,6 +1626,11 @@ def selfcheck_gate(a, argv):
 
     want = {"expect_corpus": 3, "expect_judge": 5, "expect_tree": 6, "expect_flags": 8}
     gates = red = 0
+    # ★★ `card-5ed92625-4f5`：**本跑现量**的"坏值那一跑的 rc"，逐轴记下来。
+    #   用途只有一个 —— ② 抬头拿它核 `COORD_BLIND` 那栏里手写的 `rc=N`（@nova-8980：「名字合法
+    #   还不够，得**指得到**」）。@iris-64a1 的话是这条的判据：**会变的东西可以写下来，
+    #   前提是写了就有人核** —— 写死的东西没人核对，正是我 05h 栽的那一口。
+    bad_rc = {}
 
     print("\n① 反向控制（门：必须**拒绝出数**，`合计` 一行都不许有）")
     for d in ("expect_corpus", "expect_judge", "expect_tree", "expect_flags"):
@@ -1391,6 +1647,7 @@ def selfcheck_gate(a, argv):
         else:
             badv = g[:-1] + ("0" if g[-1] != "0" else "1")
         rc, tot, _, _ = _run_once(base + [AXIS_FLAG[d], badv])
+        bad_rc[d] = rc
         ok = (rc == want[d] and tot is None)
         gates += 1
         red += 0 if ok else 1
@@ -1401,11 +1658,44 @@ def selfcheck_gate(a, argv):
               % (d, g[max(0, k - 4):k + 8], badv[max(0, k - 4):k + 8],
                  rc, want[d], tot or "**没有**", "✓" if ok else "✗ **门没响**"))
 
-    print("\n② 登记错（门：非计数轴塞探针 ⇒ `合计` **逐位不动** 且 **坐标行逐字重述**）")
+    print("\n② 登记错（门：非计数轴塞探针 ⇒ `合计` **逐位不动**；坐标那格要**现量分辨力**）")
     for d in PROBE_EXEMPT:
         print("   ★ 点名豁免 `%s`（%s）" % (d, PROBE_EXEMPT[d]))
     print("   ★ 坐标行 = 器自己印的 量法/对象/语料/判据 四行；**差哪一处都要点名**"
           "（只核「动了没有」的话，「动两根」和「动一根」同签名 —— @iris-64a1 抓的）")
+    # ★★ @nova-8980 16:5x 的坑：**豁免名单必须自己印出来** —— 否则新加的轴会顺着
+    #   "谁红谁进白名单"悄悄变绿，而那正是今天的病。⇒ 抬头印整表，每行注明**名单第 N 项**；
+    #   那一格要说的是「本轴**已声明**无坐标臂」，不是「没红所以没事」。
+    print("   ★ 无坐标臂的**已声明名单**（`COORD_BLIND`，%d 项）：" % len(COORD_BLIND))
+    for i, (k, (w, ar)) in enumerate(COORD_BLIND.items(), 1):
+        print("       第 %d 项 %-15s %s ⇒ 核它的臂：%s" % (i, k, w, ar))
+    # ★★ 那张表**本身不判红**（@nova-8980 17:0x：它印的是"谁在核它"，不是"核过没有"）；
+    #   这一节唯一的红，来自下面这条**跨臂核** —— 手写的 `rc=N` vs ① **本跑现量**的 `bad_rc[d]`。
+    #   ★ 为什么"写下来"可以、"没人核"不可以（@iris-64a1 17:0x）：那栏是**给人读的原因**，
+    #     不可能不写；能做的是让它**没有自由度** —— 写了就每次跑对一遍。
+    #   ★ 两张脸分得开：**指不到**＝名字是编的（① 那格都没印这个 rc）；**数对不上**＝名字过时了
+    #     （@nova-8980：第二种更毒，它长得跟真的一模一样，只有跨臂才分得出）。
+    arm_bad = []
+    for k, (_w, ar) in COORD_BLIND.items():
+        if bad_rc.get(k) is None:
+            arm_bad.append("%s：① 那格**没量到**坏值 rc ⇒ 这栏**没法核**（不是「对上了」）" % k)
+        elif ("rc=%d" % bad_rc[k]) not in ar:
+            arm_bad.append("%s：那栏写的不是本跑现量的 `rc=%d` ⇒ 「名字过时了」" % (k, bad_rc[k]))
+    arm_ok = not arm_bad
+    gates += 1
+    red += 0 if arm_ok else 1
+    print("   ★ 跨臂核（门：那栏里的 `rc=N` 必须**等于** ① 本跑现量出来的 N）⇒ %s"
+          % ("✓" if arm_ok else "✗ **%s**" % "；".join(arm_bad)))
+    # ★★ `card-5ed92625-4f5`：这一圈剩下的四根轴**全是 `expect_*`**，而它们的值**只印在注解里**，
+    #   注解又被 `_coords()` **按设计**切掉 ⇒ 原先那句「坐标逐字相同 ⇒ ✓」**在这一圈上恒真**：
+    #   这一格的 ✓ **不是"核过了"，是那条盲本身**。⇒ 坐标那半句改成 `_coord_arm_face` **现量**：
+    #   给/不给这个旗标两跑比，`[]` ⇒ **盲**（这一格没有坐标臂，点名谁在核它）；
+    #   非空 ⇒ 坐标真看见了这个轴（那时才是"动了"，才该按旧判据判）。
+    #   ★ 同时把 `.get(d)` 落上：`MEASURE_KEY` 里**没有**这四个键 ⇒ 原先 `[d]` 在**印红时**必 KeyError
+    #     （绿的支不求职 ⇒ 干净跑看不见）@nova-8980 16:4x 逮的。⇒ 那不是"没喂过红"，是**喂了会炸**。
+    print("   ★ 坐标臂的判据是**两点受控比较**（那一跑 vs 基点那跑，只差这一个轴的值），"
+          "**不是**把值拿去坐标行里找 —— `--expect-tree` 的值**正好就是** `对象` 行那个树 sha，"
+          "它一直在坐标里，那与「这个旗标进没进坐标」无关（@atlas-791f 量的那个反例）")
     for d in OTHER_AXES:
         if d in PROBE_EXEMPT:
             continue
@@ -1424,17 +1714,14 @@ def selfcheck_gate(a, argv):
             gates += 1
             red += 1
             continue
-        rc, tot, _, cd = _run_once(base + [AXIS_FLAG[d], v])
-        dif = _coord_diff(cd0, cd)
-        ok = (rc == 0 and tot == tot0 and _verdict(dif, []))
+        ok, line = _probe_row(d, v, base, cd0, tot0)
         gates += 1
         red += 0 if ok else 1
-        print("   %-15s 探针=%s ⇒ rc=%d · 合计 %s（基线 %s）· 坐标 %s ⇒ %s"
-              % (d, v[:20], rc, tot or "**没有**", tot0, _diff_text(dif),
-                 "✓" if ok else "✗ **%s**" % _probe_face(rc, tot, tot0, dif, MEASURE_KEY[d])))
+        print(line)
 
     print("\n③ 计数轴（门：印出的旗标行必须动 · 提示：数动没动**不判红**）")
     ax_moved = ax_same = 0
+    inj_tested, inj_bad = 0, []
     for d in COUNT_AXES:
         act = acts.get(d)
         v = _alt_value(act, getattr(abase, d, None) if abase else None) \
@@ -1451,6 +1738,16 @@ def selfcheck_gate(a, argv):
         rc, tot, fl, cd = _run_once(base + [AXIS_FLAG[d], v])
         dif = _coord_diff(cd0, cd)
         line_ok = (rc == 0 and fl is not None and fl != fl0)
+        # ★ `card-5ed92625-4f5` 第二件：**本轴在坐标里是不是单射** —— 旗标行动了，`量法` 那个字段
+        #   有没有跟着动。两个不同值印出**同一个字段** ⇒ 该轴在坐标里**恒等** ⇒ 那一格怎么探都
+        #   "逐字相同"。（`one_ok` 恰好蕴含它 ⇒ 这里**不花额外一跑**，直接从手上这两跑读。）
+        f0_, f1_ = _fields(cd0[0]), (_fields(cd[0]) if cd else {})
+        inj = (f0_.get(MEASURE_KEY[d]) != f1_.get(MEASURE_KEY[d])) if line_ok else None
+        if inj is True:
+            inj_tested += 1
+        elif inj is False:
+            inj_tested += 1
+            inj_bad.append(d)
         # ★ 门 = "旗标行必须动" **且** "坐标**只许差这一根**"：只核前者的话，两跑差两根轴
         #   也会"动" —— 那时差的数**归因不了**，而它照样绿（@iris-64a1 那句"失败与成功同签名"）。
         one_ok = _verdict(dif, [MEASURE_KEY[d]])
@@ -1483,7 +1780,11 @@ def selfcheck_gate(a, argv):
         elif dif is None:
             tail = "判不了 ⇒ 先修抽行/探针（**没测**）"
         elif not one_ok:
-            tail = "坐标不止动一根 ⇒ 这跑的数归因不了"
+            # ★ ③b 与 ③a 的分界**不在这行**（@nova-8980：边界条件只许在 `_dif_face` 一处）——
+            #   这里原来**原地复刻**了老兜底（`dif=["minlen"]` 时印「坐标不止动一根」＝把人送去
+            #   查别的轴，而现场只动了一处）。⇒ 现在只调那一处。
+            _code, _txt = _dif_face(dif, MEASURE_KEY[d])
+            tail = _txt if _code != "不止一根" else (_txt + " ⇒ 这跑的数**归因不了**")
         elif moved or alive is True:
             tail = "（不该到这）"
         elif alive is False:
@@ -1496,6 +1797,22 @@ def selfcheck_gate(a, argv):
                  "动" if line_ok else "**没动**",
                  ("只 %s（其余逐字同）" % MEASURE_KEY[d]) if one_ok else _diff_text(dif),
                  "✓" if (line_ok and one_ok and num_ok) else "✗ **%s**" % tail))
+
+    # ★★ `量法` 行的**单射**（`card-5ed92625-4f5` 第二件）—— 它是 ② 的**前置条件**：
+    #   两个不同值印出同一个字段 ⇒ 该轴在坐标里恒等 ⇒ ② 怎么探都"逐字相同"。
+    #   @atlas-791f 量过今天 **6/6 单射** ⇒ **今天不会红** ⇒ 按本组规矩（没喂过红的格不许当门）
+    #   它的门在自测 **⑤g** 里（那一格喂了一个**故意不单射**的输入）；这里印**本跑现量 + 分母**，
+    #   并**照常判红**：非单射是真缺陷（那根轴的 ② 格永远绿），不是提示。
+    inj_ok, inj_txt = _inj_face(len(inj_bad), inj_tested,
+                                "、".join(MEASURE_KEY[d] for d in inj_bad))
+    gates += 1
+    red += 0 if inj_ok else 1
+    print("   单射（② 的分辨力全靠它：两个不同值必须印出**不同字段**）⇒ %s ⇒ %s"
+          % (inj_txt, "✓" if inj_ok else "✗"))
+    if inj_tested and not inj_bad:
+        print("      ★ 这一格**今天不会红**（@atlas-791f 量过 6/6）⇒ 它是**体检**，不是主门；"
+              "喂红的那一口在自测 ⑤g（这一格存在的意义是：哪天有人把某个字段印成常量，"
+              "这里会先响，而不是等 ② 印出一个假绿）")
 
     # ★ ④ 这条门**自己也得能被喂红**：把两根轴一次碰掉 ⇒ 上面那条判据**必须**说"不通过"。
     #   不喂这一口的话，"只许差一处"就成了一条**不能失败的检查** —— 而它长得和成功一模一样
@@ -1639,6 +1956,100 @@ def selfcheck_gate(a, argv):
     print("   ⑤f           数没动 · 坐标差恰是本轴(ladder) ⇒ 判词「%s」⇒ %s"
           % (_cut(f_own, 42), "✓" if ok else "✗ **把登记错印成「不止碰一根轴」了**"))
 
+    # ── ⑤g / ⑤h（`card-5ed92625-4f5` 两件各一格，**都喂红**）──────────────────────────
+    #   ★ 本卡的病就是"一条**看不见东西的**判据印 ✓"，而它自己又极易复犯：新写的这两条
+    #     如果只印出来不喂红，它们就是**一批新的"不可能失败的门"**（④ 那一课的原话）。
+    # ⑤g ★ 单射那条：喂一个**故意不单射**的输入 ⇒ 必须说"不是单射"并**点名**；
+    #   另两个边界：**分母 0** 不许当绿（"一根都没测到"和"全单射"不许同脸）。
+    g_bad = _inj_face(1, 6, "min-len")
+    g_zero = _inj_face(0, 0, None)
+    g_good = _inj_face(0, 6, None)
+    ok = (g_bad[0] is False and "不是单射" in g_bad[1] and "min-len" in g_bad[1]
+          and g_zero[0] is False and "没测" in g_zero[1]
+          and g_good[0] is True and "6/6" in g_good[1])
+    gates += 1
+    red += 0 if ok else 1
+    print("   ⑤g           单射：喂一根不单射 ⇒ 「%s」· 分母 0 ⇒ 「%s」· 6/6 ⇒ 「%s」⇒ %s"
+          % (_cut(g_bad[1], 22), _cut(g_zero[1], 14), _cut(g_good[1], 10),
+             "✓" if ok else "✗ **这一格分不出「不单射」和「没测到」**"))
+
+    # ⑤h ★ 坐标臂分辨力那条：三张脸 + "**没登记**"那一张，各喂一口。
+    #   · `[]`（给/不给逐字相同）⇒ **盲**
+    #   · `None`（坐标抽不齐）    ⇒ **判不了** —— **不许**和"盲"共用一张脸
+    #     （"没印"和"印了但一样"要的下一步正相反）
+    #   · 非空                     ⇒ **有分辨力**
+    #   · 盲而**没登记**的轴       ⇒ 必须**当场点名**（新加的这类轴不许默默盲）
+    h_blind = _coord_arm_face("expect_corpus", [])
+    h_none = _coord_arm_face("expect_corpus", None)
+    h_seen = _coord_arm_face("unit", ["unit"])
+    h_new = _coord_arm_face("expect_whatever", [])
+    #   · 「谁在核它」那一栏**必须是一个可核的坐标**，「红会抓」这类当场不合法（@nova-8980 16:5x）
+    #   · 空 `dif` + 没登记 ⇒ `_probe_face` 也**不许**印「不止碰一根轴」（@iris-64a1 16:5x 核到的：
+    #     `.get(d)` 那一版会以一个**很确定的错名字**通过 —— 比炸更毒）
+    h_face = _probe_face(0, "331/302", "331/302", [], None)
+    #   ★ @atlas-791f 实测那口**原样**当输入：只手把印法改掉（`min-len`→`minlen`）⇒ 恰一处差、
+    #     而那处不是本轴的登记名 ⇒ 必须印**③b**（点出两端），**不许**印「不止碰一根轴」。
+    h_drift = _probe_face(0, "331/302", "331/302", ["minlen"], "min-len")
+    h_two = _probe_face(0, "331/302", "331/302", ["min-len", "face"], "min-len")
+    ok = (h_blind[0] is False and "盲" in h_blind[1] and "坐标臂" in h_blind[1]
+          and "①" in h_blind[1]                                  # 谁在核它，必须印在同一行
+          and h_none[0] is None and "判不了" in h_none[1]
+          and h_seen[0] is True and "有分辨力" in h_seen[1]
+          and h_new[0] is False and "没登记" in h_new[1]
+          and all(_arm_is_concrete(a) for _, a in COORD_BLIND.values())
+          and not _arm_is_concrete("红会抓")
+          and not _arm_is_concrete("反正没红")
+          # ★ 断言要断在**那句主张**上：`dif` 为空时说「坐标动了」是**自相矛盾** ——
+          #   这比"某几个字不许出现"结实（那张脸的判词里**故意**引了旧病名做对照，
+          #   按子串禁会把一条**对的**判词判红 —— 断子串的检查自己就是这么栽的）。
+          and "坐标动了" not in h_face and "没有坐标臂" in h_face
+          and "minlen" in h_drift and "min-len" in h_drift and "不止碰一根轴" not in h_drift
+          and "不止碰一根轴" in h_two)
+    gates += 1
+    red += 0 if ok else 1
+    print("   ⑤h           坐标臂：给了不给都逐字同 ⇒ 「%s」· 抽不齐 ⇒ 「%s」· 真动了 ⇒ 「%s」"
+          "· 盲且没登记 ⇒ 「%s」· 空 dif 且没登记 ⇒ 「%s」"
+          "· 臂名「红会抓」⇒ %s ⇒ %s"
+          % (_cut(h_blind[1], 18), _cut(h_none[1], 12), _cut(h_seen[1], 16),
+             _cut(h_new[1], 12), _cut(h_face, 16),
+             "合法（✗）" if _arm_is_concrete("红会抓") else "不合法（✓）",
+             "✓" if ok else "✗ **三张脸糊成一张，或臂名是句安慰**"))
+
+    # ⑤i ★★ **走真调用点**（@nova-8980 加的判据，@iris-64a1 定的负例规矩）：
+    #   本卡的 KeyError 在**那一行**上（② 印 ✗ 时求值 `MEASURE_KEY[d]`），函数级喂红抓不到。
+    #   正例用**真会红的那根真轴**（`expect_tree` 给一个形状合法、值必错的 40 位 ⇒ rc=6）；
+    #   要求：**不 traceback**、那行是**判词**、且**不含「坐标动了」**（没出数时坐标什么都没说）。
+    #   反向控制：**有键名**的轴走同一行 ⇒ 必须印得出第 4 张脸（差的那处恰是本轴自己 ⇒ 登记错）。
+    #   ★ 编出来的轴名/值**只许当负例** —— 正例的判据是"它必须红在那一行"，而编出来的**没有那一行**。
+    i_ok, i_line = _probe_row("expect_tree", "0" * 40, base, cd0, tot0)
+    j_d = "ladder"
+    j_v = _alt_value(acts.get(j_d), getattr(abase, j_d, None) if abase else None)
+    j_ok, j_line = _probe_row(j_d, j_v or "", base, cd0, tot0)
+    #   ★ 第三口：**没键名的轴 + 数动了** —— 这就是 KeyError 那一支的**真形状**
+    #     （rc=0 走过第一道，tot≠tot0 走到求值 `MEASURE_KEY[axis]` 那一行）⇒ 必须是判词，不是 traceback。
+    i_key = _probe_tail("expect_corpus", 0, "330/300", "324/298", [])
+    ok = (i_ok is False and "rc=6" in i_line and "坐标动了" not in i_line
+          and "没测" in i_line
+          and "登记错" in j_line and "不止碰一根轴" not in j_line
+          and "数动了" in i_key)
+    gates += 1
+    red += 0 if ok else 1
+    print("   ⑤i           真调用点：错值真轴 ⇒ 「…%s」· 有键名的轴走同一行 ⇒ 「…%s」"
+          "· 没键名+数动了(KeyError 那一支的真形状) ⇒ 「%s」⇒ %s"
+          % (i_line.strip()[-52:], j_line.strip()[-46:], i_key,
+             "✓" if ok else "✗ **那一行没走到 / 印了「坐标动了」/ 第 4 张脸没出来**"))
+
+    # ⑤j ★ 登记名 ↔ 印出的字段名（@iris-64a1 + @nova-8980 同一条）：**现在它只是注释**
+    #   ⇒ 做成门。正例是**本跑真印出来的那一行**；负例喂一个真实的旧病（`min-len(norm后)`）。
+    j_al = _key_names_aligned(_fields(cd0[0]) if cd0 else {})
+    j_bad = _key_names_aligned(["min-len(norm后)"] + sorted(set(MEASURE_KEY.values()) - {"min-len"}))
+    ok = (j_al[0] is True and j_bad[0] is False and "多印" in j_bad[1] and "少印" in j_bad[1])
+    gates += 1
+    red += 0 if ok else 1
+    print("   ⑤j           登记名↔印出的字段名：本跑 ⇒ 「%s」· 喂旧病(min-len(norm后)) ⇒ 「%s」⇒ %s"
+          % (_cut(j_al[1], 26), _cut(j_bad[1], 30),
+             "✓" if ok else "✗ **名字漂了它看不见**"))
+
     print("\n★ 自测结论：门 %d 道，红了 %d 道 ⇒ %s"
           % (gates, red, "全响（exit=0）" if not red else "**有门没响（exit=10）**"))
     print("   （提示不算门：③ 只算「旗标行必须动」那 %d 道；"
@@ -1654,10 +2065,14 @@ def main():
     # ★ 器**自己**的自查先跑（exit=9）：轴单不全 ⇒ 这一行印出来的东西就不可信，
     #   所以它拦在**最前面**，连"没点对象"都排它后面。(「谁的错」：这一格是维护者的错。)
     unknown, missing = axis_audit(ap)
-    if unknown or missing:
+    unreg = registry_audit()
+    if unknown or missing or unreg:
         print("★ 器自己的**轴单**对不上 ⇒ 拒绝出数（exit=9）。这一格**不是调用方的错**：")
         print("    有旗标没登记：%s" % (", ".join(unknown) or "（无）"))
         print("    登记了没旗标：%s" % (", ".join(missing) or "（无）"))
+        # ★ 第二半（`card-5ed92625-4f5`）：登记了，但**没在任何一张表上露面**的那一类。
+        #   它比"漏登记"更难看见：不炸、不红，只是**默默变盲**或**默默当上探针**。
+        print("    没上表（登记了却没身份）：%s" % ("；".join(unreg) or "（无）"))
         print("  ★ 为什么要拦在量之前：「生效旗标 …」那一行是从 `COUNT_AXES` 拼出来的，"
               "漏登记一个影响数的旗标 ⇒ **数会动、印的那行不动**；")
         print("    而 `--expect-flags` 拿它当判据词汇表 ⇒ 两个都漏的人串相等 ⇒ 一扇永远绿的门。")
