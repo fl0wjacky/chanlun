@@ -12,7 +12,7 @@
 "口径写成散文，两个人就实现成两条" —— 把散文翻成参数，分歧就变成**可跑的**，
 而不是两段各说各话的回忆。
 
-五个旋钮（就是这一支的全部输入，多一个都没有）：
+六个旋钮（就是这一支的全部输入，多一个都没有）：
     --tree    <sha|.>    哪棵树（sha 走 `git archive | tar -x` 到临时目录，跑完删）
     --min-len <n>        配对的**长度下限**（按 `norm()` 后的字数算，n=1 表示无下限）
     --face    whole|literal
@@ -23,7 +23,27 @@
     --unit    all|gone   ★ 单位（分母的定义）：
                          all  = **每一个**配对都进分母
                          gone = 只把「在 108 课原文里**找不到**」的配对算进去
-                                （判据 = `Corpus.where(norm(q))`，只接 norm 一档）
+    --ladder  norm|norm+ellipsis
+                         ★ 阶梯（用哪档判据判"原文里有"）：
+                         norm          = 整串规范化后查一次（卡面那套）
+                         norm+ellipsis = 再加「逐段核（省）」那一档：含省略号的引文按
+                                         `ELL` 切段、逐段规范化、要按原顺序落在同一课里
+                                         （`V.split_ellipsis` + `Corpus.chain_in`）
+
+★ `--ladder` 是再后补的，理由和 `--unit` 是同一件事的另一半：**Iris 拍的验收基准是
+  「`norm` ＋ 逐段核（省）」= `68 / 50 / 179 / 14`，而在这格接线之前，那个数
+  没有任何一条命令印得出来** —— 它只是 `tools/quotes_census.py` 文件头 `:147` 的一行字。
+  **一个数只以散文形式存在 = 别人复现不出 = 判据不在公共面上。**
+  接线后它是一条命令的输出：
+
+    --unit gone --min-len 1 --face whole --dedup raw --v1ref keep --ladder norm
+        ⇒ cards 78 · core 41 · render 16 · tools 182 · config 14 ⇒ **331 处 / 302 条**（卡面）
+    --unit gone --min-len 1 --face whole --dedup raw --v1ref keep --ladder norm+ellipsis
+        ⇒ cards 68 · core 34 · render 16 · tools 179 · config 14 ⇒ **311 处 / 283 条**
+          （core+render = 50 ⇒ 就是验收基准那四格 `68/50/179/14`）
+
+⇒ 报任何一格读数，**阶梯必须连"哪一档"一起报**：同一个旗标换一个值，
+  四个桶全动（−10 / −7 / −3 / 0）。
 
 ★ `--unit` 是后补的，补的理由值得留着：**少了它，这支器就复现不了 `card-082d9aaa-cbb`
   那四格**。那四格数的**不是**全配对，是"找不到"的那些 —— 我先前把复跑命令写成
@@ -55,6 +75,36 @@ def tree_dir(sha):
     return d
 
 
+def found(q, a):
+    """「原文里有」按 `--ladder` 判。
+
+    norm           整串规范化后查一次（卡面那套：78 / 57 / 182 / 14）
+    norm+ellipsis  再加「逐段核（省）」那一档 —— 含省略号的引文按 `ELL` 切段，
+                   逐段规范化后要求**按原顺序**落在同一课里（`V.Corpus.chain_in`）。
+                   ⇒ 这一档把"忠实省略的引用"和"真编造"分开，68 / 50 / 179 / 14。
+
+    ★ 加 `--ladder` 的理由：Iris 拍的验收基准是 `norm + 逐段核（省）`，
+      而在这支器加这一格之前，**`68/50/179/14` 没有任何一条命令印得出来** ——
+      它只是 `quotes_census.py` 文件头 :147 的一行字。
+      「一个数只以散文形式存在」= 别人复现不出 = 判据不在公共面上（见 memory/judgement-not-in-repo.md）。
+      接线之后它是一条命令的输出，口径块里那一格就不再靠人手写。
+    """
+    corpus = a.corpus
+    if corpus is None:
+        return False                        # unit=all：不判"原文有没有"，这一档不参与
+    if corpus.where(V.norm(q)):
+        return True
+    if a.ladder != "norm+ellipsis":
+        return False
+    segs, _kind = V.split_ellipsis(q)
+    if not segs:
+        return False
+    parts = [V.norm(p) for p in segs]
+    if not all(parts):
+        return False
+    return any(corpus.chain_in(parts, j) for j in range(len(corpus.nums)))
+
+
 def count(base, cell, a):
     n = 0
     keys = set()
@@ -78,8 +128,8 @@ def count(base, cell, a):
                     k = V.norm(q)
                     if len(k) < a.min_len:
                         continue
-                    if corpus is not None and corpus.where(k):
-                        continue                  # 原文里有 ⇒ 不算「找不到」
+                    if found(q, a):
+                        continue                  # 原文里有 ⇒ 不算「找不到」（按 --ladder）
                     n += 1
                     keys.add(q if a.dedup == "raw" else k)
     return n, len(keys)
@@ -114,6 +164,7 @@ def main():
     ap.add_argument("--dedup", choices=("raw", "norm"), default="norm")
     ap.add_argument("--v1ref", choices=("skip", "keep"), default="skip")
     ap.add_argument("--unit", choices=("all", "gone"), default="all")
+    ap.add_argument("--ladder", choices=("norm", "norm+ellipsis"), default="norm")
     a = ap.parse_args()
 
     docs = V.load()
@@ -127,8 +178,8 @@ def main():
     base = d or V.ROOT
     try:
         print("量法   口径参数：tree=%s · unit=%s · min-len(norm后)=%d · face=%s · "
-              "dedup=%s · v1_ref=%s"
-              % (a.tree, a.unit, a.min_len, a.face, a.dedup, a.v1ref))
+              "dedup=%s · v1_ref=%s · ladder=%s"
+              % (a.tree, a.unit, a.min_len, a.face, a.dedup, a.v1ref, a.ladder))
         print("对象   %s" % base)
         print("语料   sha256:%s" % V.fingerprint(docs)[0])
         print()
@@ -151,7 +202,7 @@ def main():
                 k = V.norm(q)
                 if len(k) < a.min_len:
                     continue
-                if a.corpus is not None and a.corpus.where(k):
+                if found(q, a):
                     continue
                 cn += 1
                 ck.add(q if a.dedup == "raw" else k)
