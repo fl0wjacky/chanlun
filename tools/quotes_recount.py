@@ -330,7 +330,7 @@ def _sites(base, a):
 
 def _key(q, a):
     """条那一把钥匙：`--dedup raw` 用原文，`norm` 用规范化后的。"""
-    return q if a.dedup == "raw" else V.norm(q)
+    return KEYFN[a.dedup](q)
 
 
 # ★★ 域词的两个**唯一**定义处（`card-14aa4f9f-544`）——
@@ -343,7 +343,16 @@ def _key(q, a):
 #     （print 子树 0 次）＋ `dom_label` 的同一跑内自核。
 DOM_CELL = "逐格"      # 口径：同一句横跨两格，**各记一次**
 DOM_GLOBAL = "全局"    # 口径：同一句跨格**合并成一条**
-DEDUP_KEYS = ("raw", "norm")   # `--dedup` 的**全部**取值（唯一一处）
+# ★★ 钥匙 → 取值函数：**唯一一处**（`card-14aa4f9f-544` 第 7 笔）。
+#   在这笔之前，`raw`/`norm` 的分派在源码里写了**两遍**（`_key` 里一份、`global_by_key` 里一份）。
+#   @iris-64a1 那把刀（只改 `global_by_key` 里那一个 token）正是从第二份进的：
+#   `rc=0 · 门 35 · 红 0`，而印出来的**正是「两个钥匙标签对调」那一屏**
+#   ⇒ **关掉打印层那一份 ≠ 关掉这个屏**。
+#   并成一处之后，动它则两个入口**同时**动 ⇒ 屏上不会再出现「一个名配错函数」。
+#   ★ 边界（不夸大）：这只把**入口数**从 4 收到 2（本表 ＋ `:2516` 那个显示用 token）。
+#     定义处自己仍是**手写常量** —— 与域词那张卡同一个残留形状。
+KEYFN = {"raw": lambda q: q, "norm": V.norm}
+DEDUP_KEYS = tuple(KEYFN)      # `--dedup` 的**全部**取值：从上面那张表**派生**，不再手写第二份
 
 
 def global_by_key(per):
@@ -352,8 +361,7 @@ def global_by_key(per):
     ★ 名字与值在**同一个元组**里产生 ⇒ 印的时候不可能把 A 的名字配到 B 的数上。
       （@iris-64a1 的变异 B：两个标签对调 —— 在旧写法里只需改一个打印字符串。）
     """
-    return tuple((k, len(set(q if k == "raw" else V.norm(q) for q in per)))
-                 for k in DEDUP_KEYS)
+    return tuple((k, len({KEYFN[k](q) for q in per})) for k in DEDUP_KEYS)
 
 
 def dom_label(scope, a):
@@ -1108,7 +1116,7 @@ def build_parser():
                          "卡上已经贴出去的命令不能因为改名跑不动。")
     ap.add_argument("--min-len", type=int, default=6)
     ap.add_argument("--face", choices=("whole", "literal"), default="whole")
-    ap.add_argument("--dedup", choices=("raw", "norm"), default="norm")
+    ap.add_argument("--dedup", choices=DEDUP_KEYS, default="norm")
     # ★ 默认从 skip 翻成 keep（@nova-8980 ① 12:16 抓的）：
     #   卡面写死的截面是「全仓 *.py 排除 .git/ 与 archive/」—— `tools/v1_ref` 两个都不是
     #   ⇒ 按那段散文跑的人应该拿到 331；而默认 skip 会**偷偷再窄一档**，裸跑印 325
@@ -2513,6 +2521,9 @@ def main():
         if sp is not None and sp["decl_denom"] and sp["decl_denom"] != (tot[0], len(_per_quote(sites))):
             print("★ 旁档与本次跑的**分母**对不上 ⇒ **拒绝出数**（exit=11）。脸 = 分母对不上")
             print("  旁档自己声明（`# 分母：` 那行）  %d 处 / %d 条" % sp["decl_denom"])
+            # ★ 这处的 `raw` 是**显示用 token**，不是分派：这个量走 `_per_quote`（按**原文标识**分组），
+            #   与 `--dedup` 无关（2×2 跑过）⇒ **不许**收进 KEYFN（收进去 = 让它跟着旗标走 = 造假），
+            #   只保持「与前者不同源」并在这一行写清。
             print("  本次跑现场算出来的            %d 处 / %d 条（%s去重 raw）"
                   % (tot[0], len(_per_quote(sites)), DOM_GLOBAL))
             print("  ★ 这一格是「**同一份旁档配了另一套旗标**」的专用出口："
