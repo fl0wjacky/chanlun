@@ -238,34 +238,75 @@ def pair(m):
     return m.group(1) if m.group(1) is not None else m.group(2)
 
 
-def count(base, cell, a):
-    n = 0
-    keys = set()
-    if not os.path.isdir(os.path.join(base, cell)):
-        return 0, 0
-    corpus = a.corpus                     # None ⇒ unit=all，不建索引（省掉整趟扫描）
-    for root, _d, files in os.walk(os.path.join(base, cell)):
-        if a.v1ref == "skip" and "v1_ref" in root:
+def _sites(base, a):
+    """**逐处**枚举：(格, 引文原文)。这是落点判定的**唯一一份**实现 ——
+    `tally()`（器印的合计）与`说话人轴`（三栏的分母）都从它派生。
+
+    ★ 为什么抽这一层（2026-09-30，本卡）：说话人轴要印「331 处的三栏」，
+      而 331 是器**自己的**数。若三栏另写一份"怎么算一处"的筛选，两份会漂
+      —— 本仓今晚反复栽在「两份手写声明」上（`COUNT_AXES` 那格、`--expect-flags` 的词汇表）。
+      ⇒ 判据：**分母与合计必须出自同一次扫描**，不是"两次扫描恰好相等"。
+
+    ★ 产出顺序 = `CELLS` 的顺序、格内 `sorted(files)`，最后 `config.py`
+      （`tally` 的行序靠它）；不存在的格不产出（⇒ 行里没有它，与旧 `count()` 的 `(0,0)` 同效果）。
+    """
+    for cell in CELLS:
+        d = os.path.join(base, cell)
+        if not os.path.isdir(d):
             continue
-        if any(("/%s" % s.split("/")[-1]) in root or root.endswith(s)
-               for s in V.SKIP if s.split("/")[-1] != "v1_ref" or a.v1ref == "skip"):
-            continue
-        for f in sorted(files):
-            if not f.endswith(".py"):
+        for root, _dd, files in os.walk(d):
+            if a.v1ref == "skip" and "v1_ref" in root:
                 continue
-            t = io.open(os.path.join(root, f), encoding="utf-8").read()
-            texts = [t] if a.face == "whole" else literal_bodies(t)
-            for body in texts:
-                for m in Q.finditer(body):
-                    q = pair(m)
-                    k = V.norm(q)
-                    if len(k) < a.min_len:
-                        continue
-                    if found(q, a):
-                        continue                  # 原文里有 ⇒ 不算「找不到」（按 --ladder）
-                    n += 1
-                    keys.add(q if a.dedup == "raw" else k)
-    return n, len(keys)
+            if any(("/%s" % x.split("/")[-1]) in root or root.endswith(x)
+                   for x in V.SKIP if x.split("/")[-1] != "v1_ref" or a.v1ref == "skip"):
+                continue
+            for f in sorted(files):
+                if not f.endswith(".py"):
+                    continue
+                t = io.open(os.path.join(root, f), encoding="utf-8").read()
+                for body in ([t] if a.face == "whole" else literal_bodies(t)):
+                    for m in Q.finditer(body):
+                        q = pair(m)
+                        if len(V.norm(q)) < a.min_len:
+                            continue
+                        if found(q, a):
+                            continue                  # 原文里有 ⇒ 不算「找不到」（按 --ladder）
+                        yield cell, q
+    # 仓根的 config.py（不是一级目录 ⇒ `CELLS` 那轮走不到它，但它必须进合计）
+    cf = os.path.join(base, "config.py")
+    if a.face == "whole" and os.path.isfile(cf):
+        t = io.open(cf, encoding="utf-8").read()
+        for m in Q.finditer(t):
+            q = pair(m)
+            if len(V.norm(q)) < a.min_len:
+                continue
+            if found(q, a):
+                continue
+            yield "config.py", q
+
+
+def _key(q, a):
+    """条那一把钥匙：`--dedup raw` 用原文，`norm` 用规范化后的。"""
+    return q if a.dedup == "raw" else V.norm(q)
+
+
+def tally(base, a, sites=None):
+    """整表跑一遍 ⇒ (rows, tot)。rows = [(名字, 处, 条)]，合计由 rows 现加。
+
+    **抽成函数是为了能跑第二遍**：收尾那行要比"换一档"的差，就得真跑两次。
+    ★ `sites` 可传入**已经扫好的落点**（主流程要拿同一份去印说话人轴）——
+      「分母与合计出自同一次扫描」不是效率问题：两次扫描恰好相等 = 漂了没人红。
+    """
+    seen, order = {}, []
+    for cell, q in (list(_sites(base, a)) if sites is None else sites):
+        if cell not in seen:
+            seen[cell] = [0, set()]
+            order.append(cell)
+        r = seen[cell]
+        r[0] += 1
+        r[1].add(_key(q, a))
+    rows = [(c, seen[c][0], len(seen[c][1])) for c in order]
+    return rows, (sum(r[1] for r in rows), sum(r[2] for r in rows))
 
 
 LIT = re.compile(
@@ -289,38 +330,85 @@ def literal_bodies(text):
     return out
 
 
-def count_config(base, a):
-    """仓根的 config.py（不是一级目录 ⇒ `CELLS` 那轮走不到它，但它必须进合计）。"""
-    p = os.path.join(base, "config.py")
-    if not (os.path.isfile(p) and a.face == "whole"):
-        return None
-    t = io.open(p, encoding="utf-8").read()
-    n, keys = 0, set()
-    for m in Q.finditer(t):
-        q = pair(m)
-        k = V.norm(q)
-        if len(k) < a.min_len:
-            continue
-        if found(q, a):
-            continue
-        n += 1
-        keys.add(q if a.dedup == "raw" else k)
-    return n, len(keys)
+# 「面」的机械定义：**引文出现在哪几格** —— 只看落点，不看内容。
+#   ★ 这是**出现**的属性，不是引文的属性：同一条引文可以两面都出现 ⇒ 单列「两面」，
+#     不许折进任一面（折进去 = 把一个"跨"写成一个"是"）。@iris-64a1 量的：main 上 457 处里
+#     363 处落在代码面 —— 那些「」本来就不是在引谁，而 (a)/(b) 的判据只在卡片面有定义。
+FACE_CELLS = (("卡片面", ("cards", "render")), ("代码面", ("core", "tools", "config.py")))
 
 
-def tally(base, a):
-    """整表跑一遍 ⇒ (rows, tot)。rows = [(名字, 处, 条)]，合计由 rows 现加。
+# 说话人轴的**类别集**（一份声明，写死在器里 —— @iris-64a1：**枚举写在读入侧代码里，不从数据里学**）。
+#   ★ 从数据里反推枚举会**静默剪掉还没出现过的值**（旁档里 `未判` 现在可能 0 条 ⇒ 从数据学就把它剪了），
+#     而"没给"与"给了个空的"共用一张脸正是本卡要治的那格。
+#   ★ 顺序 = 印出来的顺序；`未判` 与 `没判过` **两个态**（一百〇二），不许合并。
+#   ★ 旁档里出现**没在这里声明的值** ⇒ 不是"忽略"，是**报错并点名那个值**（下一笔的读入侧照这条）。
+SPEAK_CLASSES = (
+    ("a", "引文失真：本来是缠师的话，字句不对"),
+    ("b", "引号用错：本来就不是缠师的话"),
+    ("省略", "忠实省略：缠师原话＋忠实省略号（**档位的账**）"),
+    ("配对伪影", "**器的账**：配对吞了源码（坏的是键，不是写法）"),
+    ("自陈整理版", "上一行自陈「非逐字」（机器判据到不了）"),
+)
+SPEAK_UNDECIDED = ("未判", "没判过")
 
-    **抽成函数是为了能跑第二遍**：收尾那行要比"换一档"的差，就得真跑两次。
+
+def _pad(t, w):
+    """按**显示宽度**补空格（CJK 算 2 列）—— 不然对齐是按字符数对齐的，屏幕上是斜的。"""
+    d = sum(2 if ord(c) > 0x2E80 else 1 for c in t)
+    return t + " " * max(1, w - d)
+
+
+def speaker_axis(sites, tot, a):
+    """说话人轴：把合计拆成三栏，**恒印**（@nova-8980 13:18 落给本卡的第三根轴）。
+
+    缺 (c) 这一栏，`合计 331 处` 就会被读成「**331 处引文失真**」——**超额声明**：
+    里面混着两类完全不同的东西（引文的问题 / 引号的问题），还有一类没判。
+
+    ★ 分母两把尺，**各带口径**（@nova-8980 裁定 + @iris-64a1 量）：
+        处 = **不去重**（每次出现各算一次）⇒ 归类是**划分** ⇒ `a+b+c` 可以对到合计（331）
+        条 = **必须全局去重**（raw 钥匙 = 285）⇒ 302 是 **Σ逐格去重**，同一句横跨两格各记一次
+             ⇒ 拿 302 拆栏，**每一栏都虚高，而总数看起来还是对的**（最难发现的那种错）
+      ⇒ 判据（@nova-8980）：一个数能不能被归类拆分，看它的**去重范围**是否 ⊇ 归类范围。
+
+    ★ 本函数现在只印**机械的那一半**（人还没给判词 ⇒ 全落 (c)）：
+        (a)/(b) 印 `—`（**没给**），**不许印 0** —— 与 `--expect-*` 那三态同一课。
     """
-    rows = []
-    for cell in CELLS:
-        n, k = count(base, cell, a)
-        rows.append((cell, n, k))
-    cf = count_config(base, a)
-    if cf is not None:
-        rows.append(("config.py", cf[0], cf[1]))
-    return rows, (sum(r[1] for r in rows), sum(r[2] for r in rows))
+    per = {}                       # 引文 → 它出现在哪几格（条的层面）
+    for cell, q in sites:
+        per.setdefault(q, set()).add(cell)
+    raw = list(per)
+    nrm = len(set(V.norm(q) for q in raw))
+    face_of = {}
+    for q, cs in per.items():
+        card = bool(cs & set(FACE_CELLS[0][1]))
+        code = bool(cs & set(FACE_CELLS[1][1]))
+        face_of[q] = "两面" if (card and code) else ("卡片面" if card else "代码面")
+    print("说话人轴（各类 + 未判**恒印** —— 缺「未判」这一栏，「合计 %d 处」就会被读成"
+          "「%d 处引文失真」）" % (tot[0], tot[0]))
+    print("   分母：**处** = %d（不去重：每次出现各算一次）· **条** = 全局去重（raw 钥匙）= %d"
+          "（norm 钥匙 = %d）" % (tot[0], len(raw), nrm))
+    print("         ★ 不是 %d：那是 **Σ逐格去重**（同一句横跨两格各记 1）⇒ **只能说「处」**；"
+          "条那一列必须走全局去重" % tot[1])
+    for name, why in SPEAK_CLASSES:
+        print("   %s%s   —   ★ 旁档未给 ⇒ **没给**，不是 0" % (_pad(name, 10), _pad(why, 44)))
+    print("   %s%s%4d 处 / %4d 条   ←「拆不出说话人」这句话**只有人能撤销**；器不替人填"
+          % (_pad("未判", 10), _pad("判过·判不了", 56), tot[0], len(raw)))
+    print("   等式核（各类 + 未判 = 合计）：**没核** —— 旁档未给 ⇒ 只有「未判」有值，"
+          "这条等式**现在不可能失败**")
+    print("         （「一条不可能失败的门不是门」：等旁档进来它才成为一条真判据。）")
+    segs = []
+    for name, cells in FACE_CELLS:
+        qs = [q for q in raw if face_of[q] == name]
+        occ = sum(1 for _c, q in sites if face_of[q] == name)
+        segs.append("%s %4d 处 / %4d 条" % (name, occ, len(qs)))
+    qs = [q for q in raw if face_of[q] == "两面"]
+    segs.append("两面 %4d 处 / %4d 条" % (
+        sum(1 for _c, q in sites if face_of[q] == "两面"), len(qs)))
+    print("   面（引文**出现在哪几格** · 只看落点）：%s" % " · ".join(segs))
+    print("         ★ 「两面」单列：折进任一面都是把一个「跨」写成一个「是」")
+    assert len(raw) == sum(1 for q in raw if face_of[q]), "面分类漏项"
+    assert sum(len([q for q in raw if face_of[q] == n]) for n, _c in FACE_CELLS) \
+        + len(qs) == len(raw), "面分类不划分"
 
 
 def which(sha):
@@ -1149,10 +1237,14 @@ def main():
             print("               判据＝**上面那一行**行首的 `验收可用` 单值必须是「是」"
                   "（★ 别拿 `★` 当判据 —— 正确的那跑自己也印 ★）")
         print()
-        rows, tot = tally(base, a)
+        # ★ 落点**扫一次**：合计与说话人轴的分母出自同一份（漂了没人红 = 两份手写声明的病）
+        sites = list(_sites(base, a))
+        rows, tot = tally(base, a, sites)
         for name, n, k in rows:
             print("  %-8s %4d 处 / %4d 条" % (name, n, k))
         print("  %-8s %4d 处 / %4d 条" % ("合计", tot[0], tot[1]))
+        print()
+        speaker_axis(sites, tot, a)
         print()
         # ★ 收尾行**不许并列两把梯子**（@atlas-791f 12:11 抓的）：
         #   原来这行印的是字面量 `← 卡面那四格是 331 / 302` ——
