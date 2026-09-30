@@ -235,11 +235,18 @@ def tree_dir(sha):
     if sha in (".", "", None):
         return None
     d = tempfile.mkdtemp(prefix="recount-")
+    # ★ 同族第 ④ 处（card-b1337b6f-508 · 我量的，不在那张卡列的三处里）：
+    #   这个口也是"丢掉 rc、吞掉 stderr"的写法 —— `取不到那棵树：X` **一句话盖两档**：
+    #     对象**不存在**（`fatal: not a valid object name`）· 对象**类型不对**（`fatal: not a tree object`）
+    #   实测 OLD：`--commit 000…0` 与 `--commit nosuchname` **器自己印的那行逐字相同**，
+    #   区别只在 `git archive` 的 stderr 上 —— 而那是不被捕获、直接漏给终端的东西。
+    #   ⇒ 捕获 stderr，把**第一行原话**带进这句话；退出码照旧（SystemExit(str) ⇒ 1，不改判据）。
     p = subprocess.run("git archive %s | tar -x -C %s" % (sha, d),
-                       shell=True, cwd=V.ROOT)
+                       shell=True, cwd=V.ROOT, stderr=subprocess.PIPE)
     if p.returncode:
+        why = (p.stderr.decode("utf-8", "replace").strip().splitlines() or ["(空)"])[0]
         shutil.rmtree(d, ignore_errors=True)
-        raise SystemExit("取不到那棵树：%s" % sha)
+        raise SystemExit("取不到那棵树：%s（git/tar rc=%d · %s）" % (sha, p.returncode, why))
     return d
 
 
@@ -983,17 +990,42 @@ def which(sha):
     ⇒ **换个拼法就绕过"不写对象"那道门**（`--commit .` 明写出来，照样出数）——
       所以门不能只装在"参数写没写"上，得装在这个数**是什么**上。
     """
-    def git(*args):
+    def git_rc(*args):
+        """取数口：**rc 与 stderr 一起带回来** —— 失败不许长得像值。
+
+        ★ card-b1337b6f-508（不是 `which()` 的一个格子，是器的最底层取数口）：
+          旧版把 `rc` 丢掉、`stderr` 进 `DEVNULL`、只回 strip 过的 stdout
+          ⇒ **「失败」在输出面上与「值」同形**。本仓真对象复现（@bram-9d29 量）：
+            `rev-parse <blob>^{tree}`                      ⇒ rc=128 · **stdout = 回显参数本身**（非空、像值）
+            `rev-parse --verify <blob>^{tree}`             ⇒ rc=128 · stdout **空**
+            `rev-parse --symbolic-full-name <不存在的名字>` ⇒ rc=128 · **stdout = 回显参数**（非空）
+            `cat-file -t <不存在的对象>`                    ⇒ rc=128 · stdout **空**
+          ⇒ 判据一律写成**正证**（"取到了长什么样"），**不许**写"输出空 ⇒ 没有"——
+            空是两档（失败／本来就是空），而回显是个**看着像值**的串。
+          ⇒ 这个口不再替调用方猜：**每个调用方自己说"rc≠0 时这一格算什么"**。
+        """
         p = subprocess.run("git " + " ".join(args), shell=True, cwd=V.ROOT,
-                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        return p.stdout.decode("utf-8", "replace").strip()
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return (p.returncode,
+                p.stdout.decode("utf-8", "replace").strip(),
+                p.stderr.decode("utf-8", "replace").strip())
 
     if sha in (".", "", None):
         # ★ 「就地」是个**不是对象的对象**（@nova-8980 卡上那条验收命令照抄实测出来的）：
         #   同一条命令行，换一个人、换一个工作区、或者工作区脏了，数就变了。
         #   实测：不给对象照抄 ⇒ 430/382；给了 05f3e24 ⇒ 331/302。**两个都"跑得出"。**
-        head = git("rev-parse", "--short", "HEAD") or "(没有 HEAD)"
-        st = [x for x in git("status", "--porcelain").splitlines() if x.strip()]
+        rc_h, head, _e_h = git_rc("rev-parse", "--short", "HEAD")
+        if rc_h != 0:   # ★ rc 丢掉时，"取不到 HEAD"与"没有 HEAD"是同一种印法
+            head = "(取不到 HEAD · git rc=%d)" % rc_h
+        rc_s, out_s, err_s = git_rc("status", "--porcelain")
+        if rc_s != 0:
+            # ★ 同上：取不到状态时若照旧印 `0 个`，就与**工作区干净**同形 ⇒ 这一格不印数。
+            return ("就地 %s\n"
+                    "         ★ **取工作区状态失败（git rc=%d）** ⇒ 这一格**没测**：\n"
+                    "           失败时按 0 个印会与「工作区干净」同形（`没测` 与 `干净` 不许共用一句话）\n"
+                    "           第一行 stderr：%s"
+                    % (V.ROOT, rc_s, err_s.splitlines()[0] if err_s else "(空)"), False)
+        st = [x for x in out_s.splitlines() if x.strip()]
         mod = [x for x in st if not x.startswith("??")]
         unt = [x for x in st if x.startswith("??")]
         # ★ 两数分开，且**不许写"已改"**（@atlas-791f 12:2x 的半句对一半错）：
@@ -1007,7 +1039,7 @@ def which(sha):
                 "（只含已跟踪）—— **两条路不是同一把尺**\n"
                 "         ⇒ 要跟别人比数，必须点一个对象：`--commit <sha>`"
                 % (V.ROOT, head, len(st), len(mod), len(unt)), False)
-    kind = git("cat-file", "-t", sha)
+    rc_k, kind, err_k = git_rc("cat-file", "-t", sha)
     # ★ 两格**合并写**（我跑自己的判据模板时抓到的）：原来 `tree` 那格只回显**传进来的拼法**，
         #   传 `e8944076` 就印 `tree e8944076（…）` —— 40 位的树 sha **一次都不出现**。
         #   指望"对象"那一行当身份的人（我那个模板就是）会**静默解析失败**，
@@ -1020,16 +1052,43 @@ def which(sha):
     #       普通对象 id / 前缀 ⇒ **空**（rc=0）
     #       被同名 tag 抢走     ⇒ `refs/tags/05f3e24`   ← 实测（`git tag 05f3e24 335e3a3` 之后）
     #   **一句话就能问出"它是名字，还是身份"。**
-    ref = git("rev-parse", "--symbolic-full-name", sha)
-    warn = ("" if not ref else
+    rc_r, ref, err_r = git_rc("rev-parse", "--symbolic-full-name", sha)
+    # ★ 这一问自己也有**两档**（card-b1337b6f-508 我量的，与"失败=值同形"同一族）：
+    #     rc=0 且 `refs/tags/x`  ⇒ **是名字** · rc=0 且空 ⇒ **不是名字**（正证）
+    #     **rc≠0 且 stdout=回显参数**（非空）⇒ 名字不存在、这一问**没问成**
+    #   旧版 rc 丢掉后，第三档那个非空的"回显"会被当成**这个名字**写进提示里 ⇒ **一句假话**。
+    #   它今天还没露头，是因为 kind 也空 ⇒ 走下面那条不含 warn 的 early return（同一张卡的第 ③ 处）；
+    #   ⇒ **这两处必须同一笔改**，否则先把"回显"接上，接出来的就是假名字。
+    ref_name = ref if (rc_r == 0 and ref) else ""
+    ref_unasked = ("" if rc_r == 0 else
+                   "\n         ★ **它是不是名字，这一问没跑成**（git rc=%d）：这一格**没测** —— "
+                   "失败回的非空 stdout 可能只是**回显的参数**。" % rc_r)
+    warn = ("" if not ref_name else
             "\n         ★ **这个名字是一个 ref**（%s），不是对象 id ⇒ 解析它 = 信它；"
             "可门要核的是**解析出来的那棵树**\n"
             "         ⇒ 判据请给 `--expect-tree <40位>`。"
-            "**名字是给人看的，树是给判据用的。**" % ref)
-    if kind in ("commit", "tree"):
-        return ("%s %s → tree %s（临时树，跑完删）%s"
-                % (kind, sha, git("rev-parse", sha + "^{tree}"), warn), True)
-    return ("%s（认不出类型，git cat-file 说 %r）" % (sha, kind), False)
+            "**名字是给人看的，树是给判据用的。**" % ref_name)
+    # ★ `"tag"` 是我量出来的一个**洞**（card-b1337b6f-508 顺手带上的一笔，可单独退）：
+    #   本仓**六个 tag 全是 annotated**（`git cat-file -t v2.4` ⇒ `tag`）⇒ 锚 tag 那跑走的是
+    #   下面那条 `认不出类型`，**`→ tree <40位>` 一次都不印**。后果不是少一行字：
+    #     ① `--expect-tree <该 tag 的正确树>` 会 **拒绝出数 exit=6** —— 而树是对的（实测 7bf21c2f…）；
+    #     ② 拒绝时它印 `实际（对象自己说的） 没有树（就地跑）` —— 这跑**不是就地跑**，**一句假话**。
+    #   ⇒ tag 与 commit 一样是 tree-ish（`git rev-parse <tag>^{tree}` 实测出 40 位），没道理漏它。
+    if kind in ("commit", "tree", "tag"):
+        rc_t, tree, err_t = git_rc("rev-parse", sha + "^{tree}")
+        # ★ 取树那一问要看**正证**（40 位十六进制），不许看"输出非空" ——
+        #   失败时 plain 的 `rev-parse` 会把**参数自己**回显出来（一个看着像值的串）。
+        if rc_t == 0 and re.fullmatch(r"[0-9a-f]{40}", tree):
+            return ("%s %s → tree %s（临时树，跑完删）%s"
+                    % (kind, sha, tree, warn), True)
+        return ("%s %s → tree **取不到**（git rc=%d · 这一格**没测**）%s"
+                "\n         取树一问的原话：%s"
+                % (kind, sha, rc_t, warn, err_t.splitlines()[0] if err_t else "(空)"), True)
+    if rc_k != 0:
+        return ("%s（**取类型失败** · git rc=%d · 这一格**没测**）%s%s"
+                "\n         ★ 失败照印 `kind=%r` 的话，与下一行「类型认不出」**同一句话**"
+                % (sha, rc_k, warn, ref_unasked, kind), False)
+    return ("%s（认不出类型，git cat-file 说 %r）%s%s" % (sha, kind, warn, ref_unasked), False)
 
 
 def judge_id():
