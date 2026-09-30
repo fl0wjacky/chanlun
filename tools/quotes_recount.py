@@ -241,11 +241,20 @@ def which(sha):
         #   同一条命令行，换一个人、换一个工作区、或者工作区脏了，数就变了。
         #   实测：不给对象照抄 ⇒ 430/382；给了 05f3e24 ⇒ 331/302。**两个都"跑得出"。**
         head = git("rev-parse", "--short", "HEAD") or "(没有 HEAD)"
-        st = git("status", "--porcelain")
-        n = len([x for x in st.splitlines() if x.strip()])
-        return ("就地 %s\n         ★ 它**不是任何一个 sha 的对象**：工作区 HEAD=%s%s\n"
+        st = [x for x in git("status", "--porcelain").splitlines() if x.strip()]
+        mod = [x for x in st if not x.startswith("??")]
+        unt = [x for x in st if x.startswith("??")]
+        # ★ 两数分开，且**不许写"已改"**（@atlas-791f 12:2x 的半句对一半错）：
+        #   实测未跟踪**本来就**算进这个数（加一个未跟踪 .py，这里 0→1）——
+        #   但原来那行写"（N 个文件已改）"，把"未跟踪"也说成"已改"，**标签与内容不符**。
+        #   改法不是改判据，是**把两个成分拆开印**。
+        return ("就地 %s\n"
+                "         ★ 它**不是任何一个 sha 的对象**：工作区 HEAD=%s，与 HEAD 不一致 %d 个"
+                "（已跟踪改 %d · **未跟踪 %d**）\n"
+                "         ★ 就地走**工作目录**（未跟踪也算分母）；点 sha 走 `git archive`"
+                "（只含已跟踪）—— **两条路不是同一把尺**\n"
                 "         ⇒ 要跟别人比数，必须点一个对象：`--commit <sha>`"
-                % (V.ROOT, head, "，且**脏**（%d 个文件已改）" % n if n else "，干净"))
+                % (V.ROOT, head, len(st), len(mod), len(unt)))
     kind = git("cat-file", "-t", sha)
     if kind == "commit":
         return "commit %s → tree %s（临时树，跑完删）" % (sha, git("rev-parse", sha + "^{tree}"))
