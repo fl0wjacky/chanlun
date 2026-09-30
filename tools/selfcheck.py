@@ -264,6 +264,30 @@ except Exception as e:
     FONT_GAPS = -1
     print("[字体覆盖] 查不了：%s" % e)
 
+# ---- 警告措辞：上面那扇门报出来的缺字，措辞有没有把「探针类」说成「本轮的图」----
+# 它既不是引擎不变量（不记进 FAIL）、也不是字体环境（不记进 FONT_GAPS）——
+# 它是**那句话本身的分寸**，给它自己的数：混进任何一个都说不清是谁的问题。
+# 为什么要挂它（2026-09-30 实测）：`tools/verify_warn.py` 跟着
+# `agent/atlas/warn-incomplete-wording` 进了 main，但**没有任何门调用它** ——
+# selfcheck 里 `verify_warn` 出现 0 次，全仓只有 config.py 的一条注释提到它。
+# ⇒ 有人把措辞改回陈述句，不会有任何东西红。**文件在仓里 ≠ 它在跑。**
+# 位置在这一格：它验的是上面那扇门打出来的那句话，那扇门先说完，措辞才有得读。
+print("=" * 72)
+WARN_WORDING = 0
+try:
+    from tools.verify_warn import run as _warn_selftest
+    _w_bad = _warn_selftest(verbose=False)
+    if _w_bad:
+        WARN_WORDING = 1
+        print("[警告措辞] 自测 %d 格不过 ← 缺字警告把「探针类代表字」说成了「本轮的图会出方框」" % _w_bad)
+        print("           那是**对正确的活报错**：本轮压根没画到那些字（上面那扇门 rc=0 就是证据）。")
+    else:
+        print("[警告措辞] 探针类缺字只作条件陈述，且点明了是哪一份名单")
+except Exception as e:
+    WARN_WORDING = -1
+    print("[警告措辞] 跑不了：%s" % e)
+    print("           自测没跑成 = 那句话的分寸没人验过 ⇒ 按「查不出来不算通过」计。")
+
 print("=" * 72)
 print("总违规数:", FAIL, "→", "引擎检查全部通过" if FAIL == 0 else "有问题，需排查")
 if SKIP:
@@ -275,11 +299,15 @@ if FONT_GAPS:
 if PREMISE:
     print("判据前提:", "跑不了（不算通过）" if PREMISE < 0 else "config._notdef_mask 自测不过",
           "→ 上面那扇字体覆盖门的基准本身是错的，那扇门的数不可读（先修基准）")
+if WARN_WORDING:
+    print("警告措辞:", "跑不了（不算通过）" if WARN_WORDING < 0 else "自测不过",
+          "→ 缺字警告会把探针类缺字说成本轮的图（对正确的活报错）")
 # 退出码只说"有东西不对"，不说"是谁不对"：三个数混在一个非 0 里，读的人猜不出来。
 # 这是 @iris-64a1 指出的洞 —— 在字体门本来就会红的机器上，干净跑和变异跑都是 exit=1，
 # 光看退出码**隔离不出** SKIP 有没有生效。打这一行：每个非 0 退出自己说出原因。
-print("退出原因: 总违规=%d  未执行=%d  判据前提=%s  字体缺字=%s  ⇒ exit=%d"
+print("退出原因: 总违规=%d  未执行=%d  判据前提=%s  警告措辞=%s  字体缺字=%s  ⇒ exit=%d"
       % (FAIL, SKIP, "跑不了" if PREMISE < 0 else ("不过" if PREMISE else "OK"),
+         "跑不了" if WARN_WORDING < 0 else ("不过" if WARN_WORDING else "OK"),
          "查不了" if FONT_GAPS < 0 else FONT_GAPS,
-         1 if (FAIL or FONT_GAPS or SKIP or PREMISE) else 0))
-sys.exit(1 if (FAIL or FONT_GAPS or SKIP or PREMISE) else 0)
+         1 if (FAIL or FONT_GAPS or SKIP or PREMISE or WARN_WORDING) else 0))
+sys.exit(1 if (FAIL or FONT_GAPS or SKIP or PREMISE or WARN_WORDING) else 0)
