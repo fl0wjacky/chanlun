@@ -1115,6 +1115,68 @@ def judge_id():
             p)
 
 
+def self_id():
+    """**本器自己**（正跑着的这支文件）的身份 —— 两样东西：`blob8` 与**它在仓里的相对路径**。
+
+    ★ 为什么不并进 `judge_id()`：那两个格子量的**不是同一个文件**
+      （判据 = `V.__file__` 那个 `verify_quotes.py`；本器 = 这支 `quotes_recount.py`）。
+      并成一个函数，就会长成"一个名字底下两个对象" —— `card-78a38f93-2d7` 治的就是那个病。
+    ★ 第三态（"拿不到"）照 `judge_id()` 里现成的那支写：**取不到就返回 None，不抛** ——
+      器身份是**出处**，拿不到时不许把整跑拖垮（它不进任何账，见 `self_id_line()`）。
+    """
+    try:
+        b = open(__file__, "rb").read()
+    except OSError:
+        return None, None
+    rel = os.path.relpath(os.path.abspath(__file__), os.path.abspath(V.ROOT))
+    return (hashlib.sha1(b"blob %d\0" % len(b) + b).hexdigest()[:8],
+            None if rel.startswith("..") else rel)
+
+
+def self_id_line(tree):
+    """器的自我介绍行 —— **只印不判**：不进「门 N 道」的账，也不进「不算门的提示」的桶。
+
+    ★ 三条口径（缺一条，这行自己就变成新的静默点）：
+      ① **只印不判**：它不是门。理由不是偏好 —— 唯一说得出的靶子（"扫的树里那份 ≠ 我在跑的这份"）
+         **响的是合法实验**（旧器打新树），再叠上 3×2「换哪份器都不动数」⇒ 这个靶子
+         **改不了任何读数**，它只是**出处**。
+      ② **不许读成「两值相等 ⇒ 健康」**：`05f3e24` 那跑**两值不等**（树里根本没这个路径），
+         而那一跑**完全合法**。
+      ③ **不许写成第四个决定项**：`读数 = f(对象, 语料, 判据)` 照旧 —— 3×2 已量死
+         **数只随树动、不随器动** ⇒ 器身份是**出处（provenance）**，不是输入。
+    ★ 「没测」与「值」**不许共用一句话**（本仓老规矩）：所以"没有树（就地）"／"本器不在仓里"／
+      "git 没问成" 三种**各自印出来**，**不折进「树里无此路径」** —— 那一格说的是
+      **问到了、它说没有**（且树里那份与我不等，也不等于我不对：见口径 ②）。
+    """
+    blob8, rel = self_id()
+    if blob8 is None:
+        return ("器     ★ **拿不到本器自己的字节**（`__file__`=%r）  ｜  树里  （★ **没测**）"
+                % __file__)
+    if not tree:
+        tail = "（★ **没问**：这一跑没有树（就地））"
+    elif rel is None:
+        tail = "（★ **没问**：本器不在这个仓里 —— `__file__`=%r 解出来的相对路径带 `..`）" % __file__
+    else:
+        p = subprocess.run("git ls-tree %s -- %s" % (tree, rel), shell=True, cwd=V.ROOT,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        rc = p.returncode
+        out = p.stdout.decode("utf-8", "replace").strip()
+        err = p.stderr.decode("utf-8", "replace").strip()
+        m = re.match(r"[0-7]{6} blob ([0-9a-f]{40})\t", out) if rc == 0 else None
+        if rc != 0:
+            tail = ("（★ **没问成**（git rc=%d）⇒ 这一格**没测**：%s）"
+                    % (rc, err.splitlines()[0] if err else "(stderr 空)"))
+        elif not out:
+            tail = "（★ 树里无此路径）"
+        elif m is None:
+            tail = "（★ **没问成**：`ls-tree` 说的不是一行 blob（原话：%r））" % out.splitlines()[0]
+        elif m.group(1)[:8] == blob8:
+            tail = "（同）"
+        else:
+            tail = "（★ 不同：树里那份 = `%s`）" % m.group(1)[:8]
+    return "器     %s  ｜  树里  %s" % (blob8, tail)
+
+
 # ── 数的「轴单」：**唯一一份声明** ──────────────────────────────────────────────
 # ★ Why（2026-09-30，@atlas-791f 13:10 复核时给这一行上秤量出来的）：那行原来是 `flagline()`
 #   里**手写的六格**，而它印的名字是「生效**旗标**」（一个**类**）。他往副本里加了**第七个**
@@ -2666,6 +2728,10 @@ def main():
                   % (os.path.basename(jpath), jsha, jblob,
                      "  （已核：== --expect-judge）" if a.expect_judge
                      else "  （★ **没核**：没给 --expect-judge，这个 sha256 只是印出来的）"))
+        # ★★ 第三本册子：**器自己**（`card-78a38f93-2d7`，@bram-9d29 交的那一行）。
+        #   同样**无条件印**，但**不进任何账** —— 三条口径（为什么不是门／为什么"不等"不是病／
+        #   为什么不是第四个决定项）逐条写在 `self_id_line()` 的 docstring 里，改的人先读那三条。
+        print(self_id_line(got_tree))
         # ★★ 验收判据做成**专用单值**（@iris-64a1 14:3x 量出的洞 + 她先提的"门挪到输出匹配"）：
         #   ① 洞：`--commit .` 是**正当用法**（该跑、该 exit=0），但它不是任何一个对象
         #      ⇒ **换个拼法就绕过"不写对象"那道门**（明写 `.`，照样出数）。
