@@ -24,7 +24,7 @@ anchor 按 PIL 语义处理：l 起点 / m 中点 / r 终点。
 Noto 的汉字在同一字号下墨迹低 3~4px，就戳出标签底框）。所以下面 main() 会先把字体打出来。
 **换字体是发卡前的指定项，不是无关项。**
 """
-import os, sys, importlib
+import os, sys, glob, importlib
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PIL import Image, ImageDraw
@@ -268,17 +268,76 @@ def _print_bad(bad, indent="    "):
         print("%s%-8s %+6.0fpx  %-14s %s" % (indent, kind, over, where, t[:70]))
 
 
+def _cards_dir():
+    """被扫的目录 —— **印出来**，因为「扫到 0 张」时读者第一个要知道的就是"你扫的是哪儿"。"""
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "cards")
+
+
+def coverage():
+    """覆盖表 = **扫面**（cards/*.py 里定义了 build() 的），不引任何名单。
+
+    原先这里是 `CARDS + extra`，两个病叠在一起：
+      · `cards/build_all.py` 的 `CARDS` **不是覆盖表** —— 它是「合集顺序 + PDF 目录标题的唯一
+        出处」，**按设计就不列不进合集的卡**（实测缺 model_dissent、level_recursion 两张）。
+      · 缺的两个名字手工补在 `extra` 里 ⇒ 同一份名单两个副本、**只拼接不去重**。
+
+    后果两个方向都不出声（两条都实测过）：把 model_dissent 也塞进 CARDS ⇒ 同一张卡跑两次，
+    「注入支」6→11 而**合计与声明数逐字不变**（旧版）；往 cards/ 加第 15 张卡 ⇒ 两张名单都
+    不自长，静默漏扫、分母还是 14（旧版）。扫面把两个方向一起关掉：**有没有卡，由 cards/ 说。**
+
+    三态分得开（跑了 / 跳过+理由 / 不许有第四态）：没 build() 的、导入失败的都进 skipped
+    并**带理由**（下面那条 assert 保证"理由"不许空着）。
+    """
+    d = _cards_dir()
+    run, skipped = [], []
+    for p in sorted(glob.glob(os.path.join(d, "*.py"))):
+        name = os.path.basename(p)[:-3]
+        if name == "__init__":
+            skipped.append((name, "包入口，不是卡"))
+            continue
+        try:
+            mod = importlib.import_module("cards." + name)
+        except Exception as e:
+            skipped.append((name, "导入失败 %s: %s" % (type(e).__name__, e)))
+            continue
+        if not callable(getattr(mod, "build", None)):
+            skipped.append((name, "没有 build()"))
+            continue
+        run.append(name)
+    # 重名 = 有的卡被量两次（注入支数会虚高）。扫面理论上不会发生，所以这条是防回归的。
+    assert len(run) == len(set(run)), "覆盖表里有重名：%s" % (
+        sorted({n for n in run if run.count(n) > 1}))
+    # 每个没量到的文件**必须带理由**：以后有人加一条"跳过"分支却忘了写 why ⇒ 这里当场红。
+    # （先写的是 `files - run - skipped` 那条"不许有第四态"的检查 —— 它是**只会绿的灯**
+    #   （由构造恒空），按自己那条规矩删掉了：一条永远不红的检查不是检查。）
+    for name, why in skipped:
+        assert why.strip(), "跳过 %s 但没给理由 —— 三态里第二态必须自带理由" % name
+    return run, skipped
+
+
 def main():
     _install()
     _selftest()
     print("[版式体检] 字体 %s" % _font_id())
-    from cards.build_all import CARDS
-    extra = [("model_dissent", "M1 机会模型"), ("level_recursion", "M2 级别递归")]
+    cards, skipped = coverage()
+    # 「扫到 0 张」不是「没有违规」，是「**我什么都没量**」。这里是这扇门最容易被钻的一格：
+    # 树不对（cards/ 不在、只复制了半棵仓、工具被挪到别处）⇒ 覆盖表空 ⇒ 下面所有计数都是 0
+    # ⇒ 和"干净通过"印得一模一样。跟 @atlas-791f 的 `verify_quotes.py` 空树是同一种塌，
+    # 取值也照同一条约定：**0 = 通过 · 1 = 查出来有问题 · 2 = 我没查成**（2 不是 1，也不是 0）。
+    # 别把它并进 1：那会让"树指错了"看起来像"卡片有问题"；也别留在 0：那就是今天这个口子。
+    if not cards:
+        print("\n[覆盖表] **扫到 0 张** —— 这不是「通过」，是「我什么都没量」。")
+        print("           被扫的目录 = %s" % _cards_dir())
+        print("           多半是这棵树不对：没有 cards/*.py，或者工具不在它本该在的那个仓里。")
+        for name, why in skipped:
+            print("           %-22s 跳过：%s" % (name, why))
+        print("退出原因: 覆盖表 0 张（什么都没量） ⇒ exit=2")
+        return 2
     total = 0
     injected = effective = dead = 0
     uncovered = []          # 从没声明 —— 没查过
     declared_none = []      # 声明"没有失败分支" + 理由
-    for name, title in [(n, t) for n, t in CARDS] + extra:
+    for name in cards:
         try:
             mod = importlib.import_module("cards." + name)
         except Exception as e:
@@ -333,10 +392,24 @@ def main():
         print("           ★ 没声明：%s" % "、".join(uncovered))
         print("           ↑ 这几张**既没注入、也没说没有** —— 只覆盖了成功路径。"
               "合计 0 处 ≠ 全卡都查过了。")
-    # **`uncovered` 不进退出码。** 它不是"版式出错"，是"这几张还没查" —— 而落地当下必然
-    # 一张都没声明，进了退出码就等于一合上就让 main 变红（@iris-64a1 正把这把尺接进 selfcheck）。
-    # 跟 `verify_notdef` 同一处置：**单开一列计数，不并进 FAIL**。要追进度看那一行数字。
-    return 1 if (total or dead) else 0
+    # 分母必须自己印出来：少了它，「量了 14 张」和「量了 2 张」在报告上长得一样。
+    print("\n[覆盖表] 扫面 cards/*.py 定义了 build() 的：**%d 张**（跳过 %d 个文件，逐条给理由）"
+          % (len(cards), len(skipped)))
+    for name, why in skipped:
+        print("           %-22s 跳过：%s" % (name, why))
+    # **`uncovered` 现在进退出码了 —— 这是今天改的，理由连同旧理由一起写在这。**
+    #
+    # 旧写法是"不进"：理由是**落地当下必然一张都没声明**，进了就等于一合上就让 main 变红
+    # （那把尺还要接进 selfcheck，一红就是"落地当天砌墙"）。**那个理由今天可测地不成立了**：
+    # 真 main 上 `没声明 = 0 张`（本器与 `cardfit_undrawn.py` 两把尺同数），
+    # ⇒ 进退出码**不会**让 landing 当天变红，只会让"以后有人加一张不声明的卡"变红 —— 那正是要拦的。
+    #
+    # 而"只印不进"的形状是今晚反复抓到的同一格：**报告里印了、退出码里没进**（仪表 ≠ 门）。
+    # 实测差：同一棵树上 `cardfit_undrawn.py`(A′) 报 `没声明 1 张 ⇒ rc=1`，本器报同一张卡而 `rc=0`
+    # ⇒ **两条尺、同一格、两个值**。取值照全仓约定 `0=通过 · 1=查出来有问题 · 2=我没查成`。
+    print("退出原因: 版式 %d 处 · 注入未生效 %d 支 · 没声明 %d 张 ⇒ exit=%d"
+          % (total, dead, len(uncovered), 1 if (total or dead or uncovered) else 0))
+    return 1 if (total or dead or uncovered) else 0
 
 
 if __name__ == "__main__":
