@@ -118,7 +118,7 @@ def draw_evidence(d):
     rows = gap_rows()
     y = 1414
     d.rounded_rectangle([50, y, W - 50, y + 730], 22, fill=CARD, outline=LINE, width=2)
-    d.text((86, y + 24), "用真实数据验证：本引擎 4 小时类中枢，每次向上离开后的回试", font=f_s, fill=AM)
+    d.text((86, y + 24), "按本引擎口径统计：4 小时类中枢，每次向上离开后的回试", font=f_s, fill=AM)
     hd = ["日期（UTC）", "中枢", "离开冲高", "回试低点", "中枢区间 [ZD, ZG]", "判定"]
     xs = [86, 280, 400, 580, 760, 1080]
     yy = y + 96
