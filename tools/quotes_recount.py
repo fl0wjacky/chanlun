@@ -1208,6 +1208,76 @@ MEASURE_KEY = {"tree": "commit", "min_len": "min-len", "face": "face",
 #   行首逐字相同 ⇒ 结构与句子都分不开）。同源之后，栏名不可能独自过期。
 _TABLES = (("MEASURE_KEY", MEASURE_KEY), ("PROBE_EXEMPT", PROBE_EXEMPT), ("COORD_BLIND", COORD_BLIND))
 
+# ══ 门位点名册（★ 分母的**唯一**来源）═══════════════════════════════════════
+# ★★ 这是**第二份名单**（@atlas-791f 拦的）：它**不由 `_hit(...)` 生成** —— 从自己的
+#   计数语句里生成名册 = 自己证明自己。代码里的 `_hit("…")` 答「**有哪些**」；
+#   这份名册答「**该有哪些、各替哪根轴说话、本跑该不该响**」。两份**不同源**，能互相不同意。
+# ★★ 分母**现算**：`sum(_SITE_FIRED.values())`。手记的 `gates` **已删** ⇒ 少写一处
+#   `_hit` ⇒ 分母自己跟着动（不再有"少一格而屏幕全绿"）。
+# ★★ `serves` 里的轴名**逐个写死，不许用 `tuple(OTHER_AXES)`** —— 那是这一条的自证陷阱：
+#   名册若从轴单生成，新增一根轴就**自动**被覆盖，覆盖检查恒绿。写死之后：
+#     · 加了轴没写位点 ⇒ `COUNT_AXES`/`OTHER_AXES` 里那根不在并集里 ⇒ **红**
+#     · 写了位点没登记 ⇒ 某个 `_hit` 的名不在本名册里 ⇒ **红**
+#     · 轴被改名 ⇒ 新名无人覆盖 ⇒ **红**（漂移被抓，不是静默）
+#   ⇒ 只红一边 = 映射还是单向的 = 还是有人在手记（@nova-8980 的裁定 ③）。
+# ★★ 第三格 `必响`：干净跑**该不该开**。`必响=True` 而本跑 0 发 ⇒ **红**（门位点被拿掉了，
+#   屏幕不再可能"少一格而全绿"）；`必响=False` = 坏数据门，只在坏数据那一跑开 ⇒ 0 发是本分。
+# ★ 展开因子**不另写常数**：格数本跑现算并印出来（"位点 × 该处跑了几趟" ——
+#   @atlas-791f 实测：删一处 ⇒ 31→25，一处 = 6 道）。
+GATE_SITES = {
+    # 位点名                    (替哪些轴说话,                                          场合, 必响)
+    "探测·挑不出正确值":  (("expect_corpus", "expect_judge", "expect_tree", "expect_flags"),
+                          "四个 `--expect-*` 里挑不出「正确值」⇒ 那格不算测过", False),
+    "探测·喂坏值":        (("expect_corpus", "expect_judge", "expect_tree", "expect_flags"),
+                          "四个 `--expect-*` 各喂一个坏值 ⇒ 本跑 rc 必须 = 该轴应有的 rc", True),
+    "探针·挑不出值":      (("tree", "expect_corpus", "expect_judge", "expect_tree",
+                           "expect_flags", "speaker", "expect_speaker"),
+                          "非计数轴挑不出探针值 ⇒ **没测**（记一笔）", False),
+    "探针行":             (("tree", "expect_corpus", "expect_judge", "expect_tree",
+                           "expect_flags", "speaker", "expect_speaker"),
+                          "每条非计数轴一行（点名豁免的那几根在这之前就 continue）", True),
+    "计数轴·挑不出值":    (("min_len", "face", "dedup", "v1ref", "unit", "ladder"),
+                          "计数轴挑不出探针值 ⇒ **没测**（记一笔）", False),
+    "计数轴行":           (("min_len", "face", "dedup", "v1ref", "unit", "ladder"),
+                          "每条计数轴一行（`量法` 行必须动）", True),
+    "坐标臂·跨臂核":      ((), "跨臂核：那栏手写的 `rc=N` 必须等于 ① 本跑现量的 N", True),
+    "坐标臂·碰两根(没测)": ((), "一次碰两根的兜底：抽不齐两根轴 ⇒ **没测**", False),
+    "坐标臂·碰两根":      ((), "一次碰两根 ⇒ 判据必须**拒绝**（差两处不许按「只许差一处」过）", True),
+    "量法行·单射":        ((), "`量法` 行是六轴旗标值的**单射**（两个不同值必须印出不同字段）", True),
+    "量法行·⑤g单射脸":    ((), "⑤g：喂一根不单射 / 分母 0 / 6/6 三种脸", True),
+    "量法行·⑤j登记名":    ((), "⑤j：登记名 ↔ 印出的字段名", True),
+    "判词·⑤e":            ((), "⑤e：探针跑 rc=6 且 tot=None ⇒ 判词不能写成「登记错」", True),
+    "判词·⑤f":            ((), "⑤f：数没动而坐标差恰是本轴 ⇒ 判词必须是「登记错」", True),
+    "判词·⑤i":            ((), "⑤i：真调用点（错值真轴 / 有键名的轴走同一行）", True),
+    "坐标臂·⑤h":          ((), "⑤h：坐标臂（给了不给都逐字同 ⇒ 盲）三种脸 + 臂名合法性", True),
+    "旁档·读不进":        (("speaker",), "自测自己造的旁档读不进来 ⇒ **没测**（记一笔）", False),
+    "旁档·等式核":        (("speaker",), "说话人轴的等式核（各类 + 未判 + 空 = 合计）", True),
+    "旁档·红例":          (("speaker", "expect_speaker"),
+                          "旁档喂红例：rc=11 且 `脸 =` 必须是那一个", True),
+    "旁档·指纹":          (("speaker", "expect_speaker"),
+                          "指纹对不上 ⇒ rc=11 且 `脸 = 指纹`", True),
+    "探针·点名豁免":      ((), "点名豁免的那几根：**不出数** ≠ 「没红」（它们占位点、不占格）", False),
+    "位点名册":           ((), "★ 本名册自己这道门：位点该有的都在、该说话的都说了", True),
+}
+_SITE_FIRED = collections.Counter()
+
+
+def _hit(site):
+    """门位点计数的**唯一**入口：分母就是它数出来的（不是跑到哪格顺手 +1 的手记数）。"""
+    _SITE_FIRED[site] += 1
+
+
+def gate_registry_audit():
+    """位点名册三面各查一次 —— 名册**不由 `_hit` 生成**，所以能跟代码互相不同意。"""
+    unk = sorted(set(_SITE_FIRED) - set(GATE_SITES))            # 写了位点没登记
+    served = set()
+    for _axes, _, _must in GATE_SITES.values():
+        served |= set(_axes)
+    unc = sorted((set(COUNT_AXES) | set(OTHER_AXES)) - served)  # 加了轴没写位点
+    dead = sorted(set(GATE_SITES) - set(_SITE_FIRED))           # 登记了但本跑 0 发
+    deaf = [d for d in dead if GATE_SITES[d][2]]                # ★ 0 发且声明了「必响」⇒ 红
+    return unk, unc, dead, deaf
+
 
 def _coords(out):
     """那一跑**器自己印的坐标行**：量法 / 对象 / 语料 / 判据 四行（注解切掉）。
@@ -1666,7 +1736,7 @@ def selfcheck_gate(a, argv):
           "**不能**读成「我钉的语料/判据/树/旗标被核过了」。")
 
     want = {"expect_corpus": 3, "expect_judge": 5, "expect_tree": 6, "expect_flags": 8}
-    gates = red = 0
+    red = 0
     # ★★ `card-5ed92625-4f5`：**本跑现量**的"坏值那一跑的 rc"，逐轴记下来。
     #   用途只有一个 —— ② 抬头拿它核 `COORD_BLIND` 那栏里手写的 `rc=N`（@nova-8980：「名字合法
     #   还不够，得**指得到**」）。@iris-64a1 的话是这条的判据：**会变的东西可以写下来，
@@ -1678,7 +1748,7 @@ def selfcheck_gate(a, argv):
         g = good[d]
         if not g:
             print("   %-15s ★ 挑不出「正确值」⇒ **没测**（记一笔）" % d)
-            gates += 1
+            _hit("探测·挑不出正确值")
             red += 1
             continue
         if d == "expect_flags":
@@ -1690,7 +1760,7 @@ def selfcheck_gate(a, argv):
         rc, tot, _, _ = _run_once(base + [AXIS_FLAG[d], badv])
         bad_rc[d] = rc
         ok = (rc == want[d] and tot is None)
-        gates += 1
+        _hit("探测·喂坏值")
         red += 0 if ok else 1
         # ★ 证据要能看出**差在哪一位**：印两端会把"改坏了一位"藏起来（`--expect-flags` 那格改的是
         #   第一个词、`sha` 那几格改的是末位 —— 一律印头或一律印尾都必然有一格看不见）。
@@ -1700,8 +1770,13 @@ def selfcheck_gate(a, argv):
                  rc, want[d], tot or "**没有**", "✓" if ok else "✗ **门没响**"))
 
     print("\n② 登记错（门：非计数轴塞探针 ⇒ `合计` **逐位不动**；坐标那格要**现量分辨力**）")
-    for d in PROBE_EXEMPT:
-        print("   ★ 点名豁免 `%s`（%s）" % (d, PROBE_EXEMPT[d]))
+    print("   ★ 点名豁免的**已声明**名单（`PROBE_EXEMPT`）：**%d 根**"
+          "（★ 这 %d 根在进 `探针行` 之前就出声了；`OTHER_AXES` 登记 %d 根 − 豁免 %d 根 "
+          "= 本跑走探针的 %d 根）"
+          % (len(PROBE_EXEMPT), len(PROBE_EXEMPT), len(OTHER_AXES), len(PROBE_EXEMPT),
+             len(OTHER_AXES) - len(PROBE_EXEMPT)))
+    for _i, _d in enumerate(PROBE_EXEMPT, 1):
+        print("       第 %d 根 `%s`（%s）" % (_i, _d, PROBE_EXEMPT[_d]))
     print("   ★ 坐标行 = 器自己印的 量法/对象/语料/判据 四行；**差哪一处都要点名**"
           "（只核「动了没有」的话，「动两根」和「动一根」同签名 —— @iris-64a1 抓的）")
     # ★★ @nova-8980 16:5x 的坑：**豁免名单必须自己印出来** —— 否则新加的轴会顺着
@@ -1723,7 +1798,7 @@ def selfcheck_gate(a, argv):
         elif ("rc=%d" % bad_rc[k]) not in ar:
             arm_bad.append("%s：那栏写的不是本跑现量的 `rc=%d` ⇒ 「名字过时了」" % (k, bad_rc[k]))
     arm_ok = not arm_bad
-    gates += 1
+    _hit("坐标臂·跨臂核")
     red += 0 if arm_ok else 1
     print("   ★ 跨臂核（门：那栏里的 `rc=N` 必须**等于** ① 本跑现量出来的 N）⇒ %s"
           % ("✓" if arm_ok else "✗ **%s**" % "；".join(arm_bad)))
@@ -1739,6 +1814,13 @@ def selfcheck_gate(a, argv):
           "它一直在坐标里，那与「这个旗标进没进坐标」无关（@atlas-791f 量的那个反例）")
     for d in OTHER_AXES:
         if d in PROBE_EXEMPT:
+            # ★★ 裸 `continue` 就是"移出门外"（@iris-64a1 量的：7 根 → 4 道，屏幕上一个字不说）。
+            #   它站在 `for` 第一行，**比任何 `_hit` 都早** ⇒ 只盯位点的检查器看不见它。
+            #   所以豁免必须**出声**、且必须**自己占一个位点** —— 这样"加一根豁免轴"是
+            #   `探针行 −1 / 豁免 +1`，**合计不动**（@nova-8980 的验收 ①：门数不变）。
+            _hit("探针·点名豁免")
+            print("   %-15s ★ 点名豁免（`PROBE_EXEMPT`）⇒ **不参与本格**（不是「没红」）"
+                  % d)
             continue
         act = acts.get(d)
         v = good.get(d)
@@ -1752,11 +1834,11 @@ def selfcheck_gate(a, argv):
                 v = None
         if v is None:
             print("   %-15s ★ %s ⇒ **没测**（记一笔）" % (d, why_none or "没测"))
-            gates += 1
+            _hit("探针·挑不出值")
             red += 1
             continue
         ok, line = _probe_row(d, v, base, cd0, tot0)
-        gates += 1
+        _hit("探针行")
         red += 0 if ok else 1
         print(line)
 
@@ -1773,7 +1855,7 @@ def selfcheck_gate(a, argv):
             v = None
         if v is None:
             print("   %-15s ★ %s ⇒ **没测**（记一笔）" % (d, why_none))
-            gates += 1
+            _hit("计数轴·挑不出值")
             red += 1
             continue
         rc, tot, fl, cd = _run_once(base + [AXIS_FLAG[d], v])
@@ -1810,7 +1892,7 @@ def selfcheck_gate(a, argv):
                     "动（这根轴是活的，被这个基点掩住）" if alive else "**也不动**")
             else:
                 why_num = "另一基点跑不出数 ⇒ **没测**"
-        gates += 1
+        _hit("计数轴行")
         num_ok = moved or (alive is True)
         red += 0 if (line_ok and one_ok and num_ok) else 1
         # ★ ✗ 也得**分脸**：**没做成的比较**不许印成**做成了的比较**
@@ -1846,7 +1928,7 @@ def selfcheck_gate(a, argv):
     #   并**照常判红**：非单射是真缺陷（那根轴的 ② 格永远绿），不是提示。
     inj_ok, inj_txt = _inj_face(len(inj_bad), inj_tested,
                                 "、".join(MEASURE_KEY[d] for d in inj_bad))
-    gates += 1
+    _hit("量法行·单射")
     red += 0 if inj_ok else 1
     print("   单射（② 的分辨力全靠它：两个不同值必须印出**不同字段**）⇒ %s ⇒ %s"
           % (inj_txt, "✓" if inj_ok else "✗"))
@@ -1863,7 +1945,7 @@ def selfcheck_gate(a, argv):
     pair = [(d, v) for d, v in pair if v is not None]
     if len(pair) < 2:
         print("   ★ 挑不出两根轴 ⇒ **没测**（记一笔）")
-        gates += 1
+        _hit("坐标臂·碰两根(没测)")
         red += 1
     else:
         argv2 = list(base)
@@ -1874,7 +1956,7 @@ def selfcheck_gate(a, argv):
         two = sorted(MEASURE_KEY[d] for d, _ in pair)
         # 这里要的是"判据**拒绝**"：差两处却按"只许差一处"判 ⇒ 必须 False。
         refused = not _verdict(dif, [two[0]])
-        gates += 1
+        _hit("坐标臂·碰两根")
         red += 0 if refused else 1
         print("   一次碰两根（%s）⇒ 坐标 %s ⇒ 按「只许差一处」判 ⇒ %s"
               % ("+".join("%s→%s" % (d, v) for d, v in pair), _diff_text(dif),
@@ -1928,7 +2010,7 @@ def selfcheck_gate(a, argv):
         if err is not None:
             print("   %-14s ★ 自测自己造的旁档都读不进来（脸=%s）⇒ **没测**（记一笔）"
                   % ("正臂", err[0]))
-            gates += 1
+            _hit("旁档·读不进")
             red += 1
         else:
             rc, out = _run_out(base + ["--speaker", pp, "--expect-speaker", rec["fp_sem"]])
@@ -1937,7 +2019,7 @@ def selfcheck_gate(a, argv):
             #   ⇒ 正则里 `**` 当**可选**，判词按**字**取。
             m = re.search(r"等式核（[^\n]*⇒ \*{0,2}(成立|不成立（器自己坏了）)", out)
             ok = (rc == 0 and m is not None and m.group(1) == "成立")
-            gates += 1
+            _hit("旁档·等式核")
             red += 0 if ok else 1
             print("   %-14s rc=%d · 等式核 %s ⇒ %s"
                   % ("正臂（3 条全联上）", rc, (m.group(1) if m else "**没印出来**"),
@@ -1956,7 +2038,7 @@ def selfcheck_gate(a, argv):
                 rc, out = _run_out(base + ["--speaker", q])
                 got = re.search(r"脸 = (\S+)", out)
                 ok = (rc == 11 and got is not None and got.group(1) == want)
-                gates += 1
+                _hit("旁档·红例")
                 red += 0 if ok else 1
                 print("   %-14s rc=%d（要 11）· 脸 = %s（要 %s）⇒ %s"
                       % (lab, rc, got.group(1) if got else "**没印**", want,
@@ -1968,7 +2050,7 @@ def selfcheck_gate(a, argv):
             rc, out = _run_out(base + ["--speaker", q, "--expect-speaker", bad])
             got = re.search(r"脸 = (\S+)", out)
             ok = (rc == 11 and got is not None and got.group(1) == "指纹")
-            gates += 1
+            _hit("旁档·指纹")
             red += 0 if ok else 1
             print("   %-14s rc=%d（要 11）· 脸 = %s（要 指纹）⇒ %s"
                   % ("红7 指纹", rc, got.group(1) if got else "**没印**", "✓" if ok else "✗ **没响**"))
@@ -1981,7 +2063,7 @@ def selfcheck_gate(a, argv):
     #   ★ 这里**不重跑子进程去凑**那个局面（那是寻绿）：直接拿已知输入喂纯函数。
     f_totnone = _probe_face(6, None, "331/302", None)
     ok = ("没出数" in f_totnone and "登记错" not in f_totnone)
-    gates += 1
+    _hit("判词·⑤e")
     red += 0 if ok else 1
     print("   ⑤e           探针跑 rc=6 且 tot=None ⇒ 判词「%s」⇒ %s"
           % (_cut(f_totnone, 46), "✓" if ok else "✗ **病名点回「登记错」了**"))
@@ -1992,7 +2074,7 @@ def selfcheck_gate(a, argv):
     #   ★ ⑤e 与 ⑤f 合起来钉住的正是那条被写窄的判据：**"数动"不是"登记错"的唯一形状。**
     f_own = _probe_face(0, "331/302", "331/302", ["ladder"], "ladder")
     ok = ("登记错" in f_own and "不止碰一根轴" not in f_own)
-    gates += 1
+    _hit("判词·⑤f")
     red += 0 if ok else 1
     print("   ⑤f           数没动 · 坐标差恰是本轴(ladder) ⇒ 判词「%s」⇒ %s"
           % (_cut(f_own, 42), "✓" if ok else "✗ **把登记错印成「不止碰一根轴」了**"))
@@ -2008,7 +2090,7 @@ def selfcheck_gate(a, argv):
     ok = (g_bad[0] is False and "不是单射" in g_bad[1] and "min-len" in g_bad[1]
           and g_zero[0] is False and "没测" in g_zero[1]
           and g_good[0] is True and "6/6" in g_good[1])
-    gates += 1
+    _hit("量法行·⑤g单射脸")
     red += 0 if ok else 1
     print("   ⑤g           单射：喂一根不单射 ⇒ 「%s」· 分母 0 ⇒ 「%s」· 6/6 ⇒ 「%s」⇒ %s"
           % (_cut(g_bad[1], 22), _cut(g_zero[1], 14), _cut(g_good[1], 10),
@@ -2046,7 +2128,7 @@ def selfcheck_gate(a, argv):
           and "坐标动了" not in h_face and "没有坐标臂" in h_face
           and "minlen" in h_drift and "min-len" in h_drift and "不止碰一根轴" not in h_drift
           and "不止碰一根轴" in h_two)
-    gates += 1
+    _hit("坐标臂·⑤h")
     red += 0 if ok else 1
     print("   ⑤h           坐标臂：给了不给都逐字同 ⇒ 「%s」· 抽不齐 ⇒ 「%s」· 真动了 ⇒ 「%s」"
           "· 盲且没登记 ⇒ 「%s」· 空 dif 且没登记 ⇒ 「%s」"
@@ -2073,7 +2155,7 @@ def selfcheck_gate(a, argv):
           and "没测" in i_line
           and "登记错" in j_line and "不止碰一根轴" not in j_line
           and "数动了" in i_key)
-    gates += 1
+    _hit("判词·⑤i")
     red += 0 if ok else 1
     print("   ⑤i           真调用点：错值真轴 ⇒ 「…%s」· 有键名的轴走同一行 ⇒ 「…%s」"
           "· 没键名+数动了(KeyError 那一支的真形状) ⇒ 「%s」⇒ %s"
@@ -2101,17 +2183,50 @@ def selfcheck_gate(a, argv):
     if "少印" not in j_bad[1]:
         j_why.append("丁·负例判词里**没印「少印」**")
     ok = not j_why
-    gates += 1
+    _hit("量法行·⑤j登记名")
     red += 0 if ok else 1
     print("   ⑤j           登记名↔印出的字段名：本跑 ⇒ 「%s」· 喂旧病(min-len(norm后)) ⇒ 「%s」⇒ %s"
           % (_cut(j_al[1], 26), _cut(j_bad[1], 30),
              "✓" if ok else "✗ **这道门自己没响：%s**" % "；".join(j_why)))
 
-    print("\n★ 自测结论：门 %d 道，红了 %d 道 ⇒ %s"
-          % (gates, red, "全响（exit=0）" if not red else "**有门没响（exit=10）**"))
-    print("   （提示不算门：③ 只算「旗标行必须动」那 %d 道；"
-          "计数轴上「数动」的 %d 道、恒等的 %d 道都只是印出来给人看）"
-          % (len(COUNT_AXES), ax_moved, ax_same))
+    # ⑤k ★ 位点名册自己这道门（分母的账）：两面各查一次。
+    _hit("位点名册")
+    _unk, _unc, _dead, _deaf = gate_registry_audit()
+    _fired = sum(_SITE_FIRED.values())          # ← 分母：现算，不是手记
+    print("\n⑤k 位点名册（★ 分母的唯一来源）：分母 = **各门位点本跑命中之和**（现算，不是手记）")
+    print("   门位点：本跑开了 **%d** 个 / 登记 **%d** 个 · 命中合计 **%d** 格 = 分母"
+          % (len(_SITE_FIRED) - 1, len(GATE_SITES) - 1, _fired))
+    print("   本跑 **0 发**的位点（存亡看得见 —— 它们既不在分子也不在分母里）：")
+    for _d in _dead:
+        if _d == "位点名册":
+            continue
+        print("       · %-18s %s%s" % (_d, GATE_SITES[_d][1],
+                                      "" if GATE_SITES[_d][2] else "  ← 坏数据门（本跑 0 发是本分）"))
+    if _deaf:
+        print("       ★ **声明了「必响」却没开**：%s ⇒ 门位点被拿掉了" % "、".join(_deaf))
+    _regwhy = []
+    if _unk:
+        _regwhy.append("**写了位点却没登记**：%s（代码里 `_hit` 的名字不在 `GATE_SITES` 里）"
+                       % "、".join(_unk))
+    if _unc:
+        _regwhy.append("**加了轴却没写位点**：%s（`COUNT_AXES`/`OTHER_AXES` 里这几根没有任何"
+                       "位点替它说话 ⇒ 分母看不见它）" % "、".join(_unc))
+    if _deaf:
+        _regwhy.append("**声明「必响」却本跑 0 发**：%s（这门位点被拿掉了 —— 手记的 `gates` "
+                       "删了以后，这是「少一格」唯一能被看见的地方）" % "、".join(_deaf))
+    _regok = not _regwhy
+    red += 0 if _regok else 1
+    print("   两面互查（★ 只红一边 = 映射还是单向的）⇒ %s%s"
+          % ("✓ 两份名单对得上" if _regok else "✗ **%s**" % "；".join(_regwhy),
+             "" if _regok else " ⇒ 本门没响"))
+
+    print("\n★ 自测结论：**门 %d 道**，红了 %d 道 ⇒ %s"
+          % (_fired, red, "全响（exit=0）" if not red else "**有门没响（exit=10）**"))
+    print("   **门：%d 道** ← ★ 逐位点现算（各门位点本跑命中之和），进 `红` 的账" % _fired)
+    print("   **不算门的提示：%d 道** ← 只印给人看，不进账：③ 那 %d 道「旗标行必须动」"
+          "+ 计数轴「数动」%d 道 + 恒等 %d 道（★ 这 %d 道**一道都不在**上面那个 %d 里）"
+          % (len(COUNT_AXES) + ax_moved + ax_same, len(COUNT_AXES), ax_moved, ax_same,
+             len(COUNT_AXES) + ax_moved + ax_same, _fired))
     return 0 if not red else 10
 
 
