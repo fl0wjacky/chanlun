@@ -76,15 +76,19 @@ def literal_chars(paths, include_docstrings=False):
     return chars, seen, skipped
 
 
-def scan(paths=None):
+def scan(paths=None, include_docstrings=False):
     """返回 (font, missing, conflict, 字符数, 扫过的文件数, 跳过的文件)。
 
     最后一个**必须**往下传：跳过的文件里的字一个都没进集合，但缺字结论照样出。
     「查不出来，就不算通过」—— 调用方看到它非空就该让退出码非 0。
+
+    `include_docstrings` 必须从命令行**真的能传进来**：这个参数一直是有的（selftest 也覆盖），
+    但 `main()` 手写 argv 时把它过滤掉了 ⇒ 换口径这件事在 CLI 上**没有出口**（见 `_parse`）。
     """
     from render.style import F, glyph_gaps, _NOTDEF_PROBES
     font = F(24)
-    chars, files, skipped = literal_chars(paths if paths is not None else default_paths())
+    chars, files, skipped = literal_chars(
+        paths if paths is not None else default_paths(), include_docstrings=include_docstrings)
     # 探测字符是检测器自己的哨兵（render/style.py 里那几个私用区码位），不是卡片内容。
     # 不排掉它们，扫 cards/ + render/ 会把自己那几个哨兵报成"卡片缺字"——检测器举报自己。
     # **三个都要排**：只排第一个，另外两个会被当成"卡片里缺这三个字"报出来。
@@ -99,13 +103,42 @@ def _show(chars, limit=60):
     return head + ("…（共 %d 个）" % len(chars) if len(chars) > limit else "")
 
 
+KNOWN_FLAGS = ("--selftest", "--codepoints", "--include-docstrings", "-h", "--help")
+
+
+def _parse(argv):
+    """显式解析 argv → (flags, args)；**不认识的开关返回 (None, None) 让 main 退出码 2**。
+
+    旧写法是一行 `args = [a for a in argv[1:] if not a.startswith("-")]`：
+      · `--include-docstrings` 在函数里是有的（selftest 也覆盖），但 CLI 上**没有出口**
+        ⇒ 想换母体的人被**静默地**留在默认母体上（`换开关、数没动` 正是这个仓反复抓的形状）；
+      · 拼错的开关（`--include-docstring`）同样静默 —— 这一半比上一半更值钱：
+        上一半只让你少一个便利，这一半会让你以为你换了口径。
+    取值照全仓约定：**0 = 通过 · 1 = 查出来有问题 · 2 = 我没查成**（开关不认识 ⇒ 这次没查成）。
+    """
+    flags = [a for a in argv[1:] if a.startswith("-")]
+    unknown = [f for f in flags if f not in KNOWN_FLAGS]
+    if unknown:
+        print("[字体覆盖] 不认识的开关：%s —— 这次**没查成**（不许静默忽略）" % " ".join(unknown))
+        print("           可用：%s" % "  ".join(KNOWN_FLAGS))
+        return None, None
+    return flags, [a for a in argv[1:] if not a.startswith("-")]
+
+
 def main(argv):
-    args = [a for a in argv[1:] if not a.startswith("-")]
-    if "--selftest" in argv:
+    flags, args = _parse(argv)
+    if flags is None:
+        return 2
+    if "--selftest" in flags:
         return selftest()
+    if "-h" in flags or "--help" in flags:
+        print(__doc__ or "tools/fontcheck.py [--selftest] [--codepoints U+XXXX,...] "
+                         "[--include-docstrings] [路径...]")
+        return 0
+    inc_doc = "--include-docstrings" in flags
 
     try:
-        if "--codepoints" in argv:
+        if "--codepoints" in flags:
             spec = (args[0] if args else "").split(",")
             chars, files, skipped = set(chr(int(s.strip().lstrip("Uu+"), 16)) for s in spec if s.strip()), 0, []
             from render.style import F, glyph_gaps
@@ -114,14 +147,18 @@ def main(argv):
             n = len(chars)
         else:
             font, missing, conflict, n, files, skipped = scan(
-                [os.path.join(ROOT, a) if not os.path.isabs(a) else a for a in args] or None)
+                [os.path.join(ROOT, a) if not os.path.isabs(a) else a for a in args] or None,
+                include_docstrings=inc_doc)
     except Exception as e:                       # 含 config 找不到字体
         print("[字体覆盖] 无法检查：%s" % e)
         return 2
 
     print("[字体覆盖] %s" % getattr(font, "path", "?"))
-    print("  扫了 %d 个脚本%s，会画上去的字符串里 %d 个不同字符（docstring 已排除）"
-          % (files, "（**跳过 %d 个**）" % len(skipped) if skipped else "", n))
+    # ★ 母体口径必须**跟着开关走**：换了口径而这一行照旧印「已排除」，报告就对自己的母体撒了谎。
+    print("  扫了 %d 个脚本%s，%s里 %d 个不同字符（docstring %s）"
+          % (files, "（**跳过 %d 个**）" % len(skipped) if skipped else "",
+             "**docstring 也计入**（非默认口径）的字符串" if inc_doc else "会画上去的字符串",
+             n, "**已计入**" if inc_doc else "已排除"))
     for _p, _e in skipped:
         print("  ! 没扫成 %s —— %s" % (os.path.relpath(_p, ROOT), _e))
     if skipped:
