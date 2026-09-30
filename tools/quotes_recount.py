@@ -645,6 +645,28 @@ def _coord_diff(c0, c1):
     return diffs
 
 
+def _alt_base(argv):
+    """给"这根计数轴是不是**哑的**"另找一个基点 —— 只动 `--unit` 一档（`all` ↔ `gone`）。
+
+    ★ 为什么需要它（实测，不是推的）：同一根轴 `--min-len 1→2`
+      在 `--unit gone` 面上 **恒等**（331/302 → 331/302），
+      在 `--unit all`  面上 **动**（594/520 → 566/500）
+      ⇒ 计数轴可以在**某个基点上合法恒等**（@atlas-791f 在 card-c9b12e05 评论 1 上量的
+      `--unit all` 面两档 `--ladder` 恒等 594/520 是同一个形状）⇒ 拿"这个基点没动"判死
+      会造**假红**；而"**任何**基点都不动"是真缺陷（登记成计数轴、却接不上分母）。
+      ⇒ 只给"没动"的那几根多跑两遍，把这两种分开（@iris-64a1 点的那格）。
+    """
+    cur = None
+    for i, t in enumerate(argv):
+        if t == "--unit" and i + 1 < len(argv):
+            cur = argv[i + 1]
+        elif t.startswith("--unit="):
+            cur = t.split("=", 1)[1]
+    if cur is None:
+        return list(argv) + ["--unit", "all"]
+    return _strip_flag(argv, "--unit") + ["--unit", "gone" if cur != "gone" else "all"]
+
+
 def _diff_text(dif):
     """坐标差的**脸** —— 三种情况必须印成**三张不同的脸**（@iris-64a1 的收口）：
 
@@ -838,16 +860,33 @@ def selfcheck_gate(a, argv):
         moved = tot != tot0
         ax_moved += 1 if moved else 0
         ax_same += 0 if moved else 1
+        # ★ "这个基点恒等"**不等于**"这根轴是哑的"：换一个基点再翻同一根轴，把两支分开
+        #   （活轴被基点掩住 ⇒ 提示；任何基点都不动 ⇒ 红，脸=「接上了但数没跟」）。
+        alive, why_num = None, ""
+        if not moved and line_ok and one_ok:
+            alt = _alt_base(base)
+            rcA, totA, flA, _ = _run_once(alt)
+            rcB, totB, _, _ = _run_once(alt + [AXIS_FLAG[d], v])
+            if rcA == 0 and rcB == 0 and totA and totB:
+                alive = (totA != totB)
+                why_num = "另一基点(%s) ⇒ %s → %s ⇒ %s" % (
+                    flA or "旗标行没印", totA, totB,
+                    "动（这根轴是活的，被这个基点掩住）" if alive else "**也不动**")
+            else:
+                why_num = "另一基点跑不出数 ⇒ **没测**"
         gates += 1
-        red += 0 if (line_ok and one_ok) else 1
+        num_ok = moved or (alive is True)
+        red += 0 if (line_ok and one_ok and num_ok) else 1
         print("   %-15s →%-14s rc=%d · 合计 %s ⇒ 数%s · 旗标行%s · 坐标差 %s ⇒ %s"
-              % (d, v, rc, tot or "**没有**", "动" if moved else "**恒等（提示，不判红）**",
+              % (d, v, rc, tot or "**没有**",
+                 "动" if moved else ("**恒等**" + ("（%s）" % why_num if why_num else "（提示，不判红）")),
                  "动" if line_ok else "**没动**",
                  ("只 %s（其余逐字同）" % MEASURE_KEY[d]) if one_ok else _diff_text(dif),
-                 "✓" if (line_ok and one_ok) else "✗ **%s**"
+                 "✓" if (line_ok and one_ok and num_ok) else "✗ **%s**"
                  % ("印的那行没跟着动" if not line_ok else
                     ("判不了 ⇒ 先修抽行/探针（**没测**）" if dif is None
-                     else "坐标不止动一根 ⇒ 这跑的数归因不了"))))
+                     else ("坐标不止动一根 ⇒ 这跑的数归因不了" if not one_ok
+                           else "接上了但数没跟（**换个基点也不动 ⇒ 这根轴是哑的**）")))))
 
     # ★ ④ 这条门**自己也得能被喂红**：把两根轴一次碰掉 ⇒ 上面那条判据**必须**说"不通过"。
     #   不喂这一口的话，"只许差一处"就成了一条**不能失败的检查** —— 而它长得和成功一模一样
