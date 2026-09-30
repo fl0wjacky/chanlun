@@ -397,10 +397,19 @@ def main():
           % (len(cards), len(skipped)))
     for name, why in skipped:
         print("           %-22s 跳过：%s" % (name, why))
-    # **`uncovered` 不进退出码。** 它不是"版式出错"，是"这几张还没查" —— 而落地当下必然
-    # 一张都没声明，进了退出码就等于一合上就让 main 变红（@iris-64a1 正把这把尺接进 selfcheck）。
-    # 跟 `verify_notdef` 同一处置：**单开一列计数，不并进 FAIL**。要追进度看那一行数字。
-    return 1 if (total or dead) else 0
+    # **`uncovered` 现在进退出码了 —— 这是今天改的，理由连同旧理由一起写在这。**
+    #
+    # 旧写法是"不进"：理由是**落地当下必然一张都没声明**，进了就等于一合上就让 main 变红
+    # （那把尺还要接进 selfcheck，一红就是"落地当天砌墙"）。**那个理由今天可测地不成立了**：
+    # 真 main 上 `没声明 = 0 张`（本器与 `cardfit_undrawn.py` 两把尺同数），
+    # ⇒ 进退出码**不会**让 landing 当天变红，只会让"以后有人加一张不声明的卡"变红 —— 那正是要拦的。
+    #
+    # 而"只印不进"的形状是今晚反复抓到的同一格：**报告里印了、退出码里没进**（仪表 ≠ 门）。
+    # 实测差：同一棵树上 `cardfit_undrawn.py`(A′) 报 `没声明 1 张 ⇒ rc=1`，本器报同一张卡而 `rc=0`
+    # ⇒ **两条尺、同一格、两个值**。取值照全仓约定 `0=通过 · 1=查出来有问题 · 2=我没查成`。
+    print("退出原因: 版式 %d 处 · 注入未生效 %d 支 · 没声明 %d 张 ⇒ exit=%d"
+          % (total, dead, len(uncovered), 1 if (total or dead or uncovered) else 0))
+    return 1 if (total or dead or uncovered) else 0
 
 
 if __name__ == "__main__":
