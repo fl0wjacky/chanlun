@@ -330,7 +330,48 @@ def _sites(base, a):
 
 def _key(q, a):
     """条那一把钥匙：`--dedup raw` 用原文，`norm` 用规范化后的。"""
-    return q if a.dedup == "raw" else V.norm(q)
+    return KEYFN[a.dedup](q)
+
+
+# ★★ 域词的两个**唯一**定义处（`card-14aa4f9f-544`）——
+#   `逐格` 与 `全局` 是**两个不同的量**：表里那一列 = Σ(各格内部去重)；说话人轴分母 = 跨格合并。
+#   各自只在这里写一次，**任何 print 都不许再出现这两个字面量**。
+#   ⇒ 旧的验收刀（把「条(域词)」那两个字 sed 成它的反面）今天**仍能匹配源码** —— 但只匹配到
+#     **这一行注释自己举的例子**：真插一次，源码变了，**行为与输出逐字节不变**。
+#     ⇒ 「能匹配」≠「能动行为」：测一把刀要**真插一次看行为**，不是看 grep 能不能匹配（@bram-9d29 这一条我认）。
+#     它原来的目标（下面几处 print）已经没有那个字面量了。真正的门是 `tools/` 里的静态扫描
+#     （print 子树 0 次）＋ `dom_label` 的同一跑内自核。
+DOM_CELL = "逐格"      # 口径：同一句横跨两格，**各记一次**
+DOM_GLOBAL = "全局"    # 口径：同一句跨格**合并成一条**
+# ★★ 钥匙 → 取值函数：**唯一一处**（`card-14aa4f9f-544` 第 7 笔）。
+#   在这笔之前，`raw`/`norm` 的分派在源码里写了**两遍**（`_key` 里一份、`global_by_key` 里一份）。
+#   @iris-64a1 那把刀（只改 `global_by_key` 里那一个 token）正是从第二份进的：
+#   `rc=0 · 门 35 · 红 0`，而印出来的**正是「两个钥匙标签对调」那一屏**
+#   ⇒ **关掉打印层那一份 ≠ 关掉这个屏**。
+#   并成一处之后，动它则两个入口**同时**动 ⇒ 屏上不会再出现「一个名配错函数」。
+#   ★ 边界（不夸大）：这只把**入口数**从 4 收到 2（本表 ＋ `:2516` 那个显示用 token）。
+#     定义处自己仍是**手写常量** —— 与域词那张卡同一个残留形状。
+KEYFN = {"raw": lambda q: q, "norm": V.norm}
+DEDUP_KEYS = tuple(KEYFN)      # `--dedup` 的**全部**取值：从上面那张表**派生**，不再手写第二份
+
+
+def global_by_key(per):
+    """全局去重那一列：**每个钥匙各配一个按该钥匙算出来的数**。
+
+    ★ 名字与值在**同一个元组**里产生 ⇒ 印的时候不可能把 A 的名字配到 B 的数上。
+      （@iris-64a1 的变异 B：两个标签对调 —— 在旧写法里只需改一个打印字符串。）
+    """
+    return tuple((k, len({KEYFN[k](q) for q in per})) for k in DEDUP_KEYS)
+
+
+def dom_label(scope, a):
+    """域词的印法：`<域> · <钥匙>钥匙`。
+
+    ★ 钥匙词**逐字**取本跑的 `--dedup`，不手写、不复制（自我核对：比较的另一头是同一次跑印出的值）。
+    ★ 只给**随旗标走**的量用；`_per_quote` 那类**按原文标识分组**的量不随旗标走，
+      它的名字**应当**钉死 —— 名字要跟它标的**量**同源，不是跟旗标同源。
+    """
+    return "%s · %s钥匙" % (scope, a.dedup)
 
 
 def tally(base, a, sites=None):
@@ -655,7 +696,7 @@ def speaker_axis(sites, tot, a, sp=None):
     """
     per = _per_quote(sites)
     raw = list(per)
-    nrm = len(set(V.norm(q) for q in raw))
+    byk = global_by_key(per)
     face_of = _face_of(per)
     occ_of = collections.Counter(q for _c, q in sites)
     have = sp is not None
@@ -673,10 +714,10 @@ def speaker_axis(sites, tot, a, sp=None):
 
     print("说话人轴（**双轴**：类别 × 面 · 恒印 —— 缺「未判」这一栏，「合计 %d 处」就会被读成"
           "「%d 处引文失真」）" % (tot[0], tot[0]))
-    print("   分母：**处** = %d（不去重：每次出现各算一次）· **条** = 全局去重（raw 钥匙）= %d"
-          "（norm 钥匙 = %d）" % (tot[0], len(raw), nrm))
-    print("         ★ 不是 %d：那是 **Σ逐格去重**（同一句横跨两格各记 1）⇒ **只能说「处」**；"
-          "条那一列必须走全局去重" % tot[1])
+    print("   分母：**处** = %d（不去重：每次出现各算一次）· **条** = %s去重%s"
+          % (tot[0], DOM_GLOBAL, "".join("（%s 钥匙）= %d" % kv for kv in byk)))
+    print("         ★ 不是 %d：那是 **Σ%s去重**（同一句横跨两格各记 1）⇒ **只能说「处」**；"
+          "条那一列必须走%s去重" % (tot[1], DOM_CELL, DOM_GLOBAL))
     if not have:
         print("   旁档   ★ **没给**（没写 --speaker）—— 「没给」不是「给了个 0」：下面是 `—`。")
     else:
@@ -1075,7 +1116,7 @@ def build_parser():
                          "卡上已经贴出去的命令不能因为改名跑不动。")
     ap.add_argument("--min-len", type=int, default=6)
     ap.add_argument("--face", choices=("whole", "literal"), default="whole")
-    ap.add_argument("--dedup", choices=("raw", "norm"), default="norm")
+    ap.add_argument("--dedup", choices=DEDUP_KEYS, default="norm")
     # ★ 默认从 skip 翻成 keep（@nova-8980 ① 12:16 抓的）：
     #   卡面写死的截面是「全仓 *.py 排除 .git/ 与 archive/」—— `tools/v1_ref` 两个都不是
     #   ⇒ 按那段散文跑的人应该拿到 331；而默认 skip 会**偷偷再窄一档**，裸跑印 325
@@ -2480,16 +2521,19 @@ def main():
         if sp is not None and sp["decl_denom"] and sp["decl_denom"] != (tot[0], len(_per_quote(sites))):
             print("★ 旁档与本次跑的**分母**对不上 ⇒ **拒绝出数**（exit=11）。脸 = 分母对不上")
             print("  旁档自己声明（`# 分母：` 那行）  %d 处 / %d 条" % sp["decl_denom"])
-            print("  本次跑现场算出来的            %d 处 / %d 条（全局去重 raw）"
-                  % (tot[0], len(_per_quote(sites))))
+            # ★ 这处的 `raw` 是**显示用 token**，不是分派：这个量走 `_per_quote`（按**原文标识**分组），
+            #   与 `--dedup` 无关（2×2 跑过）⇒ **不许**收进 KEYFN（收进去 = 让它跟着旗标走 = 造假），
+            #   只保持「与前者不同源」并在这一行写清。
+            print("  本次跑现场算出来的            %d 处 / %d 条（%s去重 raw）"
+                  % (tot[0], len(_per_quote(sites)), DOM_GLOBAL))
             print("  ★ 这一格是「**同一份旁档配了另一套旗标**」的专用出口："
                   "旁档那一行自己写着「当场算、当场印，非写死」⇒ 它是坐标，不是注释。")
             print("    例：`--face literal` / 换 `--ladder` / 换 `--min-len` 都会挪分母，"
                   "而旁档的行数**一行不变** —— 那时逐行联结照样全中，只有这一格拦得住。")
             return 11
         for name, n, k in rows:
-            print("  %-8s %4d 处 / %4d 条(逐格)" % (name, n, k))
-        print("  %-8s %4d 处 / %4d 条(逐格)" % ("合计", tot[0], tot[1]))
+            print("  %-8s %4d 处 / %4d 条(%s)" % (name, n, k, dom_label(DOM_CELL, a)))
+        print("  %-8s %4d 处 / %4d 条(%s)" % ("合计", tot[0], tot[1], dom_label(DOM_CELL, a)))
         print()
         speaker_axis(sites, tot, a, sp)
         print()
@@ -2510,9 +2554,9 @@ def main():
               "（差 %+d 处 / %+d 条）"
               % (other, otot[0], otot[1], otot[0] - tot[0], otot[1] - tot[1]))
         om = dict((r[0], r) for r in orows)
-        print("  逐格：%s" % " · ".join(
+        print("  %s：%s" % (DOM_CELL, " · ".join(
             "%s %+d/%+d" % (r[0], om[r[0]][1] - r[1], om[r[0]][2] - r[2])
-            for r in rows if r[0] in om))
+            for r in rows if r[0] in om)))
         if a.unit == "all":
             print("  ★ unit=all 时两档**必然**同数（分母不判「原文有没有」，逐段档无从参与）"
                   "—— 这个 0 有理由，不是阶梯坏了。")
