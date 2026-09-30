@@ -37,7 +37,7 @@ Noto 的汉字在同一字号下墨迹低 3~4px，就戳出标签底框）。所
     ★ 违约消息里**不带"第 N 张"**：报告里从来不印序号，写 N 等于让读者再翻译一次；
       卡名由汇总行（`measure()`）负责印 —— **一个事实只印一处**。
 """
-import os, sys, glob, importlib
+import os, sys, glob, importlib, operator
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PIL import Image, ImageDraw
@@ -216,16 +216,27 @@ class ContractError(Exception):
 
 
 def _is_size(v):
-    """尺寸得是**正整数** —— `bool` 不算（`isinstance(True, int)` 是 `True`，见下）。
+    """尺寸判据：**能当整数用（`operator.index`）、为正、且不是布尔**。
 
-    ★ 为什么单独抽出来：同一条件宽高各写一遍，改一处漏一处是迟早的。
-    ★ 为什么不写 `type(v) is int`：那会把 `class MyInt(int)` 这类**合法输入**一起拦死 ——
-      鸭子类型正是这条契约的立身之本（"非 PIL 但正整数必须放行"那条探针靠的就是它）。
-    ★ 为什么必须排 bool：`False/True` 是 int 的子类 ⇒ 旧判据会把 `True` 当尺寸**放行**，
-      而报告那行是 `W=%-5d` ⇒ 印成 `W=1`，**一个错都不报、也没有任何一处提示这是个 bool**
-      （比 `AttributeError` 那口更难发现：那口至少喊了）。出处：`card-734aa37a-424` 第 ⑥ 探针。
+    · 用 `operator.index` 而不是 `isinstance(v, int)`：它才是 Python 里"能当整数用"的标准判据
+      —— `int` 子类、numpy 整数标量、任何带 `__index__` 的对象都放行（**契约是鸭子类型**）。
+    · 排布尔分两步，因为**它们是两种东西**：
+        ① Python 的 `bool`：`isinstance(True, int)` 与 `True > 0` 都为真 ⇒ 不排，"真值"会冒充"尺寸"；
+        ② **自称布尔元素类型的标量**（`dtype.kind == 'b'`，numpy/pandas 这类数组库的声明）：
+           `np.bool_(True)` **不是** Python `bool` 的子类，① 排不掉它，而它一样会印成 `W=1`。
+      两步合起来，**理由（"真值不许冒充尺寸"）与正文同宽** —— 这正是本卡今晚立的那条。
+    · **射程就到这儿**：本判据认这两种"布尔声明"。别的库若既不是 Python `bool`、也不声明 `dtype.kind`，
+      不在射程内 —— 这是**有意划的界**，不是遗漏（要覆盖它就得"按库认类型"，那种规则会随库版本变）。
+    · 非正、浮点、字符串、None 一律拦住。
     """
-    return isinstance(v, int) and not isinstance(v, bool) and v > 0
+    if isinstance(v, bool):
+        return False
+    if getattr(getattr(v, "dtype", None), "kind", None) == "b":
+        return False
+    try:
+        return operator.index(v) > 0
+    except TypeError:
+        return False
 
 
 def assert_card(im):
