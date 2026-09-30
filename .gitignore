@@ -1,21 +1,25 @@
 .DS_Store
-__pycache__/
+# ★ 本文件里的规则**一律不写尾斜杠**（2026-10-01 · card-6e2ee844-0a2）：
+#   `foo/` 只匹配**目录**，而 `foo` 同时匹配目录**和**符号链接/文件。
+#   `archive/chanlun108` 是跑 quotes_recount.py 的**语料挂点**，实际用法就是把 WORKTREE 里这个位置站成软链 ⇒
+#   带尾斜杠时 `git add -A` 会把那条软链**收进仓**（断链 + 本机绝对路径进仓）。
+__pycache__
 *.pyc
-uploads/
+uploads
 
 # ---- 不公开（2026-09-30）----
 # 108 课原文副本：有版权，用 tools/fetch_chanlun108.py 抓到本地
-archive/chanlun108/
+archive/chanlun108
 # 个人研究笔记（引用第三方内容）及其改稿脚本
 archive/缠论与场外体系的结合.md
 archive/缠论与场外体系的结合_手机版.pdf
 archive/oneoff/trim_paper_round*.py
 # TradingView 截图的调试裁剪
-archive/debug_crops/
+archive/debug_crops
 # 生成物：卡片、全景图、PDF，都能用脚本重出
-out/
+out
 # Claude Code 的本地会话文件
-.claude/
+.claude
 # 早期脚本存错位置的旧产物（现在一律输出到 out/）
 /*.png
 /*.pdf
