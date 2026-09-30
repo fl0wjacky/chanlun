@@ -90,11 +90,15 @@ def draw_rules(d):
         yy += 88
 
 
-def gap_rows():
+def gap_rows_and_z():
     """引擎现算：4 小时类中枢里，每次「向上离开 ZG」之后的第一次回试。
 
-    返回 [(日期, 中枢序号, 中枢, 离开冲高, 回试低点, 判定)]；判定 = 三买 / 贯穿（从区间另一侧整段穿过）/ 假缝隙 / ZD 下方。
+    返回 (rows, Z)，其中 rows = [(日期, 中枢序号, 中枢, 离开冲高, 回试低点, 判定)]；
+    判定 = 三买 / 贯穿（从区间另一侧整段穿过）/ 假缝隙 / ZD 下方。
     出图时现算 —— 换数据或改引擎，卡片自动跟着变，不会过期。
+
+    一并返回 Z 是给 cross_check() 用的：那张表的期望值必须来自被测物之外，
+    而 Z 里的 term 由 core/center.py 独立算出（见 cross_check 的说明）。
     """
     r = analyze_file("aaplusdt_4h.json")
     P, B, Z = r["pens"], r["bars"], r["centers"]
@@ -110,15 +114,58 @@ def gap_rows():
                     v = "ZD 下方" if dn["p1"] < z["ZD"] else "假缝隙"
                 t = datetime.datetime.utcfromtimestamp(B[dn["i1"]]["t"] / 1000)
                 rows.append(("%d月%d日" % (t.month, t.day), n + 1, z, up["p1"], dn["p1"], v))
-    return rows
+    return rows, Z
+
+
+def gap_rows():
+    """兼容旧调用（tools/verify_c06_c07.py:95 按 6 元组解包）：只要 rows。"""
+    return gap_rows_and_z()[0]
+
+
+def cross_check(rows, Z):
+    """拿引擎自己的中枢终结原因跟卡片的判定对账——**这只查漂移，不构成对原文的验证。**
+
+    先说清它查不了什么，免得又被读成「验证」：
+      本卡 L106-108 的谓词  up.p1>up.p0 且 dn.p1>ZG 且 ZD<=up.p0<=ZG
+      center.py L120-125 的  u.p1>u.p0 且 w.lo>ZG 且 ZD<=u.p0<=ZG
+    而向下笔恒有 lo == p1（在本数据 10/10 实测），所以 dn.p1>ZG 与 w.lo>ZG
+    是**同一个条件**。两边是同一份原文规则的两次转写——和 upgrades()/check_centers()
+    那种「同一算法的两次转写」同形。**原文读错了，两边一起错，这里查不出来。**
+
+    它真正能查的是**管道**：谁跟谁配成一笔、三买记在哪个中枢上、本卡的扫描范围
+    有没有漏掉引擎已判为三买的那一段。所以它是一条**漂移报警**——两处实现一旦
+    分家就红。这有价值（内部不一致必须吼），但别把它当独立来源。
+
+    真正的独立来源在引擎之外：data/annot_pens.json 是人工从截图标的笔。要让这张卡
+    能验原文，得拿它当外部期望值——那是另一个活，本函数不做。
+
+    依据是第 38 课原文「第三类买卖点，和中枢延伸的结束是一回事情」：三买 ⟺
+    中枢终结原因就是三买。双向对，免得漏掉「本卡漏判 / 引擎多判」。
+
+    返回 (对上几个, 不一致的清单)。清单非空 = 两处实现已经分家。
+    """
+    bad, ok = [], 0
+    for n, z in enumerate(Z, 1):
+        mine = [r[5] for r in rows if r[1] == n]
+        if not mine:
+            continue
+        card_buy, engine_buy = ("三买" in mine), (z["term"] == "三买")
+        if card_buy == engine_buy:
+            ok += 1
+        else:
+            bad.append((n, card_buy, z["term"], mine))
+    return ok, bad
+
+
+MISMATCH = []          # cross_check 的真失败清单；非空 → main() 以 1 退出（见文件末尾）
 
 
 def draw_evidence(d):
     """实证：本引擎 4 小时类中枢，逐次核对「缝隙」"""
-    rows = gap_rows()
+    rows, Z = gap_rows_and_z()
     y = 1414
     d.rounded_rectangle([50, y, W - 50, y + 730], 22, fill=CARD, outline=LINE, width=2)
-    d.text((86, y + 24), "用真实数据验证：本引擎 4 小时类中枢，每次向上离开后的回试", font=f_s, fill=AM)
+    d.text((86, y + 24), "本引擎在这段真实数据上的判定明细（下附两处实现的对账，仅查漂移）", font=f_s, fill=AM)
     hd = ["日期（UTC）", "中枢", "离开冲高", "回试低点", "中枢区间 [ZD, ZG]", "判定"]
     xs = [86, 280, 400, 580, 760, 1080]
     yy = y + 96
@@ -147,7 +194,24 @@ def draw_evidence(d):
     if thru:
         d.text((86, yy + 168), "　 「贯穿」：%s 那次离开段从 ZD 下方整段穿过区间，不是从中枢里出发，由中心定理一兜底判终结。"
                % "、".join(thru), font=f_n, fill=MU)
-    d.text((86, yy + 168 + 32 * bool(thru)), "　 样本只有 %d 次，只作示意。" % len(rows), font=f_n, fill=MU)
+    yy0 = yy + 168 + 32 * bool(thru)
+    d.text((86, yy0), "　 样本只有 %d 次，只作示意。" % len(rows), font=f_n, fill=MU)
+
+    # 对账（本卡唯一会失败的地方）：期望值来自引擎自己的 term，而不是本文件把
+    # 上面那个 v 再抄一遍 —— 那样两边同一个谓词，永远不会分歧。
+    nok, MISMATCH[:] = cross_check(rows, Z)
+    if MISMATCH:
+        d.text((86, yy0 + 34),
+               "　 ✗ 两处实现分家 %d 处：%s —— 本卡与 core/center.py 的判定已经不一致，先查哪个错。"
+               % (len(MISMATCH),
+                  "、".join("中枢%d(卡=%s/引擎=%s)" % (n, "三买" if cb else "非三买", t)
+                            for n, cb, t, _ in MISMATCH)),
+               font=f_n, fill=RD)
+    else:
+        d.text((86, yy0 + 34),
+               "　 ✓ 对账：%d 个有回试的中枢，本卡与 core/center.py 两处实现未分家。"
+               "（谓词同源，原文若读错会一起错——这条只报漂移，不当独立验证。）" % nok,
+               font=f_n, fill=GR)
 
 
 def build():
@@ -162,8 +226,13 @@ def build():
 
 def main():
     build().save(out("chanlun_model.png"))
-    print("model ok")
+    if MISMATCH:
+        # 出图成功不等于卡是对的：判据和引擎的终结原因对不上时，这张卡不该被当成证据。
+        print("model ok（图已出），但两处实现分家 %d 处：%s" % (len(MISMATCH), MISMATCH))
+        return 1
+    print("model ok，两处实现未分家")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
