@@ -69,7 +69,32 @@ git cat-file -p <blob> | grep "^PUNCT = "        # 或 git show <树>:tools/veri
 #   norm 行里**不出现 ELL**（ELL 只进 split_ellipsis，见下）。
 ```
 
-快筛（等价但**非结构性蕴含**，别拿它当唯一判据）：`git merge-base --is-ancestor 51b377f <树>`。
+★ **别改成一个"区域指纹"了事** —— 我第一版给的就是区域指纹，@atlas-791f 当场逮到它有个致命盲区：
+`sed -n '/^PUNCT *=/,/^ *return FOLD/p'` 的**右端点在 `fold()` 的 return 就停了**（`:95`），
+而 `norm()` 在 `:98–:100` —— **判据函数压根不在那个区间里**。
+实测（取 blob `23274277`，只把 `norm()` 改成 `PUNCT.sub("", ELL.sub("", s))`）：
+
+```
+                                 旧·/^PUNCT…/版     旧·/^ELL…/版     新·到第 2 个 return FOLD
+  原样                            a1e1d052f7dbb00e 870351ae00fbde05 e1511c94e8103383
+  ★ 只改 norm（= norm_ell 轴）      a1e1d052f7dbb00e 870351ae00fbde05 427d4beaa39b592e
+  只在文件尾加注释（判据区外）          a1e1d052f7dbb00e 870351ae00fbde05 e1511c94e8103383
+```
+
+⇒ 旧两版**三行同值**：它检不出 `norm` 的变化，也检不出区外的变化 —— **一扇永远绿的门**。
+⇒ 新版的右端点圈到 `norm` 的 return，**正控变、负控不变**，才算有分辨力。
+   注意 `/^ELL…/` 那版看着像"排除了 PUNCT"，其实它跑到 `:95`，**PUNCT 那行在 `:90`、还在里面**。
+
+**要用的指纹命令**（跑完自己印覆盖范围，别让它只吐一个数）：
+
+```
+git cat-file -p <blob> \
+  | awk '/^(FOLD|ELL|PUNCT) *=/{s=1} s{print} s&&/return FOLD/{c++} c==2{exit}' \
+  | sha256sum | cut -c1-16
+# 23274277 ⇒ e1511c94e8103383   （覆盖 :77–:100 共 24 行，含 FOLD/ELL/PUNCT/fold/norm）
+```
+
+快筛（非结构性蕴含，别拿它当唯一判据）：`git merge-base --is-ancestor 51b377f <树>`。
 我把这 38 笔逐笔比过 `is-ancestor` 与"含字面 `*`"，**反例 0** —— 但 0 反例的理由是那几个
 "无*"全是甲1 之前的**支尖**、每次 merge 都是 main 那侧赢；**哪次解析成旧档，这条线当场断**。
 ⇒ 快筛用祖先，**真值用内容**。
