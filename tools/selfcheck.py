@@ -160,7 +160,9 @@ try:
         if _conflict:
             print("  ⚠ cmap 与渲染分歧 %d 个：%s" % (len(_conflict), "".join(_conflict[:20])))
         print("    这些字会变成方框且不报错。**这是字体/环境问题，不是引擎问题** ——")
-        print("    把 CHANLUN_FONT 指到含中日韩字形的 ttf 再跑，这一步应回 0。")
+        print("    先用 CHANLUN_FONT 指一份含中日韩字形的 ttf 再跑。")
+        print("    若换了好字体**还剩几个**，那就不是环境问题，是**卡片用了这份字体没有的符号**")
+        print("    （实测：Noto Sans CJK 有 ✓ U+2713，但没有 ✔ U+2714 / ✗ U+2717 / ✘ U+2718）。")
     else:
         print("  ✓ 这份字体画得出字面量里的全部字符")
 except Exception as e:
