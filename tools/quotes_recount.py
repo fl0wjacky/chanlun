@@ -79,6 +79,18 @@
 
 退出：0 跑完 · 2 语料不在（**查不了 ≠ 通过**）· 3 语料指纹对不上（--expect-corpus）
       · 4 没点对象（`--commit`/`--tree` 一个都没写）—— 见下面 `--commit` 那格
+
+★★ 验收判据：**`grep -q '验收可用=是'`**（输出里那一行单值）。三个条件**必须写成"印了且 = 是"**：
+
+```
+验收可用=是        ✓ 过
+验收可用=否        ✗ 红（下面会说出少了哪一条：对象不是 sha ／ 语料没核）
+（没有这一行）      ✗ 红  ← **旧版器就是这一格**：判据若写成"没有 否就算过"，它静默通过
+```
+  ⇒ 这门装的是**这个数是什么**，不是"参数写没写"：`--commit .` 是正当用法（exit 照常 0），
+    但它不是任何一个对象 ⇒ 换个拼法就能绕过"不写对象"那道 exit=4 的门（@iris-64a1 量到的洞）。
+  ⇒ 也**不许借 `★` 当判据**：验收命令**自己**就印 ★（`★ 这一支不判对错…`，在第 15 行）
+    ⇒ 按"输出里没有 ★"判会把**正确的那跑**判红。（借别人也在用的字符当接口，本仓栽过。）
 """
 import argparse, io, os, re, shutil, subprocess, sys, tempfile
 
@@ -234,6 +246,12 @@ def which(sha):
       `git archive <commit-ish>` 照样出树，所以它一直"能用" —— 但器把
       `tree=05f3e24` 当量法行印出来，等于**量产一个含混的标签**，
       而卡上那条基准行要从它这儿抄格子。今天那次诊断就是死在"这东西是不是 tree"第①步。
+
+    返回 `(说明文字, 它是不是一个**真正的对象**)`。第二项就是 `验收可用` 那格的左半边
+    （@iris-64a1 14:2x 量出来的洞）：`--commit .` 是**正当用法**，它确实该跑、该 exit=0，
+    **但它不是任何一个对象** ⇒ 那个数绑的是"你脚下那份工作区的快照"。
+    ⇒ **换个拼法就绕过"不写对象"那道门**（`--commit .` 明写出来，照样出数）——
+      所以门不能只装在"参数写没写"上，得装在这个数**是什么**上。
     """
     def git(*args):
         p = subprocess.run("git " + " ".join(args), shell=True, cwd=V.ROOT,
@@ -258,13 +276,14 @@ def which(sha):
                 "         ★ 就地走**工作目录**（未跟踪也算分母）；点 sha 走 `git archive`"
                 "（只含已跟踪）—— **两条路不是同一把尺**\n"
                 "         ⇒ 要跟别人比数，必须点一个对象：`--commit <sha>`"
-                % (V.ROOT, head, len(st), len(mod), len(unt)))
+                % (V.ROOT, head, len(st), len(mod), len(unt)), False)
     kind = git("cat-file", "-t", sha)
     if kind == "commit":
-        return "commit %s → tree %s（临时树，跑完删）" % (sha, git("rev-parse", sha + "^{tree}"))
+        return ("commit %s → tree %s（临时树，跑完删）"
+                % (sha, git("rev-parse", sha + "^{tree}")), True)
     if kind == "tree":
-        return "tree %s（临时树，跑完删）" % sha
-    return "%s（认不出类型，git cat-file 说 %r）" % (sha, kind)
+        return ("tree %s（临时树，跑完删）" % sha, True)
+    return ("%s（认不出类型，git cat-file 说 %r）" % (sha, kind), False)
 
 
 def main():
@@ -319,7 +338,8 @@ def main():
         print("量法   口径参数：commit=%s · unit=%s · min-len(norm后)=%d · face=%s · "
               "dedup=%s · v1_ref=%s · ladder=%s"
               % (a.tree, a.unit, a.min_len, a.face, a.dedup, a.v1ref, a.ladder))
-        print("对象   %s" % which(a.tree))
+        obj_text, obj_is_obj = which(a.tree)
+        print("对象   %s" % obj_text)
         fp, fbytes = V.fingerprint(docs)
         if a.expect_corpus and fp != a.expect_corpus:
             print("★ 语料指纹对不上 ⇒ **拒绝出数**（exit=3）。这一格是门，不是装饰：")
@@ -331,6 +351,36 @@ def main():
         print("语料   sha256:%s%s" % (
             fp, "  （已核：== --expect-corpus）" if a.expect_corpus
                 else "  （★ **没核**：没给 --expect-corpus，这个 sha256 只是印出来的）"))
+        # ★★ 验收判据做成**专用单值**（@iris-64a1 14:3x 量出的洞 + 她先提的"门挪到输出匹配"）：
+        #   ① 洞：`--commit .` 是**正当用法**（该跑、该 exit=0），但它不是任何一个对象
+        #      ⇒ **换个拼法就绕过"不写对象"那道门**（明写 `.`，照样出数）。
+        #      所以门不能只装在"参数写没写"上，要装在这个数**是什么**上。
+        #   ② 但**判据不许借 `★`**：实测**验收命令自己**也印 ★ ——
+        #      `★ 这一支不判对错…`（census 那段说明）在干净验收跑的第 15 行，
+        #      按"输出里没有 ★ 行"判会把**正确的那跑**判红（@iris-64a1 三跑实测：正确跑 ★=1）。
+        #      **借别人也在用的字符当接口，正是这仓杀掉过的病。**
+        #   ⇒ 一行单值：`验收可用=是` / `验收可用=否`。检查方：`grep -q '验收可用=是'`。
+        #      它**能失败**：少给一个 --expect-corpus 就会翻成 否（下面的 else 会说出少了哪一条）。
+        corpus_ok = bool(a.expect_corpus)   # 对不上在前面已 exit=3，走到这儿就是核过了
+        if obj_is_obj and corpus_ok:
+            print("验收可用=是    （对象=%s · 语料 sha256:%s 已核）" % (a.tree, fp))
+        else:
+            why = []
+            if not obj_is_obj:
+                why.append("对象不是任何一个 sha（就地扫工作目录 ⇒ 这个数绑的是"
+                           "**你脚下那份树的快照**，换个人、换个脏法就换个数）")
+            if not corpus_ok:
+                why.append("没给 --expect-corpus（语料只是印出来的，**没核过**）")
+            print("验收可用=否    —— 不是「跑不动」（这跑是正当用法、exit 照常），"
+                  "是**这张表不能当验收读数**：")
+            for w in why:
+                print("               · %s" % w)
+            # ★ 这段**不许把判据原样打出来**（我第一版就打了，当场自伤）：判据是 grep 一个单值，
+            #   而我把那个单值写进了这段说明里 ⇒ **器自己的说明被自己的判据搜到** ⇒ 否也判"过"。
+            #   实测：②③ 两跑明明印的是 否，`grep -q '验收可用=是'` 却在**说明文字**里命中了。
+            #   ⇒ 这里只说"上面那一行必须是「是」"，**一个字都不许拼出那个 token**。
+            print("               判据＝**上面那一行**行首的 `验收可用` 单值必须是「是」"
+                  "（★ 别拿 `★` 当判据 —— 正确的那跑自己也印 ★）")
         print()
         rows, tot = tally(base, a)
         for name, n, k in rows:
