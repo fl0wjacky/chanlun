@@ -613,8 +613,8 @@ def load_speaker(path, sites):
     return {"path": path, "names": names, "rows": rows, "verdict": verdict,
             # ★ 两把指纹，**只有一把是门**（@nova-8980 15:3x 合成的仓规：
             #   凡当门用的指纹，必须指名它的定义域）：
-            #   语义指纹（门）= 对**排序后的 `(key_sha1, 判词)` 对**算 ⇒ 加注释栏、调列序都不动
-            #   字节 sha（对角）= 加一栏就会变，只能答"我读的是不是同一份文件"
+            #   指纹（key_sha1, 判词）（门）= 对**排序后的那两栏**算 ⇒ 加注释栏、调列序都不动
+            #   字节 sha（对角）= `sha256(文件)` —— 加一栏就会变，只能答"我读的是不是同一份文件"
             "fp_sem": hashlib.sha256(sem.encode("utf-8")).hexdigest()[:16],
             "sha_bytes": hashlib.sha256(rawb).hexdigest()[:16], "nbytes": len(rawb),
             "gloss": sorted(set(_speak_gloss(r["判词"], verdict[r["key_sha1"]])
@@ -987,11 +987,18 @@ def registry_audit():
       它是 ③ 那圈 `MEASURE_KEY[d]` 直接下标的前提，而"从这张表搬走"两条冲突门拦不住
       （搬走后两张表仍不相交）⇒ 这一条红了能把那口**崩在跑门过程中**的 KeyError 挡在门外。
     """
-    bad = []
-    cover = set(MEASURE_KEY) | set(PROBE_EXEMPT) | set(COORD_BLIND)
+    # ★ 三类**各自**带抬头（`card-53951346-be6`）：一个容器里躺两类东西时，
+    #   容器名只能当容器名，不能当判据（@iris-64a1）—— 原来三类共用一句表头，
+    #   而那句描述的是"一根表都没上"⇒ 另一类顶着别人的抬头印出来（@atlas-791f 抓的）。
+    #   ★★ 而栏名要担保"这是哪一类"，就得**自带定义域**，且域**不许手抄**（见 `_TABLES`）。
+    _K_ALL = "登记表上一处都没有（%s）" % " · ".join("`%s`" % n for n, _ in _TABLES)
+    _K_COUNT = "计数轴却不在 `MEASURE_KEY` 上（`COUNT_AXES` 那一侧只有它挂坐标字段名）"
+    _K_BOTH = "同时出现在一对互斥的表上（`MEASURE_KEY`×`COORD_BLIND` 或 `PROBE_EXEMPT`×`COORD_BLIND`）"
+    bad = {_K_ALL: [], _K_COUNT: [], _K_BOTH: []}
+    cover = set().union(*(set(_t) for _, _t in _TABLES))
     for d in sorted(set(COUNT_AXES) | set(OTHER_AXES)):
         if d not in cover:
-            bad.append("%s **一根表都没上** ⇒ 要么补 `MEASURE_KEY`（它有坐标字段名）、"
+            bad[_K_ALL].append("%s **一根表都没上** ⇒ 要么补 `MEASURE_KEY`（它有坐标字段名）、"
                        "要么进 `PROBE_EXEMPT`（不当探针）、要么进 `COORD_BLIND`（坐标臂看不见它）" % d)
     # ★★ @nova-8980 记档的那一条（不是"将来"，我实测**今天就能崩门**）：哨兵要钉的是
     #   **③ 那一圈的前提**，不是"每根都上了某张表"。③ 里用的是**直接下标** `MEASURE_KEY[d]`
@@ -1002,15 +1009,15 @@ def registry_audit():
     #     **⑤ 那一整节根本没有跑** ⇒ 屏幕上是"跑到一半没了"，不是"哪一格红了"。
     #   实测（一次性副本，只挪 `unit` 一格）：`KeyError: 'unit'` @:1746 · rc=1 · 门 31 道一道没印。
     for d in sorted(set(COUNT_AXES) - set(MEASURE_KEY)):
-        bad.append("%s 是**计数轴却没在 `MEASURE_KEY` 上** ⇒ ③ 那圈拿 `MEASURE_KEY[%r]` 直接取"
+        bad[_K_COUNT].append("%s 是**计数轴却没在 `MEASURE_KEY` 上** ⇒ ③ 那圈拿 `MEASURE_KEY[%r]` 直接取"
                    "**坐标字段名**，取不到就**崩在跑门的过程中**（⑤ 那一节整个不跑，屏幕上只是"
                    "「跑到一半没了」）⇒ 计数轴要有坐标字段名，放回 `MEASURE_KEY`；"
                    "若它**真该**是坐标臂看不见的，**先改 ③** 让它容忍再挪" % (d, d))
     for d in sorted(set(MEASURE_KEY) & set(COORD_BLIND)):
-        bad.append("%s 同时在 `MEASURE_KEY` 和 `COORD_BLIND` ⇒ 自相矛盾："
+        bad[_K_BOTH].append("%s 同时在 `MEASURE_KEY` 和 `COORD_BLIND` ⇒ 自相矛盾："
                    "在 `量法` 行有字段名（坐标臂看得见），却声称坐标臂看不见它" % d)
     for d in sorted(set(PROBE_EXEMPT) & set(COORD_BLIND)):
-        bad.append("%s 同时在 `PROBE_EXEMPT` 和 `COORD_BLIND` ⇒ 两头登记："
+        bad[_K_BOTH].append("%s 同时在 `PROBE_EXEMPT` 和 `COORD_BLIND` ⇒ 两头登记："
                    "② 压根不会拿它当探针，它的「盲」无从谈起" % d)
     return bad
 
@@ -1109,8 +1116,8 @@ def build_parser():
                          "★ 联结键 = `sha1(引文原文 utf-8)` 前 16 位。")
     #   ★ 指纹分两把，**只有一把是门**（@nova-8980 15:3x 合成的仓规：凡当门用的指纹，
     #     必须指名它的定义域）：
-    #       语义指纹（门）  对**排序后的 `(key_sha1, 判词)` 对**算 ⇒ 加注释栏、调列序都不动
-    #       字节 sha（对角） `sha256(文件)` ⇒ **加一栏就会变**，只能用来对"我读的是不是同一份文件"
+    #       指纹（key_sha1, 判词）（门）= 对**排序后的那两栏**算 ⇒ 加注释栏、调列序都不动
+    #       字节 sha（对角）= `sha256(文件)` —— 加一栏就会变，只能答"我读的是不是同一份文件"
     ap.add_argument("--expect-speaker", default=None, metavar="<语义指纹(key_sha1·判词) 前16位>",
                     help="旁档的**语义指纹**（`(key_sha1, 判词)` 对）对不上就 exit=11。"
                          "不给 ⇒ 那行自报「★ 没核」。★ 不是文件 sha256 —— 见 `--speaker` 的注。")
@@ -1193,6 +1200,13 @@ def _alt_value(act, cur):
 #   而"min-len 是按 norm 后的长度截的"这半句已经在 `--min-len` 的说明里写死了。
 MEASURE_KEY = {"tree": "commit", "min_len": "min-len", "face": "face",
                "dedup": "dedup", "v1ref": "v1_ref", "unit": "unit", "ladder": "ladder"}
+
+# ★★ 三张登记表的**唯一一份名单**：对象与名字同处一格 —— 加第四张表只改这一行，
+#   覆盖检查（`cover`）与**栏名**都从它算出来（@iris-64a1 的第二轮边界）。
+#   为什么必须同源：栏名里若**手抄**表名，它就是"写下的那一版"的坐标 —— 表长到第四张，
+#   检查跟着动了，栏名还停在三张，而**栏名正是"这是哪一类"的唯一担保**（两类 rc 都是 9、
+#   行首逐字相同 ⇒ 结构与句子都分不开）。同源之后，栏名不可能独自过期。
+_TABLES = (("MEASURE_KEY", MEASURE_KEY), ("PROBE_EXEMPT", PROBE_EXEMPT), ("COORD_BLIND", COORD_BLIND))
 
 
 def _coords(out):
@@ -2109,13 +2123,18 @@ def main():
     #   所以它拦在**最前面**，连"没点对象"都排它后面。(「谁的错」：这一格是维护者的错。)
     unknown, missing = axis_audit(ap)
     unreg = registry_audit()
-    if unknown or missing or unreg:
+    if unknown or missing or any(unreg.values()):
         print("★ 器自己的**轴单**对不上 ⇒ 拒绝出数（exit=9）。这一格**不是调用方的错**：")
         print("    有旗标没登记：%s" % (", ".join(unknown) or "（无）"))
         print("    登记了没旗标：%s" % (", ".join(missing) or "（无）"))
         # ★ 第二半（`card-5ed92625-4f5`）：登记了，但**没在任何一张表上露面**的那一类。
         #   它比"漏登记"更难看见：不炸、不红，只是**默默变盲**或**默默当上探针**。
-        print("    表对不上（**逐条自带身份**，别按这个表头归类）：%s" % ("；".join(unreg) or "（无）"))
+        # ★★ 分列（`card-53951346-be6`）：**每类一行、抬头就是类别名**，空的那类自己印「（无）」。
+        #   于是"哪一类响了"是可以直接核的**结构**，不必读中文句子去归类。
+        #   ★ 同一根轴**可以同时出现在两类里**（`unit` 既"一根表都没上"、又"没在 `MEASURE_KEY` 上"）——
+        #     那不是重复登记，是它同时犯了两条。
+        for _cls, _items in unreg.items():
+            print("    %s：%s" % (_cls, "；".join(_items) or "（无）"))
         print("  ★ 为什么要拦在量之前：「生效旗标 …」那一行是从 `COUNT_AXES` 拼出来的，"
               "漏登记一个影响数的旗标 ⇒ **数会动、印的那行不动**；")
         print("    而 `--expect-flags` 拿它当判据词汇表 ⇒ 两个都漏的人串相等 ⇒ 一扇永远绿的门。")
