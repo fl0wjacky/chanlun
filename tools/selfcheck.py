@@ -399,17 +399,33 @@ if SCALES:
     #   那句也盖进去（实测：red 那支印着「：7 条」却也被算进来）。所以只说"不过"，具体哪一种是上面那几行。
     print("尺子: %d 把里 **%d 把不过**（rc≠0 或查不了，两种都在上面 `[尺]` 那几行里点过名）"
           % (len(GATES), SCALES))
-# 退出码只说"有东西不对"，不说"是谁不对"：几个数混在一个非 0 里，读的人猜不出来。
-# 这是 @iris-64a1 指出的洞 —— 在字体门本来就会红的机器上，干净跑和变异跑都是 exit=1，
-# 光看退出码**隔离不出** SKIP 有没有生效。打这一行：每个非 0 退出自己说出原因。
-# 退出码只说"有东西不对"，不说"是谁不对"：几个数混在一个非 0 里，读的人猜不出来。
-# 这是 @iris-64a1 指出的洞 —— 在字体门本来就会红的机器上，干净跑和变异跑都是 exit=1，
-# 光看退出码**隔离不出** SKIP 有没有生效。打这一行：每个非 0 退出自己说出原因。
-print("退出原因: 总违规=%d  未执行=%d  判据前提=%s  警告措辞=%s  字体缺字=%s  版式=%s  尺子=%s  ⇒ exit=%d"
-      % (FAIL, SKIP, "跑不了" if PREMISE < 0 else ("不过" if PREMISE else "OK"),
-         "跑不了" if WARN_WORDING < 0 else ("不过" if WARN_WORDING else "OK"),
-         "查不了" if FONT_GAPS < 0 else FONT_GAPS,
-         "查不了" if LAYOUT < 0 else LAYOUT,
-         SCALES,
-         1 if (FAIL or FONT_GAPS or SKIP or PREMISE or WARN_WORDING or LAYOUT or SCALES) else 0))
-sys.exit(1 if (FAIL or FONT_GAPS or SKIP or PREMISE or WARN_WORDING or LAYOUT or SCALES) else 0)
+# ★ 这一格原来是**手写的**：同一组列名在这两行里各写一遍（`:352` 的格式串 + `:358` 的布尔），
+#   实测两行的**集合相同、顺序不同**（前两个对调）、相距 6 行、**0 个测试在守**（@atlas-791f 量的）。
+#   它和"前缀白名单"是同一个形状：**加一格要人去两个地方补，漏一处不报错**。
+# ⇒ 现在列名只写一遍（下面这张表），格式串和退出码都由它生成。
+#   加第 8 列 = 表里加一行 ⇒ **右边自己多一格、布尔自己多一项**（和尺侧 `checks` 同形）。
+def _fmt(name, val, neg_word, zero_word):
+    """-1 那档的说法不是"0"也不是"不过"：是"**根本没量成**" —— 它必须和"量完是 0"在纸面上分开。"""
+    if neg_word and val < 0:
+        return "%s=%s" % (name, neg_word)
+    if zero_word is not None:
+        return "%s=%s" % (name, zero_word if val == 0 else "不过")
+    return "%s=%d" % (name, val)
+
+COLS = [
+    # (名字, 值, 值<0 时怎么说, "OK/不过" 那档的 OK 怎么说；None = 直接印数)
+    ("总违规",   FAIL,         None,     None),
+    ("未执行",   SKIP,         None,     None),
+    ("判据前提", PREMISE,      "跑不了", "OK"),
+    ("警告措辞", WARN_WORDING, "跑不了", "OK"),
+    ("字体缺字", FONT_GAPS,    "查不了", None),
+    ("版式",     LAYOUT,       "查不了", None),
+    ("尺子",     SCALES,       None,     None),
+]
+if len(COLS) != len(set(n for n, _, _, _ in COLS)):
+    # 重名 ⇒ 退出那行点不出是哪一个。静态检查，和第 4 格那个单位同理：靠"记得"就会漏。
+    raise RuntimeError("COLS 里有重名：%r" % ([n for n, _, _, _ in COLS],))
+_bad_cols = [n for n, v, _, _ in COLS if v]
+_rc = 1 if _bad_cols else 0
+print("退出原因: %s  ⇒ exit=%d" % ("  ".join(_fmt(n, v, nw, zw) for n, v, nw, zw in COLS), _rc))
+sys.exit(_rc)
