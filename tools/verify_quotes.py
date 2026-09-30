@@ -274,6 +274,52 @@ def hunt(corpus, q):
     return [], "搜不到"
 
 
+CJK = re.compile(r"[　-〿一-鿿＀-￯]")
+
+
+def leak_lines(q):
+    """引文正文里**带着源码管线记号**的行号（0 起）。空 = 干净。
+
+    这一格治的是"**抽取器抽歪了**"，判据取**正文自己长什么样**，与它搜不搜得到无关：
+    `qpat` 用 `[^「」]` 配 `re.S`，一旦跨过字符串字面量边界，抠出来的正文尾部会挂上
+    `"…% (…)` 这类源码记号。判据＝**本行最后一个双引号之后没有汉字**
+    （正常引文每行结尾是汉字或标点；挂上源码就露出来）。
+
+    实测：151 条里命中 8 条，逐条人工核过 **8/8 真 · 0 假阳**。
+    ⚠ 第一版判据是"行尾是 `",` 或 `"`"，**只命中 6** —— 漏了 `cards/c04c_fourcases.py:81`
+      和 `cards/c07_level.py:52`，那两条的行尾是 `)`。**判据挂在"行尾形状"上就会漏这种。**
+    """
+    out = []
+    for i, ln in enumerate(q.split("\n")):
+        j = ln.rfind('"')
+        if j >= 0 and not CJK.search(ln[j + 1:]):
+            out.append(i)
+    return out
+
+
+def unpaired():
+    """`「` 与 `」` 个数对不上的文件。**这不是统计，是前提断言。**
+
+    `collect()` 的正则用 `[^「」]` 配 `re.S`：只要文件里有一个没闭合的 `「`，
+    它就一路吃到下一个 `」`（可以跨过整个字符串字面量）。所以"配对闭合"是判据的前提，
+    而**前提今天没有任何一行在守**。实测 76 个文件、**0 个对不上** ——
+    正因为今天是 0，才要印出来：让"前提还成立"这件事**每次都有人签字**。
+    它不红（只印）：把前提破了的后果接到判据上，是另一件事，不在这一笔里。
+    """
+    out = []
+    for root, _d, files in os.walk(REPO):
+        if any(x in root for x in SKIP):
+            continue
+        for f in files:
+            if not f.endswith((".py", ".md")):
+                continue
+            p = os.path.join(root, f)
+            t = io.open(p, encoding="utf-8", errors="replace").read()
+            if t.count("「") != t.count("」"):
+                out.append((os.path.relpath(p, REPO), t.count("「"), t.count("」")))
+    return out
+
+
 def main():
     docs = load()
     if docs is None:
@@ -410,6 +456,21 @@ def main():
     show("④ 退短词·**未定性**（不算对上，也不算搜不到）—— 退出码里没有这一格，所以只能靠印",
          [r for r in ok if r[2] in LOOSE])
 
+    # ★ 前提断言：上面所有分类都建立在"`「` 与 `」` 在文件里是配对的"之上
+    #   （正则用 `[^「」]` 配 `re.S`，配对一破就吃穿源码）。**今天没有任何一行在守这个前提。**
+    _up = unpaired()
+    print("前提：「」配对闭合 —— 扫过的每个 .py/.md 里，`「` 与 `」` 个数对不上的：**%d 个**%s"
+          % (len(_up), "" if not _up
+             else "：" + "、".join("%s（「%d / 」%d）" % x for x in _up)))
+    print()
+
+    # ⑤ 治的是"抽取器抽歪了"。★ 它**不是第五格，是一个交叉视图** ——
+    #   下面这些条目**同时也在 ①/③/④ 里**（同一条引文被两种方式看见），
+    #   所以它**不参与 `共 N 条`**。标题必须把这件事说出来：
+    #   今晚已经栽过两次"两处印同一个字符、读的人当成两格"（`①` 一处两名、`合计` 撞桶）。
+    _leak = [(e, h, w) for e, h, w in (ok + wrong + gone) if leak_lines(e["quote"])]
+    show("⑤ 抽歪了（引文正文里带着源码记号）—— **交叉视图，不是第五格**："
+         "下面这些同时也在 ①/③/④ 里，`共 N 条` 不变", _leak)
     print("=" * 78)
     print("① 对上（严档） %d = %s"
           % (strict, " + ".join("%s %d" % (h, n) for h, n in strict_parts if n) or "0"))
