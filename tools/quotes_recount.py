@@ -587,8 +587,92 @@ def _alt_value(act, cur):
     return None
 
 
+# 轴 dest → `量法` 那一行里的字段名（两套名字，**必须对得上**，否则"只动一根"判不出来）。
+MEASURE_KEY = {"tree": "commit", "min_len": "min-len(norm后)", "face": "face",
+               "dedup": "dedup", "v1ref": "v1_ref", "unit": "unit", "ladder": "ladder"}
+
+
+def _coords(out):
+    """那一跑**器自己印的坐标行**：量法 / 对象 / 语料 / 判据 四行（注解切掉）。
+
+    ★ 为什么不用 `验收可用=` 那一行：它在「否」的分支里**根本不印坐标**（只印"为什么否"），
+      而自测每一跑都可能是否 ⇒ 拿它当坐标 ＝ 有的跑比、有的跑不比（"没测"混进"相同"）。
+      这四行**两个分支都印**，所以每一跑都可比。
+    ★ 四行抽不齐 ⇒ None。**"没印"与"相同"是两件事** —— 不许让抽不到当成抽到一样的。
+    ★ 注解（`（已核：== --expect-corpus）` / `（★ **没核**：…）`）**先切掉**：那是"核过没核过"，
+      不是坐标；② 那格塞进去的正是期望值，注解必然会变。
+    """
+    got = []
+    for p in (r"^量法\s+(.+)$", r"^对象\s+(.+)$", r"^语料\s+(.+?)\s*（", r"^判据\s+(.+?)\s*（"):
+        m = re.search(p, out, re.M)
+        if not m:
+            return None
+        got.append(re.sub(r"\s+", " ", m.group(1)).strip())
+    return got
+
+
+def _fields(line):
+    """`量法` 那行按 ` · ` 拆成 `字段名 → 值`（切开**第一个** `=`，值里还有 `=` 也不怕）。
+
+    行首那个 `口径参数：commit=…` 要把前缀削掉，否则字段名成了 `口径参数：commit`
+    —— 而 `MEASURE_KEY` 里写的是 `commit`，两套名字对不上 = 这条检查静默失效。
+    """
+    out = {}
+    for t in line.split(" · "):
+        if "=" not in t:
+            continue
+        k, v = t.split("=", 1)
+        out[k.strip().split("：")[-1]] = v.strip()
+    return out
+
+
+def _coord_diff(c0, c1):
+    """两跑坐标的差 —— 返回**差在哪几处**（单位：字段名）。抽不齐 ⇒ None。
+
+    · 量法行：逐字段比（单位 = 轴）
+    · 对象 / 语料 / 判据 三行：**整行逐字比**（每一行就是一整个坐标）
+    """
+    if not c0 or not c1 or len(c0) != len(c1):
+        return None                       # 「没印」/「行数不等」⇒ **判不了**，不是「相同」
+    diffs = []
+    for i, name in ((1, "对象"), (2, "语料"), (3, "判据")):
+        if c0[i] != c1[i]:
+            diffs.append(name)
+    f0, f1 = _fields(c0[0]), _fields(c1[0])
+    for k in sorted(set(f0) | set(f1)):
+        if f0.get(k) != f1.get(k):
+            diffs.append(k)
+    return diffs
+
+
+def _diff_text(dif):
+    """坐标差的**脸** —— 三种情况必须印成**三张不同的脸**（@iris-64a1 的收口）：
+
+    · `判不了`：坐标行抽不齐 / 两侧行数不等 / 探针那一跑没印出来
+    · `逐字相同`：差 0 处
+    · `差 N 处：…`：真差了几处、差在哪几处
+
+    ★ 「判不了」和「差两处」要的修法**正相反**（一个是探针/抽行坏了，一个是真动了两根轴）
+      —— 共用一张脸，读的人就分不出该修哪边。这就是今晚那句「**没给**」与「**给了个空的**」
+      不许共用一张脸，套在这条检查自己身上。
+    """
+    if dif is None:
+        return "**判不了：坐标行抽不齐 / 两侧行数不等 / 那一跑没印出来**"
+    if not dif:
+        return "逐字相同"
+    return "**差 %d 处：%s**" % (len(dif), "/".join(dif))
+
+
+def _verdict(diff, want_keys):
+    """这条检查的判据本身 —— **抽出来是为了能被喂一次"故意差两处"去验它会不会红**。
+
+    `diff is None`（有一跑没印坐标行）⇒ **不通过**：判不出来 ≠ 判过了。
+    """
+    return diff is not None and sorted(diff) == sorted(want_keys)
+
+
 def _run_once(argv):
-    """按同一条命令跑一遍**子进程** —— `(rc, 合计, 生效旗标行)`，没印出来的是 None。
+    """按同一条命令跑一遍**子进程** —— `(rc, 合计, 生效旗标行, 坐标行)`，没印出来的是 None。
 
     走子进程不是图省事：这几道门都拦在"量之前"，只有真跑一遍才算数（同进程复用状态
     会把"没量"演成"量过"）。`合计` 抽不到 ⇒ None，**"0 行"必须有别于"0 处"**。
@@ -598,7 +682,8 @@ def _run_once(argv):
     f = re.search(r"生效旗标\s+(--[^\n（]*)", r.stdout)
     return (r.returncode,
             "%s/%s" % (m.group(1), m.group(2)) if m else None,
-            f.group(1).strip() if f else None)
+            f.group(1).strip() if f else None,
+            _coords(r.stdout))
 
 
 def selfcheck_gate(a, argv):
@@ -616,11 +701,20 @@ def selfcheck_gate(a, argv):
       ② 登记错（**门**）：每个 `OTHER_AXES` 项塞一个探针值 ⇒ `合计` 必须**逐位不动**。
          ★ 对象轴 `tree`（`--commit`）**点名豁免**：换对象 = 换一次测量，不是旋钮
            —— 豁免要按 dest 点名，不许混进"不许动"那一堆（`--tree` 是同一个参数的另一拼法）。
-      ③ 计数轴（**门 + 提示**）：每项换一档 ⇒ **印出的旗标行必须动**（门）；
-         `合计` 动没动只印成**提示**、**不判红** —— 真轴在某个合法基点上**可以恒等**
-         （实测 `--unit all` 面上两档 `--ladder` 恒等），判红会制造**假红**，
+      ③ 计数轴（**门 + 提示**）：每项换一档 ⇒ **印出的旗标行必须动** **且** 坐标**只许差
+         这一根**（门）；`合计` 动没动只印成**提示**、**不判红** —— 真轴在某个合法基点上
+         **可以恒等**（实测 `--unit all` 面上两档 `--ladder` 恒等），判红会制造**假红**，
          而一次假红足以让人把整扇门关掉（与"永远绿"同害，方向相反）。
+      ④ 自证（**门**）：把两根轴一次碰掉 ⇒ ③ 那条"只许差一处"的判据**必须说不通过**。
+         不喂这一口，"只许差一处"本身就是一条**不能失败的检查**（@iris-64a1：刚落这条修法
+         的人最容易在新那一层复犯旧病），而它长得和成功一模一样。
 
+    ★ ②③ 比的**不是"动了没有"，是"差在哪几处"**（@iris-64a1 抓的）：只核前者的话，两跑
+      差两根轴也是"动了"，而那时差的数**归因不了** —— 失败与成功同签名。
+      比的两侧**必须是器自己印的坐标行**（`量法`/`对象`/`语料`/`判据` 四行，
+      `_coords()` 从那一跑的 stdout 里抽），不许拿调用方拼的串 —— 拼的两样天然一致。
+    ★ 三种结果**三张脸**（`_diff_text`）：`判不了`（抽不齐/行数不等/那跑没印出来）·
+      `逐字相同` · `差 N 处：…`。前两者要的修法正相反，不许共用一张脸。
     ★ 代价：十几遍真扫（每遍 ~1s）⇒ **离线跑**，别塞进常规验收。
     ★ 期望值从哪儿来：①里那四个"正确值"是**器自己当场算的**（`V.fingerprint` / `judge_id()` /
       对象自己说的树 / `flagline`）。这里**不是**"抄自己印的那一行"那个病：抄自己印的值当
@@ -650,11 +744,15 @@ def selfcheck_gate(a, argv):
     #   ⇒ 这条正好是本卡自己的规矩：**豁免要按 dest 点名**（对象轴），**基线要跟被测对象同一条命令**。
     for d in tuple(x for x in OTHER_AXES if x != "tree"):
         base = _strip_flag(base, AXIS_FLAG[d])
-    rc0, tot0, fl0 = _run_once(base)
+    rc0, tot0, fl0, cd0 = _run_once(base)
     print("自测    对象=%s · 基线 rc=%d · 合计=%s · 旗标行=%s"
           % (a.tree, rc0, tot0, fl0))
-    if rc0 != 0 or not tot0:
-        print("★ 基线自己都跑不出数 ⇒ **自测没测**（exit=10）。先把这条命令跑通再来 ——")
+    print("   基线坐标行（2/3 那两格都拿它当参照，**逐字重述**）：")
+    for x in (cd0 if cd0 is not None else ["**没印出来**（⇒ 2/3 判不了，走「没测」）"]):
+        print("     %s" % x)
+    if rc0 != 0 or not tot0 or cd0 is None:
+        print("★ 基线自己都跑不出数（或坐标行印不出来）⇒ **自测没测**（exit=10）。"
+              "先把这条命令跑通再来 ——")
         print("  「没测」与「测了没过」不许共用一句话（今晚反复栽的那格）。")
         return 10
 
@@ -682,7 +780,7 @@ def selfcheck_gate(a, argv):
             badv = " ".join(t)
         else:
             badv = g[:-1] + ("0" if g[-1] != "0" else "1")
-        rc, tot, _ = _run_once(base + [AXIS_FLAG[d], badv])
+        rc, tot, _, _ = _run_once(base + [AXIS_FLAG[d], badv])
         ok = (rc == want[d] and tot is None)
         gates += 1
         red += 0 if ok else 1
@@ -693,8 +791,10 @@ def selfcheck_gate(a, argv):
               % (d, g[max(0, k - 4):k + 8], badv[max(0, k - 4):k + 8],
                  rc, want[d], tot or "**没有**", "✓" if ok else "✗ **门没响**"))
 
-    print("\n② 登记错（门：非计数轴塞探针 ⇒ `合计` 必须**逐位不动**）")
+    print("\n② 登记错（门：非计数轴塞探针 ⇒ `合计` **逐位不动** 且 **坐标行逐字重述**）")
     print("   ★ 点名豁免：`tree`（--commit）—— 换对象 = 换一次测量，不是旋钮")
+    print("   ★ 坐标行 = 器自己印的 量法/对象/语料/判据 四行；**差哪一处都要点名**"
+          "（只核「动了没有」的话，「动两根」和「动一根」同签名 —— @iris-64a1 抓的）")
     for d in OTHER_AXES:
         if d == "tree":
             continue
@@ -707,12 +807,17 @@ def selfcheck_gate(a, argv):
             gates += 1
             red += 1
             continue
-        rc, tot, _ = _run_once(base + [AXIS_FLAG[d], v])
-        ok = (rc == 0 and tot == tot0)
+        rc, tot, _, cd = _run_once(base + [AXIS_FLAG[d], v])
+        dif = _coord_diff(cd0, cd)
+        ok = (rc == 0 and tot == tot0 and _verdict(dif, []))
         gates += 1
         red += 0 if ok else 1
-        print("   %-15s 探针=%s ⇒ rc=%d · 合计 %s（基线 %s）⇒ %s"
-              % (d, v[:20], rc, tot or "**没有**", tot0, "✓" if ok else "✗ **数动了 ⇒ 登记错**"))
+        print("   %-15s 探针=%s ⇒ rc=%d · 合计 %s（基线 %s）· 坐标 %s ⇒ %s"
+              % (d, v[:20], rc, tot or "**没有**", tot0, _diff_text(dif),
+                 "✓" if ok else "✗ **%s**" % (
+                     "数动了 ⇒ 登记错" if tot != tot0
+                     else ("判不了 ⇒ 先修抽行/探针（**没测**）" if dif is None
+                           else "坐标动了 ⇒ 这个探针不止碰一根轴"))))
 
     print("\n③ 计数轴（门：印出的旗标行必须动 · 提示：数动没动**不判红**）")
     ax_moved = ax_same = 0
@@ -724,16 +829,50 @@ def selfcheck_gate(a, argv):
             gates += 1
             red += 1
             continue
-        rc, tot, fl = _run_once(base + [AXIS_FLAG[d], v])
+        rc, tot, fl, cd = _run_once(base + [AXIS_FLAG[d], v])
+        dif = _coord_diff(cd0, cd)
         line_ok = (rc == 0 and fl is not None and fl != fl0)
+        # ★ 门 = "旗标行必须动" **且** "坐标**只许差这一根**"：只核前者的话，两跑差两根轴
+        #   也会"动" —— 那时差的数**归因不了**，而它照样绿（@iris-64a1 那句"失败与成功同签名"）。
+        one_ok = _verdict(dif, [MEASURE_KEY[d]])
         moved = tot != tot0
         ax_moved += 1 if moved else 0
         ax_same += 0 if moved else 1
         gates += 1
-        red += 0 if line_ok else 1
-        print("   %-15s →%-14s rc=%d · 合计 %s ⇒ 数%s · 旗标行%s ⇒ %s"
+        red += 0 if (line_ok and one_ok) else 1
+        print("   %-15s →%-14s rc=%d · 合计 %s ⇒ 数%s · 旗标行%s · 坐标差 %s ⇒ %s"
               % (d, v, rc, tot or "**没有**", "动" if moved else "**恒等（提示，不判红）**",
-                 "动" if line_ok else "**没动**", "✓" if line_ok else "✗ **印的那行没跟着动**"))
+                 "动" if line_ok else "**没动**",
+                 ("只 %s（其余逐字同）" % MEASURE_KEY[d]) if one_ok else _diff_text(dif),
+                 "✓" if (line_ok and one_ok) else "✗ **%s**"
+                 % ("印的那行没跟着动" if not line_ok else
+                    ("判不了 ⇒ 先修抽行/探针（**没测**）" if dif is None
+                     else "坐标不止动一根 ⇒ 这跑的数归因不了"))))
+
+    # ★ ④ 这条门**自己也得能被喂红**：把两根轴一次碰掉 ⇒ 上面那条判据**必须**说"不通过"。
+    #   不喂这一口的话，"只许差一处"就成了一条**不能失败的检查** —— 而它长得和成功一模一样
+    #   （@iris-64a1：刚落这条修法的人，最容易在新那一层复犯旧病）。
+    print("\n④ 自证（门：这条「只许差一处」的判据，喂它一次故意差两处 ⇒ 必须红）")
+    pair = [(d, _alt_value(acts.get(d), getattr(a, d, None))) for d in COUNT_AXES[:2]]
+    pair = [(d, v) for d, v in pair if v is not None]
+    if len(pair) < 2:
+        print("   ★ 挑不出两根轴 ⇒ **没测**（记一笔）")
+        gates += 1
+        red += 1
+    else:
+        argv2 = list(base)
+        for d, v in pair:
+            argv2 += [AXIS_FLAG[d], v]
+        rc, tot, _, cd = _run_once(argv2)
+        dif = _coord_diff(cd0, cd)
+        two = sorted(MEASURE_KEY[d] for d, _ in pair)
+        # 这里要的是"判据**拒绝**"：差两处却按"只许差一处"判 ⇒ 必须 False。
+        refused = not _verdict(dif, [two[0]])
+        gates += 1
+        red += 0 if refused else 1
+        print("   一次碰两根（%s）⇒ 坐标 %s ⇒ 按「只许差一处」判 ⇒ %s"
+              % ("+".join("%s→%s" % (d, v) for d, v in pair), _diff_text(dif),
+                 "**不通过**（判据会红，✓）" if refused else "**通过**（✗ 这条判据是 no-op！）"))
 
     print("\n★ 自测结论：门 %d 道，红了 %d 道 ⇒ %s"
           % (gates, red, "全响（exit=0）" if not red else "**有门没响（exit=10）**"))
