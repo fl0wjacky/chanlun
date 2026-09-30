@@ -164,7 +164,7 @@ def draw_evidence(d):
     """实证：本引擎 4 小时类中枢，逐次核对「缝隙」"""
     rows, Z = gap_rows_and_z()
     y = 1414
-    d.rounded_rectangle([50, y, W - 50, y + 730], 22, fill=CARD, outline=LINE, width=2)
+    d.rounded_rectangle([50, y, W - 50, y + 762], 22, fill=CARD, outline=LINE, width=2)
     # 标题去掉「用真实数据验证」：下面那个✓不可能失败，说"验证"是给它安一个挣不到的出身。
     # 措辞用 Iris 那条的「按本引擎口径统计」。**不往标题里再塞对账说明**：那会让标题只剩
     # ~31px 余量（全角字≈30px，等于一个字的余量），换稍宽的 CJK 字体就溢出。对账只查漂移
@@ -204,17 +204,24 @@ def draw_evidence(d):
     # 对账（本卡唯一会失败的地方）：期望值来自引擎自己的 term，而不是本文件把
     # 上面那个 v 再抄一遍 —— 那样两边同一个谓词，永远不会分歧。
     nok, MISMATCH[:] = cross_check(rows, Z)
+    # 这一句原先是一行，宽 1546px、右边 1632 压在画布外 232px（tools/cardfit.py 量的）。
+    # **不改口径、不砍字**：拆成两行，第一行仍是"判没判"，第二行是那句免责 ——
+    # 免责是这句话的一半内容，砍掉它比让它出画布更糟。两行各 778 / 798px，都远在 1258px 内。
     if MISMATCH:
         d.text((86, yy0 + 34),
-               "　 × 两处实现分家 %d 处：%s —— 本卡与 core/center.py 的判定已经不一致，先查哪个错。"
+               "　 × 两处实现分家 %d 处：%s"
                % (len(MISMATCH),
                   "、".join("中枢%d(卡=%s/引擎=%s)" % (n, "三买" if cb else "非三买", t)
                             for n, cb, t, _ in MISMATCH)),
                font=f_n, fill=RD)
+        d.text((86, yy0 + 66), "　 —— 本卡与 core/center.py 的判定已经不一致，先查哪个错。",
+               font=f_n, fill=RD)
     else:
         d.text((86, yy0 + 34),
-               "　 ✓ 对账：%d 个有回试的中枢，本卡与 core/center.py 两处实现未分家。"
-               "（谓词同源，原文若读错会一起错——这条只报漂移，不当独立验证。）" % nok,
+               "　 ✓ 对账：%d 个有回试的中枢，本卡与 core/center.py 两处实现未分家。" % nok,
+               font=f_n, fill=GR)
+        d.text((86, yy0 + 66),
+               "　 （谓词同源，原文若读错会一起错——这条只报漂移，不当独立验证。）",
                font=f_n, fill=GR)
 
 
