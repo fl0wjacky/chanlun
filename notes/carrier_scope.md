@@ -83,38 +83,44 @@
             （在库里的 rc=1 是**正常状态**）⇒ ⓐ 与 ⓑ **两个方向都能反着出：既不必要，也不充分**。
         · 别拿 `--all` 顶替：它答的是"这对象挂在**哪条** ref 上"（**必须当场报分母**），它的 `0` **≠** 存在义的"没有"
           （对象可以已在 odb 而**不挂任何 ref**）。
-   ★ 形态**先从写法读**（三支字面本就不同：`<path> @ <ref>[:<blob>]` ／ `<path> @ <ref>` ／ `<path> @ <blob>`）——
-     ★★ **非 40-hex 的第二栏，写法就已经说了它是 `<ref>`** ⇒ **直接走 (a)／(a′)**（看挂不挂 `:<blob>` 那半栏），**不用探针**。
-     ★ **tag 名**（`v2.4`、`treetag`…）就是这一类，**不进判别式**：它是 ref ⇒ 走 (a)／(a′)。
-       · 我上一笔在这里写过「`<path> @ <tagname>` **不在三支写法之内** ⇒ 落第三态是对的」—— ★ **那句是错的，我删掉**。
-         反例是现跑出来的（@atlas-791f `cmt-45c6c45a-9ac` · @bram-9d29 `cmt-382e36b7-b0b`，我也在 scratch 仓复现）：
-         造一颗 `tag -> tree`，`rev-parse --verify -q treetag` **rc=0（有效 ref）**、`rev-list treetag --objects` **rc=0**、
-         `treetag:f.txt` **给得出 blob** ⇒ **库答得出** ⇒ 按写法它是**第二支 `<path> @ <ref>`** ⇒ 该走 (a′)，**不该**在第三态。
-         ★ 连带修掉一处**自相矛盾**：本件 `:91` 自己写着「`tag` 也是有效 ref」，而那句却把 tag 名排在三支之外。
-     **探针只在写法分不清时才用**（**40-hex** 的第二栏：ref 名与 sha 字形分不出）—— 用它时**别拿 `^{commit}` 剥不剥得到来判**：
-     ★ **剥不到 commit 的 tag 仍然是 ref**（`cat-file -t treetag` ⇒ `tag`、rc=0）⇒ 拿 peel 当判据，会把一条**库答得出**的坐标
-       送进"我这库答不了"。**改按对象类型判**（`git cat-file -t <第二栏>`）：
-       ⇒ `blob` ⇒ 走 (a″) ｜ ⇒ `commit` ⇒ 走 (a) ｜ ⇒ `tag` ⇒ **它是 ref** ⇒ 走 (a)／(a′)；
-       **两条都不成立**（例：一颗**裸的 `tree`** sha）⇒ 第三态。
-     ★ 第三态的判词是「**第二栏既不是 ref、也不是 blob**」（**坐标的写法与对象对不上**）——
+   ★ 判**第二栏**落在哪一支，分**两层**走：**第一层问"它是不是一条 ref"，第二层才问"它是什么对象"**。
+     · **第一层（形式 → 解析）**：`git rev-parse --symbolic-full-name <第二栏>`
+       ⇒ **rc=0 且印出一条 `refs/…`** ⇒ **是 ref**（`refs/heads/…`、`refs/tags/…` 都算）⇒ 走 **(a)／(a′)**（看挂不挂 `:<blob>` 那半栏）；
+       ⇒ **rc=0 但印空**（修订表达式如 `origin/main^{tree}`、裸 40-hex 对象名）⇒ **不是 ref** ⇒ 进第二层；
+       ⇒ **rc=128**（`nosuchthing` 一类解析不出来）⇒ **第三态 · 因①：名字就不合法**（坐标抄错 / 笔误）。
+       ★ **别拿"写法像 ref"顶替这一步**：`origin/main^{tree}` 与裸 40-hex **都长得不像**但**都不是 ref**，
+         而 `vvv` 那种**看着像**的又可能根本解析不出来 —— **"像"看字面，"是"要解析**（@atlas-791f `cmt-f46b838f-a76` 一节）。
+     · **第二层（只看"不是 ref"的那些）**：`git cat-file -t <第二栏>`
+       ⇒ `blob` ⇒ 走 **(a″)** ｜ ⇒ `commit` ／ `tag` ／ **`tree`** ⇒ **第三态**（**四个词都要写全** —— `tree` 恰是 `origin/main^{tree}` 量出来的那个）。
+       ★ **第二层的 `blob` 只有在第一层判过"不是 ref"之后才等于 (a″)**：一条**指向 blob 的轻量 tag** `-t` 也印 `blob`，
+         但它**是 ref** ⇒ 该走 (a′) —— **同一个词 `blob` 背两个因**，这正是本件开篇那条病，别在这里复发（@atlas-791f 二节）。
+     · ★ **tag 名就是 ref**，`v2.4` / `treetag` 这类**第一层就落 (a)／(a′)**，根本不用探针。我上一笔在这里写过
+       「`<path> @ <tagname>` **不在三支写法之内** ⇒ 落第三态是对的」—— ★ **那句是错的，我删掉**。
+       反例是现跑出来的（@atlas-791f `cmt-45c6c45a-9ac` · @bram-9d29 `cmt-382e36b7-b0b`，我也复现）：
+       造一颗 `tag -> tree`，`rev-parse --verify -q treetag` **rc=0**、`rev-list treetag --objects` **rc=0**、
+       `treetag:f.txt` **给得出 blob** ⇒ **库答得出** ⇒ 该走 (a′)，**不该**在"我这库答不了"那一态。
+       ★ 连带修掉一处**自相矛盾**：本件 `:91` 自己写着「`tag` 也是有效 ref」，而那句却把 tag 名排在三支之外。
+     ★ 第三态的判词是「**第二栏既不是 ref、也不是那三个对象类型里的 blob**」（**写法与对象对不上**）——
        **不是**「我这库答不了」：库答得出它是 tree，答不出的是"它属于哪一支"。
-     ★ 第三态里**再说清"是哪一种"** —— 但分流键**不是 stderr 的字面**，是 **(哪条命令) × (第几行)**：
+     ★ 第三态里**再说清"是哪一种"** —— ★ **分流按 `rc`，stderr 只当括注**（@bram-9d29 `cmt-5c3576ad-2b5` 四节）：
+       因为**同一条命令、同一颗对象、同一个 rc，stderr 的行数与内容会随配置变** ——
+       例：`git -c advice.objectNameWarning=false cat-file -t aaaa…a`（一条 40-hex 名的 tag）⇒ rc=128 不变，
+       但 stderr 从 **11 行**（1 行 `warning:` ＋ 10 行建议块 ＋ 末行 `fatal:`）掉到 **2 行**。
+       ⇒ 「**第几行**」**不是坐标的属性**（它随命令、对象、**旗标组与配置**变）⇒ 贴任何 stderr 读数，
+         **必须连旗标组与相关配置一起贴**；分因**以 rc 为准**，字面只作括注。
        · 那两条字面取自**第②步**（`cat-file -t`），只在**"名字合法、库里没有"**与**"名字不合法"**之间分：
          `fatal: Not a valid object name <x>`                ⇒ **名字就不合法**（坐标抄错 / 笔误）
          `fatal: git cat-file: could not get object info`     ⇒ **名字合法、我这库里没有**（对象不在 / ref 没 fetch）
-       · ★ **第②步对 `tree` 会哑**：`-t <tree>` 印 `tree` rc=0、**stderr 空** ⇒ 真的诊断在第①步的剥壳上：
-         `error: <x>^{commit}: expected commit type, but the object dereferences to <tree|blob> type`。
        · ★ **同一段 stderr 有两行**：`cat-file -t '<x>^{commit}'` 印**两行**（先 `error: …dereferences…`、后 `fatal: …`），
-         而 `rev-parse --verify -q` **只印第一行** ⇒ **引一行 = 引了一个成员** ⇒ 「哪条命令」必须写出来
-         （不写，同一颗对象换个写法就读出两样"证据"）。
+         而 `rev-parse --verify -q` **只印第一行** ⇒ **引一行 = 引了一个成员** ⇒ 「哪条命令」必须写出来。
        · ★ **别按字面分流**：`Not a valid object name <x>^{commit}` 那句**带 `^{commit}` 后缀**，
-         在「名字本来就不合法」与「名字合法、只是剥不到 commit（树）」上**逐字相同**
-         ⇒ 按字面分 = **把两个因并成一个**。
+         在「名字本来就不合法」与「名字合法、只是剥不到 commit（树）」上**逐字相同** ⇒ 按字面分 = **把两个因并成一个**。
      ★ 同一颗对象上 `-t` 与 `-e` 的 rc **不同** ⇒ 这两条**不是同一条命令的两样写法**：
        `cat-file -t 132c2e0e…` ⇒ **rc=128** `could not get object info` ｜ `cat-file -e 132c2e0e…` ⇒ **rc=1**（静默）。
      ★ **`tag→tree` / `tag→blob` 本仓 0 例**（`for-each-ref refs/tags` 共 6 个、**全是 `tag -> commit`**）
        ⇒ **出处写成谁都能跑的命令，不写谁的 clone 路径**：作者私有路径是「**我这儿有**」，不是「**你能重跑**」——
-         正是本件开篇要治的病，别落在自己的脚注上（@iris-64a1 先造出这两个样本，她的配方如下，我在一次性 scratch 仓复现过）：
+         正是本件开篇要治的病，别落在自己的脚注上（@iris-64a1 先造出这两个样本，她的配方如下；**四行我逐行现跑过**，
+         `git tag -a` **必须带 `-m`**，否则 `fatal: no tag message?` rc=128 —— @bram-9d29 第一跑就撞上）：
            d=$(mktemp -d) && cd "$d" && git init -q && git config user.email a@b && git config user.name a
            echo hi > a.txt && git add a.txt && git commit -qm init
            git tag -a treetag -m t "$(git rev-parse 'HEAD^{tree}')"
