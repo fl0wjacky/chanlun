@@ -145,6 +145,9 @@ def check_signals(sig, r, level="seg", measure="macd", ratio=1.0):
     """独立复核（只用中枢与单位的原始字段，按定义另写一遍关键条件）。返回违规列表（应为空）。
 
     measure / ratio 要跟产生 sig 的那次 signals() 调用一致，否则背驰那条会误报。
+    **MACD 参数（fast / slow / sig）也要一致** —— 本函数没有这三个形参，它按默认 12 / 26 / 9
+    重算 hist（下面 `macd_hist(r["bars"])`），所以调用方若给 signals() 换过参数，复核量的就不是
+    同一条线（今天仓里没有这样的调用点：`tools/selfcheck.py:81` 传的都是默认值）。
     """
     AU, U, Z = _units(r, level)
     hist = macd_hist(r["bars"]) if measure == "macd" else None
