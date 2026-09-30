@@ -157,9 +157,10 @@ def draw_theorems(d):
         yy += 96
 
     d.rounded_rectangle([86, 2326, W - 86, 2400], 12, fill=(CY[0], CY[1], CY[2], 26), outline=CY, width=2)
-    d.text((110, 2334), "第 24 课：「光用 MACD 辅助判断，即使你对中枢不大清楚，只要能分清楚 A、B、C 三段，",
+    Q_DIV160 = "第 24 课：「光用 MACD 辅助判断，即使你对中枢不大清楚，只要能分清楚 A、B、C 三段，其准确率也应该在 90%以上。而配合上中枢，那是 100%绝对的……」"
+    d.text((110, 2334), Q_DIV160[:48],
            font=f_t, fill=TX)
-    d.text((110, 2364), "其准确率也应该在 90%以上。而配合上中枢，那是 100%绝对的……」", font=f_t, fill=TX)
+    d.text((110, 2364), Q_DIV160[48:], font=f_t, fill=TX)
 
 
 def build():
