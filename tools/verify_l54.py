@@ -13,7 +13,10 @@ from core.center import find_centers
 from core.extend import big_interval, build_hierarchy
 
 g0, d1, g1, d2, g2, d3, g3, d4, g4, d5, g5 = 18.5, 17.0, 17.8, 16.6, 17.0, 16.0, 16.5, 15.8, 16.6, 15.9, 16.8
-assert d1 == g2 and d2 == g4
+# 第 54 课原文条件「d1=g2，d2=g4」——这是这组自编数的**前提**，破了下面全部没意义。
+# 用 raise 不用 assert：assert 在 python -O 下整条消失，前提破了也没人知道（沉默 ≠ 通过）。
+if not (d1 == g2 and d2 == g4):
+    raise AssertionError("原文条件「d1=g2，d2=g4」被破坏：这组数不再满足第 54 课的前提，回算无意义")
 pts = [g0, d1, g1, d2, g2, d3, g3, d4, g4, d5, g5]
 units = [dict(p0=a, p1=b, hi=max(a, b), lo=min(a, b), i0=k, i1=k + 1) for k, (a, b) in enumerate(zip(pts, pts[1:]))]
 
