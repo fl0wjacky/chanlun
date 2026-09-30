@@ -578,6 +578,22 @@ def _strip_flag(argv, flag, takes_value=True):
     return out
 
 
+def _not_empty(abase, base_opts, d, v):
+    """探针**是不是空推**：挑好的值 `v` 塞进去之后，那个轴的**生效值**有没有真的变。
+
+    ★ 变了 ⇒ 返回 `v`；没变（或解析不了）⇒ 返回 `None`，由调用方印成「**没测**」。
+      「空推」报出来的"没变"与"这个旗标真的不影响数"在屏幕上**一模一样**，而这一格存在的
+      全部理由就是「登记错 ⇒ 必须红」—— 探针得先证明自己**推得动**。
+    """
+    if abase is None:
+        return None
+    try:
+        a2 = build_parser().parse_args(list(base_opts) + [AXIS_FLAG[d], v])
+    except SystemExit:
+        return None
+    return v if str(getattr(a2, d)) != str(getattr(abase, d)) else None
+
+
 def _alt_value(act, cur):
     """给一个轴挑一个**不同的合法值**（有 `choices` 就从中挑，整数就 +1）。
 
@@ -777,8 +793,30 @@ def selfcheck_gate(a, argv):
     #     那条命令**算出来的 ⇒ 拿 A 的期望值去比 B 的实跑，`--expect-flags` 假红（实测 rc=8）；
     #     ③ 那格同理：把 `--dedup raw` 换成默认的 `norm`，旗标行"没动"也是假的。
     #   ⇒ 这条正好是本卡自己的规矩：**豁免要按 dest 点名**（对象轴），**基线要跟被测对象同一条命令**。
+    dropped = []
     for d in tuple(x for x in OTHER_AXES if x != "tree"):
+        if any(t == AXIS_FLAG[d] or t.startswith(AXIS_FLAG[d] + "=") for t in base):
+            dropped.append(AXIS_FLAG[d])
         base = _strip_flag(base, AXIS_FLAG[d])
+    # ★★ 基点那条命令**要印出来**（@nova-8980 逮的静默替换）：给 `unit` 换登记之后，基点被摘成
+    #   `unit=all` ⇒ 屏幕上印的是 `594/520`，而调用方敲的那条命令给的是 `331/302` ——
+    #   **两个数一张脸**，没有任何一行说"我摘过什么"。
+    #   判据：基线的数与"你敲的那条命令"的数**不是同一个数**时，屏幕上必须看得出来。
+    print("   基点命令 = python3 tools/quotes_recount.py %s" % " ".join(base))
+    print("   已摘（调用方写了、基点里没有）：%s"
+          % (", ".join(dropped) if dropped else "（无）"))
+    # ★★ 探针值必须**对着基点那条命令的生效值**挑，且挑完**当场核它真的不一样**。
+    #   实测（本卡，@nova-8980）：`unit` 一旦登记进 `OTHER_AXES` ⇒ 基点被摘成 `unit=all`，
+    #   而 `_alt_value` 还照**调用方**的 `gone` 去挑 ⇒ 挑出 `all` ⇒ **探针与基点同一个生效值**
+    #   ⇒ 空推 ⇒ 那一格印 ✓；红却落在 ③ 的 `ladder`（一个与变异无关的行）——
+    #   **一次与原因无关的红，和一次假绿是同一件事的两面。**
+    #   ⇒ 两道：① 按**基点**的生效值挑；② 挑完核「探针生效值 ≠ 基点生效值」，相等 ⇒ **没测**（红）。
+    #   ★ 空推报出来的"没变"，与"这个旗标真的不影响数"在屏幕上**一模一样**（@iris-64a1 同族：
+    #     判不了 ≠ 相同）。
+    try:
+        abase = build_parser().parse_args(base)
+    except SystemExit:
+        abase = None                      # 基点自己解析不了 ⇒ 下面的探针一律"没测"
     rc0, tot0, fl0, cd0 = _run_once(base)
     print("自测    对象=%s · 基线 rc=%d · 合计=%s · 旗标行=%s"
           % (a.tree, rc0, tot0, fl0))
@@ -835,10 +873,16 @@ def selfcheck_gate(a, argv):
             continue
         act = acts.get(d)
         v = good.get(d)
+        why_none = ""
         if v is None and act is not None:
-            v = _alt_value(act, getattr(a, d, None))
+            v = _alt_value(act, getattr(abase, d, None) if abase else None)
+            if v is None:
+                why_none = "挑不出探针值"
+            elif _not_empty(abase, base, d, v) is None:
+                why_none = "挑出来的 %s 与基点**同一个生效值** ⇒ 空推" % v
+                v = None
         if v is None:
-            print("   %-15s ★ 挑不出探针值 ⇒ **没测**（记一笔）" % d)
+            print("   %-15s ★ %s ⇒ **没测**（记一笔）" % (d, why_none or "没测"))
             gates += 1
             red += 1
             continue
@@ -858,9 +902,14 @@ def selfcheck_gate(a, argv):
     ax_moved = ax_same = 0
     for d in COUNT_AXES:
         act = acts.get(d)
-        v = _alt_value(act, getattr(a, d, None)) if act is not None else None
+        v = _alt_value(act, getattr(abase, d, None) if abase else None) \
+            if act is not None else None
+        why_none = "挑不出第二值"
+        if v is not None and _not_empty(abase, base, d, v) is None:
+            why_none = "挑出来的 %s 与基点**同一个生效值** ⇒ 空推" % v
+            v = None
         if v is None:
-            print("   %-15s ★ 挑不出第二值 ⇒ **没测**（记一笔）" % d)
+            print("   %-15s ★ %s ⇒ **没测**（记一笔）" % (d, why_none))
             gates += 1
             red += 1
             continue
@@ -877,7 +926,8 @@ def selfcheck_gate(a, argv):
         #   （活轴被基点掩住 ⇒ 提示；任何基点都不动 ⇒ 红，脸=「接上了但数没跟」）。
         alive, why_num = None, ""
         if not moved and line_ok and one_ok:
-            alt = _alt_base(base, getattr(a, "unit", None) or "all")
+            alt = _alt_base(base, (getattr(abase, "unit", None) if abase else None)
+                            or getattr(a, "unit", None) or "all")
             rcA, totA, flA, _ = _run_once(alt)
             rcB, totB, _, _ = _run_once(alt + [AXIS_FLAG[d], v])
             if rcA == 0 and rcB == 0 and totA and totB:
