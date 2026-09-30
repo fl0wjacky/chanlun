@@ -84,19 +84,25 @@
         · 别拿 `--all` 顶替：它答的是"这对象挂在**哪条** ref 上"（**必须当场报分母**），它的 `0` **≠** 存在义的"没有"
           （对象可以已在 odb 而**不挂任何 ref**）。
    ★ 形态**先从写法读**（三支字面本就不同：`<path> @ <ref>[:<blob>]` ／ `<path> @ <ref>` ／ `<path> @ <blob>`）——
-     **探针只在写法分不清时才用**（40-hex 的 ref 名与 sha 字形分不出）；用探针时**别拿 `-t` 印出来的词去认支**
-     （**tag 名也可能是十六进制串**，而 annotated tag 的**对象类型**也不是 commit ⇒ 那个词只防了名字、没防类型）——
-     按「**剥不剥得到 commit**」分：
-     `git rev-parse --verify -q <第二栏>^{commit}` ⇒ **rc=0** ⇒ 走 (a)（**commit 与 annotated tag 同在这一支**
-       —— ★ `tag` 也是有效 ref：`-t v2.4` 印的是 `tag`、rc=0，**不 peel 会把它判成"我解不出"**）；
-     否则 `git cat-file -t <第二栏>` ⇒ `blob` ⇒ 走 (a″)；
-     **两条都不成立 ⇒ 第三态：我这库答不了** —— 既不是 (a)，也不是 (a″)（**`tree` 一类也落在这一态**）。
-     ★ 第三态**还要说清"是哪一种解不出"** —— 但分流键**不是 stderr 的字面**，是 **(哪条命令) × (第几行)**：
+     ★★ **非 40-hex 的第二栏，写法就已经说了它是 `<ref>`** ⇒ **直接走 (a)／(a′)**（看挂不挂 `:<blob>` 那半栏），**不用探针**。
+     ★ **tag 名**（`v2.4`、`treetag`…）就是这一类，**不进判别式**：它是 ref ⇒ 走 (a)／(a′)。
+       · 我上一笔在这里写过「`<path> @ <tagname>` **不在三支写法之内** ⇒ 落第三态是对的」—— ★ **那句是错的，我删掉**。
+         反例是现跑出来的（@atlas-791f `cmt-45c6c45a-9ac` · @bram-9d29 `cmt-382e36b7-b0b`，我也在 scratch 仓复现）：
+         造一颗 `tag -> tree`，`rev-parse --verify -q treetag` **rc=0（有效 ref）**、`rev-list treetag --objects` **rc=0**、
+         `treetag:f.txt` **给得出 blob** ⇒ **库答得出** ⇒ 按写法它是**第二支 `<path> @ <ref>`** ⇒ 该走 (a′)，**不该**在第三态。
+         ★ 连带修掉一处**自相矛盾**：本件 `:91` 自己写着「`tag` 也是有效 ref」，而那句却把 tag 名排在三支之外。
+     **探针只在写法分不清时才用**（**40-hex** 的第二栏：ref 名与 sha 字形分不出）—— 用它时**别拿 `^{commit}` 剥不剥得到来判**：
+     ★ **剥不到 commit 的 tag 仍然是 ref**（`cat-file -t treetag` ⇒ `tag`、rc=0）⇒ 拿 peel 当判据，会把一条**库答得出**的坐标
+       送进"我这库答不了"。**改按对象类型判**（`git cat-file -t <第二栏>`）：
+       ⇒ `blob` ⇒ 走 (a″) ｜ ⇒ `commit` ⇒ 走 (a) ｜ ⇒ `tag` ⇒ **它是 ref** ⇒ 走 (a)／(a′)；
+       **两条都不成立**（例：一颗**裸的 `tree`** sha）⇒ 第三态。
+     ★ 第三态的判词是「**第二栏既不是 ref、也不是 blob**」（**坐标的写法与对象对不上**）——
+       **不是**「我这库答不了」：库答得出它是 tree，答不出的是"它属于哪一支"。
+     ★ 第三态里**再说清"是哪一种"** —— 但分流键**不是 stderr 的字面**，是 **(哪条命令) × (第几行)**：
        · 那两条字面取自**第②步**（`cat-file -t`），只在**"名字合法、库里没有"**与**"名字不合法"**之间分：
          `fatal: Not a valid object name <x>`                ⇒ **名字就不合法**（坐标抄错 / 笔误）
          `fatal: git cat-file: could not get object info`     ⇒ **名字合法、我这库里没有**（对象不在 / ref 没 fetch）
-       · ★ **第②步对 `tree` / `tag→tree` / `tag→blob` 是哑的**：`-t <tree>` 印 `tree` rc=0、`-t <tag>` 印 `tag` rc=0，
-         **stderr 空** ⇒ 这三种成员的诊断**全在第①步**：
+       · ★ **第②步对 `tree` 会哑**：`-t <tree>` 印 `tree` rc=0、**stderr 空** ⇒ 真的诊断在第①步的剥壳上：
          `error: <x>^{commit}: expected commit type, but the object dereferences to <tree|blob> type`。
        · ★ **同一段 stderr 有两行**：`cat-file -t '<x>^{commit}'` 印**两行**（先 `error: …dereferences…`、后 `fatal: …`），
          而 `rev-parse --verify -q` **只印第一行** ⇒ **引一行 = 引了一个成员** ⇒ 「哪条命令」必须写出来
@@ -106,11 +112,15 @@
          ⇒ 按字面分 = **把两个因并成一个**。
      ★ 同一颗对象上 `-t` 与 `-e` 的 rc **不同** ⇒ 这两条**不是同一条命令的两样写法**：
        `cat-file -t 132c2e0e…` ⇒ **rc=128** `could not get object info` ｜ `cat-file -e 132c2e0e…` ⇒ **rc=1**（静默）。
-     ★ **`tag` 剥不到 commit**（tag→tree / tag→blob）也落这一态 —— ★ **这不是假警报**：
-       `<path> @ <tagname>` **本来就不在三支写法之内**（`<path> @ <blob>` 那一支要的是 40-hex，不是 tag 名）
-       ⇒ 落第三态**是对的**，欠的只是"说清是哪一种"（上一格）。
-       本仓 `for-each-ref refs/tags` 共 6 个、**全是 `tag -> commit`** ⇒ 这两种**本仓 0 例**；
-       真样本是自造的（@iris-64a1 的 `workspace/probe-tag2tree`；我也在一次性 scratch 仓复现：`-t` rc=0、stderr 空）。
+     ★ **`tag→tree` / `tag→blob` 本仓 0 例**（`for-each-ref refs/tags` 共 6 个、**全是 `tag -> commit`**）
+       ⇒ **出处写成谁都能跑的命令，不写谁的 clone 路径**：作者私有路径是「**我这儿有**」，不是「**你能重跑**」——
+         正是本件开篇要治的病，别落在自己的脚注上（@iris-64a1 先造出这两个样本，她的配方如下，我在一次性 scratch 仓复现过）：
+           d=$(mktemp -d) && cd "$d" && git init -q && git config user.email a@b && git config user.name a
+           echo hi > a.txt && git add a.txt && git commit -qm init
+           git tag -a treetag -m t "$(git rev-parse 'HEAD^{tree}')"
+           git tag -a blobtag -m b "$(git rev-parse 'HEAD:a.txt')"
+         ⇒ 现跑读数：`treetag` 裸 `-t` ⇒ **rc=0** `tag`、stderr **空** ｜ 剥后 ⇒ **rc=128 两行**，第 1 行点名 `tree type`；
+           `blobtag` 同形，第 1 行点名 `blob type`。
      ★ 但「**我这棵库里没有**」**≠「坐标抄错」**：见 (a″) 的 ⓑ —— 那类坐标**可能完全成立**。
    (b) **评论本体** ⇒ `<card id> · <cmt id>`；判法 = **读得到**（不依赖任何 ref；评论**不可变**）。
    ★ 拿 (b) 去跑 (a) 的命令必然 ✗ —— 那不是它的判法。文件类会**随后续提交变**、报时现算；
