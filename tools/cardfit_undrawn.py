@@ -50,17 +50,25 @@ def card_names():
     报告上那个 `13` 和"全扫过"长得一模一样，而漏掉的恰好是 `model_dissent`。
     **补一个名字下次加卡再漏一次；扫面才是取法。**
     """
-    out = []
+    if not os.path.isdir("cards"):           # 目录都不在 ⇒ 空扫的**另一个来源**（见文末 ④）
+        return [], []
+    out, bad = [], []
     for fn in sorted(os.listdir("cards")):
         if not fn.endswith(".py") or fn.startswith("_"):
             continue
         try:
             tree = ast.parse(open(os.path.join("cards", fn), encoding="utf-8").read())
-        except SyntaxError:
+        except SyntaxError as e:
+            # ★ 一个 .py **解析不了** ⇒ 它从覆盖表里**整张消失**：不报错、不跳过、不出现在任何一列。
+            #   分母静默变小，而那和「扫过它、它没问题」长得**一模一样**。
+            #   这不是假想：我自己的"第 15 张卡"测试就是这么变的 —— 掐声明掐出个 unmatched ')'，
+            #   覆盖表照印 **14 张**、rc=0，而那张卡根本不在分母里。
+            #   同一形状的第四个来源（前面三个：目录不在 / 一张 build() 都没有 / 抽到 0 条字面量）。
+            bad.append("%s（%s 行 %s）" % (fn, e.__class__.__name__, e.lineno))
             continue
         if any(isinstance(n, ast.FunctionDef) and n.name == "build" for n in tree.body):
             out.append(fn[:-3])
-    return out
+    return out, bad
 
 
 def _font_id():
@@ -172,13 +180,23 @@ def all_runs(mod):
     modes = getattr(mod, "CARDFIT_FAILURES", None)
     if not modes:
         return runs, dead
-    for mode, install in modes:
+    for i, (mode, install) in enumerate(modes):
         label = "注入 %s" % (mode,)
         try:
             restore = install(mod)
         except Exception as e:                  # noqa: BLE001
             dead.append("%s（装不上：%s: %s）" % (label, type(e).__name__, e))
             continue
+        if not callable(restore):
+            # `install` 改了模块、却没给还原函数。原先这一支会溜过上面的 except，
+            # 然后在下面 `finally: restore()` 上抛 TypeError —— **整张卡的报告全没了**
+            # （实测 c05_center 挂一个返回 None 的桩：rc=1，但 14 张的读数一个都不出来）。
+            # 更要紧的是：模块现在**是脏的**，这张卡后续任何一跑都不作数 ⇒ 剩下的支一并作废，
+            # 不能只跳过这一支然后拿脏模块接着量。
+            dead.append("%s（装了但没给还原函数：install 返回 %r）—— 模块已被改脏" % (label, restore))
+            for m2, _ in modes[i + 1:]:
+                dead.append("注入 %s（上一支没还原，未量）" % (m2,))
+            break
         try:
             txt, err = one_run(mod)
         finally:
@@ -199,7 +217,7 @@ SHOW_ALL = "--all" in sys.argv
 
 _selftest()
 
-names = card_names()
+names, unparsable = card_names()
 print("[第三条尺] 缺陷 = 在**所有跑法**（真数据 ∪ 各注入支）里都没被画到的字面量 —— 交集，不是差集")
 print("[量法/对象] 覆盖表 = 扫 cards/*.py 里定义了 build() 的 → %d 张 ｜ 字体 %s" % (len(names), _font_id()))
 print("-" * 104)
@@ -207,6 +225,7 @@ print("%-22s %-8s %-6s %-10s %s" % ("卡", "字面量", "跑法", "真数据未�
 print("-" * 104)
 
 undrawn = 0                  # 缺陷条数 —— **不进退出码**（照约定：只报，不判）
+lits_total = 0               # 量成的卡合计抽出多少条字面量 ⇒ 0 条 = 本尺**什么都没量到**
 injected_ok = 0              # 真生效的注入支
 zero_lit = []                # 一条字面量都没抽到的卡 ⇒ 本尺在这张卡上**什么都没量到**
 skipped = []                 # 这张压根没量成 ⇒ 覆盖面静默变小 ⇒ **进退出码**
@@ -228,6 +247,7 @@ for name in names:
         continue
     dead_all += ["%s → %s" % (name, d) for d in dead]
     injected_ok += len(runs) - 1
+    lits_total += len(lits)
     if not lits:
         zero_lit.append(name)
     union = set().union(*[txt for _, txt in runs])
@@ -269,6 +289,8 @@ print("-" * 104)
 print("合计「所有跑法都没画到」的字面量：%d 条" % undrawn)
 print("[覆盖] 扫到 %d 张 · 量成 %d 张 · **跳过 %d 张**"
       % (len(names), len(names) - len(skipped), len(skipped)))
+for u in unparsable:
+    print("        ✗✗ 解析不了（**不在上面那个分母里**）：%s" % u)
 for s in skipped:
     print("        ✗ %s" % s)
 print("[分支覆盖] 注入支 %d 支生效 · **%d 支没测**" % (injected_ok, len(dead_all)))
@@ -278,7 +300,7 @@ print("[声明] 声明失败支 %d 张 · 声明「无失败分支」%d 张 · *
       % (len(declared_some), len(declared_none), len(undeclared)))
 if undeclared:
     print("        %s" % "、".join(undeclared))
-    print("        ↑ 这 %d 张是**没查过**，不是通过 —— 按约定单列，不进退出码" % len(undeclared))
+    print("        ↑ 这 %d 张是**没查过**，不是通过 —— 进退出码（见文末 ②）" % len(undeclared))
 if declared_none:
     if "--why" in sys.argv:
         for n, why in declared_none:
@@ -296,8 +318,50 @@ if uncovered_by_modes:
 print("[声明可信] 矛盾 %d 张（声明「无失败分支」而实测有）" % len(contradict))
 for c in contradict:
     print("        ★ %s" % c)
-rc = 1 if (skipped or dead_all or contradict) else 0
-print("⇒ 退出码 %d —— 进退出码的只有三样：**跳过/没量成的卡**、**没测的注入支**、**声明矛盾**。" % rc)
+# ---- 退出码：**从下面这份 list 生成**，不再手写那句"只有三样"------------------
+# 上一版这里是一行手写的转述（`rc = 1 if (skipped or dead_all or contradict) else 0`
+# 加一句人写的解释）。它是**转述**不是**分解**：往上面再加一个该进 rc 的 list，
+# 右边那句解释不会跟着多一项 —— @atlas-791f 的判据「加一档，右边会不会自己多一项？」
+# 一眼判它不合格。现在 rc 和那行解释都从 checks 出来，加一档右边自己多一项。
+measured = len(names) - len(skipped)
+empty_scan = None
+if not names:
+    empty_scan = ("cards/ **目录都不在**" if not os.path.isdir("cards")
+                  else "cards/ 在，但 0 个文件定义 build()")
+elif measured and len(zero_lit) == measured:
+    empty_scan = "%d 张卡全都没抽出字面量（合计 0 条）" % measured
+checks = [
+    # (rc 值, 名字, 加数的那份 list)  —— 空的那份不加数，所以它也不出现在下面的分解里
+    (2, "覆盖表空扫", None if empty_scan is None else [empty_scan]),
+    # ② 这里曾经不并进 rc，理由是"一合上就让 main 变红"。那个理由的**前提是存量非空**，
+    # 而 @atlas-791f / @iris-64a1 / 我三方在**要落地的那棵树**上独立量到 **没声明 0 张**
+    # ⇒ 前提没了 ⇒ 那份"豁免存量"的机制在解决一个不存在的问题。
+    # ⇒ 不做清单、不做 blob、不做基线，直接：没声明 ⇒ 点名 + rc=1。
+    #    （代价 0 行：今天 rc 仍是 0；收益：新卡钻不过去了，且**今天就能验会红**。）
+    (1, "没声明的卡（没查过 ≠ 通过）", undeclared),
+    (1, "解析不了的卡（它们**不在覆盖表里** ⇒ 分母静默变小）", unparsable),
+    (1, "跳过 / 没量成的卡", skipped),
+    (1, "没测的注入支", dead_all),
+    (1, "声明矛盾", contradict),
+]
+fired = [(v, n, items) for v, n, items in checks if items]
+rc = max([v for v, _, _ in fired], default=0)
+print("⇒ 退出码 %d —— 由下面 %d 项生成（同源：改这份 list，这行自己变）："
+      % (rc, len(fired)))
+if fired:
+    for v, n, items in fired:
+        extra = ""
+        if v == 2:
+            # 2 是**单独一个类**：「器说什么都没查」—— 不是"查了、有缺陷"。
+            # 它必须和 0（干净）分开，否则空扫和干净长得一模一样（@atlas-791f 格⑤）。
+            extra = "  ← rc=2 是另一个**类**：不是「查完干净」，是「**根本没查成**」"
+            if n == "覆盖表空扫":
+                extra += "\n         看到的那半个证据：%s" % items[0]
+                extra += "\n         （器分不出「树指错了」和「这棵树本来就该是空的」——两支都 rc=2，靠这行让人去判）"
+        print("     [rc=%d] %s：%d 条%s" % (v, n, len(items), extra))
+else:
+    print("     上面参与判定的 %d 份 list（%s）**全空** —— 这才是 rc=0。"
+          % (len(checks), "、".join(n for _, n, _ in checks)))
 print("   「所有跑法都没画到」的条数**不进**退出码：c06 那条未画出是**结论**（真数据到不了、注入支到得了），")
 print("   照接会让门从接上那天永远红，而唯一的修法是删判据。")
 sys.exit(rc)
