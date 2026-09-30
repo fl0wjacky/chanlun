@@ -223,22 +223,40 @@ def check(mod, name):
 def failure_modes(mod):
     """卡**自己**声明的失败分支。本工具不认识任何一张卡的内脏。
 
-    约定：模块可选地定义
+    约定：模块**按需**定义
 
-        CARDFIT_FAILURES = [(模式名, 注入函数), …]
+        CARDFIT_FAILURES = [(模式名, 注入函数), …]      # 有失败分支：逐支注入
         注入函数(mod) -> 还原函数；装完后必须真的改变画出来的字。
 
-    为什么把注入放在卡那边、不放在这张表里：支的名字叫 `cross_check`、叫 `MISMATCH`，
+        CARDFIT_FAILURES = []                            # **声明"本卡没有失败分支"**
+        CARDFIT_NO_FAILURE = "……为什么没有……"           # 上面那行必须配这句
+
+    三态，别混（**"空声明"和"没声明"必须分得开**）：
+
+        （无此属性）         = **没查过**  → 报告末尾点名
+        CARDFIT_FAILURES = [] = **查过，没有** → 报出你写的理由
+        非空列表              = 查过，有 → 逐支注入 + 自证
+
+    **为什么把注入放在卡那边、不放在这张表里**：支的名字叫 `cross_check`、叫 `MISMATCH`，
     那是**卡的内部**。工具一旦知道某张卡的内脏，加一张卡就得改工具，而工具是大家共用的热文件。
     谁拥有卡，谁拥有它的失败分支。
 
-    **没有这个属性的卡 = 没声明失败分支**，报告末尾会点名，别把「合计 0 处」读成"全卡都查过了"。
+    **为什么空声明还非得写一句理由**：光认 `[]` 的话，`CARDFIT_FAILURES = []` 会变成**一键消音** ——
+    把"没查"刷成"查过、没有"，而报告上两者长得一样。那就又造了一个代理绿。
     """
-    modes = getattr(mod, "CARDFIT_FAILURES", None) or []
+    if not hasattr(mod, "CARDFIT_FAILURES"):
+        return None                     # **从没声明** —— 这才是「没查过」
+    modes = mod.CARDFIT_FAILURES or []
     for item in modes:
         name, install = item
         if not callable(install):
             raise RuntimeError("%s.CARDFIT_FAILURES 里的 %r 不是可调用的注入函数" % (mod.__name__, name))
+    if not modes:
+        why = getattr(mod, "CARDFIT_NO_FAILURE", None)
+        if not (isinstance(why, str) and why.strip()):
+            raise RuntimeError(
+                "%s.CARDFIT_FAILURES 声明为空，但没有写 CARDFIT_NO_FAILURE 说明理由 —— "
+                "空声明必须写明「本卡没有失败分支，因为 ___」。见 tools/cardfit.py 的 failure_modes()。" % mod.__name__)
     return list(modes)
 
 
@@ -258,7 +276,8 @@ def main():
     extra = [("model_dissent", "M1 机会模型"), ("level_recursion", "M2 级别递归")]
     total = 0
     injected = effective = dead = 0
-    uncovered = []
+    uncovered = []          # 从没声明 —— 没查过
+    declared_none = []      # 声明"没有失败分支" + 理由
     for name, title in [(n, t) for n, t in CARDS] + extra:
         try:
             mod = importlib.import_module("cards." + name)
@@ -271,8 +290,11 @@ def main():
             name, W, H, n, "OK" if not bad else "★ %d 处" % len(bad)))
         _print_bad(bad)
         modes = failure_modes(mod)
-        if not modes:
+        if modes is None:
             uncovered.append(name)
+            continue
+        if not modes:
+            declared_none.append((name, mod.CARDFIT_NO_FAILURE.strip()))
             continue
         for mode, install in modes:
             restore = install(mod)
@@ -295,11 +317,25 @@ def main():
     print("\n合计 %d 处" % total)
     if dead:
         print("注入未生效 %d 支 —— 那几支**没测**，不是通过" % dead)
-    print("[分支覆盖] 注入 %d 支（%d 支确认改了画法）；另有 %d 张卡没声明注入"
-          % (injected, effective, len(uncovered)))
+    print("[分支覆盖] 注入 %d 支（%d 支确认改了画法）· 声明「无失败分支」%d 张 · **没声明 %d 张**"
+          % (injected, effective, len(declared_none), len(uncovered)))
+    if declared_none:
+        # 十几张卡的理由通常一模一样，默认平铺会把报告淹掉 —— **但要能一眼看出"它们凭什么是空的"**，
+        # 所以给个开关而不是把话吞掉：`--why` 逐张打理由。
+        if "--why" in sys.argv:
+            for name, why in declared_none:
+                print("           %-22s 无失败分支 —— %s" % (name, why))
+        else:
+            print("           %s" % "、".join(n for n, _ in declared_none))
+            print("           ↑ 这 %d 张声明了「本卡没有失败分支」（理由写在卡里，加 `--why` 可以打出来）"
+                  % len(declared_none))
     if uncovered:
-        print("           %s" % "、".join(uncovered))
-        print("           ↑ 这几张本次**只覆盖了成功路径**。合计 0 处 ≠ 全卡都查过了。")
+        print("           ★ 没声明：%s" % "、".join(uncovered))
+        print("           ↑ 这几张**既没注入、也没说没有** —— 只覆盖了成功路径。"
+              "合计 0 处 ≠ 全卡都查过了。")
+    # **`uncovered` 不进退出码。** 它不是"版式出错"，是"这几张还没查" —— 而落地当下必然
+    # 一张都没声明，进了退出码就等于一合上就让 main 变红（@iris-64a1 正把这把尺接进 selfcheck）。
+    # 跟 `verify_notdef` 同一处置：**单开一列计数，不并进 FAIL**。要追进度看那一行数字。
     return 1 if (total or dead) else 0
 
 
