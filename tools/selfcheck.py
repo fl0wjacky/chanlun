@@ -238,6 +238,7 @@ except Exception as e:
 # 但它一样让退出码非 0：查不出来，就不算通过。
 print("=" * 72)
 FONT_GAPS = 0
+FONT_FILES = 0
 try:
     # ★ `ROOT` 必须**跟着进来**：`scan()` 返回的 `_p` 是 fontcheck 的绝对路径，
     #   而这行拿 `os.path.relpath(_p, ROOT)` 印它 —— 下面 `if _skipped:` 那段一跑就 NameError。
@@ -245,7 +246,16 @@ try:
     #   不自己再算一份 `ROOT`：同一个量两个定义，本仓反复栽的那个形状（@iris-64a1 的甲案）。
     from tools.fontcheck import scan, ROOT
     _font, _missing, _conflict, _n, _files, _skipped = scan()
-    FONT_GAPS = len(_missing) + len(_conflict) + len(_skipped)
+    # ★ 这里原来是**一个数**：`len(_missing) + len(_conflict) + len(_skipped)` —— 前两项的单位是
+    #   **字符**、第三项是**文件**。加成一个数之后它**没有量纲**，而下游三处（✗ 那行／总账行／
+    #   退出那格）**一律按"字符"说话** ⇒ 那份报告在说一件它没量过的事。
+    #   实测（@nova-8980 造的变异：一行语法坏的文件）：1 个**文件**没扫成、0 个**字符**缺
+    #   ⇒ 报告印「1 个字符画不出来」+「先去换 ttf」，而真事是那张卡**根本没进分母**，换字体治不了。
+    #   ⇒ 数字是 1、处置是错的，比数错了更难发现（数错了有人会去核，处置错了不会）。
+    # ⇒ 拆成两格、各自带量纲。`_missing` 与 `_conflict` 相加**不重数**：render/style.py:154 是
+    #   if/elif 二选一，且 glyph_gaps 的 docstring 写明 conflict「不并进 missing」。
+    FONT_GAPS = len(_missing) + len(_conflict)      # 单位：个**字符**
+    FONT_FILES = len(_skipped)                      # 单位：个**文件**（和上面不是一回事，别加）
     print("[字体覆盖] %s  （扫了 %d 个脚本%s）"
           % (getattr(_font, "path", "?"), _files,
              "，**跳过 %d 个**" % len(_skipped) if _skipped else ""))
@@ -253,19 +263,28 @@ try:
         for _p, _e in _skipped:
             print("  ! 没扫成 %s —— %s" % (os.path.relpath(_p, ROOT), _e))
         print("    这几个文件的字一个都没进来，缺字结论不完整 —— 按「查不出来不算通过」计进违规。")
-    if FONT_GAPS:
+    if _missing:
         print("  ✗ 会画上去的字符串里 %d 个不同字符，有 %d 个画不出来：%s"
               % (_n, len(_missing), "".join(_missing[:40]) + ("…" if len(_missing) > 40 else "")))
-        if _conflict:
-            print("  ⚠ cmap 与渲染分歧 %d 个：%s" % (len(_conflict), "".join(_conflict[:20])))
+    if _conflict:
+        print("  ⚠ cmap 与渲染分歧 %d 个：%s" % (len(_conflict), "".join(_conflict[:20])))
+    if _missing or _conflict:
+        # ★ 这段的触发条件原来是 `if FONT_GAPS:` —— 含"只有文件没扫成"那一档，于是 ✗ 后面的数会是
+        #   **0**（真的缺 0 个字），而它底下让人去换 ttf。修的是"报告消失"，这条修的是"报告说谎"：
+        #   ✗ 和它下面那句只许在**真有缺字**时出现。
         print("    这些字会变成方框且不报错。**这是字体/环境问题，不是引擎问题** ——")
         print("    先用 CHANLUN_FONT 指一份含中日韩字形的 ttf 再跑。")
         print("    若换了好字体**还剩几个**，那就不是环境问题，是**卡片用了这份字体没有的符号**")
         print("    （实测：Noto Sans CJK 有 ✓ U+2713，但没有 ✔ U+2714 / ✗ U+2717 / ✘ U+2718）。")
+    elif _skipped:
+        # 只走了这一支 ⇒ 一个字符都没缺。单独一句、**不给换字体的建议**（换字体治不了没解析成的文件）。
+        # 上面 `if _skipped:` 那段已经逐条点了文件名和理由，这里只把它计进违规这一层说清。
+        print("  ✗ 有 %d 个文件没扫成 ⇒ 缺字结论不完整（按「查不出来不算通过」计）" % len(_skipped))
     else:
         print("  ✓ 这份字体画得出字面量里的全部字符")
 except Exception as e:
     FONT_GAPS = -1
+    FONT_FILES = -1
     print("[字体覆盖] 查不了：%s" % e)
 
 # ---- 警告措辞：上面那扇门报出来的缺字，措辞有没有把「探针类」说成「本轮的图」----
@@ -339,10 +358,22 @@ try:
         elif not _nums:
             _why = "没报出「合计」，或那行读不出数"
         _val = int(_nums[-1]) if _nums else None
+        # ★ 尺**自己的理由行**。原来红的时候只印「<我写死的标签> <合计那个数>」，于是：
+        #   两把尺这次 rc=1 都出自「没声明 1 张」，可合计那行是 0（实测 2026-09-30），
+        #   印出来就成了「它自己说有问题：卡片文字越界/出框 0 处」——**有名字可点，没点**。
+        #   而理由行它自己早印了（cardfit `退出原因: …` ／ undrawn `[rc=1] …：1 张`）。
+        # ⇒ 按**行首约定**找它，找不到才退回原来那个数。**不给每把尺配一条正则** ——
+        #   配正则就是"加一把尺要人去别处登记"，② 拆掉的前缀白名单正是这个形状。
+        _rsn = None
+        for _l in _lines:
+            _s = _l.strip()
+            if _s.startswith("[rc=") or _s.startswith("退出原因:"):
+                _rsn = _s
+                break
         _rc = _p.returncode
         if _rc != 0 or _why is not None:
             SCALES += 1
-        ROWS.append((_name, _rc, _val, _why, _what, _unit))
+        ROWS.append((_name, _rc, _val, _why, _what, _unit, _rsn))
         if _legacy:
             # 这三行的**格式和语义一个字不改** —— 别人卡面上的接受判据读的就是它们。
             if _vid:
@@ -362,12 +393,17 @@ try:
     # 每把尺一行：**名字 / rc / 它自己那个数 / 红没红**。旧版只有 cardfit 一行，
     # 其余几把尺"接上了没有"在报告里看不出来（@atlas-791f 那张表就是这么量出来的）。
     # ★ 这一行也是"加了第 N 把尺"的落点：表里加一行，这里自己多印一行。
-    for _name, _rc, _val, _why, _what, _unit in ROWS:
+    for _name, _rc, _val, _why, _what, _unit, _rsn in ROWS:
         _head = "[尺] %-8s rc=%s" % (_name, _rc)
         if _why is not None:
             print("%s  **查不了**：%s" % (_head, _why))
+        elif _rc != 0 and _rsn:
+            # 引它自己那行（**逐字**），不再复述成我写的标签 + 合计那个数。
+            print("%s  **它自己说有问题**：%s" % (_head, _rsn))
         elif _rc != 0:
-            print("%s  **它自己说有问题**：%s %d %s（上面是它的原文）" % (_head, _what, _val, _unit))
+            # 它没印理由行 —— 这一档本身要说出来：**红得有理由行可点**才是新口径的卖点。
+            print("%s  **它自己说有问题**：%s %d %s（★ 但它**没印理由行**，这句是我按合计那个数复述的）"
+                  % (_head, _what, _val, _unit))
         else:
             print("%s  %s：%d %s" % (_head, _what, _val, _unit))
 except Exception as e:
@@ -380,9 +416,15 @@ print("总违规数:", FAIL, "→", "引擎检查全部通过" if FAIL == 0 else
 if SKIP:
     print("未执行数:", SKIP, "→ **有格子的判据压根没跑**（夹具/前提没造出来）")
     print("           这一条不是通过：上面每一行「未执行」都要有人去查为什么造不出夹具。")
+# ★ 这两格**分开发言**、各带各的量纲，因为它们的**处置不一样**：
+#   缺字 → 换字体（或改卡片用了冷僻符号）；文件没扫成 → 先修那份文件，**换字体治不了**。
+#   合成一句就必然借其中一个的量纲说话，那正是原来那句「%d 个字符画不出来」的来路。
 if FONT_GAPS:
     print("字体覆盖:", "查不了（不算通过）" if FONT_GAPS < 0 else "%d 个字符画不出来" % FONT_GAPS,
-          "→ 出图会静默出方框")
+          "→ 出图会静默出方框（处置：换一份含中日韩字形的 ttf，见上面几行）")
+if FONT_FILES:
+    print("字体覆盖:", "查不了（不算通过）" if FONT_FILES < 0 else "%d 个文件没扫成" % FONT_FILES,
+          "→ 那几份文件的字**一个都没进分母**，缺字结论不完整（**换字体治不了**：先修那份文件）")
 if PREMISE:
     print("判据前提:", "跑不了（不算通过）" if PREMISE < 0 else "config._notdef_mask 自测不过",
           "→ 上面那扇字体覆盖门的基准本身是错的，那扇门的数不可读（先修基准）")
@@ -422,7 +464,11 @@ COLS = [
     ("未执行",   SKIP,         None,     None),
     ("判据前提", PREMISE,      "跑不了", "OK"),
     ("警告措辞", WARN_WORDING, "跑不了", "OK"),
-    ("字体缺字", FONT_GAPS,    "查不了", None),
+    # 下面这两格必须分开：`字体缺字` 的单位是**个字符**、`字体没扫成` 的单位是**个文件**。
+    # 原来它们和成 `字体缺字=1` 出去 ⇒ 那句"1 个字符画不出来"是**借来的量纲**，1 其实是文件数。
+    # 也不能把 `没扫成` 从退出面上删掉：那样"有文件没扫成"就退回 exit=0 —— 正是本仓那个病。
+    ("字体缺字",  FONT_GAPS,  "查不了", None),   # 个字符
+    ("字体没扫成", FONT_FILES, "查不了", None),   # 个文件
     ("版式",     LAYOUT,       "查不了", None),
     ("尺子",     SCALES,       None,     None),
 ]
