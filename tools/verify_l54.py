@@ -74,7 +74,10 @@ check_prop("(d1g1+g1d2+d2g2) 的区间 = 一个价位",
 B = find_centers(units[4:7])[0]
 C = find_centers(units[7:10])[0]
 spans = [(z["DD"], z["GG"]) for z in (A, B, C)]           # 「当成线段……高低点就是这线段的端点」
-check("[原文-命题] 三个 1 分钟中枢合成的 5 分钟中枢", (d2, g5), big_interval(spans))
+# 这条**不标**「原文-命题」：want 是 (d2, g5)，这组 fixture 链上的两个点——原文图上没标数，
+# 数是这组自编数算出来的（原文命题「当成线段」已由上一行的 spans 取法承担）。
+# 它测的是 big_interval 从三段里挑端点挑对了，属「引擎重算」档，只当回归基准。
+check("[引擎重算] 三个 1 分钟中枢合成的 5 分钟中枢", (d2, g5), big_interval(spans))
 
 print("第 52 课答疑「中枢延伸的情况，只看前三段的区间，后面都是震荡」：")
 mk = lambda PI0, PI1, ZD, ZG, DD, GG: dict(PI0=PI0, PI1=PI1, ZD=ZD, ZG=ZG, DD=DD, GG=GG, X0=PI0, X1=PI1, live=False)
