@@ -224,7 +224,18 @@ class Unaskable(Exception):
     问不出口 = 交了东西，但"尺寸多大"这一问没答上来（**没有判决**）。
     ★ 原话一个字不丢，附在我们这句话**后面** —— 读者先看到"哪一问没答上来"，再看它为什么炸。
     ★ 与 `ContractError` 同规矩：消息里**不带卡名、不带任何数**（印它的是调用方那行，一个事实只印一处）。
+      「取 .dtype 时」那半句是**位置**（哪一问没答上来），不是**名**：它只有四个固定取值，反查不回任何对象。
     """
+
+
+def _unaskable(what, e):
+    """**问不出口**那句话 —— **四个位点一种句式**：`取 <哪一问> 时 <类型>: <原话>`。
+
+    `what` 是**位置**（哪一问没答上来），不是**名**：全器只有四个取值（`.dtype` / `.dtype.kind` /
+    `__index__` / `.width`｜`.height`），反查不回任何对象 —— 与「消息里不带卡名、不带任何数」同规矩。
+    ★ 句式收在一处，是因为本卡治的病正是「同一件事两处两种说法」：位点各写各的，迟早再分家。
+    """
+    return Unaskable("取 %s 时 %s: %s" % (what, type(e).__name__, e))
 
 
 def _is_size(v):
@@ -261,13 +272,13 @@ def _is_size(v):
     except AttributeError:          # ★ 第二格：与"没有 dtype"同路，写成字面
         d = None
     except Exception as e:          # ★ 探测自己抛 ⇒ **问不出口**（`TypeError` 在这里**不是**"答案"）
-        raise Unaskable("%s: %s" % (type(e).__name__, e)) from e
+        raise _unaskable(".dtype", e) from e
     try:
         kind = getattr(d, "kind", None)
     except AttributeError:          # ★ 同上：按"没有 kind"读，写成字面
         kind = None
     except Exception as e:
-        raise Unaskable("%s: %s" % (type(e).__name__, e)) from e
+        raise _unaskable(".dtype.kind", e) from e
     if kind == "b":
         return False
     try:
@@ -275,7 +286,7 @@ def _is_size(v):
     except TypeError:               # ★ **只有这一行**：协议里合法的否定答案 ⇒ 第一张脸（不是正整数）
         return False
     except Exception as e:          # ★ 其余 = **问不出口** ⇒ 第二张脸（原话附在后面）
-        raise Unaskable("%s: %s" % (type(e).__name__, e)) from e
+        raise _unaskable("__index__", e) from e
 
 
 def _read_size_attr(im, name):
@@ -290,7 +301,7 @@ def _read_size_attr(im, name):
     except AttributeError:
         return None
     except Exception as e:
-        raise Unaskable("取 .%s 时 %s: %s" % (name, type(e).__name__, e)) from e
+        raise _unaskable(".%s" % name, e) from e
 
 
 def assert_card(im):

@@ -3,7 +3,10 @@
 为什么要方格：`except` 的射程是**代码**的属性、不是**异常类型**的属性 ⇒ 只在"异常类型"这一维上取样，
   一条 `except` 盖宽了，探针一格都照不出来（`card-8ce1d0ca-087` 上两版实现同时漏掉的两格）。
 
-位点（4 个）：① `.dtype` 自己抛 ② `.dtype.kind` 自己抛 ③ `__index__` 自己抛 ④ 图自己的 `.width` 抛
+位点（**5 个**）：① `.dtype` 自己抛 ② `.dtype.kind` 自己抛 ③ `__index__` 自己抛
+　　　　　　　　④ 图自己的 `.width` 抛 ⑤ 图自己的 `.height` 抛
+★ **按调用点算，不按函数算**：`_unaskable()` 一个函数盖五处 —— 一个函数盖多处，正是"射程比理由宽"的
+  同一形状（`card-8ce1d0ca-087` 上那两格就是这么来的）⇒ 它的每个 `what` 取值各要有一格。
 类型（3 类）：`TypeError` · `AttributeError` · `RuntimeError`（"其余"的代表）
 
 用法：python3 -B faces_grid.py <cardfit.py 路径> [<路径> …]   ⇒ 一列一个版本，行可逐格比。
@@ -48,6 +51,10 @@ def _img_width_boom(exc):        # ④ 图自己的 `.width` 抛（`.height` 正
     return type("Im", (), {"width": _prop(exc), "height": 10})()
 
 
+def _img_height_boom(exc):       # ⑤ 图自己的 `.height` 抛（`.width` 正常 = 10）—— `_read_size_attr` 的第二处调用
+    return type("Im", (), {"width": 10, "height": _prop(exc)})()
+
+
 def _img_plain(w, h):            # 对照：一副正常的图
     return type("Im", (), {"width": w, "height": h})()
 
@@ -56,8 +63,10 @@ ROWS = []                        # (行名, 造对象)
 for _tn, _e in _EXCS:
     ROWS.append(("①.dtype 抛 %s" % _tn, (lambda e=_e: _img_plain(_v_dtype_boom(e), 5))))
     ROWS.append(("②.dtype.kind 抛 %s" % _tn, (lambda e=_e: _img_plain(_v_kind_boom(e), 5))))
-    ROWS.append(("③__index__ 抛 %s" % _tn, (lambda e=_e: _img_plain(_v_idx_boom(e), 5))))
+    ROWS.append(("③__index__ 抛 %s%s" % (_tn, " ★红线：必须仍是第一张脸" if _tn == "TypeError" else ""),
+                 (lambda e=_e: _img_plain(_v_idx_boom(e), 5))))
     ROWS.append(("④图.width 抛 %s" % _tn, (lambda e=_e: _img_width_boom(e))))
+    ROWS.append(("⑤图.height 抛 %s" % _tn, (lambda e=_e: _img_height_boom(e))))
 ROWS.append(("对照 真没 dtype · idx=5", lambda: _img_plain(type("V", (), {"__index__": lambda self: 5})(), 5)))
 ROWS.append(("对照 自称布尔 dtype.kind='b'", lambda: _img_plain(type("V", (), {"__index__": lambda self: 5, "dtype": type("D", (), {"kind": "b"})()})(), 5)))
 ROWS.append(("对照 Python bool", lambda: _img_plain(True, 5)))
