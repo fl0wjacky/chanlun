@@ -275,7 +275,13 @@ io.open(a.tsv, "w", encoding="utf-8").write(body)
 print(u"列名：%s" % cols)
 print(u"数据行 %d" % len(rows))
 print(u"第 7 栏分布：%s" % {k: v for k, v in sorted(stat.items())})
-print(u"★ 判词指纹（新定义 三元组）= %s" % fp3)
+_sha = hashlib.sha256(body.encode()).hexdigest()[:16]
+# ★ @nova-8980 的 ①：fp3 与文件 sha **必须同屏**（分两行＝让人自己拼；拼错了没有任何东西会响）
+print(u"★ 同屏：判词指纹（新定义 三元组）fp3 = %s ｜ 文件 sha256[:16] = %s" % (fp3, _sha))
+# ★ @nova-8980 的 ②（照抄）：表头不进指纹 **⇒ 指纹抓不住表头说谎**。
+#   所以表头那几句散文的裁判，只能是**上面这几行当场算出来的**：
+#   判据核 / 闸1（寻绿围栏）/ 闸4（表头钉的指纹）/ 闸6（两棵树比过没）。表头自己说的话不算证据。
+print(u"  ★ 表头不进指纹 ⇒ **指纹抓不住表头说谎**：表头的裁判只能是本跑当场算出来的那几行"
+      u"（判据核 · 闸1 · 闸4 钉值 · 闸6 两棵树）—— 表头自言自语的部分，按仓规算「意向」，不算证据。")
 print(u"  旧定义（二元组，已作废）    = %s   ← 它盖不住第 7 栏，故换" % fp2)
-print(u"★ 文件 sha256[:16] = %s" % hashlib.sha256(body.encode()).hexdigest()[:16])
 print(u"★ 剥法逐字：%s" % STRIP_RULE_TEXT)
