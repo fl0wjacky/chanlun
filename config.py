@@ -107,7 +107,9 @@ def _notdef_mask(f):
     真缺的字（会画成方框的那些）一个都不报：**静默假绿，退出码也不会替你发现**（夹具
     `tools/verify_notdef.py`，假字体就能跑，不需要字体文件）。
     所以投出的基准要再过一道：与 `_UNMAPPED_CHARS`（**永久未分配** ⇒ 按定义就是真 .notdef）
-    对一遍；对不上（或基准没有墨）就改用那一支的遮罩 —— 它才是 .notdef。
+    对一遍。三支一致**且有墨** ⇒ 它才是 .notdef，基准以它为准；**拿不到这样一支参照
+    （三支不一致、或三支都没墨）就返回 None（判不了）** —— 没有参照时装作有参照，
+    就是本条要防的那种假绿。
     """
     masks = [bytes(f.getmask(c)) for c in _NOTDEF_CHARS]    # ImagingCore 没有 .tobytes()
     counts = {}
@@ -122,7 +124,15 @@ def _notdef_mask(f):
         return None                       # 三个互不相同：判不了，不猜（契约不变）
     refs = [bytes(f.getmask(c)) for c in _UNMAPPED_CHARS]
     ref = refs[0] if all(m == refs[0] for m in refs) else None
-    if ref and ref != base:
+    if not ref:
+        # 这一行**必须是 `not ref`，不能写 `ref and …`** —— `ref` 是 bytes，`b""` 是假值，
+        # 写成真值判断时下面两种「拿不到可信参照」的状态会**静默跳过**这道校验、把 base
+        # 原样返回，于是本条要防的假绿原样回来（两格都在 tools/verify_notdef.py 里）：
+        #   ⑦ 未分配码位三个**都画空白**：它们自己也没墨 ⇒ 这支字体上"缺字"判不了
+        #   ⑧ 未分配码位三个**互不相同**：压根没有一致的参照可用
+        # 两种都走「判不了」，不退回 base —— 退回 base 就是在没有参照时装作有参照。
+        return None
+    if ref != base:
         return ref                        # 投出来的基准不是 .notdef；未分配码位那一支才是
     return base
 
