@@ -232,6 +232,26 @@ except Exception as e:
     print("[判据前提] 跑不了：%s" % e)
     print("           自测没跑成 = 那扇门的基准没人验过 ⇒ 按「查不出来不算通过」计。")
 
+# 第二条前提（card-6adfd2c9-dca）：下面那把 `undef` 尺**自己**有没有判据。
+# 它唯一的死法是**假报**（假红一次之后没人信它），另一个方向的死法是**真有 bug 看不见**
+# （那这格子只是个安慰奖）。两个方向都得有实测 ⇒ 八个探针 + 一对同树成对读数。
+# ★ 必须**自动**跑：@atlas-791f 那条 T7 量的正是"不自己带 rc 的判据会变成又一个只在某分支才炸的洞"
+#   —— 手跑一次的读数会过期，接线才会跟着每一次 selfcheck 跑。
+try:
+    from tools.undef_scan import run as _undef_selftest, selftest_paired as _undef_paired
+    _u_bad = _undef_selftest(verbose=False)      # 八个探针：假报形状不许报、真形状必须报
+    _u_bad += _undef_paired(verbose=False)       # 成对读数：同一棵树上 +1 个探针 ⇒ 正好多 1 处并点名
+    if _u_bad:
+        if PREMISE == 0:
+            PREMISE = 1
+        print("[判据前提] undef_scan 自测：**%d 格不过** ← 下面那把尺那份「0 处」不可读" % _u_bad)
+    else:
+        print("[判据前提] undef_scan 自测通过（探针全对 + 同树成对读数成立）⇒ 下面那把尺报的数可信")
+except Exception as e:
+    PREMISE = -1
+    print("[判据前提] undef_scan 自测跑不了：%s" % e)
+    print("           尺自己没验过 ⇒ 它那份「0 处」按「查不出来不算通过」计。")
+
 # ---- 字体覆盖：上面每一条都默认「字画得出来」，这一步才验那个默认 ----
 # 缺字是**静默**失败：PIL 画成方框、不报错，然后上面照样报「全部通过」。所以它不计进
 # FAIL（FAIL 是引擎不变量的数目，两者含义不同，混成一个数就说不清是谁的问题），
@@ -335,6 +355,11 @@ GATES = [
      r"^合计\s+(-?\d+)", True),
     ("undrawn", "cardfit_undrawn.py", "所有跑法都没画到的字面量", "条", "[量法/对象]",
      r"^合计.*：\s*(-?\d+)\s*条\s*$", False),
+    # 第三条尺（card-6adfd2c9-dca）：不跑代码、只读 AST，扫「用了但没定义的名字」。
+    # 为什么要它：`tools/selfcheck.py:250` 的 `ROOT` 那种 NameError 干净树上**永远不跑**
+    # （触发条件在 `if _skipped:` 里）⇒ 靠跑跑不出来，靠人翻才翻得到。本仓没 CI、pyflakes 也装不上。
+    ("undef", "undef_scan.py", "用了但没定义的名字", "处", "[量法/对象]",
+     r"^未定义名：(-?\d+) 处$", False),
 ]
 LAYOUT = 0     # ← 语义**不变**：cardfit 的越界处数（接受判据里 `版式=N` 读的就是它）
 SCALES = 0     # 新列：**有几把尺报红或查不了**（0 = 表里每一把都 rc=0 且报出了证据行+数）
