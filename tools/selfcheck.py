@@ -120,6 +120,29 @@ s1 = copy.deepcopy(S); t = next(x for x in s1 if x["kind"] == "一买")
 t["center"] = next(k + 1 for k, z in enumerate(Rz["centers"]) if z["rel"] != "下跌延续")
 count("不在下跌趋势里的一买未被发现", 0 if check_signals(s1, Rz, "pen") else 1)
 
+# 断点层（不变量 A）：断点两侧永不合并。校验器必须抓得住「断点被吃掉」；
+# 同时切分不得扰动断点之前的结构 —— 各段独立跑，前缀必须逐字段不变。
+from core.kline import quantize, standardize, check_no_cross_break_merge
+from core.preprocess import preprocess
+from config import tick_of
+
+zbars = quantize(json.load(open(data("zec15.json"), encoding="utf-8")), tick_of("zec15.json"))
+m0 = standardize(zbars)
+merged = [k for k in range(1, len(m0)) if m0[k]["i"] > m0[k - 1]["i"] + 1]   # 所有真合并过原始K线的位置
+k = merged[len(merged) // 2]                                                # 取中段一根，别用序列开头那几根
+b = m0[k]["i"]                                                              # 把断点摆在它吃进去的那根上
+brk = [dict(i=b, reason="mutation")]
+count("被吃掉的断点未被发现", 0 if check_no_cross_break_merge(m0, brk) else 1,
+      "　（断点 %d，跨它合并的是第 %d 根）" % (b, k))
+m1 = standardize(zbars, breaks=brk)
+count("按断点切完仍有跨断点合并", len(check_no_cross_break_merge(m1, brk)))
+count("断点切分没起作用（切完与整段相同）", 0 if m1 != m0 else 1)
+count("断点输出的下标越界", sum(1 for x in m1 if not (0 <= x["ih"] <= x["i"] < len(zbars) and 0 <= x["il"] <= x["i"])))
+count("断点输出的下标未递增", sum(1 for a, c in zip(m1, m1[1:]) if c["i"] <= a["i"]))
+count("breaks=[] 与整段口径不一致", 0 if standardize(zbars, breaks=[]) == R["ZEC 15m"]["std"] else 1)
+_adj, _brk = preprocess(zbars, adjust="none", session=None)
+count("preprocess 非恒等（不变量 C1）", 0 if (_adj == zbars and _brk == []) else 1)
+
 print("=" * 72)
 print("总违规数:", FAIL, "→", "全部通过" if FAIL == 0 else "有问题，需排查")
 sys.exit(1 if FAIL else 0)
