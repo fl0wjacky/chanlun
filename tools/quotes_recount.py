@@ -353,6 +353,12 @@ DOM_GLOBAL = "全局"    # 口径：同一句跨格**合并成一条**
 #     定义处自己仍是**手写常量** —— 与域词那张卡同一个残留形状。
 KEYFN = {"raw": lambda q: q, "norm": V.norm}
 DEDUP_KEYS = tuple(KEYFN)      # `--dedup` 的**全部**取值：从上面那张表**派生**，不再手写第二份
+DOM_UNKNOWN = "未知"           # 只提域词、**没点钥匙**的那种提及（脚注那行）—— 只入名册，不入反向表
+# ★★ 域词印法的**唯一一处**：`dom_label` 与「域词·屏内自洽」门的抽取正则**都从这一行派生**。
+#   同源只管「**怎么认**」（正则怎么拼）；**「该有几个」另算**，从下面那几个定义处数出来
+#   —— 否则改印法 ⇒ 门跟着改 ⇒ 门永远抽得到，"抽不到 ⇒ 红"这条**结构上永不触发**
+#   （@iris-64a1 16:33Z 在 `card-b1843eef-089` 上逮的，这一条是我原设计的硬伤）。
+DOM_LABEL_FMT = "%s · %s钥匙"
 
 
 def global_by_key(per):
@@ -371,7 +377,149 @@ def dom_label(scope, a):
     ★ 只给**随旗标走**的量用；`_per_quote` 那类**按原文标识分组**的量不随旗标走，
       它的名字**应当**钉死 —— 名字要跟它标的**量**同源，不是跟旗标同源。
     """
-    return "%s · %s钥匙" % (scope, a.dedup)
+    return DOM_LABEL_FMT % (scope, a.dedup)
+
+
+def _dom_label_re():
+    """抽取正则**从 `DOM_LABEL_FMT` 派生** —— 不许手写第二份拼法。
+
+    ★ 病是「同一件事的第二份手抄」：印法改一个字，手抄的正则静默失配 ⇒ 门开始**抽不到**，
+      而"抽不到"如果被当成"没事"就又是一扇永远绿的门。所以既**同源派生**，又**另算期望值**。
+    """
+    return re.escape(DOM_LABEL_FMT).replace("%s", "(.+?)")
+
+
+# ★ 屏上三种"报了数"的行，各一条正则。**只认形状，不认数** —— 数由上面那几个定义处另算。
+_RE_DOM_ROW = re.compile(r"^\s*\S+\s+\d+ 处 /\s*(\d+) 条\(%s\)\s*$" % _dom_label_re(), re.M)
+_RE_DOM_KEY = re.compile(r"（(\S+) 钥匙）\s*=\s*(\d+)")
+_RE_DOM_FOOT = re.compile(r"不是\s*(\d+)：那是\s*\*\*Σ(\S+?)去重\*\*.*?必须走(\S+?)去重")
+
+
+def dom_screen_audit(out, run_dedup):
+    """域词屏内自洽门：**同一跑印出的那几个数，名字与数不许互相打架**。
+
+    返回 `(findings, stats)`；`findings` 空 ⇒ 绿。
+
+    ★ 三条判据（正 / 反 / 抽不到），@atlas-791f 与 @nova-8980 在卡上定的：
+      ① **正向**：同一个 `(域词, 钥匙)` 下可以有多个数，但**只许是分解**（其一 = 其余之和）；
+         加不起来的那些 = **重述**，必须唯一。
+         ★ 逐档行是**分解**的一支（合计 = 各档之和），所以逐档行**反复出现同一个值不算重述**
+           —— 按"重述也必须唯一"直接判会**假红正典**（我原型第一版就在这儿红了）。
+      ② **反向**：同一个**数**只许挂在**一个** `(域词, 钥匙)` 上（@atlas-791f 的 v3 是这么逮的）。
+         脚注那种**只提域词、没点钥匙**的提及**不入这张表**（它是"提及"，不是"断言"）。
+      ③ **抽不到 ⇒ 红**：屏上"该有一行"的条数（按形状数）与真抽出来的组数
+         ∓ 定义处算出的**应有组数**，任一不等就红。N=0 自动落在里面。
+
+    ★ 期望值 `M` **只从定义处算**（`DOM_CELL`/`DOM_GLOBAL`/`DEDUP_KEYS` + 本跑的 `dedup`），
+      **不从屏上算** —— 同源只管"怎么认"，不管"该有几个"。
+    """
+    f, stats = [], {}
+
+    # ---- 抽 ----
+    rows = _RE_DOM_ROW.findall(out)                     # [(条, 域词, 钥匙)]
+    tri = {}
+    for tiao, scope, key in rows:
+        tri.setdefault((scope, key), []).append(int(tiao))
+    # 定义行：域词 + 每个钥匙各一对
+    for ln in out.splitlines():
+        if "**条**" not in ln or "去重" not in ln:
+            continue
+        mq = re.search(r"\*\*条\*\*\s*=\s*(\S+?)去重", ln)
+        if not mq:
+            continue
+        for km in _RE_DOM_KEY.finditer(ln[mq.end():]):
+            tri.setdefault((mq.group(1), km.group(1)), []).append(int(km.group(2)))
+    # 脚注：**只提及**，不入 tri
+    #   元组顺序跟正则的组序一致：**Σ 那头 / 必须走那头 / 数**（我第一版把数塞在中间，
+    #   读出来就是「必须走那头写 302」—— 同一个报文自己先错配，与门要抓的病同形）。
+    mentions = [(m.group(2), m.group(3), int(m.group(1)))
+                for m in _RE_DOM_FOOT.finditer(out)]
+
+    # ---- ③ 抽不到（形状数 vs 真抽出来的，逐个面比）----
+    #   ★ 形状只认 **`条(`** 这一种：`  面（…）` 那行和"只换 --ladder"那行**也含「N 处 /」**，
+    #     拿 `处 /` 当形状会多数出 2 行 ⇒ 正典就假红（我第一版就是这么红的）。
+    n_row_like = len([l for l in out.splitlines() if "条(" in l])
+    n_def_like = len([l for l in out.splitlines() if "**条**" in l and "去重" in l])
+    n_foot_like = len([l for l in out.splitlines() if "不是" in l and "Σ" in l and "去重" in l])
+    # 应有组数：只从**定义处**数。逐档/合计 → (DOM_CELL, 本跑 dedup)；定义行 → (DOM_GLOBAL, 每个钥匙)
+    want = 1 + len(DEDUP_KEYS)     # ★ **绝对值**，不含被测常量
+    want_mentions = 1
+    stats.update(rows_like=n_row_like, rows=len(rows), defs_like=n_def_like,
+                 foots_like=n_foot_like, groups=len(tri), want=want,
+                 mentions=len(mentions), knife_blind=True)
+    if n_row_like != len(rows):
+        f.append("抽不到：有 %d 行像「N 处 / M 条(域词)」，只抽出 %d 行 ⇒ 印法改了而抽取没跟上"
+                 % (n_row_like, len(rows)))
+    if n_def_like != 1:
+        f.append("抽不到：定义行（**条** = …去重…）该有 1 行，数到 %d 行" % n_def_like)
+    if n_foot_like != 1:
+        f.append("抽不到：脚注行（不是 …Σ…去重）该有 1 行，数到 %d 行" % n_foot_like)
+    # ★★ 定义处不变量：两个域词必须是**两个**东西。这条**不靠屏上的数**，所以翻常量时它先响。
+    #    （@iris-64a1：期望值里只要带上被测常量，"翻常量 ⇒ 期望值跟着跑" ⇒ 屏内又自洽 ⇒ 门绿。
+    #      我第一版确实写成 `1 + len(DEDUP_KEYS) + 1 - (1 if DOM_CELL == DOM_GLOBAL else 0)`
+    #      —— 那个"减 1"就是把被测常量请进了期望值，正是要治的病换个位置复发。）
+    if DOM_CELL == DOM_GLOBAL:
+        f.append("定义处自相矛盾：`DOM_CELL` 与 `DOM_GLOBAL` 是同一个值「%s」"
+                 "⇒ 两个名字指一件事，屏上必然并组" % DOM_CELL)
+    if run_dedup not in DEDUP_KEYS:
+        f.append("本跑 `--dedup`=%r 不在 `DEDUP_KEYS` 里 ⇒ 钥匙词无定义处" % run_dedup)
+    if len(tri) != want:
+        f.append("抽不到/抽多了：抽出 %d 组，定义处要求**绝对** %d 组 ⇒ 红" % (len(tri), want))
+    want_dom, want_key = {DOM_CELL, DOM_GLOBAL}, set(DEDUP_KEYS)
+    if set(d for d, _ in tri) != want_dom:
+        f.append("抽不到/抽多了：屏上域词 %s，定义处只有 %s"
+                 % (sorted(set(d for d, _ in tri)), sorted(want_dom)))
+    if set(k for _, k in tri) != want_key:
+        f.append("抽不到/抽多了：屏上钥匙 %s，`DEDUP_KEYS` 只有 %s"
+                 % (sorted(set(k for _, k in tri)), sorted(want_key)))
+    if len(mentions) != want_mentions:
+        f.append("抽不到：脚注该有 %d 处**提及**（Σ域词 + 必须走域词），抽出 %d 处"
+                 % (want_mentions, len(mentions)))
+    for sig, must, _n in mentions:
+        if sig != DOM_CELL or must != DOM_GLOBAL:
+            f.append("脚注自相矛盾：Σ 那头写「%s」（应 %s），必须走那头写「%s」（应 %s）"
+                     % (sig, DOM_CELL, must, DOM_GLOBAL))
+
+    # ---- ① 正向：多值只许是分解，否则必须唯一 ----
+    for (d, k), vs in sorted(tri.items()):
+        if len(set(vs)) <= 1:
+            continue
+        tot = sum(vs)
+        if any(v == tot - v for v in vs):     # 其一 = 其余之和 ⇒ 分解 ⇒ 合法
+            continue
+        f.append("正向冲突 (%s,%s)：%s —— 没有一个数 = 其余之和，且不唯一 ⇒ 重述却给了两个数"
+                 % (d, k, sorted(set(vs))))
+
+    # ---- ② 反向：一个数只许挂一个**域词** ----
+    # ★★ 这里**只比域词，不比钥匙** —— 我第一版比的是整个 `(域词,钥匙)` 对，那**不成立**：
+    #   `raw` 与 `norm` 的条数在这份语料上不等（285/283），但**换一份语料可以恰好相等**，
+    #   而那时屏上印的是**对的**。实测：合法同数 ⇒ 我那一版**红**，与真变异（两把钥匙并成一码事）
+    #   **同一张脸** ⇒ 假红与真红分不开。@nova-8980 `card-46bc267c-b70` 要的正是"两把钥匙在**本跑**上
+    #   是不是同一个量"，那是**跑内的量**，不是屏上的字 —— 归那道不变量，不归本门。
+    #   窄到**跨域词**之后仍然假红：某个档的条数**恰好**等于某个钥匙的数 ⇒ 正确屏照样红
+    #   （实测：把 285 换成与某档相同的值 ⇒ 红）。⇒ **这一整条降级，不进红账。**
+    #   ★ 它**没有"定理那一块"可以升**（@iris-64a1 问的）：这里唯一像定理的东西是
+    #     「条(raw) ≥ 条(norm)」（归一化是函数 ⇒ 不同的 norm 不多于不同的原文），
+    #     可那是**两把钥匙之间**的性质，不是屏上字与字之间的性质 ⇒ 它的归宿是
+    #     `card-46bc267c-b70` 那条**跑内**不变量，搬不到本门来。
+    #     而且它挡不住"两把钥匙并成一码事"（283 ≥ 283 成立）⇒ 更不能拿它顶替那一条。
+    #   ★ 降级后它**不进"门 N 道"**（不进 `_hit`、不进分母），自带"为什么不敢当门"，
+    #     归宿写在下面那行印文里（谁看、看到该怎么办）。
+    nums = {}
+    for (d, k), vs in tri.items():
+        for v in vs:
+            nums.setdefault(v, set()).add(d)
+    stats["hints"] = []
+    for v, ds in sorted(nums.items()):
+        if len(ds) <= 1:
+            continue
+        stats["hints"].append(
+            "反向提示 数=%d 同时被两个域词各报了一遍（%s）。"
+            "**它不是门**：合法巧合（某档的条数恰好等于某钥匙的数）也会长这样，"
+            "我实测过正确屏被它判红 ⇒ 不进红账。★ 归宿：**别去改屏** —— "
+            "两把钥匙在**本跑**上是不是同一个量，去 `card-46bc267c-b70` 那条跑内不变量上判。"
+            % (v, "、".join(sorted(ds))))
+    return f, stats
 
 
 def tally(base, a, sites=None):
@@ -1266,6 +1414,10 @@ _TABLES = (("MEASURE_KEY", MEASURE_KEY), ("PROBE_EXEMPT", PROBE_EXEMPT), ("COORD
 # ★ 展开因子**不另写常数**：格数本跑现算并印出来（"位点 × 该处跑了几趟" ——
 #   @atlas-791f 实测：删一处 ⇒ 31→25，一处 = 6 道）。
 GATE_SITES = {
+    # ★ 它替 `dedup` 说话的理由：屏上那两处**钥匙词**的词汇表就是 `--dedup` 的取值
+    #   （`DEDUP_KEYS`）；域词那两个是**常量**，不是旗标，所以不归任何轴。
+    "域词·屏内自洽":      (("dedup",),
+                          "同一跑印出的域词/钥匙与数互相打架（正/反/抽不到三条各喂一口）", True),
     # 位点名                    (替哪些轴说话,                                          场合, 必响)
     "探测·挑不出正确值":  (("expect_corpus", "expect_judge", "expect_tree", "expect_flags"),
                           "四个 `--expect-*` 里挑不出「正确值」⇒ 那格不算测过", False),
@@ -2229,6 +2381,48 @@ def selfcheck_gate(a, argv):
     print("   ⑤j           登记名↔印出的字段名：本跑 ⇒ 「%s」· 喂旧病(min-len(norm后)) ⇒ 「%s」⇒ %s"
           % (_cut(j_al[1], 26), _cut(j_bad[1], 30),
              "✓" if ok else "✗ **这道门自己没响：%s**" % "；".join(j_why)))
+
+    # ── ⑤l 域词·屏内自洽（`card-b1843eef-089`）────────────────────────────────────
+    #   正典那一口走的是**真屏**（`_run_out` 现起一次普通跑 —— 门**不能**拿本跑自己的输出
+    #   当输入：`--selfcheck-gate` 那一跑里 `逐格`/`全局` 出现 **0 次**，自食会永远抽不到）。
+    #   三个坏态**从那一张真屏派生**（只改一处字节），跟真变异改的是同一处 ⇒ 不会跟真屏漂开。
+    #   ★ 期望值那条（@iris-64a1 16:33Z）：`M` 是**绝对**的 `1 + len(DEDUP_KEYS)`，
+    #     外加一条**不看屏**的不变量 `DOM_CELL != DOM_GLOBAL` —— 期望值里一旦带上被测常量，
+    #     "翻常量 ⇒ 期望值跟着跑" ⇒ 屏内又自洽 ⇒ 门绿（我第一版就是这么写的，同一个病换位置复发）。
+    print("\n⑤l 域词·屏内自洽（门：正典绿 · 翻常量红 · 改数红 · 抽不到红）")
+    _c_rc, _c_out = _run_out(base)
+    _c_dedup = getattr(abase, "dedup", None)
+    _f_canon, _s_canon = dom_screen_audit(_c_out, _c_dedup)
+    print("   正典（真跑 rc=%d）  域词组 %d/%d · 逐档行 %d/%d · 提及 %d ⇒ %s"
+          % (_c_rc, _s_canon["groups"], _s_canon["want"], _s_canon["rows"],
+             _s_canon["rows_like"], _s_canon["mentions"],
+             "绿 ✓" if not _f_canon else "✗ **正典就红**：%s" % "；".join(_f_canon)))
+    # 翻常量那一口：**真把常量翻掉**再调一次（finally 复原），屏也跟着翻 —— 与真变异同形。
+    _sv = (DOM_CELL, DOM_GLOBAL)
+    try:
+        globals()["DOM_CELL"], globals()["DOM_GLOBAL"] = _sv[1], _sv[1]
+        _f_flip, _ = dom_screen_audit(_c_out.replace(_sv[0], _sv[1]), _sv[1])
+    finally:
+        globals()["DOM_CELL"], globals()["DOM_GLOBAL"] = _sv
+    _f_num, _ = dom_screen_audit(
+        re.sub(r"(合计\s+\d+ 处 /\s+)(\d+)( 条\()", r"\g<1>1\g<3>", _c_out), _c_dedup)
+    #   抽不到那一口：把印法尾巴那个词改掉 ⇒ 正则**按印法派生**所以在真变异下也跟着变；
+    #   这里直接改**屏上的字节**，模拟"印法改了而抽取这一头没跟上" ⇒ 必须报抽不到。
+    _f_gone, _ = dom_screen_audit(_c_out.replace("钥匙)", ")"), _c_dedup)
+    ok = (not _f_canon) and _f_flip and _f_num and _f_gone
+    _hit("域词·屏内自洽")
+    red += 0 if ok else 1
+    print("   翻常量（DOM_CELL:=全局）⇒ %s" % ("响 ✓ " + _cut("；".join(_f_flip), 40)
+                                              if _f_flip else "✗ **没响**"))
+    print("   改一个数（合计 302→1）  ⇒ %s" % ("响 ✓ " + _cut("；".join(_f_num), 40)
+                                              if _f_num else "✗ **没响**"))
+    print("   抽不到（钥匙词被摘）    ⇒ %s" % ("响 ✓ " + _cut("；".join(_f_gone), 40)
+                                              if _f_gone else "✗ **没响**"))
+    print("   ★ 射程（**盲区要写出来，不许读成「都管」**）：本门只核**域词/钥匙名与数**互相自洽；"
+          "把 `raw` 与 `norm` 两个**钥匙名与数配对**翻掉（@iris-64a1 的丙刀）它**看不见** ——")
+    print("     实测那一跑本门**绿**，因为 `(raw)=283 (norm)=285` 组数、正反都自洽。")
+    print("     残留入口（@nova-8980 已把两份手抄并成 `KEYFN`，入口 4→2）：`KEYFN` 的**值**"
+          "仍是手写常量（表里翻一下 `raw`/`norm` 对哪个函数）＋ `main()` 里那个**显示用 token**。")
 
     # ⑤k ★ 位点名册自己这道门（分母的账）：两面各查一次。
     _hit("位点名册")
