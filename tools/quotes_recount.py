@@ -93,9 +93,10 @@
   两头：**总数和表结构绑着，抄总数不抄表结构，就再也对不上。**
 
 退出：0 跑完 · 2 语料不在（**查不了 ≠ 通过**）· 3 语料指纹对不上（--expect-corpus）
-      · 4 **参数不合格，器还没开始量**：没点对象（`--commit`/`--tree` 一个都没写）
-          见下面 `--commit` 那格；或某个 `--expect-*` 给的不是它该有的长度
-          （「参数写坏了」和「对不上」共用一句"红"就分不出是哪个 —— 先验形状）
+      · 4 没点对象（`--commit`/`--tree` 一个都没写）—— 见下面 `--commit` 那格
+      · 7 某个 `--expect-*` 给的不是它该有的长度 —— **器还没开始量**。
+          4 和 7 都停在"量之前"，可**原因不同**（谁没说清对象／谁把常数打歪了），
+          而"共用一句红"正是今天反复栽的那格 —— 文字分了，出口码也得跟着分
       · 5 **判据**指纹对不上（--expect-judge）—— 数和 3 **分开出口**：3 与 5 都"拒绝出数"，
         但**原因不同**，而今天反复栽的就是"红是对的、原因是错的"那一格
       · 6 **对象解析出来的树**对不上（--expect-tree）—— 名字一样 ≠ 对象一样
@@ -304,9 +305,21 @@ def which(sha):
         #   而失败长得和"对象不对"一模一样：**红是对的、原因是错的**，今天栽过好几回的同一格。
         #   ⇒ 统一印 `→ tree <40位>`：这一行的身份由**对象自己**说（`rev-parse`），不由传参的拼法说。
         #     传短 sha、传长 sha、传 tree、传 commit，印出来的都是同一个 40 位。
+    # ★ @atlas-791f 12:5x 的便宜加固：**git 本来就会喊**（`warning: refname 'X' is ambiguous`），
+    #   是这支器把它吞了（`git archive` 的 stderr 直接漏到终端，捕获 stdout 的检查方看不见）。
+    #   ⇒ 不必自己做冲突检测，问一句就够。实测 `git rev-parse --symbolic-full-name <名>`：
+    #       普通对象 id / 前缀 ⇒ **空**（rc=0）
+    #       被同名 tag 抢走     ⇒ `refs/tags/05f3e24`   ← 实测（`git tag 05f3e24 335e3a3` 之后）
+    #   **一句话就能问出"它是名字，还是身份"。**
+    ref = git("rev-parse", "--symbolic-full-name", sha)
+    warn = ("" if not ref else
+            "\n         ★ **这个名字是一个 ref**（%s），不是对象 id ⇒ 解析它 = 信它；"
+            "可门要核的是**解析出来的那棵树**\n"
+            "         ⇒ 判据请给 `--expect-tree <40位>`。"
+            "**名字是给人看的，树是给判据用的。**" % ref)
     if kind in ("commit", "tree"):
-        return ("%s %s → tree %s（临时树，跑完删）"
-                % (kind, sha, git("rev-parse", sha + "^{tree}")), True)
+        return ("%s %s → tree %s（临时树，跑完删）%s"
+                % (kind, sha, git("rev-parse", sha + "^{tree}"), warn), True)
     return ("%s（认不出类型，git cat-file 说 %r）" % (sha, kind), False)
 
 
@@ -391,11 +404,15 @@ def main():
                                ("--expect-judge", a.expect_judge, 16, "sha256 前16位"),
                                ("--expect-tree", a.expect_tree, 40, "40位 tree sha")):
         if val and not re.fullmatch(r"[0-9a-f]{%d}" % n, val):
-            print("★ %s 给的**不是一个%s**（你给的是 %r，%d 个字符）⇒ **器还没开始量**（exit=4）。"
+            print("★ %s 给的**不是一个%s**（你给的是 %r，%d 个字符）⇒ **器还没开始量**（exit=7）。"
                   % (flag, name, val, len(val)))
             print("  ★ 这不是「对不上」，是**参数写坏了**：两件事共用一句'红'，就分不出是哪个了。")
             print("  ★ 抄常数的时候，长度对不对是**唯一能当场自查**的那一格 —— 所以先查它。")
-            return 4
+            # ★ 出口码也**分开**（@nova-8980 12:5x 抓的）：我原先把这一格和"没点对象"一起塞进 4 ——
+            #   **我刚在文字那一格治好的病（三态共用一个词），当场在出口码那一格复刻了一遍。**
+            #   判准是**这是谁的错**：「常数打歪了」是**调用方的**错；「没点对象」是**那次调用没说清对象**。
+            #   4 和 7 都停在"量之前"，所以对读数的影响一样 —— 但机器分得出，人不用去读中文才知道是哪种。
+            return 7
     docs = V.load()
     if docs is None:
         print("语料不在 ⇒ 什么都没查（exit=2）。先跑 tools/fetch_chanlun108.py")
