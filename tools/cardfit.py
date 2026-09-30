@@ -268,6 +268,11 @@ def _print_bad(bad, indent="    "):
         print("%s%-8s %+6.0fpx  %-14s %s" % (indent, kind, over, where, t[:70]))
 
 
+def _cards_dir():
+    """被扫的目录 —— **印出来**，因为「扫到 0 张」时读者第一个要知道的就是"你扫的是哪儿"。"""
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "cards")
+
+
 def coverage():
     """覆盖表 = **扫面**（cards/*.py 里定义了 build() 的），不引任何名单。
 
@@ -283,7 +288,7 @@ def coverage():
     三态分得开（跑了 / 跳过+理由 / 不许有第四态）：没 build() 的、导入失败的都进 skipped
     并**带理由**（下面那条 assert 保证"理由"不许空着）。
     """
-    d = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "cards")
+    d = _cards_dir()
     run, skipped = [], []
     for p in sorted(glob.glob(os.path.join(d, "*.py"))):
         name = os.path.basename(p)[:-3]
@@ -315,6 +320,19 @@ def main():
     _selftest()
     print("[版式体检] 字体 %s" % _font_id())
     cards, skipped = coverage()
+    # 「扫到 0 张」不是「没有违规」，是「**我什么都没量**」。这里是这扇门最容易被钻的一格：
+    # 树不对（cards/ 不在、只复制了半棵仓、工具被挪到别处）⇒ 覆盖表空 ⇒ 下面所有计数都是 0
+    # ⇒ 和"干净通过"印得一模一样。跟 @atlas-791f 的 `verify_quotes.py` 空树是同一种塌，
+    # 取值也照同一条约定：**0 = 通过 · 1 = 查出来有问题 · 2 = 我没查成**（2 不是 1，也不是 0）。
+    # 别把它并进 1：那会让"树指错了"看起来像"卡片有问题"；也别留在 0：那就是今天这个口子。
+    if not cards:
+        print("\n[覆盖表] **扫到 0 张** —— 这不是「通过」，是「我什么都没量」。")
+        print("           被扫的目录 = %s" % _cards_dir())
+        print("           多半是这棵树不对：没有 cards/*.py，或者工具不在它本该在的那个仓里。")
+        for name, why in skipped:
+            print("           %-22s 跳过：%s" % (name, why))
+        print("退出原因: 覆盖表 0 张（什么都没量） ⇒ exit=2")
+        return 2
     total = 0
     injected = effective = dead = 0
     uncovered = []          # 从没声明 —— 没查过
