@@ -85,7 +85,9 @@
           （对象可以已在 odb 而**不挂任何 ref**）。
    ★ 判**第二栏**落在哪一支，分**两层**走：**第一层问"它是不是一条 ref"，第二层才问"它是什么对象"**。
      · **第一层（形式 → 解析）**：`git rev-parse --symbolic-full-name <第二栏>`
-       ⇒ **rc=0 且印出一条 `refs/…`** ⇒ **是 ref**（`refs/heads/…`、`refs/tags/…` 都算）⇒ 走 **(a)／(a′)**（看挂不挂 `:<blob>` 那半栏）；
+       ⇒ **rc=0 且印出非空** ⇒ **是 ref**（`refs/heads/…`／`refs/tags/…`；★ **detached 时 `HEAD`／`@` 印的就是 `HEAD`** ——
+         **别只认 `refs/` 开头的**，否则会把一条真 ref 判成非 ref；@atlas-791f 在 `/tmp` 新仓 `checkout --detach` 后现量：
+         `--symbolic-full-name HEAD` ⇒ **rc=0 印 `HEAD`**（我复现：`@` 同））⇒ 走 **(a)／(a′)**（看挂不挂 `:<blob>` 那半栏）；
        ⇒ **rc=0 但印空**（修订表达式如 `origin/main^{tree}`、裸 40-hex 对象名）⇒ **不是 ref** ⇒ 进第二层；
        ⇒ **rc=128**（`nosuchthing` 一类解析不出来）⇒ **第三态 · 因①：名字就不合法**（坐标抄错 / 笔误）。
        ★ **别拿"写法像 ref"顶替这一步**：`origin/main^{tree}` 与裸 40-hex **都长得不像**但**都不是 ref**，
