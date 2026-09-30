@@ -25,6 +25,8 @@ Noto 的汉字在同一字号下墨迹低 3~4px，就戳出标签底框）。所
 **换字体是发卡前的指定项，不是无关项。**
 
 **`build()` 的契约 —— 什么算「一张成功的卡」**（`check()` 在返回处断言，违约抛 `ContractError`）：
+★ 还有**第二张脸**：尺寸**问不出口**（`.width`/`.height`/`.dtype`/`__index__` 自己抛）时抛 `Unaskable`
+  —— 「不是正整数」与「问不出口」**不许并成一句**（一个是判决、一个是没跑成）。
 
     build() 成功  =  返回**一副画好的图**，判据三条（全部可读、与具体实现无关）：
       ① 有 `.width` 和 `.height` 两个属性；
@@ -215,6 +217,16 @@ class ContractError(Exception):
     """
 
 
+class Unaskable(Exception):
+    """**问不出口** —— 尺寸那一问**没跑成**：`.width`/`.height`/`.dtype`/`__index__` 自己抛了。
+
+    与 `ContractError` 是**两个病，别并进一个数**：违约 = 它没交出一副图（**有判决**）；
+    问不出口 = 交了东西，但"尺寸多大"这一问没答上来（**没有判决**）。
+    ★ 原话一个字不丢，附在我们这句话**后面** —— 读者先看到"哪一问没答上来"，再看它为什么炸。
+    ★ 与 `ContractError` 同规矩：消息里**不带卡名、不带任何数**（印它的是调用方那行，一个事实只印一处）。
+    """
+
+
 def _is_size(v):
     """尺寸判据：**能当整数用（`operator.index`）、为正、且不是布尔**。
 
@@ -227,20 +239,54 @@ def _is_size(v):
       两步合起来，**理由（"真值不许冒充尺寸"）与正文同宽** —— 这正是本卡今晚立的那条。
     · **射程就到这儿**：本判据认这两种"布尔声明"。别的库若既不是 Python `bool`、也不声明 `dtype.kind`，
       不在射程内 —— 这是**有意划的界**，不是遗漏（要覆盖它就得"按库认类型"，那种规则会随库版本变）。
+    · ★ **射程外第一格 =「问不出口」，不是「不是正整数」**：`TypeError` 以外**任何**异常
+      （`.dtype.kind` 自己抛、`__index__` 自己抛）⇒ 抛 `Unaskable`，**不许压成第一张脸**。
+      切法**切在异常类型上**：`operator.index` 的协议里 `TypeError` **就是"我不是整数"这个合法的否定答案**
+      （⇒ `False`），其余异常都不是答案、是**没答上来**。**不采用** blanket `except Exception: return False`
+      —— 那样会把**判据自己的毛病**印成"这张卡违约"，拿一个假结论换一句原话（比现状更坏）。
+    · ★ **射程外第二格（写下来的约定，不是遗漏）**：`v.dtype` **自己抛 `AttributeError`** 与"**没有** `dtype`"
+      在 Python 里走**同一条路**（`getattr(x, 名, default)` 的第三个参数就是一条写不出 `except` 字样的吞）
+      ⇒ 本判据**按"没有 dtype"读**。这里把它**写成字面的 `except AttributeError`**：行为与
+      `getattr(v, "dtype", None)` 逐格相同，区别只在 `grep -n "except AttributeError"` 找得到它
+      —— 静默点从"没人知道"变成"**写下来的**"。
     · 非正、浮点、字符串、None 一律拦住。
     """
-    if isinstance(v, bool):
-        return False
-    if getattr(getattr(v, "dtype", None), "kind", None) == "b":
-        return False
     try:
+        if isinstance(v, bool):
+            return False
+        try:
+            d = v.dtype
+        except AttributeError:      # ★ 第二格：与"没有 dtype"同路，写成字面
+            d = None
+        if getattr(d, "kind", None) == "b":
+            return False
         return operator.index(v) > 0
-    except TypeError:
+    except TypeError:               # ★ 协议里合法的否定答案 ⇒ 第一张脸：**不是正整数**
         return False
+    except Exception as e:          # ★ 其余 = **问不出口** ⇒ 第二张脸（原话附在后面）
+        raise Unaskable("%s: %s" % (type(e).__name__, e)) from e
+
+
+def _read_size_attr(im, name):
+    """读一个尺寸属性：**没有** ⇒ `None`（第一张脸的事，交给 `_is_size`）；**问不出口** ⇒ `Unaskable`。
+
+    ★ 这里的 `except AttributeError` 是**写下来的约定**，不是新行为：`getattr(im, name, None)` 的
+      default 本来就吞 `AttributeError`，"没有这个属性"与"这个属性自己抛 `AttributeError`"在 Python 里
+      区分不了 ⇒ 本器**按"没有"读**（要的是 `grep` 找得到它）。
+    """
+    try:
+        return getattr(im, name)
+    except AttributeError:
+        return None
+    except Exception as e:
+        raise Unaskable("取 .%s 时 %s: %s" % (name, type(e).__name__, e)) from e
 
 
 def assert_card(im):
     """契约断言（契约见模块 docstring）。违约时抛**领域消息**，不让 AttributeError 露出去。
+
+    **两张脸**：判决 = `ContractError`（不是一副图 / 不是正整数）；**没跑成** = `Unaskable`
+    （尺寸那一问自己抛了）—— 后者也**不许**是 Python 原话，更**不许**被印成一张判决。
 
     **消息里不带卡名**：卡名由调用方（`measure()` 的汇总行）负责印 —— 这里再带一次，
     报告上同一个名字会出现两遍。**一个事实只印一处。**
@@ -248,9 +294,14 @@ def assert_card(im):
       那里写明了"是样本不是判据"。运行期消息塞一个"实测"的人口数 ⇒ 加一张卡它当场变假、且没人会重算
       （`card-78a38f93-2d7` 整晚那条：**器会数自己的源码，数随版本变**）。
     """
-    w = getattr(im, "width", None)
-    h = getattr(im, "height", None)
-    if not (_is_size(w) and _is_size(h)):
+    try:
+        w = _read_size_attr(im, "width")
+        h = _read_size_attr(im, "height")
+        ok = _is_size(w) and _is_size(h)
+    except Unaskable as e:
+        # 领域壳：先说**哪一问**没答上来，`Unaskable` 里那句话（原话）附在后面。
+        raise Unaskable("build() 交出了东西，但**尺寸问不出口** —— %s" % e) from e
+    if not ok:
         raise ContractError(
             "build() 返回了 %s，不是一副图 —— 契约：有 .width / .height 两个正整数属性"
             % type(im).__name__)
