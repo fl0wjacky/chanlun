@@ -56,7 +56,10 @@ def check_prop(label, prop, ok):
 
 print("第 54 课：g0d5 = g0d1 + {(d1g1+g1d2+d2g2) + (g2d3+d3g3+g3d4) + (d4g4+g4d5+d5g5)}")
 first = find_centers(units[0:3])[0]                       # 走到 d2 时：[d1, g1]
-check("[原文-命题] 走到 d2 时的 1 分钟中枢", (d1, g1), (first["ZD"], first["ZG"]))
+# 这里**不**标「原文-命题」：前三段区间取交 = [max(d1,d1,d2), min(g0,g1,g1)] = [d1, g1]，
+# 是这组 fixture 的几何必然 —— want 是被构造逼出来的，这条测的只是「引擎挑对了这三段」。
+# 标成原文命题等于给它安一个它没有的出身：本来只是没内涵，标完还多一层假出身（Nova #178）。
+check("[引擎重算·构造必然] 走到 d2 时的 1 分钟中枢", (d1, g1), (first["ZD"], first["ZG"]))
 Z0 = find_centers(units)[0]                               # 按段往后走：d2g2 仍是震荡，g2d3 离开、d3g3 碰不到 → g3 三卖
 ok = Z0["term"] == "三卖" and Z0["PI1"] == 3
 FAIL += not ok
