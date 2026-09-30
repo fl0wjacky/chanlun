@@ -419,8 +419,14 @@ def main():
               % (len(ok), strict + loose, stray))
     print("④ 退短词·**未定性**（不算对上，也不算搜不到） %d" % loose)
     print("② 课号不符 %d      ③ 搜不到 %d" % (len(wrong), len(gone)))
-    print("   —— 共 %d 条；其中 ①② 是给的、③ 是真待办、④ 要人读"
-          % (strict + loose + len(wrong) + len(gone)))
+    # 这一行原先印「—— 共 151 条；其中 ①② 是给的、③ 是真待办、④ 要人读」，
+    # 而上面四行是**并列印的** ⇒ 读起来像四格相加，可总数只由三格构成（④ 是从 ① 里切出来的）。
+    # @nova-8980 就在这几行上真读错过一次（把 120+5+16+10 当成"账加得起来"）——
+    # 顶部的警告离这儿 120 行远，救不了这里。**所以写清恒等式，不改任何数。**
+    print("   —— 共 %d 条 = ① %d ＋ ② %d ＋ ③ %d（**④ %d 在 ① 里，别再加一次**）；"
+          "①② 是给的、③ 是真待办、④ 要人读"
+          % (strict + loose + len(wrong) + len(gone),
+             strict + loose, len(wrong), len(gone), loose))
     print("   语料指纹 sha256:%s（数变了先看指纹变没变）" % fp)
 
     bad = len(wrong) + len(gone)
