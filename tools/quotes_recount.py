@@ -333,6 +333,25 @@ def _key(q, a):
     return q if a.dedup == "raw" else V.norm(q)
 
 
+# ★★ 域词的两个**唯一**定义处（`card-14aa4f9f-544`）——
+#   `逐格` 与 `全局` 是**两个不同的量**：表里那一列 = Σ(各格内部去重)；说话人轴分母 = 跨格合并。
+#   各自只在这里写一次，**任何 print 都不许再出现这两个字面量**。
+#   ⇒ 旧的验收刀（把 `条(逐格)` sed 成 `条(全局)`）修完就**插不进去了** —— 那种"修完永远绿"的刀不是门。
+#     门是 `tools/` 里的静态扫描（print 子树 0 次）＋ `dom_label` 的同一跑内自核。
+DOM_CELL = "逐格"      # 口径：同一句横跨两格，**各记一次**
+DOM_GLOBAL = "全局"    # 口径：同一句跨格**合并成一条**
+
+
+def dom_label(scope, a):
+    """域词的印法：`<域> · <钥匙>钥匙`。
+
+    ★ 钥匙词**逐字**取本跑的 `--dedup`，不手写、不复制（自我核对：比较的另一头是同一次跑印出的值）。
+    ★ 只给**随旗标走**的量用；`_per_quote` 那类**按原文标识分组**的量不随旗标走，
+      它的名字**应当**钉死 —— 名字要跟它标的**量**同源，不是跟旗标同源。
+    """
+    return "%s · %s钥匙" % (scope, a.dedup)
+
+
 def tally(base, a, sites=None):
     """整表跑一遍 ⇒ (rows, tot)。rows = [(名字, 处, 条)]，合计由 rows 现加。
 
@@ -673,10 +692,10 @@ def speaker_axis(sites, tot, a, sp=None):
 
     print("说话人轴（**双轴**：类别 × 面 · 恒印 —— 缺「未判」这一栏，「合计 %d 处」就会被读成"
           "「%d 处引文失真」）" % (tot[0], tot[0]))
-    print("   分母：**处** = %d（不去重：每次出现各算一次）· **条** = 全局去重（raw 钥匙）= %d"
-          "（norm 钥匙 = %d）" % (tot[0], len(raw), nrm))
-    print("         ★ 不是 %d：那是 **Σ逐格去重**（同一句横跨两格各记 1）⇒ **只能说「处」**；"
-          "条那一列必须走全局去重" % tot[1])
+    print("   分母：**处** = %d（不去重：每次出现各算一次）· **条** = %s去重（raw 钥匙）= %d"
+          "（norm 钥匙 = %d）" % (tot[0], DOM_GLOBAL, len(raw), nrm))
+    print("         ★ 不是 %d：那是 **Σ%s去重**（同一句横跨两格各记 1）⇒ **只能说「处」**；"
+          "条那一列必须走%s去重" % (tot[1], DOM_CELL, DOM_GLOBAL))
     if not have:
         print("   旁档   ★ **没给**（没写 --speaker）—— 「没给」不是「给了个 0」：下面是 `—`。")
     else:
@@ -2480,16 +2499,16 @@ def main():
         if sp is not None and sp["decl_denom"] and sp["decl_denom"] != (tot[0], len(_per_quote(sites))):
             print("★ 旁档与本次跑的**分母**对不上 ⇒ **拒绝出数**（exit=11）。脸 = 分母对不上")
             print("  旁档自己声明（`# 分母：` 那行）  %d 处 / %d 条" % sp["decl_denom"])
-            print("  本次跑现场算出来的            %d 处 / %d 条（全局去重 raw）"
-                  % (tot[0], len(_per_quote(sites))))
+            print("  本次跑现场算出来的            %d 处 / %d 条（%s去重 raw）"
+                  % (tot[0], len(_per_quote(sites)), DOM_GLOBAL))
             print("  ★ 这一格是「**同一份旁档配了另一套旗标**」的专用出口："
                   "旁档那一行自己写着「当场算、当场印，非写死」⇒ 它是坐标，不是注释。")
             print("    例：`--face literal` / 换 `--ladder` / 换 `--min-len` 都会挪分母，"
                   "而旁档的行数**一行不变** —— 那时逐行联结照样全中，只有这一格拦得住。")
             return 11
         for name, n, k in rows:
-            print("  %-8s %4d 处 / %4d 条(逐格)" % (name, n, k))
-        print("  %-8s %4d 处 / %4d 条(逐格)" % ("合计", tot[0], tot[1]))
+            print("  %-8s %4d 处 / %4d 条(%s)" % (name, n, k, dom_label(DOM_CELL, a)))
+        print("  %-8s %4d 处 / %4d 条(%s)" % ("合计", tot[0], tot[1], dom_label(DOM_CELL, a)))
         print()
         speaker_axis(sites, tot, a, sp)
         print()
@@ -2510,9 +2529,9 @@ def main():
               "（差 %+d 处 / %+d 条）"
               % (other, otot[0], otot[1], otot[0] - tot[0], otot[1] - tot[1]))
         om = dict((r[0], r) for r in orows)
-        print("  逐格：%s" % " · ".join(
+        print("  %s：%s" % (DOM_CELL, " · ".join(
             "%s %+d/%+d" % (r[0], om[r[0]][1] - r[1], om[r[0]][2] - r[2])
-            for r in rows if r[0] in om))
+            for r in rows if r[0] in om)))
         if a.unit == "all":
             print("  ★ unit=all 时两档**必然**同数（分母不判「原文有没有」，逐段档无从参与）"
                   "—— 这个 0 有理由，不是阶梯坏了。")
