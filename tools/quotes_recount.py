@@ -343,6 +343,17 @@ def _key(q, a):
 #     （print 子树 0 次）＋ `dom_label` 的同一跑内自核。
 DOM_CELL = "逐格"      # 口径：同一句横跨两格，**各记一次**
 DOM_GLOBAL = "全局"    # 口径：同一句跨格**合并成一条**
+DEDUP_KEYS = ("raw", "norm")   # `--dedup` 的**全部**取值（唯一一处）
+
+
+def global_by_key(per):
+    """全局去重那一列：**每个钥匙各配一个按该钥匙算出来的数**。
+
+    ★ 名字与值在**同一个元组**里产生 ⇒ 印的时候不可能把 A 的名字配到 B 的数上。
+      （@iris-64a1 的变异 B：两个标签对调 —— 在旧写法里只需改一个打印字符串。）
+    """
+    return tuple((k, len(set(q if k == "raw" else V.norm(q) for q in per)))
+                 for k in DEDUP_KEYS)
 
 
 def dom_label(scope, a):
@@ -677,7 +688,7 @@ def speaker_axis(sites, tot, a, sp=None):
     """
     per = _per_quote(sites)
     raw = list(per)
-    nrm = len(set(V.norm(q) for q in raw))
+    byk = global_by_key(per)
     face_of = _face_of(per)
     occ_of = collections.Counter(q for _c, q in sites)
     have = sp is not None
@@ -695,8 +706,8 @@ def speaker_axis(sites, tot, a, sp=None):
 
     print("说话人轴（**双轴**：类别 × 面 · 恒印 —— 缺「未判」这一栏，「合计 %d 处」就会被读成"
           "「%d 处引文失真」）" % (tot[0], tot[0]))
-    print("   分母：**处** = %d（不去重：每次出现各算一次）· **条** = %s去重（raw 钥匙）= %d"
-          "（norm 钥匙 = %d）" % (tot[0], DOM_GLOBAL, len(raw), nrm))
+    print("   分母：**处** = %d（不去重：每次出现各算一次）· **条** = %s去重%s"
+          % (tot[0], DOM_GLOBAL, "".join("（%s 钥匙）= %d" % kv for kv in byk)))
     print("         ★ 不是 %d：那是 **Σ%s去重**（同一句横跨两格各记 1）⇒ **只能说「处」**；"
           "条那一列必须走%s去重" % (tot[1], DOM_CELL, DOM_GLOBAL))
     if not have:
