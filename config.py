@@ -45,6 +45,10 @@ _FONTS = [
 # 正常字体三个码位都渲成 .notdef（同一个遮罩）；被映射的那个会不一样。
 # 取多数票：三个里有两个相同 → 那个就是 .notdef；三个互不相同 → **判不了**，不猜。
 _NOTDEF_CHARS = ("\ue000", "\ue001", "\uf8ff")
+# \u4ea4\u53c9\u6821\u9a8c\u7528\uff1aUnicode **\u6c38\u4e45\u672a\u5206\u914d**\u7684\u7801\u4f4d\uff08U+0378/0379/0380\uff0c\u4ece\u6765\u6ca1\u6d3e\u8fc7\u5b57\uff09\u3002
+# \u4e3a\u4ec0\u4e48\u4e0d\u80fd\u53ea\u9760\u79c1\u7528\u533a\uff1a\u79c1\u7528\u533a**\u5c31\u662f**\u7ed9\u4eba\u81ea\u7531\u6620\u5c04\u7684\uff08\u56fe\u6807\u5b57\u4f53\u5168\u9760\u5b83\uff09\uff0c\u4e09\u4e2a\u4e00\u8d77\u88ab\u6620\u5c04\u6210\u540c\u4e00\u4e2a
+# \u7a7a\u767d\u5b57\u5f62\u65f6\u591a\u6570\u7968"\u9f50"\u4e86\u3001\u5374\u6295\u51fa\u4e00\u4e2a\u6ca1\u6709\u58a8\u7684\u5047\u57fa\u51c6 \u2014\u2014 \u8be6\u89c1 `_notdef_mask` \u4e0e tools/verify_notdef.py\u3002
+_UNMAPPED_CHARS = ("\u0378", "\u0379", "\u0380")
 # 哨兵字取自卡片真的会画出来的字符。**口径和版本都得写全，因为这个数两者都随** —— 实测（2026-09-30，
 # `origin/main` = b0e1748；同一个扫描器 `tools/fontcheck.py` 的读法，只换过滤器和树）：
 #
@@ -97,15 +101,30 @@ def _notdef_mask(f):
 
     多数票：三个私用区码位里若有两个遮罩相同，那个就是 .notdef（另有一个被映射了）；
     三个互不相同 → 这支字体的私用区被映射得不只一个，挑不出基准 → 判不了。
+
+    ⚠️ 多数票只挡得住"其中一个被映射"。**三个一起被映射成同一个空白字形时票是齐的**，
+    而空白遮罩不是 .notdef —— 拿它当基准，所有真字形都"不等于 .notdef"，于是报"查过，一个都不缺"，
+    真缺的字（会画成方框的那些）一个都不报：**静默假绿，退出码也不会替你发现**（夹具
+    `tools/verify_notdef.py`，假字体就能跑，不需要字体文件）。
+    所以投出的基准要再过一道：与 `_UNMAPPED_CHARS`（**永久未分配** ⇒ 按定义就是真 .notdef）
+    对一遍；对不上（或基准没有墨）就改用那一支的遮罩 —— 它才是 .notdef。
     """
     masks = [bytes(f.getmask(c)) for c in _NOTDEF_CHARS]    # ImagingCore 没有 .tobytes()
     counts = {}
     for m in masks:
         counts[m] = counts.get(m, 0) + 1
+    base = None
     for m, n in counts.items():
         if n >= 2:
-            return m
-    return None
+            base = m
+            break
+    if base is None:
+        return None                       # 三个互不相同：判不了，不猜（契约不变）
+    refs = [bytes(f.getmask(c)) for c in _UNMAPPED_CHARS]
+    ref = refs[0] if all(m == refs[0] for m in refs) else None
+    if ref and ref != base:
+        return ref                        # 投出来的基准不是 .notdef；未分配码位那一支才是
+    return base
 
 
 def _missing(font_path, probe, size=16):
