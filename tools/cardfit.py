@@ -162,12 +162,10 @@ def _panel_of(x, ink_top):
     return best
 
 
-def check(mod, name):
-    RECORDS.clear(); PANELS.clear()
-    im = mod.build()
-    W, H = im.width, im.height
+def _violations(recs, W, H):
+    """判据：**一条都没动**，只是从 check() 里挪出来，好让注入跑的正文也过同一套。"""
     bad = []
-    for xy, text, font, anchor in RECORDS:
+    for xy, text, font, anchor in recs:
         if font is None or not str(text).strip():
             continue
         left, right = _extent(xy[0], text, font, anchor)
@@ -185,7 +183,71 @@ def check(mod, name):
         p = _panel_of(xy[0], ink_top)
         if p is not None and ink_bot > p[3] + PANEL_TOL:
             bad.append((ink_bot - p[3], "出面板", xy, text, ink_top, ink_bot))
-    return W, H, len(RECORDS), sorted(bad, reverse=True)
+    return bad
+
+
+def _fingerprint(recs):
+    """这一次到底画了哪些字（位置 + 内容）。字体对象不可哈希，不带。
+
+    只用来回答一个问题：**注入之后，画出来的东西变了吗？**
+    没变 ⇒ 那一支根本没走到 ⇒ "覆盖过了"这句话自己成了代理量。见 INJECT。
+    """
+    return tuple((xy, str(t)) for xy, t, _f, _a in recs)
+
+
+def check(mod, name):
+    RECORDS.clear(); PANELS.clear()
+    im = mod.build()
+    recs = list(RECORDS)
+    return (im.width, im.height, len(recs),
+            sorted(_violations(recs, im.width, im.height), reverse=True),
+            _fingerprint(recs))
+
+
+# ---- 失败分支注入 -----------------------------------------------------------
+# 为什么需要这一节：探针包在 `ImageDraw.text` 上 —— **谁画它看见谁**。真实数据下
+# `cards/model_dissent.py` 的 `cross_check` 返空清单，那条「× 两处实现分家 N 处：…」的正文
+# 就一次都画不出来，于是它一次都没被量过。实测那一支比成功支还宽 14px（1560.3 vs 1546.0），
+# 而且**宽度是 N 的函数、不是常数**：那串 `中枢1(卡=…/引擎=…)` 随分家条数变长，
+# n=1/2/3 一行装得下，n≥4 起破边距（实测表见 card-47bb914a-6c2）。
+#
+# 所以这一节**不是加判据**（判据一条没动），是**把失败分支真逼出来画一遍**，
+# 让现有判据自己开口。代价最小：一个桩，不碰判据。
+#
+# **每条注入都要自证**：注入后画出来的字和干净跑一模一样 ⇒ 报「注入未生效」并计入退出码。
+# 打歪了的桩比不打更危险 —— 它会让"这一支覆盖过了"变成新的代理量，而且长得跟真的一样。
+#
+# 注入**写在卡那边**（模块属性 `CARDFIT_FAILURES`），不写在这张表里：见 failure_modes()。
+
+
+def failure_modes(mod):
+    """卡**自己**声明的失败分支。本工具不认识任何一张卡的内脏。
+
+    约定：模块可选地定义
+
+        CARDFIT_FAILURES = [(模式名, 注入函数), …]
+        注入函数(mod) -> 还原函数；装完后必须真的改变画出来的字。
+
+    为什么把注入放在卡那边、不放在这张表里：支的名字叫 `cross_check`、叫 `MISMATCH`，
+    那是**卡的内部**。工具一旦知道某张卡的内脏，加一张卡就得改工具，而工具是大家共用的热文件。
+    谁拥有卡，谁拥有它的失败分支。
+
+    **没有这个属性的卡 = 没声明失败分支**，报告末尾会点名，别把「合计 0 处」读成"全卡都查过了"。
+    """
+    modes = getattr(mod, "CARDFIT_FAILURES", None) or []
+    for item in modes:
+        name, install = item
+        if not callable(install):
+            raise RuntimeError("%s.CARDFIT_FAILURES 里的 %r 不是可调用的注入函数" % (mod.__name__, name))
+    return list(modes)
+
+
+def _print_bad(bad, indent="    "):
+    for over, kind, xy, text, a, b in bad:
+        t = str(text).replace("\n", "⏎")
+        where = ("x=%-4d→%-6.0f" % (xy[0], b) if kind in ("越界", "破边距")
+                 else "y=%-5.0f→%-6.0f" % (a, b))
+        print("%s%-8s %+6.0fpx  %-14s %s" % (indent, kind, over, where, t[:70]))
 
 
 def main():
@@ -195,24 +257,50 @@ def main():
     from cards.build_all import CARDS
     extra = [("model_dissent", "M1 机会模型"), ("level_recursion", "M2 级别递归")]
     total = 0
+    injected = effective = dead = 0
+    uncovered = []
     for name, title in [(n, t) for n, t in CARDS] + extra:
         try:
             mod = importlib.import_module("cards." + name)
         except Exception as e:
             print("%-22s 跳过：%s: %s" % (name, type(e).__name__, e))
             continue
-        W, H, n, bad = check(mod, name)
+        W, H, n, bad, clean_fp = check(mod, name)
         total += len(bad)
-        head = "%-22s W=%-5d H=%-5d 文字 %3d 处  %s" % (
-            name, W, H, n, "OK" if not bad else "★ %d 处" % len(bad))
-        print(head)
-        for over, kind, xy, text, a, b in bad:
-            t = str(text).replace("\n", "⏎")
-            where = ("x=%-4d→%-6.0f" % (xy[0], b) if kind in ("越界", "破边距")
-                     else "y=%-5.0f→%-6.0f" % (a, b))
-            print("    %-8s %+6.0fpx  %-14s %s" % (kind, over, where, t[:70]))
+        print("%-22s W=%-5d H=%-5d 文字 %3d 处  %s" % (
+            name, W, H, n, "OK" if not bad else "★ %d 处" % len(bad)))
+        _print_bad(bad)
+        modes = failure_modes(mod)
+        if not modes:
+            uncovered.append(name)
+            continue
+        for mode, install in modes:
+            restore = install(mod)
+            try:
+                _W, _H, _n, bad2, fp = check(mod, name)
+            finally:
+                restore()
+            injected += 1
+            if fp == clean_fp:
+                # 桩没打进那一支 —— 这一支算**没测**，不算通过。计入退出码，但单列出来，
+                # 免得和"版式越界"混成一个数（两者根本不是一个病）。
+                dead += 1
+                print("  ├ %-20s ★ 注入未生效 —— 这一支没走到，**不算覆盖**" % mode)
+                continue
+            effective += 1
+            total += len(bad2)
+            print("  ├ %-20s 文字 %3d 处  %s" % (
+                mode, _n, "OK" if not bad2 else "★ %d 处" % len(bad2)))
+            _print_bad(bad2)
     print("\n合计 %d 处" % total)
-    return 1 if total else 0
+    if dead:
+        print("注入未生效 %d 支 —— 那几支**没测**，不是通过" % dead)
+    print("[分支覆盖] 注入 %d 支（%d 支确认改了画法）；另有 %d 张卡没声明注入"
+          % (injected, effective, len(uncovered)))
+    if uncovered:
+        print("           %s" % "、".join(uncovered))
+        print("           ↑ 这几张本次**只覆盖了成功路径**。合计 0 处 ≠ 全卡都查过了。")
+    return 1 if (total or dead) else 0
 
 
 if __name__ == "__main__":
