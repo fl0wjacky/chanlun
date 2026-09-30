@@ -210,6 +210,28 @@ count("breaks=[] 与整段口径不一致", 0 if standardize(zbars, breaks=[]) =
 _adj, _brk = preprocess(zbars, adjust="none", session=None)
 count("preprocess 非恒等（不变量 C1）", 0 if (_adj == zbars and _brk == []) else 1)
 
+# ---- 判据前提：下面那扇「字体覆盖」门自己的基准对不对 ----
+# 那扇门判「缺不缺字」靠 `config._notdef_mask` 投出的 .notdef 基准。基准错了它就是**假绿**：
+# 拿一个没有墨的空白遮罩当 .notdef，所有真字形都"不等于它" ⇒ 报「一个都不缺」。
+# 所以这一格既不是引擎不变量（不记进 FAIL）、也不是字体环境（不记进 FONT_GAPS）——
+# 它是**判据自己的前提**，给它自己的数：混进任何一个都说不清是谁的问题。
+# 位置也必须是这里 —— 跑在那扇门**前面**：先说清基准可不可信，那扇门的数才有得读。
+print("=" * 72)
+PREMISE = 0
+try:
+    from tools.verify_notdef import run as _notdef_selftest
+    _n_bad = _notdef_selftest(verbose=False)        # 通过的格不逐条打（一屏已经很长），不过的永远打
+    if _n_bad:
+        PREMISE = 1
+        print("[判据前提] config._notdef_mask 自测：%d 格不过 ← 下面那扇字体覆盖门的基准本身是错的" % _n_bad)
+        print("           那扇门会把真缺的字报成「一个都不缺」（静默假绿）。**先修基准，再读那扇门。**")
+    else:
+        print("[判据前提] config._notdef_mask 自测通过 ⇒ 下面那扇门拿的 .notdef 基准可信")
+except Exception as e:
+    PREMISE = -1
+    print("[判据前提] 跑不了：%s" % e)
+    print("           自测没跑成 = 那扇门的基准没人验过 ⇒ 按「查不出来不算通过」计。")
+
 # ---- 字体覆盖：上面每一条都默认「字画得出来」，这一步才验那个默认 ----
 # 缺字是**静默**失败：PIL 画成方框、不报错，然后上面照样报「全部通过」。所以它不计进
 # FAIL（FAIL 是引擎不变量的数目，两者含义不同，混成一个数就说不清是谁的问题），
@@ -250,10 +272,14 @@ if SKIP:
 if FONT_GAPS:
     print("字体覆盖:", "查不了（不算通过）" if FONT_GAPS < 0 else "%d 个字符画不出来" % FONT_GAPS,
           "→ 出图会静默出方框")
+if PREMISE:
+    print("判据前提:", "跑不了（不算通过）" if PREMISE < 0 else "config._notdef_mask 自测不过",
+          "→ 上面那扇字体覆盖门的基准本身是错的，那扇门的数不可读（先修基准）")
 # 退出码只说"有东西不对"，不说"是谁不对"：三个数混在一个非 0 里，读的人猜不出来。
 # 这是 @iris-64a1 指出的洞 —— 在字体门本来就会红的机器上，干净跑和变异跑都是 exit=1，
 # 光看退出码**隔离不出** SKIP 有没有生效。打这一行：每个非 0 退出自己说出原因。
-print("退出原因: 总违规=%d  未执行=%d  字体缺字=%s  ⇒ exit=%d"
-      % (FAIL, SKIP, "查不了" if FONT_GAPS < 0 else FONT_GAPS,
-         1 if (FAIL or FONT_GAPS or SKIP) else 0))
-sys.exit(1 if (FAIL or FONT_GAPS or SKIP) else 0)
+print("退出原因: 总违规=%d  未执行=%d  判据前提=%s  字体缺字=%s  ⇒ exit=%d"
+      % (FAIL, SKIP, "跑不了" if PREMISE < 0 else ("不过" if PREMISE else "OK"),
+         "查不了" if FONT_GAPS < 0 else FONT_GAPS,
+         1 if (FAIL or FONT_GAPS or SKIP or PREMISE) else 0))
+sys.exit(1 if (FAIL or FONT_GAPS or SKIP or PREMISE) else 0)
