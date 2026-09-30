@@ -17,7 +17,7 @@ import config
 
 BOX = b"\x01" * 432          # 真 .notdef：一个方框，有墨
 BLANK = b""                  # 被映射到的空白字形：**没有墨**
-INK = b"\x02" * 400          # 一个真字形
+B_MASK = b"\x03" * 270       # 一个真字形（'B'）：**有墨**，长度和 .notdef 不同
 
 
 class FakeFont:
@@ -43,6 +43,16 @@ CASES = [
      FakeFont({c: BLANK for c in P}), BOX),
     ("私用区三个互不相同（旧契约：判不了，不猜）",
      FakeFont({P[0]: b"\xaa", P[1]: b"\xbb", P[2]: b"\xcc"}), None),
+
+    # --- 边界表（@bram-9d29 在 card-8ac04844-0ca 上列的五行，逐行收进夹具）---
+    # 为什么把"两个→真字形"也收进来：基准**有墨但仍是错**的那一行，"遮罩长度为 0 ⇒ 判不了"
+    # 那类改法**不响**（长度 270 不是 0），所以只测长度等于只测一半。见卡上对照表。
+    ("边界① 一个私用区码位 → 空白字形",
+     FakeFont({P[0]: BLANK}), BOX),
+    ("边界② 两个 → 同一个空白字形",
+     FakeFont({P[0]: BLANK, P[1]: BLANK}), BOX),
+    ("边界④ 两个 → 同一个**真字形** 'B'（基准有墨、但是错的）",
+     FakeFont({P[0]: B_MASK, P[1]: B_MASK}), BOX),
 ]
 
 bad = 0
