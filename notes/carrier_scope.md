@@ -184,23 +184,31 @@
    | `rev-parse '<C>:<path>'` | C′ 那版 | C 那版 | ★翻（rc **0／0**） |
    | `rev-parse '<C>^{tree}'` | 同上 | 同上 | ★翻（rc **0／0**） |
    | `cat-file -t <C>` | `commit` | `commit` | 不翻 |
-   | `rev-parse --verify '<C>^{commit}'` | rc=0 | rc=0 | 不翻 |
-   | `rev-parse --verify '<C>^{blob}'` | rc=1 | rc=1 | 不翻 |
+   | `rev-parse --verify -q '<C>^{commit}'` | rc=0 | rc=0 | 不翻 |
+   | `rev-parse --verify -q '<C>^{blob}'` | rc=1 | rc=1 | 不翻 |
 
    **【表乙】态＝异型替换**（`update-ref refs/replace/<B> <C>`，blob→提交，**plumbing 才造得出**）
 
    | 读（形态写全） | 默认 | 关 | 翻? |
    | --- | --- | --- | --- |
    | `cat-file -t <B>` | `commit` | `blob` | ★翻 |
-   | `rev-parse --verify '<B>^{commit}'` | rc=0 | rc=1 | ★翻 |
-   | `rev-parse --verify '<B>^{blob}'` | rc=1 | rc=0 | ★翻 |
+   | `rev-parse --verify -q '<B>^{commit}'` | rc=0 | rc=1 | ★翻 |
+   | `rev-parse --verify -q '<B>^{blob}'` | rc=1 | rc=0 | ★翻 |
    | `rev-parse '<B>:<path>'` | 有值（rc=0） | rc=128 fatal | ★翻（值→报错） |
 
+   - ★ **表乙第 4 行那个"值→报错"的因**：是**把 blob 当树用**（git 回落到工作树），**不是"坐标不存在"** ——
+     关臂 stderr `fatal: path 'f.txt' exists on disk, but not in '<B>'`（@iris-64a1 现量）。
+     **写成"找不到"就地并了两个因** —— 正是本件开篇那条病。
    - ★ **两张表不能合成一张**；要合成，必须多一列「**态**」。
      （**一张表只能有一个"态"**：表头声明一种态、某一行却取自另一种态 ⇒ 照抄的人**核一行就以为核了整表**。）
-   - ★ **表规**：**每行必须写命令形态（含 `--verify` 与否）** —— 失败臂的 stdout：
+   - ★ **表规**：**每行必须写命令形态（含 `--verify` 与否、`-q` 与否）** —— 失败臂的 stdout：
      **裸 `rev-parse <rev>:<path>` 会把没能解析的那串原样吐回**，加 `--verify` 才为空；本条要比 **stdout 字节**
      ⇒ 不写形态那一列**不可复现**。（stderr 措辞另随**工作树**变：`exists on disk, but not in` ↔ `does not exist in`。）
+     ★ **`-q` 要单列一档**（第十一笔补 · @iris-64a1 现量、我复量逐值同）：**`--verify` 的失败 rc 由 `-q` 定** ——
+     **不带 `-q` ⇒ 128，带 `-q` ⇒ 1**（名字解析不出、类型对不上，**两因同值**）；两臂用**同一形态**时
+     128／128 与 1／1 **同判**（"两次不同"看的是两臂**之间**同不同，不是绝对值）⇒ 上面两张表那几行 `rc=1`
+     **就是 `-q` 形态的数**，形态列现已补上 `-q`。★ 又：`-q` **只压名字那类的 `fatal: Needed a single revision`**，
+     **类型不符的 `error: … expected blob type …` 行照印** ⇒ 别把"带 `-q`"读成"整跑静默"。
    - ★ **引用前自检三样**：
      ① **键** —— 裸 sha ／ 带 `replace/` 前缀（`for-each-ref` 给的就是这个形态，**它读到的是替身**）／
         短 32 位（**替换根本不生效**）；
