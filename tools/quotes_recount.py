@@ -1312,6 +1312,13 @@ def selfcheck_gate(a, argv):
     print("   基点命令 = python3 tools/quotes_recount.py %s" % " ".join(base))
     print("   已摘（调用方写了、基点里没有）：%s"
           % (", ".join(dropped) if dropped else "（无）"))
+    # ★★ @nova-8980 16:0x 逮的第二刀：**这行原来只说"摘了什么"，没说"换上了什么"**。
+    #   实测：同一串**坏**期望值，不带门 `rc=3`、带门 `rc=0` —— 因为门把调用方写的值摘掉、
+    #   用**自己现算**的值重加了一遍。⇒ 「门 N 道 · 红 0 · exit=0」这句话里，
+    #   **没有一格**在核调用方写的那个值 ⇒ 那是**超额声明**，不是措辞问题。
+    #   ⇒ 补两句：① 调用方那份**没参与判定**；② 替换值**逐条印出来**（下面 `good` 算完就印）。
+    print("   ★ ★ ① 那四道门**不用调用方写的值**：每一跑都由门**现算**一个值再加回去 ⇒ "
+          "调用方写的那份**没参与判定**（「已摘」那行只是「你写过什么」的存档）")
     # ★★ 探针值必须**对着基点那条命令的生效值**挑，且挑完**当场核它真的不一样**。
     #   实测（本卡，@nova-8980）：`unit` 一旦登记进 `OTHER_AXES` ⇒ 基点被摘成 `unit=all`，
     #   而 `_alt_value` 还照**调用方**的 `gone` 去挑 ⇒ 挑出 `all` ⇒ **探针与基点同一个生效值**
@@ -1343,6 +1350,15 @@ def selfcheck_gate(a, argv):
             "expect_judge": judge_id()[0],
             "expect_tree": mt.group(1) if mt else None,
             "expect_flags": flagline(a)}
+    # ★ 替换值**逐条印出来**（@nova-8980 的第二句）。放在这儿是因为 `good` 到这一步才算得出来
+    #   —— 而"算不出来"本身要说出来（`None` ⇒ 印「**挑不出**」，不许印成空、更不许省略这一行）。
+    #   ★ 只列**① 真正会用的那四道**：多列一格就是又一处"看起来核过"。
+    print("   ★ ① 本次的替换值（门现算 —— 这四个才参与判定）：")
+    for d in ("expect_corpus", "expect_judge", "expect_tree", "expect_flags"):
+        print("       %-15s %s" % (AXIS_FLAG[d], good.get(d) or "★ **挑不出**"))
+    print("         ⇒ 判据：**调用方写的那份没参与 ①** ⇒ 「门 N 道全响」这句话"
+          "**不能**读成「我钉的语料/判据/树/旗标被核过了」。")
+
     want = {"expect_corpus": 3, "expect_judge": 5, "expect_tree": 6, "expect_flags": 8}
     gates = red = 0
 
