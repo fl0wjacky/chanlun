@@ -165,7 +165,9 @@ def draw_evidence(d):
     rows, Z = gap_rows_and_z()
     y = 1414
     d.rounded_rectangle([50, y, W - 50, y + 730], 22, fill=CARD, outline=LINE, width=2)
-    d.text((86, y + 24), "本引擎在这段真实数据上的判定明细（下附两处实现的对账，仅查漂移）", font=f_s, fill=AM)
+    # 标题去掉「用真实数据验证」：下面那个✓不可能失败，说"验证"是给它安一个挣不到的出身。
+    # 措辞取 Iris 那条分支的「按本引擎口径统计」，并明说对账只查漂移（详见 cross_check）。
+    d.text((86, y + 24), "按本引擎口径统计：4 小时类中枢，每次向上离开后的回试（下附两处实现对账，仅查漂移）", font=f_s, fill=AM)
     hd = ["日期（UTC）", "中枢", "离开冲高", "回试低点", "中枢区间 [ZD, ZG]", "判定"]
     xs = [86, 280, 400, 580, 760, 1080]
     yy = y + 96
