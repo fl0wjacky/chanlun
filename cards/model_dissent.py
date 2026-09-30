@@ -218,11 +218,20 @@ def draw_evidence(d):
     # **不改口径、不砍字**：拆成两行，第一行仍是"判没判"，第二行是那句免责 ——
     # 免责是这句话的一半内容，砍掉它比让它出画布更糟。两行各 778 / 798px，都远在 1258px 内。
     if MISMATCH:
+        # **列清单只列前 2 条，条数照旧全报**：这条正文的宽度是分家条数的函数，不是常数。
+        # 实测（`tools/cardfit.py` 的注入，右边界 vs N，Droid 97320619 / Noto 2c76254f）：
+        #   N=1 632.7 / 642.4   N=2 959.8 / 971.9   N=3 1262.8 / 1277.5（贴着 1344）
+        #   N=4 1589.9 / 1607.1 **越界**   N=8 3032.8 / 3061.0 越界
+        # 真实数据 8 行、全部分家就是 N=8 —— 那是够得着的，不是假想。贴边不算安全：
+        # N=3 只剩 81px（≈2.7 个全角字），换稍宽的字体就翻。
+        # 砍掉的只是**卡面上的明细**，`main()` 仍然把完整清单打到 stdout 并把退出码置 1 ⇒ 信息没丢。
+        shown = MISMATCH[:2]
         d.text((86, yy0 + 34),
-               "　 × 两处实现分家 %d 处：%s"
+               "　 × 两处实现分家 %d 处：%s%s"
                % (len(MISMATCH),
                   "、".join("中枢%d(卡=%s/引擎=%s)" % (n, "三买" if cb else "非三买", t)
-                            for n, cb, t, _ in MISMATCH)),
+                            for n, cb, t, _ in shown),
+                  "…" if len(MISMATCH) > len(shown) else ""),
                font=f_n, fill=RD)
         d.text((86, yy0 + 66), "　 —— 本卡与 core/center.py 的判定已经不一致，先查哪个错。",
                font=f_n, fill=RD)
@@ -253,6 +262,47 @@ def main():
         return 1
     print("model ok，两处实现未分家")
     return 0
+
+
+# ---- 交给 tools/cardfit.py 的失败分支注入 ------------------------------------
+# 这张卡有一条**真实数据下永远走不到**的正文：`cross_check` 返空清单 ⇒ 那条
+# 「× 两处实现分家 N 处：…」一次都画不出来，版式体检（tools/cardfit.py）也就一次都没量过它。
+# 实测那一支比成功支**还宽 14px**（右边界 1646.3 vs 1632.0，画布只有 1400），而且**宽度是 N 的函数、
+# 不是常数**：那串 `中枢1(卡=…/引擎=…)` 随分家条数线性变长（n=1/2/3 一行装得下，n≥4 起破边距）。
+#
+# 所以这里声明**怎么把那一支逼出来**，让 cardfit 现有的判据自己开口（判据一条没改）。
+# 契约：`(模式名, 注入函数)`，注入函数(mod) -> 还原函数；装完后**必须真的改变画出来的字**，
+# 没改变的话 cardfit 会报「注入未生效」并计进退出码 —— **打歪的桩比不打更危险**，
+# 它会让"这一支覆盖过了"变成新的代理量，而且长得跟真的一样。
+# 注入写在卡这边而不是 cardfit 里：`cross_check` / `MISMATCH` 是**这张卡的内脏**，
+# 工具一旦认识某张卡的内脏，加一张卡就得改工具，而工具是大家共用的热文件。
+
+
+def _cardfit_inject_mismatch(n):
+    """把 `cross_check` 打桩成「报 n 处分家」。n 取值覆盖三种形状：
+    装得下（1/2/3）、刚好过半（4）、**真实上界 8**（= `len(rows)`，全部分家）。
+
+    **只改"有几条分家"，不改"它们说什么"** —— 那条正文的宽度由 `z["term"]` 决定，
+    而这里的 term 从**真实 rows** 里取（有 `'三买'` 也有 `'Z 段向上离开'`，差 5 个字 ≈ 150px）。
+    自己编一串假 term 去量，量的是我编的那串，不是这一支 —— 又一个代理量。"""
+    def install(mod):
+        orig = mod.cross_check
+
+        def restore():
+            mod.cross_check = orig
+            mod.MISMATCH[:] = []      # build() 里是 `MISMATCH[:] = …` 原地改，不还原就留下一条脏清单
+
+        def fake(rows, Z):
+            # 形状照抄真实现：draw_evidence 解包 (n, cb, t, _)，四元组少一个当场 TypeError
+            return 0, [(rows[i % len(rows)][1], i % 2 == 0,
+                        rows[i % len(rows)][2]["term"], "三买") for i in range(n)]
+
+        mod.cross_check = fake
+        return restore
+    return install
+
+
+CARDFIT_FAILURES = [("分家 %d 处" % n, _cardfit_inject_mismatch(n)) for n in (1, 2, 3, 4, 8)]
 
 
 if __name__ == "__main__":
