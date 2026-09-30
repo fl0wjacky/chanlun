@@ -68,8 +68,12 @@
                          ★ 它的词汇表是 `COUNT_AXES` 那一份声明 —— 不是手写的一串格子。
                            （@atlas-791f 13:10 上秤量出来的：手写六格在加了第七个影响数的旗标后
                            **数动而印的那行不动** ⇒ 两个都漏的人串相等 ⇒ 永远绿的门。）
-                         ★ 它**不并进**「验收可用」的四条件（与上面三条故意不对称）：
-                           那三条治"看不见"，旗标这维**行内自带披露**。理由与代价写在 main 里。
+                         ★ 它**进**「验收可用」这个条件（@nova-8980 13:15 的裁决；我原来那处
+                           "故意不对称"被打回）：旗标不钉 ⇒ 复现的是**某个**数、不是那张卡上的数 ——
+                           而立卡理由就是"光旗标就能挪数"。缺它 ⇒ 印 **`验收可用=否（旗标未钉）`**。
+                         ★ 三态，不是两态（@iris-64a1 13:1x）：**"没给"和"给了个空的"不是一件事**。
+                           `--expect-flags "$FLAGS"`（变量没展开）⇒ 值**到了器手里** ⇒ 形状那格红（exit=7）；
+                           只有真"没给"才是「旗标未钉」。四个 `--expect-*` 一起改（不挑着改）。
     --unit    all|gone   ★ 单位（分母的定义）：
                          all  = **每一个**配对都进分母
                          gone = 只把「在 108 课原文里**找不到**」的配对算进去
@@ -118,6 +122,11 @@
      ⇒ 器在**量之前**就退了 ⇒ 多半是**器拿错版本**（旧树没有这两个新旗标），
        **不是语料没了** —— 屏幕上那行 `unrecognized arguments: --xxx` 才是租客报的名字，
        照着本表去查语料就查错门了。（@atlas-791f 12:43 量到、@bram-9d29 复现后补登记。）
+     ★ 同一个 2 的**第三个租客**（@iris-64a1 13:1x 量到）：**值以 `-` 开头 ＋ 空格形式** ——
+       `--expect-flags "--min-len"` ⇒ `error: argument --expect-flags: expected one argument`。
+       argparse 把那个值当成了**下一个选项**吃掉 ⇒ **器连形状都看不到**（换 `=` 形式
+       `--expect-flags="--min-len"` 就交给器 ⇒ 走 **exit=7**）。⇒ 判据：**一道"值形状"的门，
+       只能管真的到达函数的那些值** —— 通道可能在门前面就把值吃了，而那声错听着像"你的参数写错了"。
   3  语料指纹对不上（--expect-corpus）—— 换个 `QL_CORPUS` 指进来就会走这条
   4  没点对象（`--commit`/`--tree` 一个都没写）—— 见下面 `--commit` 那格
   5  **判据**指纹对不上（--expect-judge）—— 3 与 5 都"拒绝出数"，但**原因不同**：
@@ -135,20 +144,26 @@
      租客是**维护者**，不是调用方，所以不许与 4/7 共用（那两个是调用方的错）。
      ★ 它拦在**最前面**（连"没点对象"都排在它后面）：轴单不全是**这一行印出来的东西不可信**，
        那时候再论对象写没写没有意义。★ 它也**只**管"漏登记"这一半 —— 见 `axis_audit`
+     ★ 故意红（实测两次）：① 轴单里删掉 `min_len` ⇒ `rc=9`，印出 `有旗标没登记：min_len`；
+       ② 加一个 `--bump` 且两个单子都不写 ⇒ 同样 `rc=9`。
+       ★ 而**登记错**（真影响数的旗标被登记进 `OTHER_AXES`）它红不了：自查绿、数 331/302→338/309、
+       印的那行不动、`--expect-flags` 照旧 rc=0 —— 那一半靠复核，别把边界当覆盖（见 `axis_audit`）。
 
 ★★ 验收判据：**`grep -q '验收可用=是'`**（输出里那一行单值）。三个条件**必须写成"印了且 = 是"**：
 
 ```
 验收可用=是    （树=… · 语料 sha256:… 已核 · 判据 sha256:… 已核 · 生效旗标 --min-len 1 --face whole …（已核 --expect-flags））
-验收可用=否    ✗ 红（下面会说出少了哪一条：对象不是 sha ／ 语料没核 ／ 判据没核）
+验收可用=否    ✗ 红（**带名字**：`（旗标未钉）`／`（对象不是 sha · 语料没核 · 判据没核 · 树没核 · 旗标未钉）`，
+              下面还会逐条说出"少了哪一条、为什么"）
 （没有这一行）      ✗ 红  ← **旧版器就是这一格**：判据若写成"没有 否就算过"，它静默通过
 ```
   ⇒ ★ 那一行现在还带**生效旗标**（`flagline()`）：语料/判据/树都钉了，**旗标这一维原来一个都没钉**
     —— 而本卡自己的验收命令要 `--min-len 1`，默认却是 6：漏写一个旗标 ⇒ 另一个数，屏幕上与
     "照抄的那一跑"逐字节同形。印的必须是**解析后的生效值**，不是用户写的拼法（也不是 `sys.argv`）。
-  ⇒ ★ **印出来只是半扇门**：看得见 ≠ 拦得住。另外半扇是 `--expect-flags`（exit=8）——
-    一条命令想被**机器**验，就得把这一串也写进去。这一格与上面四条的关系（为什么它**不**并进
-    「验收可用」的四条件）写在 main 里那一段，别只读这里。
+  ⇒ ★ **印出来只是半扇门**：看得见 ≠ 拦得住。另外半扇是 `--expect-flags`（exit=8），
+    而它**进**「验收可用」的条件（缺它就印 `否（旗标未钉）`，@nova-8980 13:15 裁决）。
+    ★ 代价（说清，别让它是暗雷）：**所有已经贴出去的老命令都会当场翻「否」** ——
+    那声红是准确的（"你引的是新版器、而没钉旗标"），单值 ＋ 说得出的原因，不用重写老卡。
   ⇒ 这门装的是**这个数是什么**，不是"参数写没写"：`--commit .` 是正当用法（exit 照常 0），
     但它不是任何一个对象 ⇒ 换个拼法就能绕过"不写对象"那道 exit=4 的门（@iris-64a1 量到的洞）。
   ⇒ 也**不许借 `★` 当判据**：验收命令**自己**就印 ★（`★ 这一支不判对错…`，在第 15 行）
@@ -487,24 +502,24 @@ def main():
     #   原来只有 `print(fingerprint(docs))`，全支没有一处比对 ⇒ 换个 QL_CORPUS 指进来，
     #   这支器**照样跑、照样印一个 sha256、照样出数**，只有人眼去比才发现。
     #   ⇒ 有门才叫验过：对不上 exit=3（2 已经给了"语料不在"）。
-    ap.add_argument("--expect-corpus", default="", metavar="<sha256前16位>",
+    ap.add_argument("--expect-corpus", default=None, metavar="<sha256前16位>",
                     help="语料指纹对不上就 exit=3。不给 ⇒ 那行会自报「★ 没核」。")
     # ★ 第二个洞（@nova-8980 12:4x 量到、@atlas-791f 12:5x 独立变异复现）：
     #   门核的是「对象 + 语料」，可这支器的数**由三个输入决定** —— 判据是第三个。
     #   ⇒ 照 --expect-corpus 那把尺再钉一次（**不另发明概念**）：同一个模样、同一个出口形态。
-    ap.add_argument("--expect-judge", default="", metavar="<sha256前16位>",
+    ap.add_argument("--expect-judge", default=None, metavar="<sha256前16位>",
                     help="判据 verify_quotes.py 的指纹对不上就 exit=5。"
                          "不给 ⇒ 那行会自报「★ 没核」。")
     # ★ 第三个洞（@nova-8980 12:5x）：`git tag 05f3e24 335e3a3` ⇒ 拼法不变、对象换了、门照印「是」。
     #   ⇒ 前三道门都钉在「你写了什么」上，这一道钉在「你指的是哪棵树」上。
-    ap.add_argument("--expect-tree", default="", metavar="<40位 tree sha>",
+    ap.add_argument("--expect-tree", default=None, metavar="<40位 tree sha>",
                     help="对象解析出来的树 sha 对不上就 exit=6。"
                          "不给 ⇒ 判据那格会说出「树没核」。")
     # ★ 第四个洞（@nova-8980 那句"引它必须连剥法一起引"的延长线；@atlas-791f 13:10 指出：
     #   这一格**必须先修轴单**，否则它是**一扇永远绿的门**——两个人都漏了同一个旗标，
     #   串比出来相等）。⇒ 上面 `COUNT_AXES` 先落地，这里才接线。
     #   `数 = f(对象, 语料, 判据, ★旗标)` —— 前三个各有一道门，第四个原来一个都没有。
-    ap.add_argument("--expect-flags", default="", metavar="'<--名 值 …>'",
+    ap.add_argument("--expect-flags", default=None, metavar="'<--名 值 …>'",
                     help="生效旗标串（解析后的值）逐字对不上就 exit=8。"
                          "不给 ⇒ 那一格自报「★ 没核」。★ 它含空格，**要用引号**。")
     a = ap.parse_args()
@@ -535,10 +550,16 @@ def main():
     # ★ **别让新的门复刻旧病**（@nova-8980 12:5x 的警告）：三个 `--expect-*` 都是"我手打一串数"，
     #   打歪一位就**永远比不上** —— 而"常数写坏了"和"对象真的不对"会长成一个样（三态共用一个词，
     #   今天栽过好几回的那格）。⇒ 先验**形状**，说清是哪一种，再谈比不比得上。
+    # ★ 三态，不是两态（@iris-64a1 13:1x 量到的第二个入口，比 rc=2 那格更重）：
+    #   `--expect-flags "$FLAGS"`（**变量没展开**，最常见的真实写法）⇒ 值**到了器手里**，
+    #   而 `if a.expect_flags:` 把它当成"没给" ⇒ 照旧出数、照旧印「是」，那格只写「★ 没核」。
+    #   ⇒ `flags_shape_bad("")` 那段防守**永不执行**（死代码 = 没人负责的租客）。
+    #   这与 `--commit` 那格（"抄错也出数"）**逐字同形，换了根轴**。
+    #   ⇒ 判据：**"没给"和"给了个空的"不是一件事**，四个常数一起改成三态（不挑着改）。
     for flag, val, n, name in (("--expect-corpus", a.expect_corpus, 16, "sha256 前16位"),
                                ("--expect-judge", a.expect_judge, 16, "sha256 前16位"),
                                ("--expect-tree", a.expect_tree, 40, "40位 tree sha")):
-        if val and not re.fullmatch(r"[0-9a-f]{%d}" % n, val):
+        if val is not None and not re.fullmatch(r"[0-9a-f]{%d}" % n, val):
             print("★ %s 给的**不是一个%s**（你给的是 %r，%d 个字符）⇒ **器还没开始量**（exit=7）。"
                   % (flag, name, val, len(val)))
             print("  ★ 这不是「对不上」，是**参数写坏了**：两件事共用一句'红'，就分不出是哪个了。")
@@ -550,7 +571,7 @@ def main():
             return 7
     # ★ `--expect-flags` 走**同一条形状优先**的路（理由与上面三个常数完全相同）：
     #   "常数打歪了"和"真的对不上"不许共用一句红。形状 = 成对的 `--名 值`。
-    if a.expect_flags:
+    if a.expect_flags is not None:
         bad = flags_shape_bad(a.expect_flags)
         if bad:
             print("★ --expect-flags 给的**不是一个旗标串**（%s）⇒ **器还没开始量**（exit=7）。" % bad)
@@ -588,7 +609,7 @@ def main():
         #   解析出来的却是另一棵树，而门照印「是」。⇒ 名字是**给人看的**，树是**给判据用的**。
         m = re.search(r"→ tree ([0-9a-f]{40})", obj_text)
         got_tree = m.group(1) if m else ""
-        if a.expect_tree and got_tree != a.expect_tree:
+        if a.expect_tree is not None and got_tree != a.expect_tree:
             print("★ 树对不上 ⇒ **拒绝出数**（exit=6）。名字一样**不等于**对象一样：")
             print("  期望 --expect-tree %s" % a.expect_tree)
             print("  实际（对象自己说的）  %s" % (got_tree or "没有树（就地跑）"))
@@ -596,7 +617,7 @@ def main():
                   " 45056e42，数从 331/302 变成 400/360 —— 上一版门在这跑里印「是」。")
             return 6
         fp, fbytes = V.fingerprint(docs)
-        if a.expect_corpus and fp != a.expect_corpus:
+        if a.expect_corpus is not None and fp != a.expect_corpus:
             print("★ 语料指纹对不上 ⇒ **拒绝出数**（exit=3）。这一格是门，不是装饰：")
             print("  期望 --expect-corpus %s" % a.expect_corpus)
             print("  实际（%d 字节语料）      %s" % (fbytes, fp))
@@ -610,7 +631,7 @@ def main():
         #   这行**无条件印**（@nova-8980 12:5x 的 ①）："没核"和"核过"必须**分开印**，
         #   否则又回到"看起来验过"那一格 —— 和语料那行同一个模样。
         jsha, jblob, jpath = judge_id()
-        if a.expect_judge and jsha != a.expect_judge:
+        if a.expect_judge is not None and jsha != a.expect_judge:
             print("★ 判据指纹对不上 ⇒ **拒绝出数**（exit=5）。门原来只核两个输入，可"
                   "**读数由三个决定**：")
             print("  期望 --expect-judge %s" % a.expect_judge)
@@ -638,43 +659,60 @@ def main():
         #      **借别人也在用的字符当接口，正是这仓杀掉过的病。**
         #   ⇒ 一行单值：`验收可用=是` / `验收可用=否`。检查方：`grep -q '验收可用=是'`。
         #      它**能失败**：少给一个 --expect-corpus 就会翻成 否（下面的 else 会说出少了哪一条）。
-        corpus_ok = bool(a.expect_corpus)   # 对不上在前面已 exit=3，走到这儿就是核过了
-        judge_ok = bool(a.expect_judge)     # 对不上在前面已 exit=5，走到这儿就是核过了
-        tree_ok = bool(a.expect_tree)       # 对不上在前面已 exit=6，走到这儿就是核过了
-        flags_ok = bool(a.expect_flags)     # 对不上在前面已 exit=8，走到这儿就是核过了
-        # ★ `--expect-flags` **不**并进下面这个条件 —— 与上面三条**故意不对称**，
-        #   这里是全卡最该被挑的一格，把理由与代价写下来：
-        #   · 那三条治的是「**看不见**」：语料/判据/对象被换掉，**印出来的那行自己不会变**
-        #     （换个 QL_CORPUS、换旧判据、`git tag` 挪对象 ⇒ 那一行照样一个 sha），
-        #     只有人眼去比一串十六进制才发现 ⇒ **没核 = 这张表不可用**。
-        #   · 旗标这一维**行内自带披露**：这一行印的就是解析后的生效值，漏写/打歪都**写在同一行上**
-        #     ⇒ 没核 = "没人替机器看着"，≠ "读者看不出"。两件事不该共用一句"否"。
-        #   ★ 代价说清：若把它并进条件，**每一条已经贴出去的命令**（`card-082d9aaa-cbb` 的验收行、
-        #     `card-99f0da5a-6b7` 的 Done 证据）都会当场翻成「否」—— 而那两张卡不归我一个人。
-        #   ⇒ 一句就能翻面（`... and flags_ok`）；要不要翻，交给小栋与复核的人拍，我不私自替别人的卡改门。
+        # ★ 三态（`is not None`）：**"没给"和"给了个空的"不是一件事**（@iris-64a1 13:1x 量的第二个
+        #   入口）—— `--expect-flags "$FLAGS"`（变量没展开）值**到了器手里**，被 `if a.expect_flags:`
+        #   当成"没给" ⇒ 照旧出数。给了空的现在走形状那格（exit=7），走不到这儿。
+        corpus_ok = a.expect_corpus is not None   # 对不上在前面已 exit=3，走到这儿就是核过了
+        judge_ok = a.expect_judge is not None     # 对不上在前面已 exit=5，走到这儿就是核过了
+        tree_ok = a.expect_tree is not None       # 对不上在前面已 exit=6，走到这儿就是核过了
+        flags_ok = a.expect_flags is not None     # 对不上在前面已 exit=8，走到这儿就是核过了
+        # ★★ @nova-8980 13:15 裁决：`--expect-flags` **并进**这个条件（我原来那处"故意不对称"被打回）。
+        #   她的两条理由，都写在下面（我照收，别再"行内自带披露"那套）：
+        #   ① 「是」的语义 = **这一跑可以当验收读数引用**。旗标不钉 ⇒ 它复现的是**某个**数、
+        #      不是那张卡上写的那个数 —— 本卡的立卡理由就是这条：同一句"全默认"在这支器的
+        #      8 个历史版本上给出**三个数**（366/334 · 356/325 · 347/316），**光旗标就能挪数**。
+        #   ② **一个单值的含义，不许取决于"某个可选参数给没给"** —— 否则「是」有两种读法，
+        #      正是今晚在治的病（同一句担保，作用域比它钉住的事实大）。
+        #   ★ 顺带把立卡那件事接上了：那次事故**没有加旗标，只翻了 `--v1ref` 的默认值**。
+        #     `8` 号门核的是**生效值**，默认值就在那串里 ⇒ 默认一翻，同一条命令的期望串立刻对不上。
+        #     ★ 但**只在"命令没写那个旗标"时**（@nova-8980 13:1x 的边界，我签）：命令把
+        #     `--v1ref keep` 写全了，默认翻了数也不变、**也不该红** —— 那不是漏洞是正确，
+        #     可两次"不红"长得一模一样（一次是没抓到、一次是本该不红）⇒ 写清、并成对地量（见卡）。
+        tags, why = [], []
+        if not obj_is_obj:
+            tags.append("对象不是 sha")
+            why.append("对象不是任何一个 sha（就地扫工作目录 ⇒ 这个数绑的是"
+                       "**你脚下那份树的快照**，换个人、换个脏法就换个数）")
+        if not corpus_ok:
+            tags.append("语料没核")
+            why.append("没给 --expect-corpus（语料只是印出来的，**没核过**）")
+        if not judge_ok:
+            tags.append("判据没核")
+            why.append("没给 --expect-judge（**判据**只是印出来的，没核过 —— "
+                       "而判据一换数就变，门原来在这两跑里都照印「是」）")
+        if not tree_ok:
+            tags.append("树没核")
+            why.append("没给 --expect-tree（**对象名**只是拼法，没核过它指的是哪棵树 —— "
+                       "`git tag 05f3e24 <别的提交>` 之后，拼法一模一样、数是另一棵树的）")
+        if not flags_ok:
+            tags.append("旗标未钉")
+            why.append("没给 --expect-flags（**旗标/默认值**只是印出来的，没核过 —— "
+                       "它就是这个第四个自变量：同一句「全默认」在 8 个版本上给出三个数，"
+                       "差的是 `--v1ref` 的默认翻过一面）")
         flagseg = "生效旗标 %s（%s）" % (
             flagline(a),
             "已核 --expect-flags" if flags_ok else "★ 没核 --expect-flags")
-        if obj_is_obj and corpus_ok and judge_ok and tree_ok:
+        if not tags:
             print("验收可用=是    （树=%s · 语料 sha256:%s 已核 · 判据 sha256:%s 已核 · %s）"
                   % (got_tree, fp, jsha, flagseg))
         else:
-            why = []
-            if not obj_is_obj:
-                why.append("对象不是任何一个 sha（就地扫工作目录 ⇒ 这个数绑的是"
-                           "**你脚下那份树的快照**，换个人、换个脏法就换个数）")
-            if not corpus_ok:
-                why.append("没给 --expect-corpus（语料只是印出来的，**没核过**）")
-            if not judge_ok:
-                why.append("没给 --expect-judge（**判据**只是印出来的，没核过 —— "
-                           "而判据一换数就变，门原来在这两跑里都照印「是」）")
-            if not tree_ok:
-                why.append("没给 --expect-tree（**对象名**只是拼法，没核过它指的是哪棵树 —— "
-                           "`git tag 05f3e24 <别的提交>` 之后，拼法一模一样、数是另一棵树的）")
+            # ★ 单值那一行现在**带名字**（`验收可用=否（旗标未钉）`）：@nova-8980 要的退路 ——
+            #   老命令跑新器会变红，但那声红是**准确的**且**说得出原因**，不用重写任何老卡。
             print("验收可用=否    （%s）—— 不是「跑不动」（这跑是正当用法、"
-                  "exit 照常），是**这张表不能当验收读数**：" % flagseg)
+                  "exit 照常），是**这张表不能当验收读数**：" % " · ".join(tags))
             for w in why:
                 print("               · %s" % w)
+            print("               · %s" % flagseg)
             # ★ 这段**不许把判据原样打出来**（我第一版就打了，当场自伤）：判据是 grep 一个单值，
             #   而我把那个单值写进了这段说明里 ⇒ **器自己的说明被自己的判据搜到** ⇒ 否也判"过"。
             #   实测：②③ 两跑明明印的是 否，`grep -q '验收可用=是'` 却在**说明文字**里命中了。
