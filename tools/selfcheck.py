@@ -151,16 +151,24 @@ print("=" * 72)
 FONT_GAPS = 0
 try:
     from tools.fontcheck import scan
-    _font, _missing, _conflict, _n, _files = scan()
-    FONT_GAPS = len(_missing) + len(_conflict)
-    print("[字体覆盖] %s  （扫了 %d 个脚本）" % (getattr(_font, "path", "?"), _files))
+    _font, _missing, _conflict, _n, _files, _skipped = scan()
+    FONT_GAPS = len(_missing) + len(_conflict) + len(_skipped)
+    print("[字体覆盖] %s  （扫了 %d 个脚本%s）"
+          % (getattr(_font, "path", "?"), _files,
+             "，**跳过 %d 个**" % len(_skipped) if _skipped else ""))
+    if _skipped:
+        for _p, _e in _skipped:
+            print("  ! 没扫成 %s —— %s" % (os.path.relpath(_p, ROOT), _e))
+        print("    这几个文件的字一个都没进来，缺字结论不完整 —— 按「查不出来不算通过」计进违规。")
     if FONT_GAPS:
-        print("  ✗ 字面量里 %d 个不同字符，有 %d 个画不出来：%s"
+        print("  ✗ 会画上去的字符串里 %d 个不同字符，有 %d 个画不出来：%s"
               % (_n, len(_missing), "".join(_missing[:40]) + ("…" if len(_missing) > 40 else "")))
         if _conflict:
             print("  ⚠ cmap 与渲染分歧 %d 个：%s" % (len(_conflict), "".join(_conflict[:20])))
         print("    这些字会变成方框且不报错。**这是字体/环境问题，不是引擎问题** ——")
-        print("    把 CHANLUN_FONT 指到含中日韩字形的 ttf 再跑，这一步应回 0。")
+        print("    先用 CHANLUN_FONT 指一份含中日韩字形的 ttf 再跑。")
+        print("    若换了好字体**还剩几个**，那就不是环境问题，是**卡片用了这份字体没有的符号**")
+        print("    （实测：Noto Sans CJK 有 ✓ U+2713，但没有 ✔ U+2714 / ✗ U+2717 / ✘ U+2718）。")
     else:
         print("  ✓ 这份字体画得出字面量里的全部字符")
 except Exception as e:
