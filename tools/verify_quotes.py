@@ -283,6 +283,19 @@ def main():
     print("仓里**带课号的引文** %d 条（去重），其中**跨行引文** %d 条\n"
           % (len(items), sum(1 for e in items.values() if e["multiline"])))
 
+    # 「一条都没扫到」不等于「都合规」。分母是 0 的时候下面全是 0，退出码也是 0 ——
+    # QL_REPO 指错树（指到没有 cards/ 的地方）会和「干净」印得一模一样。
+    # 跟语料不在同一条规矩：**什么都没查，不是通过**。
+    if not items:
+        print("=" * 78)
+        print("被审计的树里**一条带课号的引文都没有** —— 这一条不是「通过」")
+        print("=" * 78)
+        print("  被审计：%s" % REPO)
+        print("  分母是 0，下面所有计数都会是 0，退出码也会是 0 —— 和'干净'印得一样。")
+        print("  大概率是 QL_REPO 指错了（指到没有 cards/ 的树）。")
+        print("退出原因: 被审计的树是空的 ⇒ exit=2")
+        return 2
+
     def hunt3(q):
         for how, corp in (("逐字原样", c_raw), ("折叠叠字后", c_fold), ("规范化后", c_norm)):
             hits = corp.where(q if how == "逐字原样"
@@ -329,8 +342,13 @@ def main():
     for e, hits, how in ok:
         by_how.setdefault(how, []).append(e)
 
-    strict = sum(len(by_how.get(h, [])) for h in STRICT)
+    # 分解式与总数**同一个来源**：右边由 STRICT 生成，不是手写名字。
+    # 手写的那半不会随档位长 —— 加一档右边就少一项，而它看起来仍像算出来的。
+    strict_parts = [(h, len(by_how.get(h, []))) for h in STRICT]
+    strict = sum(n for _, n in strict_parts)
     loose = sum(len(by_how.get(h, [])) for h in LOOSE)
+    # 不在任何一张清单里的档位：既不在上面的分解里，也不在 ④ 里 —— 会被静默吞掉。
+    stray = len(ok) - strict - loose
 
     print("=" * 78)
     print("① 课号对上 %d 条，**按命中档位拆** —— 严档才算「对上」" % len(ok))
@@ -347,9 +365,12 @@ def main():
     show("③ 完全搜不到（连退到短词也不中）", gone)
 
     print("=" * 78)
-    print("① 对上（严档） %d = 逐字 %d + 折叠 %d + 规范 %d"
-          % (strict, len(by_how.get("逐字原样", [])),
-             len(by_how.get("折叠叠字后", [])), len(by_how.get("规范化后", []))))
+    print("① 对上（严档） %d = %s"
+          % (strict, " + ".join("%s %d" % (h, n) for h, n in strict_parts if n) or "0"))
+    if stray:
+        print("   ⚠ 分解式对不上总数：对上 %d 条 · 严档+退短词 %d 条 · 差 %d"
+              "（有档位没进 STRICT/LOOSE，会被静默吞掉）"
+              % (len(ok), strict + loose, stray))
     print("④ 退短词·**未定性**（不算对上，也不算搜不到） %d" % loose)
     print("② 课号不符 %d      ③ 搜不到 %d" % (len(wrong), len(gone)))
     print("   —— 共 %d 条；其中 ①② 是给的、③ 是真待办、④ 要人读"
