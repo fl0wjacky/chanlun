@@ -285,11 +285,14 @@ def coverage():
     「注入支」6→11 而**合计与声明数逐字不变**（旧版）；往 cards/ 加第 15 张卡 ⇒ 两张名单都
     不自长，静默漏扫、分母还是 14（旧版）。扫面把两个方向一起关掉：**有没有卡，由 cards/ 说。**
 
-    三态分得开（跑了 / 跳过+理由 / 不许有第四态）：没 build() 的、导入失败的都进 skipped
-    并**带理由**（下面那条 assert 保证"理由"不许空着）。
+    四态分得开（跑了 / 不是卡+理由 / **该量却没量成**+理由 / 不许有第五态）：
+      · `skipped` = 本来就不是卡（`__init__`、`build_all` 这种没有 build() 的）—— 不进退出码
+      · `failed`  = **卡，但没量成**（导入就炸、build() 抛错）—— **进退出码**
+    两者分开的理由不是分类癖：`__init__` 进 rc 会让每次跑都红，而一张**倒下**的卡不进 rc
+    会让「14 张全 OK」这句话在只有 13 张量成时照样印出来（实测：语法坏一张卡，rc=0）。
     """
     d = _cards_dir()
-    run, skipped = [], []
+    run, skipped, failed = [], [], []
     for p in sorted(glob.glob(os.path.join(d, "*.py"))):
         name = os.path.basename(p)[:-3]
         if name == "__init__":
@@ -298,7 +301,9 @@ def coverage():
         try:
             mod = importlib.import_module("cards." + name)
         except Exception as e:
-            skipped.append((name, "导入失败 %s: %s" % (type(e).__name__, e)))
+            # **该量却没量成** —— 与上面那个 skipped 不是一回事：`__init__`/`build_all` 本来就不是卡，
+            # 而这里是一张**卡倒下了**。它必须进退出码，理由见下面的注释（今天这里印了、rc 还是 0）。
+            failed.append((name, "导入失败 %s: %s" % (type(e).__name__, e)))
             continue
         if not callable(getattr(mod, "build", None)):
             skipped.append((name, "没有 build()"))
@@ -310,16 +315,16 @@ def coverage():
     # 每个没量到的文件**必须带理由**：以后有人加一条"跳过"分支却忘了写 why ⇒ 这里当场红。
     # （先写的是 `files - run - skipped` 那条"不许有第四态"的检查 —— 它是**只会绿的灯**
     #   （由构造恒空），按自己那条规矩删掉了：一条永远不红的检查不是检查。）
-    for name, why in skipped:
+    for name, why in skipped + failed:
         assert why.strip(), "跳过 %s 但没给理由 —— 三态里第二态必须自带理由" % name
-    return run, skipped
+    return run, skipped, failed
 
 
 def main():
     _install()
     _selftest()
     print("[版式体检] 字体 %s" % _font_id())
-    cards, skipped = coverage()
+    cards, skipped, failed = coverage()
     # 「扫到 0 张」不是「没有违规」，是「**我什么都没量**」。这里是这扇门最容易被钻的一格：
     # 树不对（cards/ 不在、只复制了半棵仓、工具被挪到别处）⇒ 覆盖表空 ⇒ 下面所有计数都是 0
     # ⇒ 和"干净通过"印得一模一样。跟 @atlas-791f 的 `verify_quotes.py` 空树是同一种塌，
@@ -329,7 +334,7 @@ def main():
         print("\n[覆盖表] **扫到 0 张** —— 这不是「通过」，是「我什么都没量」。")
         print("           被扫的目录 = %s" % _cards_dir())
         print("           多半是这棵树不对：没有 cards/*.py，或者工具不在它本该在的那个仓里。")
-        for name, why in skipped:
+        for name, why in skipped + failed:
             print("           %-22s 跳过：%s" % (name, why))
         print("退出原因: 覆盖表 0 张（什么都没量） ⇒ exit=2")
         return 2
@@ -337,12 +342,11 @@ def main():
     injected = effective = dead = 0
     uncovered = []          # 从没声明 —— 没查过
     declared_none = []      # 声明"没有失败分支" + 理由
-    for name in cards:
-        try:
-            mod = importlib.import_module("cards." + name)
-        except Exception as e:
-            print("%-22s 跳过：%s: %s" % (name, type(e).__name__, e))
-            continue
+
+    def measure(name):
+        """量一张卡；**抛异常 = 这张卡没量成**，由调用处收进 `failed`，不影响其余卡。"""
+        nonlocal total, injected, effective, dead
+        mod = importlib.import_module("cards." + name)
         W, H, n, bad, clean_fp = check(mod, name)
         total += len(bad)
         print("%-22s W=%-5d H=%-5d 文字 %3d 处  %s" % (
@@ -351,10 +355,10 @@ def main():
         modes = failure_modes(mod)
         if modes is None:
             uncovered.append(name)
-            continue
+            return
         if not modes:
             declared_none.append((name, mod.CARDFIT_NO_FAILURE.strip()))
-            continue
+            return
         for mode, install in modes:
             restore = install(mod)
             try:
@@ -367,12 +371,24 @@ def main():
                 # 免得和"版式越界"混成一个数（两者根本不是一个病）。
                 dead += 1
                 print("  ├ %-20s ★ 注入未生效 —— 这一支没走到，**不算覆盖**" % mode)
-                continue
+                return
             effective += 1
             total += len(bad2)
             print("  ├ %-20s 文字 %3d 处  %s" % (
                 mode, _n, "OK" if not bad2 else "★ %d 处" % len(bad2)))
             _print_bad(bad2)
+
+    for name in cards:
+        try:
+            measure(name)
+        except Exception as e:
+            # 一张卡没量成 ⇒ ① 收进 failed（**进退出码**）② 其余卡照跑 ③ 分母行会写清"没量成 M 张"。
+            # 旧写法两半都是漏的：导入失败只 print、rc 照样 0；而 `check(mod, name)`（里面就是
+            # `mod.build()`）**根本不在 try 里** ⇒ 一张卡抛错就裸崩，后面十几张的判决一张都不印。
+            # 两条探针（语法坏 / build() 抛）见 card-6832f8a4-144。
+            failed.append((name, "%s: %s" % (type(e).__name__, e)))
+            print("%-22s ★ **没量成**：%s: %s" % (name, type(e).__name__, e))
+
     print("\n合计 %d 处" % total)
     if dead:
         print("注入未生效 %d 支 —— 那几支**没测**，不是通过" % dead)
@@ -397,6 +413,16 @@ def main():
           % (len(cards), len(skipped)))
     for name, why in skipped:
         print("           %-22s 跳过：%s" % (name, why))
+    # ★ **量成的张数**单独印一行 —— 这条是今天补的，理由就是"分母静默变小"：
+    #   旧版把"导入失败"混进上面那个 skipped（那是"不是卡"的意思），于是
+    #     `cards/aa_syntax.py` 语法坏一张 ⇒ 报告印「14 张（跳过 5 个文件）」、rc **0**
+    #   —— 「14 张全 OK」这句话在只有 **13** 张量成时照样印出来，而且门槛是绿的。
+    #   同树同探针 `cardfit_undrawn.py` 报 `[rc=1] 解析不了的卡（它们不在覆盖表里 ⇒ 分母静默变小）`。
+    if failed:
+        print("           ★ **没量成 %d 张**（它们**不在上面那个 %d 里**）：" % (len(failed), len(cards)))
+        for name, why in failed:
+            print("             %-20s %s" % (name, why))
+        print("             ↑ 这几张**是卡**，只是这次没量出来 ⇒ 合计 0 处**不等于**它们没问题。")
     # **`uncovered` 现在进退出码了 —— 这是今天改的，理由连同旧理由一起写在这。**
     #
     # 旧写法是"不进"：理由是**落地当下必然一张都没声明**，进了就等于一合上就让 main 变红
@@ -407,9 +433,10 @@ def main():
     # 而"只印不进"的形状是今晚反复抓到的同一格：**报告里印了、退出码里没进**（仪表 ≠ 门）。
     # 实测差：同一棵树上 `cardfit_undrawn.py`(A′) 报 `没声明 1 张 ⇒ rc=1`，本器报同一张卡而 `rc=0`
     # ⇒ **两条尺、同一格、两个值**。取值照全仓约定 `0=通过 · 1=查出来有问题 · 2=我没查成`。
-    print("退出原因: 版式 %d 处 · 注入未生效 %d 支 · 没声明 %d 张 ⇒ exit=%d"
-          % (total, dead, len(uncovered), 1 if (total or dead or uncovered) else 0))
-    return 1 if (total or dead or uncovered) else 0
+    print("退出原因: 版式 %d 处 · 注入未生效 %d 支 · 没声明 %d 张 · 没量成 %d 张 ⇒ exit=%d"
+          % (total, dead, len(uncovered), len(failed),
+             1 if (total or dead or uncovered or failed) else 0))
+    return 1 if (total or dead or uncovered or failed) else 0
 
 
 if __name__ == "__main__":
