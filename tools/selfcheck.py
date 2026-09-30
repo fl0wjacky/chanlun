@@ -143,6 +143,33 @@ count("breaks=[] 与整段口径不一致", 0 if standardize(zbars, breaks=[]) =
 _adj, _brk = preprocess(zbars, adjust="none", session=None)
 count("preprocess 非恒等（不变量 C1）", 0 if (_adj == zbars and _brk == []) else 1)
 
+# ---- 字体覆盖：上面每一条都默认「字画得出来」，这一步才验那个默认 ----
+# 缺字是**静默**失败：PIL 画成方框、不报错，然后上面照样报「全部通过」。所以它不计进
+# FAIL（FAIL 是引擎不变量的数目，两者含义不同，混成一个数就说不清是谁的问题），
+# 但它一样让退出码非 0：查不出来，就不算通过。
 print("=" * 72)
-print("总违规数:", FAIL, "→", "全部通过" if FAIL == 0 else "有问题，需排查")
-sys.exit(1 if FAIL else 0)
+FONT_GAPS = 0
+try:
+    from tools.fontcheck import scan
+    _font, _missing, _conflict, _n, _files = scan()
+    FONT_GAPS = len(_missing) + len(_conflict)
+    print("[字体覆盖] %s  （扫了 %d 个脚本）" % (getattr(_font, "path", "?"), _files))
+    if FONT_GAPS:
+        print("  ✗ 字面量里 %d 个不同字符，有 %d 个画不出来：%s"
+              % (_n, len(_missing), "".join(_missing[:40]) + ("…" if len(_missing) > 40 else "")))
+        if _conflict:
+            print("  ⚠ cmap 与渲染分歧 %d 个：%s" % (len(_conflict), "".join(_conflict[:20])))
+        print("    这些字会变成方框且不报错。**这是字体/环境问题，不是引擎问题** ——")
+        print("    把 CHANLUN_FONT 指到含中日韩字形的 ttf 再跑，这一步应回 0。")
+    else:
+        print("  ✓ 这份字体画得出字面量里的全部字符")
+except Exception as e:
+    FONT_GAPS = -1
+    print("[字体覆盖] 查不了：%s" % e)
+
+print("=" * 72)
+print("总违规数:", FAIL, "→", "引擎检查全部通过" if FAIL == 0 else "有问题，需排查")
+if FONT_GAPS:
+    print("字体覆盖:", "查不了（不算通过）" if FONT_GAPS < 0 else "%d 个字符画不出来" % FONT_GAPS,
+          "→ 出图会静默出方框")
+sys.exit(1 if (FAIL or FONT_GAPS) else 0)
