@@ -64,15 +64,15 @@ chanlun_mag/
 │   ├── aaplusdt_*.json      AAPL 永续 2026-07-26 – 09-27（c01–c05、框架卡、chart_levels / nested）
 │   ├── zec15.json / zec_{1h,2h,4h}.json  ZEC 永续约 210 天、拉到当前（c06 / c07 实证、ZEC 线段图）
 │   └── btc_4h.json          BTC 永续 4 小时，2025-10-01 起拉到当前（BTC 全景顺滑版）
-├── out/                     本机产物目录（自动创建，可随时删）
+├── out/                     本机产物目录（自动创建，可随时删；不入库，用下面「常用入口」的命令重出）
 └── archive/
-    ├── chanlun108/          ★《教你炒股票》108 课全文（本地副本）
+    ├── chanlun108/          ★《教你炒股票》108 课全文（本地副本；有版权，不入库——先跑 tools/fetch_chanlun108.py 抓到本地）
     │   ├── raw/             原始页
     │   ├── text/            每课正文纯文本
     │   ├── 全文.txt         合并版（检索用）
     │   └── 目录.txt         序号 + 标题
     ├── oneoff/              一次性修补脚本
-    └── debug_crops/         调试截图
+    └── debug_crops/         调试截图（不入库）
 ```
 
 ---

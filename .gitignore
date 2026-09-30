@@ -2,3 +2,15 @@
 __pycache__/
 *.pyc
 uploads/
+
+# ---- 不公开（2026-09-30）----
+# 108 课原文副本：有版权，用 tools/fetch_chanlun108.py 抓到本地
+archive/chanlun108/
+# 个人研究笔记（引用第三方内容）及其改稿脚本
+archive/缠论与场外体系的结合.md
+archive/缠论与场外体系的结合_手机版.pdf
+archive/oneoff/trim_paper_round*.py
+# TradingView 截图的调试裁剪
+archive/debug_crops/
+# 生成物：卡片、全景图、PDF，都能用脚本重出
+out/
