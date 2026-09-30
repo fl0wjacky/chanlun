@@ -6,7 +6,7 @@
 import json
 from PIL import Image, ImageDraw, ImageFont
 
-from config import FONT as FONT_PATH
+from config import FONT as FONT_PATH, _NOTDEF_CHARS
 
 # ---- 配色 ----
 BG    = (16, 18, 24)      # 页面底色
@@ -92,7 +92,15 @@ def F(size):
 # .notdef 的指纹用**位图字节**，不能用尺寸：DejaVu 下 .notdef 是 (14,21)，而位图尺寸同为
 # (14,21) 的真字形有 10 个（U+14A6、U+14AB…）。拿尺寸当指纹，这 10 个字会被误报成缺字
 # ——那就成了「对正确的活报错」。4764 个真字形里，字节指纹误判 0 个。
-_NOTDEF_PROBE = ""          # 私用区，任何正常字体都不该有它；再自检一道，见下
+# 基准取**三个**私用区码位取多数票，不是取一个——因为**字体可以映射私用区**。实测
+# （`tools/fontcheck.py --selftest` 里现造一支把 U+E000 指到 'B' 字形的字体）：
+#   单探针时 `.notdef` 的基准变成 'B' 的墨迹 ⇒ 真缺的「中」渲成真 .notdef、跟它比**不相等**
+#   ⇒ 判成"有"，而且落进 conflict 而不是 missing —— **读 missing 的人看到的是一张干净白名单**
+#   （@bram-9d29 量到的形状；夹具与两支字体的复算见 `card-8ac04844-0ca`）
+# 三个码位里两个相同 → 那个就是 .notdef（另有一个被映射了）；三个互不相同 → **判不了**，
+# 抛异常，不猜。清单直接取 config.py 那份（它挑字体用的是同一套）：**两份私用区清单是最容易
+# 被改一份忘一份的东西**，这个仓已经为"同一格两条判据分家"付过一次账。
+_NOTDEF_PROBES = _NOTDEF_CHARS
 
 
 def _cmap_codepoints(font_path):
@@ -109,6 +117,24 @@ def _cmap_codepoints(font_path):
     return out
 
 
+def _notdef_mask(font):
+    """这支字体给「没有字形的码位」画的遮罩；**判不了返回 None**。
+
+    多数票：三个私用区码位里若有两个遮罩相同，那个就是 .notdef（另有一个被映射了）；
+    三个互不相同 → 这支字体的私用区被映射得不只一个，挑不出基准 → 判不了。
+
+    None 和「一个遮罩」是两回事：混起来就成了今晚反复栽的那个坑——**判不了被读成没问题**。
+    """
+    masks = [bytes(font.getmask(c)) for c in _NOTDEF_PROBES]   # ImagingCore 没有 .tobytes()
+    counts = {}
+    for m in masks:
+        counts[m] = counts.get(m, 0) + 1
+    for m, n in counts.items():
+        if n >= 2:
+            return m
+    return None
+
+
 def glyph_gaps(text, font=None):
     """text 里**画不出来**的字。
 
@@ -117,11 +143,16 @@ def glyph_gaps(text, font=None):
       conflict —— 两条判据结论不一致的字：cmap 说「有」而渲染是方框（或反之）。
                   这种字体单看哪一条都不可信，单独报出来给人看，不并进 missing。
 
-    检测器先自检：拿已知存在的 'A' 试一次。若 'A' 也判成 .notdef，说明这套判据在这份字体上
-    失灵——**抛异常**，不返回「整串都缺」：一个对什么都说缺的检查，是另一种静默通过。
+    检测器先自检两道，任一不过**抛异常**，不返回「整串都缺」：一个对什么都说缺的检查，是另一种
+    静默通过。
+      ① .notdef 的基准挑得出来吗（三个私用区码位取多数票，挑不出就是判不了）
+      ② 拿已知存在的 'A' 试一次：若 'A' 也判成 .notdef，说明这套判据在这份字体上失灵
     """
     font = font if font is not None else F(24)
-    notdef = bytes(font.getmask(_NOTDEF_PROBE))
+    notdef = _notdef_mask(font)
+    if notdef is None:
+        raise RuntimeError("字形检测器失灵：%s 的私用区被映射得不止一个，挑不出 .notdef 基准，"
+                           "缺字结论不可信" % getattr(font, "path", "?"))
     if bytes(font.getmask("A")) == notdef:
         raise RuntimeError("字形检测器失灵：%s 里连 'A' 都被判成 .notdef，缺字结论不可信"
                            % getattr(font, "path", "?"))
