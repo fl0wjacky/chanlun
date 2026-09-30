@@ -1091,7 +1091,14 @@ def _alt_value(act, cur):
 
 
 # 轴 dest → `量法` 那一行里的字段名（两套名字，**必须对得上**，否则"只动一根"判不出来）。
-MEASURE_KEY = {"tree": "commit", "min_len": "min-len(norm后)", "face": "face",
+#
+# ★ 这一格原来叫 `min-len(norm后)` —— **名说它印派生量，它印的是旗标原值**（@nova-8980 现量：
+#   1/2/3 三读，印的就是 1/2/3，不是归一化后的长度）。轴本身是单射的，坏的是名。
+#   改名**两处必须同一笔**（这里 + 下面印 `量法` 的那行 printf）：只改一处 ⇒ 字段名对不上
+#   ⇒ `_fields` 那条检查**静默失效**（`_fields` 的 docstring 自己写的就是这个病）。
+#   为什么改成旗标名而不是"真印派生量"：印原值没有信息损失；印派生量是**多一个能撒谎的数**，
+#   而"min-len 是按 norm 后的长度截的"这半句已经在 `--min-len` 的说明里写死了。
+MEASURE_KEY = {"tree": "commit", "min_len": "min-len", "face": "face",
                "dedup": "dedup", "v1ref": "v1_ref", "unit": "unit", "ladder": "ladder"}
 
 
@@ -1211,14 +1218,19 @@ def _run_out(argv):
     return r.returncode, r.stdout
 
 
-def _probe_face(rc, tot, tot0, dif):
+def _probe_face(rc, tot, tot0, dif, own=None):
     """② 那格的**病名** —— 抽成纯函数**只为一件事：让它能喂红**（见 `selfcheck_gate` ⑤e）。
 
     ★ 原来的写法把病名和"没出数"混在一起判，于是 @nova-8980 15:4x 复现出一条**红对了、名字错了**
       的判词：探针那一跑 **`tot is None`**（数根本没印出来），而打印走了 `tot != tot0`
       ⇒ 印「数动了 ⇒ 登记错」。**登记本来是对的**，下一个读的人会去改登记。
       ⇒ 「红对了」不等于「判对了」：病名指错方向时，红会**把人送到错的地方去**（比没红更坏）。
-    ★ 三种脸，三种修法（`_diff_text` 那条规矩的同一课）：**没出数** / 数动了 / 坐标动了。
+    ★ **四**张脸，四种修法：**没出数** / 数动了 / 本轴自己恒等 / 坐标动了（碰了别的轴）。
+    ★★ 第四张脸（`own`）是 @nova-8980 补的，缺了它会把**登记错**印成**不止碰一根轴**：
+         基点 `unit=all` 时 `ladder` **恒等** ⇒ 数**不动**、而坐标差恰是 `[ladder]`。
+       ⇒ 「数动」不是"登记错"的**唯一**形状。判据是：**坐标差里出现本轴以外的东西**才叫
+         "不止碰一根轴"；差的那一处**恰是本轴**（`MEASURE_KEY[d]`）⇒ 就是**登记错**，
+         副句（坐标差只那一处）是证据，不是罪名。`own=None`（没传）保持旧行为。
     """
     if tot is None:
         return "判不了：探针那一跑**没出数**（rc=%d）⇒ 这格**没测**" % rc
@@ -1226,6 +1238,8 @@ def _probe_face(rc, tot, tot0, dif):
         return "数动了 ⇒ 登记错"
     if dif is None:
         return "判不了 ⇒ 先修抽行/探针（**没测**）"
+    if own is not None and len(dif) == 1 and dif[0] == own:
+        return "登记错（数没动，但坐标差的那一处**就是本轴自己**）"
     return "坐标动了 ⇒ 这个探针不止碰一根轴"
 
 
@@ -1417,7 +1431,7 @@ def selfcheck_gate(a, argv):
         red += 0 if ok else 1
         print("   %-15s 探针=%s ⇒ rc=%d · 合计 %s（基线 %s）· 坐标 %s ⇒ %s"
               % (d, v[:20], rc, tot or "**没有**", tot0, _diff_text(dif),
-                 "✓" if ok else "✗ **%s**" % _probe_face(rc, tot, tot0, dif)))
+                 "✓" if ok else "✗ **%s**" % _probe_face(rc, tot, tot0, dif, MEASURE_KEY[d])))
 
     print("\n③ 计数轴（门：印出的旗标行必须动 · 提示：数动没动**不判红**）")
     ax_moved = ax_same = 0
@@ -1614,6 +1628,17 @@ def selfcheck_gate(a, argv):
     print("   ⑤e           探针跑 rc=6 且 tot=None ⇒ 判词「%s」⇒ %s"
           % (_cut(f_totnone, 46), "✓" if ok else "✗ **病名点回「登记错」了**"))
 
+    # ⑤f ★ 同一张脸的另一半（@nova-8980 补的第四张脸）：
+    #   数**没动**、坐标差**恰是本轴自己** ⇒ 病名必须是**登记错**，不许是「不止碰一根轴」。
+    #   现场（@atlas-791f 读数）：基点 `unit=all` 时 `ladder` 恒等。
+    #   ★ ⑤e 与 ⑤f 合起来钉住的正是那条被写窄的判据：**"数动"不是"登记错"的唯一形状。**
+    f_own = _probe_face(0, "331/302", "331/302", ["ladder"], "ladder")
+    ok = ("登记错" in f_own and "不止碰一根轴" not in f_own)
+    gates += 1
+    red += 0 if ok else 1
+    print("   ⑤f           数没动 · 坐标差恰是本轴(ladder) ⇒ 判词「%s」⇒ %s"
+          % (_cut(f_own, 42), "✓" if ok else "✗ **把登记错印成「不止碰一根轴」了**"))
+
     print("\n★ 自测结论：门 %d 道，红了 %d 道 ⇒ %s"
           % (gates, red, "全响（exit=0）" if not red else "**有门没响（exit=10）**"))
     print("   （提示不算门：③ 只算「旗标行必须动」那 %d 道；"
@@ -1705,7 +1730,7 @@ def main():
     d = tree_dir(a.tree)
     base = d or V.ROOT
     try:
-        print("量法   口径参数：commit=%s · unit=%s · min-len(norm后)=%d · face=%s · "
+        print("量法   口径参数：commit=%s · unit=%s · min-len=%d · face=%s · "
               "dedup=%s · v1_ref=%s · ladder=%s"
               % (a.tree, a.unit, a.min_len, a.face, a.dedup, a.v1ref, a.ladder))
         obj_text, obj_is_obj = which(a.tree)
