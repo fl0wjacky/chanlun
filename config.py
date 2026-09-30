@@ -37,7 +37,14 @@ _FONTS = [
     "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
 ]
 
-_NOTDEF_CHAR = ""        # 私用区探针，用来取 .notdef 的模样
+# 取 .notdef 的模样用**三个**私用区码位，不是取一个——因为**字体可以映射私用区**。
+# 实测（fontTools 现造一支把 U+E000 映射到 'A' 字形的字体）：
+#   探针拿到的是 'A' 的墨迹 → 真缺的「中」（渲成真 .notdef）跟它比 → 判成"有"（**假绿**）
+#                             → 真有的 'A' 跟它比 → 判成"缺"（**假红**）
+#   两个方向都错，**而且探针是有墨的**——所以"先看探针有没有墨"这条判据抓不住它。
+# 正常字体三个码位都渲成 .notdef（同一个遮罩）；被映射的那个会不一样。
+# 取多数票：三个里有两个相同 → 那个就是 .notdef；三个互不相同 → **判不了**，不猜。
+_NOTDEF_CHARS = ("\ue000", "\ue001", "\uf8ff")
 # 哨兵字取自卡片真的会画出来的字符（cards/ + render/ 的字面量统计：origin/main 上 882 个字）。
 # 三类独立计数：某一类缺就说那一类，不因为"整体看着还行"把它吞掉。
 #
@@ -54,38 +61,69 @@ _PROBES = (
 _PROBE_CACHE = {}
 
 
+def _notdef_mask(f):
+    """这支字体给"没有字形的码位"画的遮罩；**判不了返回 None**。
+
+    多数票：三个私用区码位里若有两个遮罩相同，那个就是 .notdef（另有一个被映射了）；
+    三个互不相同 → 这支字体的私用区被映射得不只一个，挑不出基准 → 判不了。
+    """
+    masks = [bytes(f.getmask(c)) for c in _NOTDEF_CHARS]    # ImagingCore 没有 .tobytes()
+    counts = {}
+    for m in masks:
+        counts[m] = counts.get(m, 0) + 1
+    for m, n in counts.items():
+        if n >= 2:
+            return m
+    return None
+
+
 def _missing(font_path, probe, size=16):
-    """返回 probe 里画不出来的那些字；字体加载失败则整串都算缺。"""
+    """probe 里画不出来的字；字体加载失败则整串都算缺；**判不了返回 None**。
+
+    None 和 "" 是两回事："" 是"查过，一个都不缺"，None 是"这一格查不了"。
+    混起来就成了今晚反复栽的那个坑——查不了被读成没问题。
+    """
     key = (font_path, probe, size)
     if key not in _PROBE_CACHE:
         try:
             from PIL import ImageFont
             f = ImageFont.truetype(font_path, size)
-            notdef = bytes(f.getmask(_NOTDEF_CHAR))     # PIL 9.0 的 ImagingCore 没有 .tobytes()
-            _PROBE_CACHE[key] = "".join(c for c in probe if bytes(f.getmask(c)) == notdef)
+            notdef = _notdef_mask(f)
+            if notdef is None:
+                _PROBE_CACHE[key] = None
+            else:
+                _PROBE_CACHE[key] = "".join(c for c in probe if bytes(f.getmask(c)) == notdef)
         except Exception:
             _PROBE_CACHE[key] = probe                   # 加载不了就当它一个都画不出来，不猜
     return _PROBE_CACHE[key]
 
 
-def _font_gaps(font_path):
-    """[(类别名, 缺的字), …]；空列表 = 四类全有。"""
+def _font_probe(font_path):
+    """(判得了吗, [(类别名, 缺的字), …])。判不了时第二个元素无意义。"""
     gaps = []
     for name, probe in _PROBES:
         miss = _missing(font_path, probe)
+        if miss is None:
+            return False, []
         if miss:
             gaps.append((name, miss))
-    return gaps
+    return True, gaps
 
 
 def _font_score(font_path):
-    """覆盖完整的类数。用来在候选之间排序。"""
-    return len(_PROBES) - len(_font_gaps(font_path))
+    """排序用：先看判不判得了，再看覆盖了几个类。判不了排在任何判得了的字体后面。"""
+    ok, gaps = _font_probe(font_path)
+    return (1 if ok else 0, len(_PROBES) - len(gaps))
 
 
 def _warn_incomplete(font_path, why):
-    gaps = _font_gaps(font_path)
-    if gaps:
+    ok, gaps = _font_probe(font_path)
+    if not ok:
+        print("[字体] 警告（%s）：%s 的私用区码位被映射了，取不到可比的 .notdef，"
+              "**覆盖查不了**——「查不了」不等于「覆盖好」，出图仍可能静默出方框；"
+              "请用 CHANLUN_FONT 指定一支能验的字体。"
+              % (why, os.path.basename(font_path)), file=sys.stderr)
+    elif gaps:
         print("[字体] 警告（%s）：%s 缺 %s；这些字会被画成方框而且不会报错，"
               "请用 CHANLUN_FONT 指定一支覆盖更全的字体。"
               % (why, os.path.basename(font_path),
