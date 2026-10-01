@@ -10,7 +10,7 @@ docs = []
 for n in range(1, 109):
     p = os.path.join(BASE, "lesson-%03d.txt" % n)
     if os.path.exists(p):
-        docs.append((n, open(p, encoding="utf-8").read()))
+        docs.append((n, open(p, encoding="utf-8").read().replace("\n", "")))  # 删换行：词被折行劈开时也数得到
 
 GROUPS = [
     ("中枢",               ["缠中说禅走势中枢", "走势中枢", "中枢"]),
