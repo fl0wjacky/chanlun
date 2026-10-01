@@ -62,7 +62,7 @@
 语料的「关於」手打成「关于」（两处）—— 手打引文就是会走样。这份是我在
 自己成品上按同一把尺重核用的脚本（当时结果：174/174 命中、0 需归一）。
 """
-import os, re, sys, glob
+import os, re, sys, glob, hashlib
 
 # 只剥**装饰**（加粗星号、各式引号：半角/全角/中日式），**不剥任何正文内容**。
 # 判据：两边的差异必须只是「同一串字被什么样的符号装饰」；凡是会吃掉正文字符的
@@ -237,6 +237,18 @@ def main():
                  "（原先这里报出来的『全部都不中』就是这个原因，不是引文错了。）" % D)
     lessons = {f: open(f, encoding="utf-8").read().replace("\r", "").replace("\n", "")
                for f in _ls}
+    # ★ 2026-10-01 @atlas-791f 补的第二层：上面那条「语料不在就炸」挡的是**什么都没加载**，
+    #   挡不住**只加载了一部分** —— 那时「」块非 0、还可能照绿（引的那一课恰好在）。
+    #   ⇒ 一条断「我引了东西」（块 ≠ 0），一条断「我拿全了东西」（课数 + 指纹），两条一起才算检查过。
+    #   指纹印在读数行上 —— 以后任何一条历史读数都能据此判它当时吃的是哪份语料。
+    NEXPECT = 108
+    cat = "".join(lessons[k] for k in sorted(lessons))
+    CORPUS_FP = "%d 课/%d 字/sha1:%s" % (len(lessons), len(cat),
+                                         hashlib.sha1(cat.encode("utf-8")).hexdigest()[:12])
+    assert len(lessons) == NEXPECT, (
+        "语料只加载到 %d 课，应为 %d 课（目录 %s）。少课 ⇒ 引到缺的那几课的「」会全部判不中，"
+        "而引到在的那几课的会照绿 —— **这种半瞎最像「引文全对」**。指纹：%s"
+        % (len(lessons), NEXPECT, D, CORPUS_FP))
     folded = {k: fold(v) for k, v in lessons.items()}
     lossy = {k: lo(v) for k, v in lessons.items()}
     nws = {k: re.sub(r"\s+", "", v) for k, v in folded.items()}
@@ -277,6 +289,7 @@ def main():
                 deco_add += 1
 
     print("%s ｜ 门槛 ≥%d 字 ｜ 尺：单课整块逐字 ＋ 双侧剥装饰(↵ ** 各式引号) ＋ 省略号按序切片" % (path, mn))
+    print("语料 %s ｜ ★ 读数只对这份语料成立：换一份（少课／多课／改过字）就得重跑" % CORPUS_FP)
     print("「」块 %d ｜ 原样逐字 %d ｜ 剥装饰后 %d ｜ 省略号按序 %d ｜ 仅空白归一 %d ｜ 仅标点归一 %d ｜ 都不中 %d"
           % (len(quotes), len(bucket["strict"]), len(bucket["deco"]),
              len(bucket["ellipsis"]), len(bucket["norm"]), len(bucket["punct"]),
