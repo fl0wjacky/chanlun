@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """从 state5（44 行、带跨课标注、无行号）重建：+4 行 +四处行内补证"""
-import io,os
+import io,os,sys
 ROOT=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 _IN=os.path.join(ROOT,"notes/concepts-pipeline/inputs")  # ★ 复算输入（原在 /tmp，2026-10-01 落进仓）
 P=os.path.join(ROOT,"docs/concepts/inventory_中枢走势组.md")
@@ -43,22 +43,30 @@ for anchor, add in EXT.items():
     body=row[:-1].rstrip()
     i=body.find(" <br>跨课·")
     s[m[0]]=(body[:i]+add+body[i:] if i>=0 else body+add)+" |"
-    print("  补 %s（%d 字）"%(anchor.strip("| *"),len(add)))
+    print("  补 %s（%d 字）"%(anchor.strip("| *"),len(add)),file=sys.stderr)
 
-print("插入自相似性于第 %d 行、平衡市于第 %d 行、震荡中轴于第 %d 行 ｜ 概念行 %d"%(a+1,b+1,c+1,sum(1 for l in s if l.startswith("| **"))))
+print("插入自相似性于第 %d 行、平衡市于第 %d 行、震荡中轴于第 %d 行 ｜ 概念行 %d"%(a+1,b+1,c+1,sum(1 for l in s if l.startswith("| **"))),file=sys.stderr)
 
-# ===== 守卫（2026-10-01 加，实测踩过）=====
-# 这脚本把**整份文件**换成「state5 ＋ 四处补插」那张表体草稿。写它的时候全篇就只有表体，
-# 前言、附录一…十一 都是**后来**长出来的。所以现在在成品上跑一次 ＝ 把成品换成草稿：
-# 实测 **1567 行 → 97 行**，前言与附录全没，**且不报错、还打印「概念行 48」**。
-# 而 README 顶上那份「按顺序跑」的链，第一步就是它 —— 按文档做，第一步就毁文件。
-#
-# ⇒ 本脚本**只能跑在草稿上**。要改成品，改 `inputs/state5.md` 里对应那一行（源头），别跑它。
-if os.path.exists(P):
-    _old=open(P,encoding="utf-8").read().split("\n")
-    _lost=[h for h in (l for l in _old if l.startswith("## ")) if h not in set(s)]
-    assert not _lost, ("会丢 %d 个一级标题，拒绝写入：%s —— 本脚本只重建表体，"
-                       "跑在成品上＝把成品换成 %d 行的草稿。要改成品请改 inputs/state5.md。"
-                       % (len(_lost), _lost[:3], len(s)))
-    assert len(s) >= len(_old)-5, "行数从 %d 掉到 %d，拒绝写入"%(len(_old),len(s))
-open(P,"w",encoding="utf-8").write("\n".join(s))
+# ===== 出口（2026-10-01 按 @nova-8980 的判决改，比「加守卫」更彻底）=====
+# 守卫（「丢标题就拒绝写入」）只做到「不毁文件」。@nova-8980 要的是更强的：
+#   **别把枪口对着成品** —— 谁照着复算命令跑一次，也不该有覆盖交付物的机会。
+# 所以这个脚本**不再往成品写**：
+#   · 默认写 stdout（管道/重定向随你，那是你自己的选择，不是脚本替你定的）；
+#   · 要落文件就自己传路径（`python3 rebuild48.py /tmp/rebuild48.out.md`）；
+#   · 传成品的路径 → 当场断言拒绝。
+# 产物只有表体草稿这一点没变；要改成品，改 `inputs/state5.md` 里那一行（源头）。
+_out = sys.argv[1] if len(sys.argv) > 1 else None
+_text = "\n".join(s)
+if _out is None:
+    sys.stdout.write(_text)
+    print("\n[rebuild48] 已写 stdout（%d 行，只有表体草稿）。落文件请自己传路径。" % len(s),
+          file=sys.stderr)
+else:
+    assert os.path.abspath(_out) != os.path.abspath(P), \
+        "别把草稿写进成品（%s）。传 /tmp 或任意非成品路径。" % P
+    if os.path.exists(_out):
+        _old = open(_out, encoding="utf-8").read().split("\n")
+        _lost = [h for h in (l for l in _old if l.startswith("## ")) if h not in set(s)]
+        assert not _lost, "会丢 %d 个一级标题，拒绝写入 %s：%s" % (len(_lost), _out, _lost[:3])
+    open(_out, "w", encoding="utf-8").write(_text)
+    print("[rebuild48] 已写 %s（%d 行，只有表体草稿）" % (_out, len(s)), file=sys.stderr)
