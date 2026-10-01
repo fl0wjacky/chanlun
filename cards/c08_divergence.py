@@ -27,7 +27,7 @@ def macd_bars(d, x0, x1, base, top, step=18):
 def draw_definition(d):
     """A 定义：比的是同向两段的力度"""
     section(d, 200, 880, "背驰 = 同向两段，后一段力气更小", AM, chip_dy=16)
-    d.text((620, 220), "不是「感觉涨不动」，是同向两段力度的比较；", font=f_n, fill=MU)
+    d.text((620, 220), "不是感觉涨不动，是同向两段力度的比较；", font=f_n, fill=MU)
     d.text((620, 250), "背驰必有逆转，但逆转不等于大跌", font=f_n, fill=MU)
 
     # 价格：A 之前的中枢 → A 段上涨 → B 中枢 → C 段创新高（第 24 课：A 之前必须已有中枢）
@@ -66,7 +66,7 @@ def draw_definition(d):
 def draw_macd_premise(d):
     """B 用 MACD 判断的前提"""
     section(d, 900, 1330, "用 MACD 判断背驰的前提", CY, chip_dy=16)
-    d.text((520, 926), "第 24 课前提（③在正文里，未编号）：不是看到「新高+柱子变短」就算", font=f_n, fill=MU)
+    d.text((520, 926), "第 24 课前提（③在正文里，未编号）：不是看到 新高 + 柱子变短 就算", font=f_n, fill=MU)
 
     conds = [
         ("①", "有两段同向的趋势", "A 段与 C 段方向相同", CY),
@@ -157,9 +157,10 @@ def draw_theorems(d):
         yy += 96
 
     d.rounded_rectangle([86, 2326, W - 86, 2400], 12, fill=(CY[0], CY[1], CY[2], 26), outline=CY, width=2)
-    d.text((110, 2334), "第 24 课：「光用 MACD 辅助判断，即使你对中枢不大清楚，只要能分清楚 A、B、C 三段，",
+    Q_DIV160 = "第 24 课：「光用 MACD 辅助判断，即使你对中枢不大清楚，只要能分清楚 A、B、C 三段，其准确率也应该在 90%以上。而配合上中枢，那是 100%绝对的……」"
+    d.text((110, 2334), Q_DIV160[:48],
            font=f_t, fill=TX)
-    d.text((110, 2364), "其准确率也应该在 90%以上。而配合上中枢，那是 100%绝对的……」", font=f_t, fill=TX)
+    d.text((110, 2364), Q_DIV160[48:], font=f_t, fill=TX)
 
 
 def build():

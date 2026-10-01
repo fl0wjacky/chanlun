@@ -198,14 +198,16 @@ def main():
     hit = sum(1 for i, z in enumerate(z4) if any(overlap(tz4[i], z, ts30[j], s) for j, s in enumerate(seg30)))
     d.rounded_rectangle([40, y, W - 40, y + 350], 18, fill=CARD, outline=LINE, width=2)
     d.text((80, y + 22), "结论", font=F(34), fill=AM)
+    Q_LEVEL77 = "「不同周期 K 线图(不同倍度数显微镜)和走势的级别(显微镜所观察的物体)」"
     lines = [
         "同一段时间：4 小时镜片看到 %d 个类中枢 / %d 笔；30 分钟镜片看到 %d 个类中枢 / %d 笔。"
         % (len(z4), len(p4), len(z30), len(p30)),
         "4H 中枢3（%d 笔）在 30 分钟上是 %d 个类中枢，相邻关系 %d 对扩展、%d 对趋势 —— 放大看仍是一个震荡，结构没变，是镜片变了。"
         % (z3["npens"], len(inner), kinds.count("扩展"), kinds.count("趋势")),
-        "4H 的 %d 个类中枢 与 30m 的 %d 个线段中枢，%d 个对得上（时间、区间都交叠；样本很少）。第 77 课：「不同周期 K 线图(不同倍度数显微镜)"
+        ("4H 的 %d 个类中枢 与 30m 的 %d 个线段中枢，%d 个对得上（时间、区间都交叠；样本很少）。第 77 课："
+         + Q_LEVEL77[:20])
         % (len(z4), len(seg30), hit),
-        "和走势的级别(显微镜所观察的物体)」—— 级别不是 K 线周期。4H 中枢3 的边界（ZG %.1f / ZD %.1f）在 30m 上是反复穿越的区域，"
+        Q_LEVEL77[20:] + "—— 级别不是 K 线周期。4H 中枢3 的边界（ZG %.1f / ZD %.1f）在 30m 上是反复穿越的区域，"
         "按 30m 细节在边界挂单，容易被来回扫到。" % (z3["ZG"], z3["ZD"]),
     ]
     yy = y + 82
