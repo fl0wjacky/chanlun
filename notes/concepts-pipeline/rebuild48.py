@@ -47,4 +47,18 @@ for anchor, add in EXT.items():
 
 print("插入自相似性于第 %d 行、平衡市于第 %d 行、震荡中轴于第 %d 行 ｜ 概念行 %d"%(a+1,b+1,c+1,sum(1 for l in s if l.startswith("| **"))))
 
+# ===== 守卫（2026-10-01 加，实测踩过）=====
+# 这脚本把**整份文件**换成「state5 ＋ 四处补插」那张表体草稿。写它的时候全篇就只有表体，
+# 前言、附录一…十一 都是**后来**长出来的。所以现在在成品上跑一次 ＝ 把成品换成草稿：
+# 实测 **1567 行 → 97 行**，前言与附录全没，**且不报错、还打印「概念行 48」**。
+# 而 README 顶上那份「按顺序跑」的链，第一步就是它 —— 按文档做，第一步就毁文件。
+#
+# ⇒ 本脚本**只能跑在草稿上**。要改成品，改 `inputs/state5.md` 里对应那一行（源头），别跑它。
+if os.path.exists(P):
+    _old=open(P,encoding="utf-8").read().split("\n")
+    _lost=[h for h in (l for l in _old if l.startswith("## ")) if h not in set(s)]
+    assert not _lost, ("会丢 %d 个一级标题，拒绝写入：%s —— 本脚本只重建表体，"
+                       "跑在成品上＝把成品换成 %d 行的草稿。要改成品请改 inputs/state5.md。"
+                       % (len(_lost), _lost[:3], len(s)))
+    assert len(s) >= len(_old)-5, "行数从 %d 掉到 %d，拒绝写入"%(len(_old),len(s))
 open(P,"w",encoding="utf-8").write("\n".join(s))
