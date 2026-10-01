@@ -51,7 +51,7 @@
 语料的「关於」手打成「关于」（两处）—— 手打引文就是会走样。这份是我在
 自己成品上按同一把尺重核用的脚本（当时结果：174/174 命中、0 需归一）。
 """
-import re, sys, glob
+import os, re, sys, glob
 
 # 只剥**装饰**（加粗星号、各式引号：半角/全角/中日式），**不剥任何正文内容**。
 # 判据：两边的差异必须只是「同一串字被什么样的符号装饰」；凡是会吃掉正文字符的
@@ -206,8 +206,19 @@ def main():
         mn = int(sys.argv[sys.argv.index("--min") + 1])
 
     text = open(path, encoding="utf-8").read()
+    # ★ 2026-10-01 修：这里原来写的是 glob.glob("archive/chanlun108/text/lesson-*.txt")
+    #   —— **CWD 相对**。不在仓根跑（例如 `cd /tmp`）时 glob 返回空 → lessons 为空 →
+    #   每个「」都找不到课 → **都不中 = 全部块数、exit 1**。
+    #   实测：从 /tmp 跑本仓成品，报「「」块 1064 ｜ 原样逐字 0 ｜ 都不中 1064」——
+    #   这不是「引文全错」，是**尺找不到语料**。**这是最坏的一种假红：它指着 1064 条说全是编的。**
+    #   改成 __file__ 相对定位，并且**语料缺失当场炸、把缺的路径印出来**。
+    ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    D = os.path.join(ROOT, "archive/chanlun108/text")
+    _ls = sorted(glob.glob(os.path.join(D, "lesson-*.txt")))
+    assert _ls, ("语料不在 %s —— archive/ 未进仓，需与本仓同相对路径就位。"
+                 "（原先这里报出来的『全部都不中』就是这个原因，不是引文错了。）" % D)
     lessons = {f: open(f, encoding="utf-8").read().replace("\r", "").replace("\n", "")
-               for f in sorted(glob.glob("archive/chanlun108/text/lesson-*.txt"))}
+               for f in _ls}
     folded = {k: fold(v) for k, v in lessons.items()}
     lossy = {k: lo(v) for k, v in lessons.items()}
     nws = {k: re.sub(r"\s+", "", v) for k, v in folded.items()}
