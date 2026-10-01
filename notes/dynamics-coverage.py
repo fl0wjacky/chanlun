@@ -57,4 +57,4 @@ print(f"\n**账目**：广谱信号 ≥4 的课 **{len(b4)} 课 / {sum(r['lines'
       f" 零命中 {len([r for r in rows if r['broad']==0])} 课；"
       f"**表外 {len(out)} 课**（零命中 {len([r for r in out if r['broad']==0])} 课 ＋ "
       f"广谱 1-3 且特异词 0 的 {len([r for r in out if r['broad']>0])} 课："
-      + ' '.join(str(r['no']) for r in out if r['broad']>0) + "）", file=sys.stderr)
+      + ' '.join(str(r['no']) for r in out if r['broad']>0) + "）")
