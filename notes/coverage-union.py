@@ -107,6 +107,31 @@ def fmt(s):
     return " ".join(str(x) for x in sorted(s))
 
 
+def _decl(txt, got, who):
+    """把「我从表里抽出几行」和「这份文档**自报**几课」对一下。
+
+    ★ 为什么加这个：2026-10-01 nova 亲自比出来一处 ——
+      `inventory_动力学.md` 抬头仍写「表内 88 课」，而它自己的生成脚本
+      `notes/dynamics-coverage.py` 已经跑到 **90** 课：**脚本改了、交付文件没重新生成**。
+      我从文件读，读到的就是旧的。
+    ★ 这是我这类脚本的天生盲区：**我读的是产物，产物可能落后于它的源。**
+      文档自报的数与我从文档抽出的行数**同源**，所以这一比**证不了正确性** ——
+      但它一眼能看出「产物自己跟自己不一致」，那正是上面那种情形。
+    ★ 没自报就明说「略过」，**不许默默算过**。
+    """
+    m = re.search(r"表内\s*(\d+)\s*课", txt)
+    if not m:
+        print("      ⚠ 这份文档**没自报**课数（没找到『表内 N 课』）⇒ 这一比略过，没验")
+        return
+    d = int(m.group(1))
+    if d == got:
+        print("      ★ 文档自报 %d 课 ＝ 我抽出的 %d 行（同源一致性 ✓，**不是正确性**）" % (d, got))
+    else:
+        print("      ★★ 文档自报 %d 课 ≠ 我抽出的 %d 行 ⇒ **产物很可能落后于它的源**"
+              % (d, got))
+        print("         （先查 %s 的生成脚本现在跑出来多少，再决定信哪个）" % who)
+
+
 def main():
     ref = sys.argv[1] if len(sys.argv) > 1 else "origin/main"
     rp = git("rev-parse", "--verify", "%s^{commit}" % ref)
@@ -115,10 +140,12 @@ def main():
     print("现算坐标：%s = %s" % (ref, rp.stdout.strip()[:7]))
     print()
 
-    A = table_courses(show("docs/concepts/inventory_结构组.md", ref), 8)
+    _ta = show("docs/concepts/inventory_结构组.md", ref)
+    _ti = show("docs/concepts/inventory_动力学.md", ref)
+    A = table_courses(_ta, 8)
     # 动力学表的列数不固定（同文件里还有别的表）⇒ 不走 ncol 分支，按末列状态词扫
     I = set()
-    for ln in show("docs/concepts/inventory_动力学.md", ref).split("\n"):
+    for ln in _ti.split("\n"):
         c = _cells(ln) if ln.startswith("|") else []
         if len(c) >= 3 and re.fullmatch(r"\d{1,3}", c[0]) and c[-1] in STATUS_WORDS:
             I.add(int(c[0]))
@@ -134,7 +161,9 @@ def main():
                          % ZS_TABLE_PATH)
 
     print("① 结构组 表内 = %3d 课   （文档 §7 现取 · 门槛：信号 ≥4）" % len(A))
+    _decl(_ta, len(A), "结构组")
     print("② 动力学 表内 = %3d 课   （文档 §15 现取 · 末列状态过滤）" % len(I))
+    _decl(_ti, len(I), "动力学")
     print("③ 中枢组 表内 = %3d 课   （%s 现取 · %d 行）"
           % (len(B), ZS_TABLE_PATH, len(B)))
     # ★ 手抄那条**降级成对照**：他 `--dump-table` 之后，取补从「输入」变回「产物」。
