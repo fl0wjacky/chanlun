@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """从 state5（44 行、带跨课标注、无行号）重建：+4 行 +四处行内补证"""
-import io
-P="docs/concepts/inventory_中枢走势组.md"
-s=open("/tmp/state5.md",encoding="utf-8").read().split("\n")
+import io,os
+ROOT=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_IN=os.path.join(ROOT,"notes/concepts-pipeline/inputs")  # ★ 复算输入（原在 /tmp，2026-10-01 落进仓）
+P=os.path.join(ROOT,"docs/concepts/inventory_中枢走势组.md")
+s=open(_IN+"/state5.md",encoding="utf-8").read().split("\n")
 
 def ins_after(anchor, rowfile):
     global s
@@ -13,9 +15,9 @@ def ins_after(anchor, rowfile):
     return i[0]+1
 
 # 顺序不重要：锚点各自唯一
-a=ins_after("| **走势终完美** |", "/tmp/r_selfsim.txt")
-b=ins_after("| **趋势** |", "/tmp/row_pingheng.txt")
-c=ins_after("| **中枢震荡** |", "/tmp/row_zhongzhou.txt")
+a=ins_after("| **走势终完美** |", _IN+"/r_selfsim.txt")
+b=ins_after("| **趋势** |", _IN+"/row_pingheng.txt")
+c=ins_after("| **中枢震荡** |", _IN+"/row_zhongzhou.txt")
 
 # 中枢的方向 备注补证
 k=[n for n,l in enumerate(s) if l.startswith("| **趋势的方向（中枢的方向）** |")]
@@ -27,7 +29,7 @@ body=row[:-1].rstrip()
 i=body.find(" <br>跨课·")          # 跨课标注永远在行尾，插在它前面（multimark 每轮会重写行尾那一段）
 s[k[0]]=(body[:i]+add+body[i:] if i>=0 else body+add)+" |"
 # ===== 48 行版追加 =====
-d=ins_after("| **缠中说禅走势分解定理二** |", "/tmp/row_wanquan.txt")
+d=ins_after("| **缠中说禅走势分解定理二** |", _IN+"/row_wanquan.txt")
 
 EXT = {
  "| **走势终完美** |": "；**L102 又给两套说法（第五、第六）**：⑤ L102「因为走势必完美对应的是一种最特殊、最强有力的唯一分解」⑥ L102「本 ID 的理论给出的递归函数，完美地给出市场走势一个类似记数法一样的唯一分解」；同课点出它为什么关键：L102「这才是走势必完美真正关键的地方。」；并点名一个应用：L102「区间套的方法，就是走势必完美的一个重要的应用。」；**另见结构组**：本行引的那句走势必完美定义（分型、笔、线段、不同级别走势类型所对应的递归函数 → 唯一分解），结构组已单列一行，定义不在本组重复登记",

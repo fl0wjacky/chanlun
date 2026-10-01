@@ -1,5 +1,6 @@
 import os,re
-ROOT="/home/cumora/.cumora/agents/bram-9d29/workspace/wt-concepts"
+ROOT=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # ★ 相对定位（2026-10-01 复算查：原来写死绝对路径）
+_IN=os.path.join(ROOT,"notes/concepts-pipeline/inputs")  # ★ 复算输入（原在 /tmp，2026-10-01 落进仓）
 DOC=os.path.join(ROOT,"docs/concepts/inventory_中枢走势组.md")
 D=os.path.join(ROOT,"archive/chanlun108/text")
 JOIN={};OFF={}
@@ -59,7 +60,7 @@ ops.sort(key=lambda x:-x[0])
 s=head
 for a,b,repl,kind,q in ops: s=s[:a]+repl+s[b:]
 open(DOC,"w",encoding="utf-8").write(s+sep+app)
-open("/tmp/annot_log.tsv","w",encoding="utf-8").write("\n".join("%s\t%s\t%s\t%s\t%d"%r for r in LOG))
+open(_IN+"/annot_log.tsv","w",encoding="utf-8").write("\n".join("%s\t%s\t%s\t%s\t%d"%r for r in LOG))
 print("改写 token %d ｜ 括号补插 %d ｜ 与共享 token 同行免插 %d ｜ 判为非引文跳过 %d ｜ 没能定位 %d ｜ 行号点合计 %d"%(
     n_tok,n_ins,n_same,n_skip,len(miss),len(re.findall(r"L\d+:\d+(?:-\d+)?",s))))
 for why,q in miss: print("   ✗ [%s] %s"%(why,q[:40]))

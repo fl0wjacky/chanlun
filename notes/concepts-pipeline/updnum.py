@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """把附录/前言里的数字全部改成实算值 —— 数字只有一个来源（就这段代码）。"""
 import os,re
-ROOT="/home/cumora/.cumora/agents/bram-9d29/workspace/wt-concepts"
+ROOT=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # ★ 相对定位（2026-10-01 复算查：原来写死绝对路径）
+_IN=os.path.join(ROOT,"notes/concepts-pipeline/inputs")  # ★ 复算输入（原在 /tmp，2026-10-01 落进仓）
 DOC=os.path.join(ROOT,"docs/concepts/inventory_中枢走势组.md")
 D=os.path.join(ROOT,"archive/chanlun108/text")
 CORP={f:open(os.path.join(D,f),encoding="utf-8").read().replace("\n","") for f in sorted(os.listdir(D))}
@@ -23,7 +24,7 @@ hit=one+multi
 L=[q for q in big if len(q)>=20]; S=[q for q in big if len(q)<20]
 Lm=[q for q in L if len([f for f in CORP if q in CORP[f]])>1]
 Sm=[q for q in S if len([f for f in CORP if q in CORP[f]])>1]
-log=[l.split("\t") for l in open("/tmp/annot_log.tsv",encoding="utf-8").read().split("\n") if l.strip()]
+log=[l.split("\t") for l in open(_IN+"/annot_log.tsv",encoding="utf-8").read().split("\n") if l.strip()]
 tok=sum(1 for r in log if r[3]=="TOKEN")
 ins=sum(1 for r in log if r[3] in ("INSERT","INSERT-改挂"))
 rehang=[r for r in log if r[3]=="INSERT-改挂"]
@@ -39,11 +40,12 @@ PREAMBLE = """- 自检（可复跑）：正则抽本表每个 `「…」` 内的
   ② 去空白口径（别用，见下）：同一个 {big} 条的集合跑出来是 **{hit} ｜ 只引别名表 {alias} ｜ 未命中 {zero}** —— **读数一样，但它放过过一条真错**。
   ⚠ **必须用 ①**：去空白会把 `0 轴` 与 `0轴`、`an+1=f(an) 的` 与 `an+1=f(an)的` 混成一个 —— 本表那条唯一的失败**正是被去空白口径放过去的**（保留空格才现形）。**两套口径现在报同一个数，不等于两把尺一样硬。**
   ⚠ **命中不等于出处对**：语料里有叠字噪声、且有整段复述（同一句常命中好几课）。按引句计：**≥20 字 {nL} 条里只有 {nLm} 条命中 >1 课**（≈{pct}%）；另 {nSm} 条命中 >1 课的是 4–15 字词片段（多为概念名本身），不参与这个比例；
-  所以首见课号那一列不是从命中数推的，是**另行按课号从小到大扫每一课**扫出来的（见 `first.py` 那一步）。
+  所以首见课号那一列不是从命中数推的，是**另行按课号从小到大扫每一课**扫出来的（`notes/concepts-pipeline/first.py` —— ★ 该脚本**原本不存在**：`git ls-files` 没有、`git log --all` 里从未进过任何提交，2026-10-01 按这句话的判据**重建**；重建版跑出 **一致 38 ｜ 表上更晚 11（均须备注解释非技术义）｜ 真错 0**）。
 
 **跨课检测（全表 {uniq} 条去重引文里、长度 ≥4 字的 {big} 条 × 全 108 课，逐字；口径按 @nova-8980 定稿）**：引句 ≥20 字 **{nL} 条 → 命中 >1 课 {nLm} 条**（≈{pct}%）· <20 字 {nS} 条 → 命中 >1 课 {nSm} 条（词片段，**不作引文计**）· 只引别名表 {alias} 条 · 未命中 {zero}。命中 >1 课的行已就地标注：长引文标**复述待看**，短碎片标**撞句待看**（20 字阈值按 @atlas-791f 口径；短句的整句复述会落进「撞句」那格，别当噪声跳过）。
 - 行号：每条引文标 `L课号:行`（单行 `L17:3`，跨行 `L17:8-9`），标的是**该引文在这一课里首次出现**的起止行。全表 **{ann} 个行号点 ｜ 挂在引文上的 {att}（对得上 {att} ／ 对不上 0）｜ 4 处行内出处引用**（写在备注里、不挂引文）。★ 这 {att} 个是**构造保证型**（行号与引文出自同一段脚本：先定课、再回那一课取 `find()` 首次出现的行）⇒「行号飘」恒为 0，**不算查过**，别把它并进上面两档 —— 详见附录。
-- 全表 **{n_rows} 条概念**（概念名前的【跨组】＝只为接口而列，判据不在本组）。""".format(
+- 全表 **{n_rows} 条概念**（概念名前的【跨组】＝只为接口而列，判据不在本组）。
+- **复算命令**（★ 前提：`archive/` **未进仓**，语料需与本仓同相对路径就位）：`python3 notes/concepts-pipeline/finalcheck.py`（前言这串数）· `notes/concepts-pipeline/verifyline.py`（行号配对）· `notes/concepts-pipeline/first.py`（首见课号那一列）· `notes/concepts-pipeline/checkquotes.py docs/concepts/inventory_中枢走势组.md --min 4`（「」逐字）· `notes/concepts-pipeline/doubling.py`（叠字两档）。**脚本都在本组的支上，读数由脚本打印，不是手抄的。**""".format(
     qs=len(qs),uniq=len(uniq),big=len(big),hit=hit,alias=alias,zero=zero,
     nL=len(L),nLm=len(Lm),pct="%.1f"%(100.0*len(Lm)/len(L)),nSm=len(Sm),nS=len(S),ann=att+4,att=att,n_rows=n_rows).split("\n")
 
@@ -99,7 +101,24 @@ lines=doc.split("\n")
 i=[k for k,l in enumerate(lines) if l.startswith("- 自检（可复跑）")][0]
 j=[k for k,l in enumerate(lines) if l.startswith("| 概念 |")][0]
 k=[k for k,l in enumerate(lines) if l.startswith("## 附录")][0]
-new=lines[:i]+PREAMBLE+lines[j:k]+APPENDIX
+
+# ★★ 2026-10-01 修：原来 `new=lines[:i]+PREAMBLE+lines[j:k]+APPENDIX` 直接把
+#   「第一个 `## 附录` 到文件结尾」整段换成 APPENDIX —— 那时全篇只有**一个**附录。
+#   后来附录二…十一 是另一支脚本追加的，于是这条老式子**一跑就删掉后面全部附录**
+#   （实测：1566 行 → 114 行，附录三–十一 共 1450 行没了，且**不报错**）。
+#   现在只替换**第一节**附录；下一节起原样接回去。
+nxt=[t for t in range(k+1,len(lines)) if lines[t].startswith("## ")]
+t0=nxt[0] if nxt else len(lines)
+# 节间分隔按本文件既有约定**确定性地重建**（空行／`---`／空行），不去猜原来有几个空行 ——
+# 猜法会因 APPENDIX 末尾空行的有无而整体错位一行（实测差一行）。
+_A=list(APPENDIX)                       # 末尾空行先抹平，免得与下面的分隔叠成两行空行
+while _A and _A[-1]=="": _A.pop()
+new=lines[:i]+PREAMBLE+lines[j:k]+_A+["","---",""]+lines[t0:]
+
+# ★ 守卫：宁可炸掉，也不静默丢几节。任何原有的一级标题在新文件里必须还在。
+_lost=[h for h in (l for l in lines if l.startswith("## ")) if h not in set(new)]
+assert not _lost, "会丢标题，拒绝写入：%s" % _lost
+assert len(new) >= len(lines) - 5, "行数从 %d 掉到 %d，拒绝写入" % (len(lines), len(new))
 open(DOC,"w",encoding="utf-8").write("\n".join(new))
 print("前言段 %d 行 → %d 行 ｜ 附录重写 ｜ 表体 %d 行"%(j-i,len(PREAMBLE),k-j))
 print("数字：引文 %d/%d/%d（≥4字）｜回全库 %d｜别名 %d｜未命中 %d｜跨课 %d→%d、%d→%d｜行号点 %d（挂引文 %d＋行内 4）"%(len(qs),len(uniq),len(big),hit,alias,zero,len(L),len(Lm),len(S),len(Sm),att+4,att))
