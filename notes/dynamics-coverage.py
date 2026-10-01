@@ -59,13 +59,31 @@ print('**入表条件**：广谱信号 ≥4 **或** 特异词 >0（`broad < 4 an
 print('排序：**特异词信号**从高到低（与中枢走势组同做法）。`信号(广谱)` 列同时给单行尺，'
       '两者的差＝被折行劈开的命中。`状态` 只对**本表这一把尺**负责：★未读 ≠ 该课没料，'
       '已精读 ＝ 整课逐行读完（含附录），不是“点读过”。\n')
-print('| 课 | 背驰 | 力度 | 买卖点 | MACD | 缺口 | 特异词 | 信号(广谱) | 单行尺 | 定义句行 | 课长 | 清单引句 | 状态 |')
-print('|' + '---|' * 12)
+# ★★ 第 20 批加：**表头自检** —— 表头格子数必须等于数据行格子数。
+#   起因（本批自查时撞见）：第 16 批给 FAMILY 加了第六族（合力），**表头那行没跟着改**
+#   ⇒ 表头比数据**少一格**，于是「缺口」之后每一列的标签都**错位一格**
+#   （读者会把「合力」那一格的 0 读成「特异词」，把特异词读成「信号(广谱)」…），
+#   而且在严格 GFM 下多出来的那一格会被丢掉（**状态列整个看不见**）。
+#   ⇒ **加族词是真加，改表头不是顺手事** —— 所以让它自己数。
+COLS = 1 + len(FAMILY) + 7      # 课 ＋ 各族 ＋ 特异词/信号(广谱)/单行尺/定义句行/课长/清单引句/状态
+HEAD = '| 课 | ' + ' | '.join(n for n, _ in FAMILY) + ' | 特异词 | 信号(广谱) | 单行尺 | 定义句行 | 课长 | 清单引句 | 状态 |'
+WIDTH_BAD = []   # 表头/数据行宽度不合的课号
+if len([c for c in HEAD.split('|')]) - 2 != COLS:
+    print(f'★★ 表头自检：表头 {len(HEAD.split("|"))-2} 格 vs 应为 {COLS} 格（族词加了、表头没改）', file=sys.stderr)
+print(HEAD)
+print('|' + '---|' * COLS)
 for r in rows_n:
     if r['broad'] < 4 and r['narrow'] == 0: continue
     c = ' | '.join(str(d) if d == rr else f'{d}({rr})' for d, rr in r['cols'])
     st = '已精读' if r['no'] in READ else '★未读'
-    print(f"| {r['no']} | {c} | **{r['narrow']}** | **{r['broad']}** | {r['broad_raw']} | {r['defline']} | {r['lines']} | {quotes.get(r['no'],0)} | {st} |")
+    LINE = f"| {r['no']} | {c} | **{r['narrow']}** | **{r['broad']}** | {r['broad_raw']} | {r['defline']} | {r['lines']} | {quotes.get(r['no'],0)} | {st} |"
+    if len(LINE.split('|')) - 2 != COLS:
+        WIDTH_BAD.append((r['no'], len(LINE.split('|')) - 2))
+    print(LINE)
+#   ★ 只喊一次 ＋ 报总数：**一次红 90 行的检查等于没检查**（人会把整屏忽略掉）。
+if WIDTH_BAD:
+    print(f'★★ 表头自检：数据行 {WIDTH_BAD[0][1]} 格 vs 表头 {COLS} 格'
+          f'（首例 L{WIDTH_BAD[0][0]}，共 {len(WIDTH_BAD)} 行；族词加了、表头没跟）', file=sys.stderr)
 # ★★ 第 17 批加：**抬头自检** —— 脚本算的课数 vs 交付文件此刻自己写的课数。
 #   起因（atlas 1359 提的，原文「你这次是靠人工比出来的，该由脚本比」）：
 #   第 16 批我改了 §15.22 的新数，却忘了把下面那张抄回来的表一起重生成 ⇒ **同一个数在同一个文件里有两个版本，
