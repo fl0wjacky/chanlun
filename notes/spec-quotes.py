@@ -18,8 +18,16 @@ import os, re, sys
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TXT = os.path.join(R, 'archive/chanlun108/text')
-MARK = re.compile(r'⟦(\d+):(\d+)-(\d+)⟧')
+MARK = re.compile(r'⟦(\d+):(\d+)(?:-(\d+))?⟧')
 TOK = re.compile(r'「([^「」]*)」')
+# ★★ 展开后**不许**再有 ⟦…⟧ 残留。旧版正则只认 `⟦课:行-行⟧`，于是 `⟦98:9⟧`
+#    这种单行写法**不被认、原样留在文里**，而「」那一套尺**全都看不见它**
+#    ⇒ `docs/spec/中枢.md:111` 带着字面标记进了 main，读者看到的是符号不是原文。
+#    @atlas-791f 2026-10-01 在 main 上发现。⇒ 两条：① 单行式也收 ② 残留即报错、不写文件。
+#    ★ 只管「长得像真坐标」的：`⟦数字:…⟧`。**故意不抓 `⟦课:起-止⟧` 这种**——
+#      说明书正文要能**举例说明标记怎么写**（@atlas-791f 三份文件的表头就写着
+#      「单行不展开且不报错」这句），抓宽了会把示例本身判成残留、等于把文档禁言。
+LEFT = re.compile(r'⟦\s*\d+\s*[:：][^⟧]*⟧')
 
 corpus = {}
 for fn in sorted(os.listdir(TXT)):
@@ -36,7 +44,9 @@ def slice_of(n, a, b):
 
 
 def expand(body):
-    return MARK.sub(lambda m: slice_of(int(m.group(1)), int(m.group(2)), int(m.group(3))), body)
+    # ⟦n:a⟧ ≡ ⟦n:a-a⟧（单行式）
+    return MARK.sub(lambda m: slice_of(int(m.group(1)), int(m.group(2)),
+                                       int(m.group(3) or m.group(2))), body)
 
 
 def locate(block):
@@ -53,6 +63,17 @@ def main():
     body = open(src, encoding='utf-8').read()
     n_mark = len(MARK.findall(body))
     out = expand(body) if n_mark else body
+
+    # ★★ **先查残留，后写文件**：宁可什么都不写，也不发出一份带字面标记的稿。
+    left = LEFT.findall(out)
+    if left:
+        print('== %s ==' % src)
+        print('✗ 有 %d 处标记没被展开（原样留在文里，读者看到的是符号、不是原文）：' % len(left))
+        for t in left[:20]:
+            print('  ✗ %s' % t)
+        print('  合法写法只有两种：⟦课:行⟧ ／ ⟦课:行-行⟧。文件未改动。')
+        raise SystemExit(1)
+
     if not check_only and n_mark:
         open(src, 'w', encoding='utf-8').write(out)
 
