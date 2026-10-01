@@ -28,7 +28,10 @@ import re
 import sys
 import unicodedata
 
-CORPUS = 'archive/chanlun108/text'
+# ★ 路径口径（2026-10-01 第 13 批补）：原版是相对路径，必须 cd 到仓库根才跑得动 ——
+#   与 bram 那六个 /tmp 输入同一类毛病。现在按 __file__ 定位，**在哪个目录跑都一样**。
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CORPUS = os.path.join(ROOT, 'archive/chanlun108/text')
 DECOR = '**「」『』“”‘’"\'()（）`↵'
 
 

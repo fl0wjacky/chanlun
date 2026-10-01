@@ -13,10 +13,15 @@
 #   ③ 命中的课有几课：逐字命中证不了出处唯一（语料里整段复述）
 #
 # 用法：python3 notes/verify_inventory.py docs/concepts/inventory_动力学.md
-import re, sys, glob, hashlib
+#
+# ★ 路径口径（2026-10-01 第 13 批补）：原版把 CORPUS 写成**相对路径**，
+#   必须 cd 到仓库根才跑得动 —— 与 bram 那六个 /tmp 输入是同一类毛病。
+#   现在按 __file__ 定位，**在哪个目录跑都一样**。
+import os, re, sys, glob, hashlib
 
-LEDGER = sys.argv[1] if len(sys.argv) > 1 else 'docs/concepts/inventory_动力学.md'
-CORPUS = 'archive/chanlun108/text'
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LEDGER = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, 'docs/concepts/inventory_动力学.md')
+CORPUS = os.path.join(ROOT, 'archive/chanlun108/text')
 
 LESSONS = {}
 for p in sorted(glob.glob(CORPUS + '/lesson-*.txt')):

@@ -4,7 +4,10 @@
 # 副尺（单行）：grep -o 口径，与结构组 §7 同尺，被折行劈开的漏
 # 两档词场：①广谱＝本组概念的通用名（背驰/力度/买卖点/MACD/缺口，全书高频 ⇒ ≥4 是下限不是筛子）
 #           ②特异＝只在本组概念里出现、别组不用的词（用来**排序**，与 bram 同做法）
-import glob, re, sys
+# ★ 路径口径（2026-10-01 第 13 批补）：原版全是相对路径，必须 cd 到仓库根才跑得动 ——
+#   与 bram 那六个 /tmp 输入同一类毛病。现在按 __file__ 定位，**在哪个目录跑都一样**。
+import os, glob, re, sys
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAMILY = [
     ('背驰', ['背驰','背弛','背馳','背离']),
     ('力度', ['力度']),
@@ -16,14 +19,14 @@ NARROW = ['背驰段','盘整背驰','趋势背驰','类背驰','类似背驰','
           '黄白线','零轴','0 轴','柱子','趋势平均力度','平均趋势力度','走势力度','背驰级别',
           '第一类买点','第二类买点','第三类买点','第三类卖点','红柱子','绿柱子']
 MARK = ['就是','称为','叫做','定义为','所谓','必须','不允许','至少']
-READFILE = 'notes/read-动力学.txt'   # nova 2026-10-01：三组统一用 notes/read-<组名>.txt
+READFILE = os.path.join(ROOT, 'notes/read-动力学.txt')   # nova 2026-10-01：三组统一用 notes/read-<组名>.txt
 READ = {int(x) for x in open(READFILE).read().split()}
 if '--write-read' in sys.argv:      # 名单与覆盖表**同一个来源**：由本脚本写回，不手抄
     open(READFILE, 'w').write('\n'.join(str(n) for n in sorted(READ)) + '\n')
     print(f'{READFILE}: {len(READ)} 课（按数值序写回）')
 def num(p): return int(re.search(r'lesson-(\d+)', p).group(1))
 rows = []
-for p in sorted(glob.glob('archive/chanlun108/text/lesson-*.txt'), key=num):
+for p in sorted(glob.glob(os.path.join(ROOT, 'archive/chanlun108/text/lesson-*.txt')), key=num):
     raw = open(p, encoding='utf-8').read(); dew = raw.replace('\n','')
     cols = [(sum(dew.count(t) for t in toks), sum(raw.count(t) for t in toks)) for _, toks in FAMILY]
     broad = sum(c[0] for c in cols)
@@ -34,7 +37,7 @@ for p in sorted(glob.glob('archive/chanlun108/text/lesson-*.txt'), key=num):
     rows.append(dict(no=num(p), cols=cols, broad=broad, broad_raw=broad_raw,
                      narrow=narrow, defline=defline, lines=len(raw.split('\n'))))
 # 清单里已有的引句条数（＝我去过那儿，不等于读过）
-led = open('docs/concepts/inventory_动力学.md', encoding='utf-8').read()
+led = open(os.path.join(ROOT, 'docs/concepts/inventory_动力学.md'), encoding='utf-8').read()
 quotes = {}
 for m in re.finditer(r'^L(\d{1,3}):', led, re.M):
     quotes[int(m.group(1))] = quotes.get(int(m.group(1)), 0) + 1
