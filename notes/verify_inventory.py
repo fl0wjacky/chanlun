@@ -47,14 +47,32 @@ for i, line in enumerate(open(LEDGER, encoding='utf-8').read().split('\n'), 1):
     rows.append((i, les, a, b, q))
 
     txt = LESSONS.get(les, '')
-    if q not in txt:                                   # ①
-        bad.append(('①逐字', i, les, a, q[:40]))
+    # ★★ 2026-10-01 第 14 批：**首/尾 `…` 的截断引，本器此前一律判①逐字不过**。
+    #   与自查尺是同一个盲点（那把是 `len(segs) < 2`），本批两处一起修。
+    #   规矩不变：**`…` 是唯一允许的不连续，且必须显式打出**；每片仍须逐字、仍须同课、仍须按序。
+    segs = [s for s in q.split('…') if s.strip()]
+    if not segs:
+        bad.append(('①逐字', i, les, a, '空块'))
         continue
-    upto = txt[:txt.index(q)]
-    got = upto.count('\n') + 1                         # ② 首次出现处的行号
-    if got != a:
-        bad.append(('②行号', i, les, a, '实际 %d' % got))
-    hits = [n for n, t in LESSONS.items() if q in t]   # ③
+    pos, ok, firstline = 0, True, None
+    for si, s in enumerate(segs):
+        p = txt.find(s, pos)
+        if p < 0:
+            ok = False
+            break
+        if si == 0:
+            firstline = txt[:p].count('\n') + 1
+        pos = p + len(s)
+    if not ok:                                         # ①
+        bad.append(('①逐字', i, les, a, '（片片查）' + q[:40]))
+        continue
+    # ② 行号：**有前导 `…` 的行不查首行**（那正是"从句子中间开始引"的声明），
+    #    其余仍要求首片首次出现处整除起始行号。
+    if not q.startswith('…') and firstline != a:
+        bad.append(('②行号', i, les, a, '实际 %d' % firstline))
+    # ③ 用**最长的一片**查跨课（用 segs[0] 会在 `…` 行上把「本 ID 理论的」这种短头当线索，噪声极大）
+    probe = max(segs, key=len)
+    hits = [n for n, t in LESSONS.items() if probe in t]
     if len(hits) != 1:
         print('  ③跨课 文件%d行 L%d:%d 也在 %s' %
               (i, les, a, ' '.join('第%d课' % n for n in hits if n != les)))
