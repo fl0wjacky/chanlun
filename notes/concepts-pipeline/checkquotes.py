@@ -165,6 +165,29 @@ def hits(q, lessons, folded, lossy, nws, mn):
     return "miss"
 
 
+# ★★ 正交的第八档（@iris-64a1 2026-10-01 06:1x 提出、@nova-8980 定为规矩）：**疑似掐尾**。
+#   判据（iris 版）：**块末字不在 `。！？…”』）` 且块不以 `…` 收尾** ⇒ 疑似「引到一半掐掉尾巴」。
+#   为什么逐字尺**看不见**它：掐掉尾巴的**前缀本来就是一个连续子串** —— 逐字命中、行号也对，
+#   检查一片绿。这不是「命中错了」，是**少看了一维**（与 deco 档同类：② 档把装饰擦掉了，
+#   这里则是「块有没有到头」这一维从来没人问）。★ 凡「找到子串就停」的尺都有这个盲区。
+#   ★ nova 的规矩原话是「引原文至少引到句号或分号；中途截断的，必须打『……』」
+#     ⇒ **分号也算终结符**。两套口径不同（iris 那套不含 `；`，更严），所以**两栏都报** ——
+#     只报一栏，就会变成「bram 说 12、iris 说 19」那种假打架。
+#   ★ 只报、**不改退出码**：引半句在原文里是常态，会有合法误报（引用者有意只取前半句）。
+TERM_IRIS = "。！？…”』）"
+TERM_NOVA = "。！？；…”』）.?!;"
+
+
+def tail_cut(q, terms):
+    """块是否疑似掐尾：末字不是终结符，且没有用 `…` 收尾。"""
+    t = q.replace("↵", "").strip().rstrip("*` ")
+    if not t:
+        return False
+    if t.endswith("…") or t.endswith("..."):
+        return False          # 引用者已声明「后面还有」
+    return t[-1] not in terms
+
+
 def deco_check(q, folded_x, posmap, raw_x):
     """★ 第七档（正交标示，不是阶梯的一级）：块的**装饰符**跟语料那一带一样吗？
 
@@ -311,6 +334,17 @@ def main():
             print("  ⚠ 语料那带有 %s，块里没有%s：%s"
                   % (corpus_only or {}, ("；块里另多 " + str(block_extra)) if block_extra else "",
                      q[:70]))
+    # ★ 第八档（正交）：疑似掐尾 —— 逐字尺**结构性看不见**的一类（掐掉尾巴的前缀仍是连续子串）。
+    #   两套终结符口径都报（见 TERM_*）：iris 那套不含 `；`（更严），nova 的规矩含 `；`。
+    if "--no-tail" not in sys.argv:
+        tc_iris = [q for q in quotes if tail_cut(q, TERM_IRIS)]
+        tc_nova = [q for q in quotes if tail_cut(q, TERM_NOVA)]
+        print("★ 疑似掐尾：iris 口径（不含 `；`）%d ｜ nova 口径（含 `；`）%d"
+              "（正交档，不改退出码；逐字尺看不见 —— 掐尾后的前缀仍是连续子串）"
+              % (len(tc_iris), len(tc_nova)))
+        for q in tc_iris:
+            t = q.replace("↵", "").strip().rstrip("*` ")
+            print("  … 疑似掐尾（末尾『%s』）：…%s" % (t[-1], q[-70:]))
     print("含 ↵ 折行 %d ｜ 含省略号 %d" % (sum("↵" in q for q in quotes),
                                        sum("…" in q for q in quotes)))
     return 1 if bucket["miss"] else 0
