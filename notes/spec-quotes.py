@@ -58,6 +58,16 @@ def main():
     blocks = TOK.findall(out)
     assert blocks, '✗ 一块「」都没有 —— 标记没展开？'
     bad = [b for b in blocks if locate(b) is None]
+
+    # 自纠：不逐字的「」一律降为『』。生成出来的块永远逐字，所以不中的必然是**我顺手写的强调**。
+    # 十批自纠全是这个病（手打的「」＝自己的想法），与其每次人工改，不如让它出不去。
+    if bad and not check_only:
+        for b in bad:
+            out = out.replace('「%s」' % b, '『%s』' % b)
+        open(src, 'w', encoding='utf-8').write(out)
+        blocks = TOK.findall(out)
+        bad = [b for b in blocks if locate(b) is None]
+
     print('== %s ==' % src)
     print('标记展开   : %d 处' % n_mark)
     print('「」块     : %d ｜ 逐字命中 %d ｜ 不中 %d' % (len(blocks), len(blocks) - len(bad), len(bad)))
