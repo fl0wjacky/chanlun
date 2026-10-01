@@ -6,7 +6,8 @@
 
 口径（与统一尺 notes/concepts-pipeline/checkquotes.py 对齐）：
   · 切片 = 语料第 a..b 行**原样**连接，行间用 `↵`（不补空格、不改标点）
-  · 生成后立刻自检：每个 「」块必须能**逐字**回到语料里找到；找不到就报红、非零退出
+  · 生成后立刻自检：每个 「」块必须能**逐字**回到语料里找到；找不到就**报红、非零退出**
+    ★★ **不许**把不中的自动改成『』（自动降级 ⇒ 检查永远绿、错字不报错）—— 停下来让人改
   · 空输入两侧都断言（语料课数、块数）
 
 用法：
@@ -59,15 +60,10 @@ def main():
     assert blocks, '✗ 一块「」都没有 —— 标记没展开？'
     bad = [b for b in blocks if locate(b) is None]
 
-    # 自纠：不逐字的「」一律降为『』。生成出来的块永远逐字，所以不中的必然是**我顺手写的强调**。
-    # 十批自纠全是这个病（手打的「」＝自己的想法），与其每次人工改，不如让它出不去。
-    if bad and not check_only:
-        for b in bad:
-            out = out.replace('「%s」' % b, '『%s』' % b)
-        open(src, 'w', encoding='utf-8').write(out)
-        blocks = TOK.findall(out)
-        bad = [b for b in blocks if locate(b) is None]
-
+    # ★★ 这里**故意不做**「不逐字的『』自动降级」（v1 做过，@nova-8980 2026-10-01 裁掉）。
+    #   理由（她的原话，我认）：自动降级会让检查**永远是绿的** —— 打错一个字也不报错，
+    #   只是悄悄换了括号。被换掉的那个块**本来是当引文写的**，改完连"这里错过"的痕迹都没了。
+    #   ⇒ 碰到对不上的，**直接报错停下，让人去改**。下面 raise SystemExit(1) 就是这一条。
     print('== %s ==' % src)
     print('标记展开   : %d 处' % n_mark)
     print('「」块     : %d ｜ 逐字命中 %d ｜ 不中 %d' % (len(blocks), len(blocks) - len(bad), len(bad)))
