@@ -77,9 +77,34 @@ if _m and int(_m.group(1)) != len(inb):
 else:
     print(f'抬头自检：一致（表内 {len(inb)} 课）', file=sys.stderr)
 b4 = [r for r in rows if r['broad'] >= 4]
-print(f"\n**账目**：广谱信号 ≥4 的课 **{len(b4)} 课 / {sum(r['lines'] for r in b4)} 行**"
-      f"（全 108 课共 {sum(r['lines'] for r in rows)} 行）· 其中特异词 >0 的 {len([r for r in b4 if r['narrow']>0])} 课 ·"
-      f" 零命中 {len([r for r in rows if r['broad']==0])} 课；"
-      f"**表外 {len(out)} 课**（零命中 {len([r for r in out if r['broad']==0])} 课 ＋ "
-      f"广谱 1-3 且特异词 0 的 {len([r for r in out if r['broad']>0])} 课："
-      + ' '.join(str(r['no']) for r in out if r['broad']>0) + "）")
+ACCT = (f"**账目**：广谱信号 ≥4 的课 **{len(b4)} 课 / {sum(r['lines'] for r in b4)} 行**"
+        f"（全 108 课共 {sum(r['lines'] for r in rows)} 行）· 其中特异词 >0 的 {len([r for r in b4 if r['narrow']>0])} 课 ·"
+        f" 零命中 {len([r for r in rows if r['broad']==0])} 课；"
+        f"**表外 {len(out)} 课**（零命中 {len([r for r in out if r['broad']==0])} 课 ＋ "
+        f"广谱 1-3 且特异词 0 的 {len([r for r in out if r['broad']>0])} 课："
+        + ' '.join(str(r['no']) for r in out if r['broad']>0) + "）")
+# ★★ 第 20 批加：**账目自检 ＋ 进度自检** —— 上面那条自检只盯"课数"一个数，
+#   而每批真正会动的数是另两颗：**已精读／★未读**（存在 §15.3 散文里，脚本管不着）。
+#   第 16 批那次旧数的形状就是"改了这边忘了那边"，所以这里把两颗数也接上。
+#   规则：**找不到也不许算绿**（"没得比"和"比对了且相同"必须长得不一样）。
+def _chk(name, pat, want):
+    _f = re.search(pat, led)
+    if _f is None:
+        print(f'{name}自检：文件里找不到那一行 —— 没得比（**这不算绿**）', file=sys.stderr)
+    elif tuple(int(g) for g in _f.groups()) != want:
+        print(f'★★ {name}自检：不一致 —— 脚本 {want} vs 文件 {tuple(int(g) for g in _f.groups())}'
+              f'（交付文件没重新生成）', file=sys.stderr)
+    else:
+        print(f'{name}自检：一致', file=sys.stderr)
+DONE = len([r for r in inb if r['no'] in READ])
+#   账目那一行比较长，整行比（不走 _chk 的元组比法）：
+_a = re.search(r'\*\*账目\*\*：广谱信号[^\n]*', led)
+if _a is None:
+    print('账目自检：文件里找不到账目行 —— 没得比（**这不算绿**）', file=sys.stderr)
+elif _a.group(0) != ACCT:
+    print('★★ 账目自检：不一致 —— 文件里第一处账目与本次现算的不同（交付文件没重新生成）', file=sys.stderr)
+else:
+    print('账目自检：一致', file=sys.stderr)
+_chk('进度', r'表内已精读 \*\*(\d+)\*\* · ★未读 \*\*(\d+)\*\*', (DONE, len(inb) - DONE))
+_chk('读名单', r'读名单 `notes/read-动力学.txt` 现在 (\d+) 课', (len(READ),))
+print('\n' + ACCT)
