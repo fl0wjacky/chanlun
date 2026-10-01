@@ -71,6 +71,10 @@ STATUS_WORDS = {"★未读", "已精读", "逐行", "已读", "未读", "抽读"
 #   bram 的覆盖表不在仓库里（在卡 card-fd1a9604-bc8 上），只能拿他的「表外」取补。
 #   ★★ 实测这串当天就在漂：卡上 06:14 报 21 课 → 群 06:2x 报 20 课 → 他文档仍写 23 课。
 #   ⇒ 所以这里**不静默用**：把来源、时刻、条数都印出来，条数对不上就当场炸。
+# ★ 2026-10-01 起，③ **直读仓库原件**（不再取补）—— bram 加了 `--dump-table`：
+ZS_TABLE_PATH = "notes/table-中枢走势组.txt"      # 表内课号，一行一课。★ 这才是输入
+# ↓ 下面这条现在只当**对照**用（曾经是唯一的输入，见文件头那通碑）。两件不同来路的
+#   东西给出同一个补集，才算真对上过一次；不一致时以落表为准。
 ZS_OUTSIDE_FROM_CARD = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 74, 76,
                         85, 87, 95, 96, 97, 103, 104]
 ZS_ASOF = "卡 card-fd1a9604-bc8 · bram 2026-10-01T06:14Z（列表逐字来自他卡上那条）"
@@ -99,6 +103,10 @@ assert len(set(ZS_OUTSIDE_FROM_CARD)) == len(ZS_OUTSIDE_FROM_CARD), "中枢组�
 ALL = set(range(1, 109))
 
 
+def fmt(s):
+    return " ".join(str(x) for x in sorted(s))
+
+
 def main():
     ref = sys.argv[1] if len(sys.argv) > 1 else "origin/main"
     rp = git("rev-parse", "--verify", "%s^{commit}" % ref)
@@ -114,16 +122,32 @@ def main():
         c = _cells(ln) if ln.startswith("|") else []
         if len(c) >= 3 and re.fullmatch(r"\d{1,3}", c[0]) and c[-1] in STATUS_WORDS:
             I.add(int(c[0]))
-    B = ALL - set(ZS_OUTSIDE_FROM_CARD)
+    # ★ ③ 直读仓库原件（bram 2026-10-01 `--dump-table` 落下的）。
+    #   取不到**不许顶替**：以前是靠上面那条手抄名单取补的，现在取补是**产物**，不是输入。
+    _zt = git("show", "%s:%s" % (ref, ZS_TABLE_PATH))
+    if _zt.returncode != 0:
+        raise SystemExit("取不到 %s:%s（③ 的第 3 个来源没了）\n  %s"
+                         % (ref, ZS_TABLE_PATH, _zt.stderr.strip()))
+    B = set(int(m) for m in re.findall(r"(?m)^\s*(\d{1,3})\s*$", _zt.stdout))
+    if not B:
+        raise SystemExit("%s 里一行课号都取不到 —— **空表不是「0 课」**，是取法错了"
+                         % ZS_TABLE_PATH)
 
     print("① 结构组 表内 = %3d 课   （文档 §7 现取 · 门槛：信号 ≥4）" % len(A))
     print("② 动力学 表内 = %3d 课   （文档 §15 现取 · 末列状态过滤）" % len(I))
-    print("③ 中枢组 表内 = %3d 课   ★★ 非仓库现算：108 − 卡上贴的表外 %d 课"
-          % (len(B), len(ZS_OUTSIDE_FROM_CARD)))
-    print("      来源：%s" % ZS_ASOF)
-    print("      %s" % ZS_STALE_NOTE)
-    print("      ★ ②③ 两格的口径不同（门槛不同），**并集不代表任何一张表**；")
-    print("        报 ③ 必须连上面的来源一起报 —— 它**不是仓库现算**。")
+    print("③ 中枢组 表内 = %3d 课   （%s 现取 · %d 行）"
+          % (len(B), ZS_TABLE_PATH, len(B)))
+    # ★ 手抄那条**降级成对照**：他 `--dump-table` 之后，取补从「输入」变回「产物」。
+    #   两件不同来路的东西给出同一个补集，才算真对上一次（见 [[same-word-different-measure]]）。
+    _comp = ALL - B
+    _ok = _comp == set(ZS_OUTSIDE_FROM_CARD)
+    print("      ★ 对照（不是输入）：落表取补 %d 课 与 卡上那条手抄名单 —— %s"
+          % (len(_comp), "**完全一致**" if _ok else "★ **不一致**"))
+    if not _ok:
+        print("        只在落表取补里：%s" % fmt(_comp - set(ZS_OUTSIDE_FROM_CARD)))
+        print("        只在手抄名单里：%s" % fmt(set(ZS_OUTSIDE_FROM_CARD) - _comp))
+        print("        ★ 以落表为准（那是原件、可复算）；手抄那条按上面的来源去更新。")
+    print("      ★ ②③ 两格的口径不同（门槛不同），**并集不代表任何一张表**。")
     U = A | I | B
     print("   ────────────────────────────────────────────")
     print("   三张表内并集 = %3d 课" % len(U))
@@ -142,9 +166,6 @@ def main():
         print("     %-22s %3d 课" % (nm, k))
     print("     %-22s %3d 课" % ("并集", len(rf)))
     print()
-
-    def fmt(s):
-        return " ".join(str(x) for x in sorted(s))
 
     never = ALL - U
     in_tbl_no_read = U - rf
