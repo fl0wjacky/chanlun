@@ -34,11 +34,16 @@ led = open('docs/concepts/inventory_动力学.md', encoding='utf-8').read()
 quotes = {}
 for m in re.finditer(r'^L(\d{1,3}):', led, re.M):
     quotes[int(m.group(1))] = quotes.get(int(m.group(1)), 0) + 1
+inb = [r for r in rows if not (r['broad'] < 4 and r['narrow'] == 0)]
+out = [r for r in rows if (r['broad'] < 4 and r['narrow'] == 0)]
 rows_n = sorted(rows, key=lambda r: (-r['narrow'], -r['broad'], r['no']))
 rows_b = sorted(rows, key=lambda r: (-r['broad'], -r['narrow'], r['no']))
-print('## 覆盖表 · 全 108 课（脚本现算：`notes/dynamics-coverage.py`）\n')
+print('## 覆盖表 · 表内 %d 课（脚本现算：`notes/dynamics-coverage.py`）\n' % len(inb))
+print('**入表条件**：广谱信号 ≥4 **或** 特异词 >0（`broad < 4 and narrow == 0` 的课不入表，'
+      '**表外是 %d 课，不是没有课** —— 见 §15.3）。' % len(out))
 print('排序：**特异词信号**从高到低（与中枢走势组同做法）。`信号(广谱)` 列同时给单行尺，'
-      '两者的差＝被折行劈开的命中。\n')
+      '两者的差＝被折行劈开的命中。`状态` 只对**本表这一把尺**负责：★未读 ≠ 该课没料，'
+      '已精读 ＝ 整课逐行读完（含附录），不是"点读过"。\n')
 print('| 课 | 背驰 | 力度 | 买卖点 | MACD | 缺口 | 特异词 | 信号(广谱) | 单行尺 | 定义句行 | 课长 | 清单引句 | 状态 |')
 print('|' + '---|' * 12)
 for r in rows_n:
@@ -49,4 +54,7 @@ for r in rows_n:
 b4 = [r for r in rows if r['broad'] >= 4]
 print(f"\n**账目**：广谱信号 ≥4 的课 **{len(b4)} 课 / {sum(r['lines'] for r in b4)} 行**"
       f"（全 108 课共 {sum(r['lines'] for r in rows)} 行）· 其中特异词 >0 的 {len([r for r in b4 if r['narrow']>0])} 课 ·"
-      f" 零命中 {len([r for r in rows if r['broad']==0])} 课", file=sys.stderr)
+      f" 零命中 {len([r for r in rows if r['broad']==0])} 课；"
+      f"**表外 {len(out)} 课**（零命中 {len([r for r in out if r['broad']==0])} 课 ＋ "
+      f"广谱 1-3 且特异词 0 的 {len([r for r in out if r['broad']>0])} 课："
+      + ' '.join(str(r['no']) for r in out if r['broad']>0) + "）", file=sys.stderr)
