@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """从 state5（44 行、带跨课标注、无行号）重建：+4 行 +四处行内补证"""
-import io
-P="docs/concepts/inventory_中枢走势组.md"
-s=open("/tmp/state5.md",encoding="utf-8").read().split("\n")
+import io,os
+ROOT=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_IN=os.path.join(ROOT,"notes/concepts-pipeline/inputs")  # ★ 复算输入（原在 /tmp，2026-10-01 落进仓）
+P=os.path.join(ROOT,"docs/concepts/inventory_中枢走势组.md")
+s=open(_IN+"/state5.md",encoding="utf-8").read().split("\n")
 
 def ins_after(anchor, rowfile):
     global s
@@ -13,9 +15,9 @@ def ins_after(anchor, rowfile):
     return i[0]+1
 
 # 顺序不重要：锚点各自唯一
-a=ins_after("| **走势终完美** |", "/tmp/r_selfsim.txt")
-b=ins_after("| **趋势** |", "/tmp/row_pingheng.txt")
-c=ins_after("| **中枢震荡** |", "/tmp/row_zhongzhou.txt")
+a=ins_after("| **走势终完美** |", _IN+"/r_selfsim.txt")
+b=ins_after("| **趋势** |", _IN+"/row_pingheng.txt")
+c=ins_after("| **中枢震荡** |", _IN+"/row_zhongzhou.txt")
 
 # 中枢的方向 备注补证
 k=[n for n,l in enumerate(s) if l.startswith("| **趋势的方向（中枢的方向）** |")]
@@ -27,7 +29,7 @@ body=row[:-1].rstrip()
 i=body.find(" <br>跨课·")          # 跨课标注永远在行尾，插在它前面（multimark 每轮会重写行尾那一段）
 s[k[0]]=(body[:i]+add+body[i:] if i>=0 else body+add)+" |"
 # ===== 48 行版追加 =====
-d=ins_after("| **缠中说禅走势分解定理二** |", "/tmp/row_wanquan.txt")
+d=ins_after("| **缠中说禅走势分解定理二** |", _IN+"/row_wanquan.txt")
 
 EXT = {
  "| **走势终完美** |": "；**L102 又给两套说法（第五、第六）**：⑤ L102「因为走势必完美对应的是一种最特殊、最强有力的唯一分解」⑥ L102「本 ID 的理论给出的递归函数，完美地给出市场走势一个类似记数法一样的唯一分解」；同课点出它为什么关键：L102「这才是走势必完美真正关键的地方。」；并点名一个应用：L102「区间套的方法，就是走势必完美的一个重要的应用。」；**另见结构组**：本行引的那句走势必完美定义（分型、笔、线段、不同级别走势类型所对应的递归函数 → 唯一分解），结构组已单列一行，定义不在本组重复登记",
@@ -45,4 +47,18 @@ for anchor, add in EXT.items():
 
 print("插入自相似性于第 %d 行、平衡市于第 %d 行、震荡中轴于第 %d 行 ｜ 概念行 %d"%(a+1,b+1,c+1,sum(1 for l in s if l.startswith("| **"))))
 
+# ===== 守卫（2026-10-01 加，实测踩过）=====
+# 这脚本把**整份文件**换成「state5 ＋ 四处补插」那张表体草稿。写它的时候全篇就只有表体，
+# 前言、附录一…十一 都是**后来**长出来的。所以现在在成品上跑一次 ＝ 把成品换成草稿：
+# 实测 **1567 行 → 97 行**，前言与附录全没，**且不报错、还打印「概念行 48」**。
+# 而 README 顶上那份「按顺序跑」的链，第一步就是它 —— 按文档做，第一步就毁文件。
+#
+# ⇒ 本脚本**只能跑在草稿上**。要改成品，改 `inputs/state5.md` 里对应那一行（源头），别跑它。
+if os.path.exists(P):
+    _old=open(P,encoding="utf-8").read().split("\n")
+    _lost=[h for h in (l for l in _old if l.startswith("## ")) if h not in set(s)]
+    assert not _lost, ("会丢 %d 个一级标题，拒绝写入：%s —— 本脚本只重建表体，"
+                       "跑在成品上＝把成品换成 %d 行的草稿。要改成品请改 inputs/state5.md。"
+                       % (len(_lost), _lost[:3], len(s)))
+    assert len(s) >= len(_old)-5, "行数从 %d 掉到 %d，拒绝写入"%(len(_old),len(s))
 open(P,"w",encoding="utf-8").write("\n".join(s))

@@ -1,5 +1,5 @@
 import os,re
-ROOT="/home/cumora/.cumora/agents/bram-9d29/workspace/wt-concepts"
+ROOT=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # ★ 相对定位（2026-10-01 复算查：原来写死绝对路径）
 DOC=os.path.join(ROOT,"docs/concepts/inventory_中枢走势组.md")
 D=os.path.join(ROOT,"archive/chanlun108/text")
 files=sorted(os.listdir(D))

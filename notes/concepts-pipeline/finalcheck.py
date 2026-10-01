@@ -1,6 +1,9 @@
 import os,re
-ROOT="/home/cumora/.cumora/agents/bram-9d29/workspace/wt-concepts"
+# ★ 相对定位，不写死绝对路径 —— 换 worktree／换人也能跑（2026-10-01 复算查）。
+ROOT=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+IN=os.path.join(ROOT,"notes/concepts-pipeline/inputs")
 D=ROOT+"/archive/chanlun108/text"
+assert os.path.isdir(D), "语料不在 %s —— 复算前提：archive/ 未进仓，需与本仓同相对路径就位" % D
 CORP={f:open(os.path.join(D,f),encoding="utf-8").read().replace("\n","") for f in sorted(os.listdir(D))}
 ALIAS=re.sub(r"\s+","",open(ROOT+"/docs/术语别名表.md",encoding="utf-8").read())
 doc=open(ROOT+"/docs/concepts/inventory_中枢走势组.md",encoding="utf-8").read()
@@ -17,7 +20,9 @@ L=[q for q in big if len(q)>=20]; S=[q for q in big if len(q)<20]
 Lm=[q for q in L if len([f for f in CORP if q in CORP[f]])>1]
 Sm=[q for q in S if len([f for f in CORP if q in CORP[f]])>1]
 ann=len(re.findall(r"L\d+:\d+(?:-\d+)?",T))
-log=[l.split("\t") for l in open("/tmp/annot_log.tsv",encoding="utf-8").read().split("\n")]
+# ★ 原来是 /tmp/annot_log.tsv —— 仓外、易失，别人跑必炸。已落进仓（inputs/）。
+#   这份是 addline4.py 那一次跑的**冻结输出**；addline4 非幂等，所以冻住而不是重推。
+log=[l.split("\t") for l in open(os.path.join(IN,"annot_log.tsv"),encoding="utf-8").read().split("\n")]
 print("【表内】「」 %d ｜ 去重 %d ｜ ≥4字 %d"%(len(qs),len(uniq),len(big)))
 print("  回全库：命中 1 课 %d ｜ 命中 >1 课 %d ｜ 0 命中 %d（含只引别名表 %d）⇒ 命中 %d"%(one,multi,zero,alias,one+multi))
 print("  跨课：≥20 字 %d 条 → 跨课 %d 条 ｜ <20 字 %d 条 → 跨课 %d 条"%(len(L),len(Lm),len(S),len(Sm)))

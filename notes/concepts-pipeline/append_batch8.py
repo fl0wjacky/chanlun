@@ -5,7 +5,7 @@
 """
 import os, glob
 
-WT = "/home/cumora/.cumora/agents/bram-9d29/workspace/wt-concepts"
+WT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # ★ 相对定位（2026-10-01 复算查：原来写死绝对路径）
 P = os.path.join(WT, "docs/concepts/inventory_中枢走势组.md")
 TXT = os.path.join(WT, "archive/chanlun108/text/lesson-%03d.txt")
 
