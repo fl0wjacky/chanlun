@@ -22,6 +22,7 @@ import sys
 WT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DOC = os.path.join(WT, "docs/concepts/inventory_中枢走势组.md")
 OUT = os.path.join(WT, "notes/read-中枢走势组.txt")
+OUT_TABLE = os.path.join(WT, "notes/table-中枢走势组.txt")   # 表内课号（--dump-table 写）
 
 # 词场两档。★ 这里是**唯一**一份定义，卡上那张表是从这里现算的，别在别处再抄一遍。
 SPECIFIC = ["中枢震荡", "走势终完美", "必完美", "同级别分解", "非同级别分解",
@@ -105,6 +106,19 @@ def main():
         old = open(OUT, encoding="utf-8").read() if os.path.exists(OUT) else None
         open(OUT, "w", encoding="utf-8").write(body)
         print("→ 已写回（%s）" % ("内容有变" if old != body else "内容未变"))
+
+    # ★ @atlas-791f 2026-10-01 06:3x 指出：**我的表外数此前只存在于卡上（仓外）**，
+    #   而他的并表脚本第三格正是拿它取补 ⇒ 全脚本唯一的「仓外 ＋ 手抄」输入。
+    #   现算的东西不该手抄。本开关把它写进仓库，谁都能 `git show` 到某一刻的名单。
+    if "--dump-table" in sys.argv:
+        body = "".join("%d\n" % n for n in sorted(in_table))
+        old = open(OUT_TABLE, encoding="utf-8").read() if os.path.exists(OUT_TABLE) else None
+        open(OUT_TABLE, "w", encoding="utf-8").write(body)
+        print("→ 表内名单已写回 %s（%d 课；表外 %d 课 ＝ 全库 %d − 表内）"
+              % (os.path.relpath(OUT_TABLE, WT), len(in_table), len(out_table), len(L)))
+        print("→ 口径：%s　★ 门槛变了这个名单就会变，引用时必须连门槛一起报。"
+              % "特异词 ≥1 或 通场词 ≥4")
+        print("→ %s" % ("内容有变" if old != body else "内容未变"))
     return 0
 
 
