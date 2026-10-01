@@ -17,13 +17,18 @@
   · 该块在多课里都成立 ⇒ 记 `歧义`，**不猜**，报出来让人看。
   · 块前面找不到坐标 ⇒ 记 `无坐标`，报出来。
 
-★★ **本尺有一条**硬前提**，不满足时读数基本是噪声，别拿去指责别人**：
-   它靠「正文里最近的那个 `` `L课:行` ``」来认领引文块。
-   ⇒ 只在**「一个坐标紧跟它自己那个块」**的写法下可靠（`分型.md`／`笔.md`／`线段.md` 是这么写的）。
-   ⇒ 若正文里存在**不跟块的交叉引用**（如「★ 这与 `L33:145` 是同一个答案的另一次给出」），
-     那个坐标会被下面第一个块「就近认领」⇒ 报出**假的「课不符／行不符」**。
-   ★ 实测：拿它跑 `docs/spec/中枢.md` 报 14 无坐标 ＋ 4 不符；**逐条看过，那 4 条全是配对漂移，不是对方的错**。
-   ⇒ **本尺目前只给「按本写法写的文件」用**；要推广，得先让块自带坐标（或改判据）。
+★★ **本尺有一条硬前提；前提不成立时它不猜，报「判不了」停下。**
+   它靠「**紧邻**在块前面的那个 `` `L课:行` ``」认领引文块（坐标与块之间 ≤3 个换行）。
+   前提＝**每个引文块都有自己紧邻的坐标，且一个坐标只领一个块**。
+   ⇒ 违反任一条（无主块／一坐标多块）⇒ **rc=2「判不了」**，并把逐条判词标成「不可信」。
+      **2 不是「有错」，是「这份文件我判不了」** —— 别把它读成红。
+
+   ★ 为什么要「紧邻」这一条：正文里的**交叉引用**（「★ 这与 `L33:145` 是同一个答案的另一次给出」）
+     离块隔着一个标题好几行。按「最近的那个」认领，它会把下面第一个块抢走 ⇒ 报**假的「课不符」**。
+     这正是我第一版对 `docs/spec/中枢.md` 报出 4 条假红的原因（逐条看过，**一条都不是作者的错**）。
+
+   ★ 实测九份（main `ccd7441`）：`分型`／`笔`／`线段` **rc=0**；其余六份 **rc=2**（前提不成立）。
+     —— 这是**写法差异**，不是那六份有错。
 
 用法：
   python3 notes/spec-firstoccur.py docs/spec/分型.md [更多文件...]
@@ -86,6 +91,7 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     perturb = '--perturb' in sys.argv
     bad_total = 0
+    unresolved = 0
     for src in args:
         text = open(src, encoding='utf-8').read()
         # 按出现顺序收集：坐标 与 引文块
@@ -96,18 +102,27 @@ def main():
             items.append(('cit', m.start(), m))
         items.sort(key=lambda x: x[1])
 
-        ok = waive = bad = amb = noc = 0
+        def newlines_between(p, q):
+            return text.count('\n', p, q)
+
+        ok = waive = bad = amb = noc = multi = 0
         msgs = []
+        n_cit = n_block = 0
         last_cit = None
+        owned = 0                      # 当前坐标已经领过几个块
         for kind, pos, val in items:
             if kind == 'cit':
+                n_cit += 1
                 last_cit = val
+                cit_end = val.end()
+                owned = 0
                 continue
             block = val
             n = whole_line_slice(block)
             if n is None:
                 waive += 1                      # 行文内引，不判
                 continue
+            n_block += 1
             if n == 'AMBIG':
                 amb += 1
                 msgs.append('  ? 歧义：多课都含此块 → %s' % block[:44])
@@ -115,15 +130,31 @@ def main():
             first = line_of(n, JOINED[n].find(block.replace('↵', '\n')))
             if perturb:
                 first += 1
-            if last_cit is None:
+            # ★★ 前提不成立 ⇒ 报错停下，**不猜**（@iris-64a1 提的三条，这里是前两条）。
+            #    看不懂的时候不吭声，等于把风险转给下一个读的人。
+            # ★ 坐标**只认紧邻它**的那个块。正文里「见 `L33:145`」这种提一句、
+            #   离块隔着一个标题好几行 —— 那是**交叉引用**，不是块的主人。
+            #   不设这条，悬空的引用会把下面第一个块抢走，报出假的「课不符」。
+            if last_cit is None or newlines_between(cit_end, pos) > 3:
+                why = ('它前面一个坐标都没有' if last_cit is None
+                       else '最近那个坐标（L%s:%s）离它有 %d 个换行，不是紧邻'
+                            % (last_cit.group(1), last_cit.group(2), newlines_between(cit_end, pos)))
                 noc += 1
-                msgs.append('  ? 无坐标：L%d:%d 起 → %s' % (n, first, block[:44]))
+                bad += 1
+                msgs.append('  ✗ 无主块（%s）：L%d:%d 起 → %s' % (why, n, first, block[:40]))
+                last_cit = None
                 continue
+            if owned >= 1:
+                multi += 1
+                bad += 1
+                msgs.append('  ✗ 一个坐标领了不止一个块（本尺不挑其中一个）：'
+                            'L%s:%s 之后第 %d 个块 → %s'
+                            % (last_cit.group(1), last_cit.group(2), owned + 1, block[:38]))
+                owned += 1
+                continue
+            owned += 1
             c, a, b = int(last_cit.group(1)), int(last_cit.group(2)), last_cit.group(3)
             b = int(b) if b else a
-            # ★ 用完即清：一个坐标只认它**自己**那个块。
-            #   否则一个坐标会被后面好几个块各自「就近」认领，把「没坐标」误报成「标错了」。
-            last_cit = None
             if c != n:
                 bad += 1
                 msgs.append('  ✗ 课不符：正文标 L%d，块其实在 L%d（首见 :%d）' % (c, n, first))
@@ -133,18 +164,35 @@ def main():
                             % (c, a, b, first, block[:40]))
             else:
                 ok += 1
-        bad_total += bad
+        premise_broken = (noc + multi) > 0
+        if not premise_broken:
+            bad_total += bad      # 前提没破，才把「不符」记成真不符
+        delta = n_cit - n_block
         print('== %s ==' % src)
-        print('  首见命中 %d ｜ 行文内引(不判) %d ｜ ★不符 %d ｜ 歧义 %d ｜ 无坐标 %d'
-              % (ok, waive, bad, amb, noc))
+        print('  首见命中 %d ｜ 行文内引(不判) %d ｜ 不符 %d（无主块 %d ＋ 一坐标多块 %d）｜ 歧义 %d'
+              % (ok, waive, bad, noc, multi, amb))
+        print('  坐标 %d 个 ｜ 引文块 %d 个 ｜ 差 %+d%s'
+              % (n_cit, n_block, delta,
+                 '（差不为 0 正常：表里的坐标往往不跟块；但**块比坐标多**要先看' if delta < 0 else ''))
+        if premise_broken:
+            print('  ★★ 前提不成立（见下 N 条）：本尺**不判这份文件**。')
+            print('     下面的「课不符／行不符」**一条都不可信** —— 那是配对漂移，不是作者的错。')
+            print('     要判这份，先让引文块自带坐标（或改用别的判据）。')
         for m in msgs:
-            print(m)
+            suffix = '  ［前提已破，此条不可信］' if premise_broken and ('课不符' in m or '行不符' in m) else ''
+            print(m + suffix)
         if bad == 0:
             print('  ✓ 每个引文块的行号，都是该内容在本课的首次出现行')
+        elif premise_broken:
+            unresolved += 1   # 不是「有错」，是「判不了」——下面按 rc=2 记
     print('-' * 60)
     print('★ 另有 A/B 两维本尺**不查**：① 引文是否逐字（交给 spec-quotes.py ＋ checkquotes.py）；'
           '② 首见是否等于「定义处」（首见可能只是顺口一提，定义在别处 —— 那一维要人读）。')
-    return 1 if bad_total else 0
+    print('★ 退出码：0 ＝ 判过了，全绿 ｜ 1 ＝ 判过了，有真不符 ｜ '
+          '2 ＝ **判不了**（前提不成立），不是「有错」')
+    if bad_total:
+        return 1
+    return 2 if unresolved else 0
 
 
 if __name__ == '__main__':
