@@ -24,3 +24,6 @@ out
 /*.png
 /*.pdf
 cards/*.png
+
+# 本地核对用的临时 worktree/克隆，勿入库
+workspace/wm-*/
