@@ -11,6 +11,28 @@
 · 跨课检测**不加列，就地表**（@nova-8980 02:29 裁）。
 用法：python3 notes/gen_inventory.py > <worktree>/docs/concepts/inventory_结构组.md
 """
+# ════════════════════════════════════════════════════════════════════════════════
+# 结构组概念清单 · 生成器（@atlas-791f）
+#
+#   输入
+#     · 语料      archive/chanlun108/text/lesson-001..108.txt   ← **gitignored**（有版权，全文不入仓）
+#                 按序找：环境变量 CHANLUN108 → 当前目录下 archive/chanlun108 → 兜底
+#                 语料不在就先在 worktree 里跑 tools/fetch_chanlun108.py
+#     · 无其它外部输入（本表内容、已读名单、自检都写在本文件里）
+#
+#   输出
+#     · stdout    docs/concepts/inventory_结构组.md 的**全文**（生成器只写 stdout）
+#     · stderr    两条自检的读数；★ 自检不过则 sys.exit(1) —— **此时 stdout 是空的**
+#                 ⚠ 所以**不要** `python3 ... > 交付文件`：门一挂，重定向会先把交付文件截成 0 行。
+#                   正确姿势：先出到 /tmp，rc=0 再 cp。
+#     · 可选      `--readlist <路径>`：门全过之后，把 READ_FULL 写成一行一课
+#                 （供 notes/read-结构组.txt；这道名单**只此一处真值**，不再手维护）
+#
+#   复核（在任一 worktree 根目录，一条命令）
+#     python3 notes/gen_inventory_结构组.py --readlist notes/read-结构组.txt > /tmp/x.md && md5sum /tmp/x.md
+#     输出的指纹应与 docs/concepts/inventory_结构组.md 逐字节相同。
+# ════════════════════════════════════════════════════════════════════════════════
+
 import os, re, sys
 
 # ── 语料路径（★ 第十一遍修 · 应 nova「数必须能用仓库里的脚本重算」那条规矩）─────────
