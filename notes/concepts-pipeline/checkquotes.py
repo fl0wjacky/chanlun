@@ -79,24 +79,23 @@ def lo(s):
     return re.sub(r"\s+", "", fold(s)).translate(PUNCT)
 
 
-def hits(q, lessons, folded, lossy, nws, mn):
-    """返回 q 落在哪一档：strict / deco / ellipsis / norm / punct / miss。"""
-    qs = q.replace("↵", "")
-    if any(qs in v for v in lessons.values()):
-        return "strict"
-    fq = fold(qs)
-    if any(fq in v for v in folded.values()):
-        return "deco"
-    # 带省略号：把非空片按序在同一课里找。
-    # ★ 2026-10-01 05:1x 修一条**假红**：以前写成 `if len(ps) > 1`，于是
-    #   「本课，就是把前面“线段破坏的…」这种**尾随省略号**（引用者表示「后面还有」）
-    #   只剩一片，被挡在门外 ⇒ 一句合法的缩引被判成走样。
-    #   ⚠️ 放宽的只是「省略号可以在末尾/开头」；每一片仍然要**逐字命中、按序、同一课**，
-    #     再加一条下限：最长的那片至少 --min 字 —— 免得「…」这种空壳蒙混过关。
-    if "…" in fq:
-        ps = [p for p in re.split(r"[…]+", fq) if p]
+def match_at(qn, corpus, mn):
+    """在**某一归一档**里找 qn：先整块，再（含省略号时）按片。
+
+    返回 "whole" / "frags" / None。
+
+    ★ 省略号的处理放在**每一档里各做一次**，这是 2026-10-01 05:3x 修的一条假红：
+      以前只在「剥装饰」那一档做按片匹配 ⇒ **既跨行、又带省略号**的块永远不中
+      （结构组那 5 条全是这个形状：片片都在同一课、去掉空白就命中，整块却过不了）。
+      做成"每档都能按片"之后，块落在哪一档就仍然报哪一档 —— 归一强度照旧看得见。
+    """
+    if any(qn in v for v in corpus.values()):
+        return "whole"
+    if "…" in qn:
+        ps = [p for p in re.split(r"[…]+", qn) if p]
+        # 下限：最长的那片至少 --min 字 —— 免得「…」这种空壳蒙混过关。
         if ps and max(len(p) for p in ps) >= mn:
-            for v in folded.values():
+            for v in corpus.values():
                 pos, ok = 0, True
                 for p in ps:
                     j = v.find(p, pos)
@@ -105,17 +104,36 @@ def hits(q, lessons, folded, lossy, nws, mn):
                         break
                     pos = j + len(p)
                 if ok:
-                    return "ellipsis"
+                    return "frags"
+    return None
+
+
+def hits(q, lessons, folded, lossy, nws, mn):
+    """返回 q 落在哪一档：strict / deco / ellipsis / norm / punct / miss。
+
+    阶梯（每上一档只多归一一样东西，所以报出来的档就是"你该改什么"）：
+      ① 原样逐字 → ② 剥装饰 → ③ ②+省略号按序 → ④ ②+去空白 → ⑤ ④+标点全半角
+    ★ 每一档里，整块命中与按片命中**都算命中**（含省略号的块记在"省略号按序"名义下）。
+    """
+    qs = q.replace("↵", "")
+    if any(qs in v for v in lessons.values()):
+        return "strict"
+    fq = fold(qs)
+    r = match_at(fq, folded, mn)
+    if r == "whole":
+        return "deco"
+    if r == "frags":
+        return "ellipsis"
     # 空白不敏感档。★ 比的是**去过空白的语料**（nws），不是原语料 ——
     #   2026-10-01 05:2x 修：以前拿「去过空白的引文」去比「带空白的语料」，
     #   这一档几乎从不命中，于是所有只需去空白的块都被**误记进 punct 档**
     #   （连『继续说线段的划分』这种一个标点都没有的也被报成「仅标点」，当场露馅）。
-    if any(re.sub(r"\s+", "", fq) in v for v in nws.values()):
+    if match_at(re.sub(r"\s+", "", fq), nws, mn):
         return "norm"
     # ★ 最后一档：只有标点符号不同（全角/半角）——**单独报**，不混进 miss。
     #   iris 2026-10-01 逐条归类时把这一类量出来是「纯排版」，和「真删改」是两回事；
     #   两件事一个数报，就会有人为了降一个数去改另一件事。
-    if any(lo(qs) in v for v in lossy.values()):
+    if match_at(lo(qs), lossy, mn):
         return "punct"
     return "miss"
 
