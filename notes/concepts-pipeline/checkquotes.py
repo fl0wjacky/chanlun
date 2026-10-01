@@ -1,8 +1,15 @@
 # -*- coding: utf-8 -*-
 """逐字自检：把清单里每个「」引文块拿回语料核 —— 抄走样（如 关于/关於）会在这里现形。
 
-用法（在 wt-concepts worktree 根跑）：
+用法（本脚本用 __file__ 定位语料与文件，**任意 CWD 都能跑**）：
     python3 checkquotes.py [文件路径] [--min 4]
+
+★★ 空输入的**特征签名**（@atlas-791f 提议，2026-10-01 收）—— 拿它回查任何一条历史读数：
+    · **语料没加载到** ⇒ 每个「」都找不到课 ⇒ **都不中 ＝ 全部块数**，exit 1。**吵，安全的一侧。**
+      （实测：从 /tmp 跑本仓成品报「「」块 1064 ｜ 原样逐字 0 ｜ 都不中 1064」。）
+    · **文件拿错/为空** ⇒ **「」块 0** ⇒ 一片绿、`都不中 0`、exit 0。**静默，危险的一侧** ——
+      它与「这批引文全对」长得一模一样。故这里**明写一条 assert：块数为 0 就炸**。
+    ⇒ 任何一条历史读数，只要它不是「都不中 ＝ 全部」也不是「块 0」，就能判定**当时输入确实加载到了**。
 
 ★ 门槛默认 4。以前默认 25 会把**短引文**的漂移整片漏掉 —— 2026-10-01 nova 用低门槛
   扫出我新加段落里 45 处「」不是语料逐字（如把「必须保证中枢的确立」写成「先保证中枢的确立」）。
@@ -38,7 +45,11 @@
    ★ **它不放宽门**：punct 与 miss 分列打印、punct 逐条点名，退出码仍只看 miss。
      永远绿的门（atlas 那版渲染期降级）与本档的区别就在这：**这里每一条都印出来给你看**。
 
-★ 用法坑：`sys.argv` 里 `--min` 后面的数字会被当成路径，**必须显式传文件路径**：
+★ 用法坑（**2026-10-01 已修，此条留作记录**）：`sys.argv` 里 `--min` 后面的数字曾被当成路径，
+  于是 `checkquotes.py --min 4`（不写路径）去 `open('4')`、FileNotFoundError。
+  现在 `--min` 与它的值**一起摘掉**再取路径，下面几种写法都可以：
+    python3 checkquotes.py                                   # 裸跑 ⇒ 默认本仓成品
+    python3 checkquotes.py --min 4                           # 不写路径也行
     python3 checkquotes.py docs/concepts/inventory_中枢走势组.md --min 4
 
 尺（报数时必须连尺一起报）：
@@ -199,11 +210,19 @@ def deco_check(q, folded_x, posmap, raw_x):
 
 
 def main():
-    args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    path = args[0] if args else "docs/concepts/inventory_中枢走势组.md"
+    # ★ 2026-10-01 修：原来 `args = [不以 -- 开头的项]` 会把 `--min` **后面的数字**当成文件路径 ——
+    #   `checkquotes.py --min 4`（不写路径）于是去 open('4')、FileNotFoundError。
+    #   现在把 `--min` 与它的值**一起摘掉**再取路径，这个坑没有了。
+    _argv = sys.argv[1:]
     mn = 4
-    if "--min" in sys.argv:
-        mn = int(sys.argv[sys.argv.index("--min") + 1])
+    if "--min" in _argv:
+        _i = _argv.index("--min")
+        mn = int(_argv[_i + 1])
+        _argv = _argv[:_i] + _argv[_i + 2:]
+    args = [a for a in _argv if not a.startswith("--")]
+    # ★ 默认路径也改 __file__ 相对：原来写死 "docs/concepts/…" 是 CWD 相对。
+    ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    path = args[0] if args else os.path.join(ROOT, "docs/concepts/inventory_中枢走势组.md")
 
     text = open(path, encoding="utf-8").read()
     # ★ 2026-10-01 修：这里原来写的是 glob.glob("archive/chanlun108/text/lesson-*.txt")
@@ -212,7 +231,6 @@ def main():
     #   实测：从 /tmp 跑本仓成品，报「「」块 1064 ｜ 原样逐字 0 ｜ 都不中 1064」——
     #   这不是「引文全错」，是**尺找不到语料**。**这是最坏的一种假红：它指着 1064 条说全是编的。**
     #   改成 __file__ 相对定位，并且**语料缺失当场炸、把缺的路径印出来**。
-    ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     D = os.path.join(ROOT, "archive/chanlun108/text")
     _ls = sorted(glob.glob(os.path.join(D, "lesson-*.txt")))
     assert _ls, ("语料不在 %s —— archive/ 未进仓，需与本仓同相对路径就位。"
@@ -225,6 +243,10 @@ def main():
 
     quotes = [m.group(1) for m in re.finditer("「([^「」]*)」", text)
               if len(m.group(1)) >= mn]
+    # ★ 空输入的**危险那一侧**：块 0 ⇒ 一片绿 + exit 0，与「引文全对」长得一模一样。
+    #   （安全那一侧是语料没加载到 ⇒ 都不中 = 全部 ⇒ 吵。见文件头「空输入的特征签名」。）
+    assert quotes, ("「」块 0（门槛 ≥%d）—— 文件拿错、为空、或门槛把全篇都滤掉了。"
+                    "这不是「引文全对」，是**什么都没检查**。路径：%s" % (mn, path))
     fmap = {}
     for k, v in lessons.items():
         fmap[k] = fold_map(v)
