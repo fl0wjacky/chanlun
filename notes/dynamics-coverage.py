@@ -66,6 +66,16 @@ for r in rows_n:
     c = ' | '.join(str(d) if d == rr else f'{d}({rr})' for d, rr in r['cols'])
     st = '已精读' if r['no'] in READ else '★未读'
     print(f"| {r['no']} | {c} | **{r['narrow']}** | **{r['broad']}** | {r['broad_raw']} | {r['defline']} | {r['lines']} | {quotes.get(r['no'],0)} | {st} |")
+# ★★ 第 17 批加：**抬头自检** —— 脚本算的课数 vs 交付文件此刻自己写的课数。
+#   起因（atlas 1359 提的，原文「你这次是靠人工比出来的，该由脚本比」）：
+#   第 16 批我改了 §15.22 的新数，却忘了把下面那张抄回来的表一起重生成 ⇒ **同一个数在同一个文件里有两个版本，
+#   只有新的那份带记号**。谁读文件谁读到旧的那半（atlas 就是这么读到 88 的）。
+#   ⇒ 这条自检的用处不是"跑完总是绿的"，而是**在文件已陈旧时当场喊**：它红 = 交付文件没重新生成。
+_m = re.search(r'覆盖表 · 表内 (\d+) 课', led)
+if _m and int(_m.group(1)) != len(inb):
+    print(f'★★ 抬头自检：不一致 —— 脚本 {len(inb)} 课 vs 文件抬头 {_m.group(1)} 课（交付文件没重新生成）', file=sys.stderr)
+else:
+    print(f'抬头自检：一致（表内 {len(inb)} 课）', file=sys.stderr)
 b4 = [r for r in rows if r['broad'] >= 4]
 print(f"\n**账目**：广谱信号 ≥4 的课 **{len(b4)} 课 / {sum(r['lines'] for r in b4)} 行**"
       f"（全 108 课共 {sum(r['lines'] for r in rows)} 行）· 其中特异词 >0 的 {len([r for r in b4 if r['narrow']>0])} 课 ·"
