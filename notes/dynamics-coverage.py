@@ -16,7 +16,11 @@ NARROW = ['背驰段','盘整背驰','趋势背驰','类背驰','类似背驰','
           '黄白线','零轴','0 轴','柱子','趋势平均力度','平均趋势力度','走势力度','背驰级别',
           '第一类买点','第二类买点','第三类买点','第三类卖点','红柱子','绿柱子']
 MARK = ['就是','称为','叫做','定义为','所谓','必须','不允许','至少']
-READ = {int(x) for x in open('notes/dynamics-read.txt').read().split()}
+READFILE = 'notes/read-动力学.txt'   # nova 2026-10-01：三组统一用 notes/read-<组名>.txt
+READ = {int(x) for x in open(READFILE).read().split()}
+if '--write-read' in sys.argv:      # 名单与覆盖表**同一个来源**：由本脚本写回，不手抄
+    open(READFILE, 'w').write('\n'.join(str(n) for n in sorted(READ)) + '\n')
+    print(f'{READFILE}: {len(READ)} 课（按数值序写回）')
 def num(p): return int(re.search(r'lesson-(\d+)', p).group(1))
 rows = []
 for p in sorted(glob.glob('archive/chanlun108/text/lesson-*.txt'), key=num):
