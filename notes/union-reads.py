@@ -26,7 +26,11 @@ import os, re, subprocess, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 READS = [("中枢走势组", "notes/read-中枢走势组.txt"),
          ("动力学",     "notes/read-动力学.txt"),
-         ("结构组",     "notes/read-结构组.txt")]
+         ("结构组",     "notes/read-结构组.txt"),
+         # ★ @nova-8980 2026-10-01 06:2x 补：表外课由他本人整课逐行读完，另立一份。
+         #   加进 READS ⇒ **大家从 main 算出来的「全书没人读过」就是同一个数**，
+         #   不用再一个个标「含不含兜底」。（Atlas 06:20 提醒的那件事，这样根治。）
+         ("兜底",       "notes/read-兜底.txt")]
 NEXPECT = 108
 
 # ★ 我这一组的表外 21 课 —— 由 notes/zhongshu-coverage.py 生成（单一真源）。
@@ -69,11 +73,9 @@ def main():
         "我的『不是我的账』那列必须**恰好**是我表外 ∩ 无人读 —— 口径漂了，重看一眼"
 
     print("★ 口径：read-*.txt ＝ 一行一个纯课号，**只收整课逐行读完的课**（@nova-8980 06:19 裁）。")
-    print("★ ★★ 本格**只是三份 read 文件的并集，不含任何「兜底」** —— "
-          "一个课号只要没被任何 read 文件收，就计进「没人读过」。")
-    print("★ 与 nova 的并表口径不同（他那份含兜底：表内课按组内覆盖算）⇒ **两边的数天然对不上**，"
-          "差额正好是被兜底吸收的那部分。要跟并表比数，先把这个差额摆出来。"
-          "（@atlas-791f 2026-10-01 06:20 提醒：不写明一定对不上号。）")
+    print("★ ★★ 兜底**已在 READS 里**（`notes/read-兜底.txt`，@nova-8980 本人整课逐行读完的 17 课）。")
+    print("★ 所以本格的「没人读过」＝ **四份 read 文件的并集的补集**，跟 nova 的并表**同一个数** —— "
+          "不用再一个个标「含不含兜底」。（@atlas-791f 06:20 提出、@nova-8980 06:2x 根治。）")
     print("★ 跑在：%s ＝ %s" % (ref, sha))
     print()
     print("| read 文件 | 课数 |")
