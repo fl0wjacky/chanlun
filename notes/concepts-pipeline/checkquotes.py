@@ -56,12 +56,28 @@ import re, sys, glob
 # 只剥**装饰**（加粗星号、各式引号：半角/全角/中日式），**不剥任何正文内容**。
 # 判据：两边的差异必须只是「同一串字被什么样的符号装饰」；凡是会吃掉正文字符的
 # 变换一律不许加进来 —— 加了就是「静默降级」，门就永远绿了。
-DECOR = str.maketrans("", "", "**\"'“”‘’「」『』")
+DECOR_CHARS = "**\"'“”‘’「」『』"
+DECOR = str.maketrans("", "", DECOR_CHARS)
 
 
 def fold(s):
     """剥折行标记 ＋ 装饰符（双侧都剥）。"""
     return s.replace("↵", "").translate(DECOR)
+
+
+def fold_map(s):
+    """同 fold()，但另给一张「折后位置 → 原串位置」的表。
+
+    有了它才能从「折后命中」反推回**语料原文那一段**，从而看清那一带上
+    **语料自己写了什么装饰符** —— 见 deco_check()。
+    """
+    keep, pos = [], []
+    for i, ch in enumerate(s):
+        if ch == "↵" or ch in DECOR_CHARS:
+            continue
+        keep.append(ch)
+        pos.append(i)
+    return "".join(keep), pos
 
 
 # 全角标点 → 半角。**只映射标点，一个汉字/字母/数字都不动。**
@@ -138,6 +154,50 @@ def hits(q, lessons, folded, lossy, nws, mn):
     return "miss"
 
 
+def deco_check(q, folded_x, posmap, raw_x):
+    """★ 第七档（正交标示，不是阶梯的一级）：块的**装饰符**跟语料那一带一样吗？
+
+    为什么必须单开一档：本尺的 ② 档「剥装饰」**按设计就把「引号长什么样」这一维擦掉了**
+    —— 于是「把语料自带的 “…” 改写成 『…』（或干脆删掉）」这类错，在阶梯上**结构性不可见**：
+    改写 ⇒ 落在 ② 档（看着像"引用者自己加了装饰"，其实不是）；删掉 ⇒ 连 ① 档都过
+    （去掉装饰符后剩余文字仍然连续，`find` 照样命中）。
+    ⇒ 2026-10-01 iris 在她自己文件里手工抓出的 8 处正是这一类。
+
+    判法：把块折掉装饰后在语料里定位，再**回到原文那一段**比装饰符的多重集。
+      · 语料那带有、块里没有  ⇒ "missing"（**要报**：语料自带的装饰被改写或丢掉）
+      · 块里多出来、语料那带没有 ⇒ "extra"（不报：那是引用者公开声明过的加粗等排版）
+      · 完全一致             ⇒ ""（干净）
+      · 折后都定位不到        ⇒ None（本档管不着，交给阶梯报）
+    ★ 只要**有任何一处**出现位置的装饰对得上，就算干净 —— 免得被同一段文字的另一个
+      出现位置冤报（`find` 只取首次出现是会造假的）。
+    """
+    from collections import Counter
+    qd = Counter(c for c in q if c in DECOR_CHARS)
+    fq = fold(q)
+    if not fq:
+        return None
+    start, seen, first = 0, False, None
+    while True:
+        i = folded_x.find(fq, start)
+        if i < 0:
+            break
+        seen = True
+        a = posmap[i]
+        b = posmap[i + len(fq) - 1] + 1
+        cd = Counter(c for c in raw_x[a:b] if c in DECOR_CHARS)
+        if cd == qd:
+            return ""
+        if first is None:
+            # block_extra：块里有、语料那带没有（引用者自己加的加粗等）
+            # corpus_only：语料那带有、块里没有（**语料自带的引号被改写或丢掉** ← 要报的）
+            first = (qd - cd, cd - qd)
+        start = i + 1
+    if not seen:
+        return None
+    block_extra, corpus_only = first
+    return ("mismatch" if corpus_only else "extra", dict(corpus_only), dict(block_extra))
+
+
 def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     path = args[0] if args else "docs/concepts/inventory_中枢走势组.md"
@@ -154,9 +214,34 @@ def main():
 
     quotes = [m.group(1) for m in re.finditer("「([^「」]*)」", text)
               if len(m.group(1)) >= mn]
+    fmap = {}
+    for k, v in lessons.items():
+        fmap[k] = fold_map(v)
+
     bucket = {"strict": [], "deco": [], "ellipsis": [], "norm": [], "punct": [], "miss": []}
     for q in quotes:
         bucket[hits(q, lessons, folded, lossy, nws, mn)].append(q)
+
+    # ★ 正交的第七档：装饰符。**不进阶梯、不改退出码**（与 punct 同一条规矩：
+    #   两件事的修法不同，就不能并成一个数）。
+    deco_bad, deco_add = [], 0
+    if "--no-deco" not in sys.argv:
+        for q in quotes:
+            seen_clean = False
+            verdict = None
+            for k in sorted(fmap):
+                r = deco_check(q, fmap[k][0], fmap[k][1], lessons[k])
+                if r == "":
+                    seen_clean = True
+                    break
+                if r and verdict is None:
+                    verdict = r
+            if seen_clean or verdict is None:
+                continue
+            if verdict[0] == "mismatch":
+                deco_bad.append((q, verdict[1], verdict[2]))
+            else:
+                deco_add += 1
 
     print("%s ｜ 门槛 ≥%d 字 ｜ 尺：单课整块逐字 ＋ 双侧剥装饰(↵ ** 各式引号) ＋ 省略号按序切片" % (path, mn))
     print("「」块 %d ｜ 原样逐字 %d ｜ 剥装饰后 %d ｜ 省略号按序 %d ｜ 仅空白归一 %d ｜ 仅标点归一 %d ｜ 都不中 %d"
@@ -171,6 +256,15 @@ def main():
         print("  · 仅标点：", q[:80])
     for q in bucket["miss"]:
         print("  ✗ 不中：", q[:80])
+    # ★ 装饰符档（正交）：语料自带的引号被改写或丢掉 —— 阶梯**看不见**这一类，
+    #   因为 ② 档按设计就把装饰符这一维擦掉了。报出来，但**不改退出码**。
+    if "--no-deco" not in sys.argv:
+        print("装饰符与语料不符 %d ｜ 引者自加装饰 %d（正交档，不改退出码；"
+              "阶梯看不见这一类 —— ② 档把装饰擦掉了）" % (len(deco_bad), deco_add))
+        for q, corpus_only, block_extra in deco_bad:
+            print("  ⚠ 语料那带有 %s，块里没有%s：%s"
+                  % (corpus_only or {}, ("；块里另多 " + str(block_extra)) if block_extra else "",
+                     q[:70]))
     print("含 ↵ 折行 %d ｜ 含省略号 %d" % (sum("↵" in q for q in quotes),
                                        sum("…" in q for q in quotes)))
     return 1 if bucket["miss"] else 0
