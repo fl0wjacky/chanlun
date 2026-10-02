@@ -672,6 +672,11 @@ buildSegments(array<Unit> P) =>
 //       倒数几格（i-2..i）的判词；续扫的 i 只增不回，已经跳过去的位置不会再问 ⇒ 缓存段会
 //       stale（seg-sync-deepfix-probe.py 实测 zec_1h@159：换最后那根笔把 openingOverlaps(0) 从
 //       假翻成真，而 i 早已跳到 1，位置 0 再没被问过）。
+//     ★★ 更深一层：「只从最后一个已确认段末笔之后重扫」也不安全（seg-partial-rejected.md）。
+//       **已确认段本身押在尾巴上** —— case-1 的破位笔、case-2 的反向分型都要读段 endPen 之后的笔
+//       直到当前尾巴，尾笔一换就能把前面已确认的段翻掉（zec_1h@1433：{73,79} endPen=79 ≤ M-4，
+//       可 case-1 破位笔扫到 pens[81..82]，尾笔一换这段就撤销）。所以非纯追加一律整段重算，
+//       别想省成「只重扫尾巴」—— 那个「最后已确认段」自己可能就是 stale 的。
 mkPen(array<Fx> fx, array<int> seq, int t) =>
     a = fx.get(seq.get(t))
     b = fx.get(seq.get(t + 1))
