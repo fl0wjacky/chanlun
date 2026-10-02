@@ -125,6 +125,11 @@ contains(float ah, float al, float bh, float bl) => (ah >= bh and al <= bl) or (
 //
 //   zIH/zIL 的含义与批量版一致：『这个极值是哪根原始K线贡献的』——画图精确定位用。
 //   注意它们现在是**原始下标**（off 恒为 0），不再是 slice 内的相对下标。
+//
+//   ★ 关于数组长度（不是漏了，是故意的）：这几支和下面的 aM 都**不再截断**，
+//     会一直长到「图上K线数」。上限是 Pine 的数组容量 10 万，而主流套餐单张图最多几万根
+//     （原来是 >20000 就 shift 掉）。**不能 shift**：shift 掉之后数组下标就跟「原始下标」
+//     错位了，而 zIH/zIL 和 aM.get(off + t) 全都按原始下标取值 —— 那是静默错位，不是省内存。
 var array<float> zH  = array.new<float>()   // 标准化序列：高
 var array<float> zL  = array.new<float>()   //               低
 var array<int>   zIH = array.new<int>()     //               最高点来自哪根原始K线
