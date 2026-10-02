@@ -17,7 +17,10 @@ except Exception as e:                                    # noqa: BLE001
     sys.exit(2)
 
 src = open(path, encoding="utf-8").read()
-n = src.count("\n") + 1
+# ★ 行数用 splitlines()，别用 src.count("\n") + 1：文件末尾带换行时后者会多算一行
+#   （942 行的 chanlun.pine 被印成 943，我还把这数贴到了卡上）。判据是 wc -l，
+#   不是"换行符个数"，末尾那个换行不开启新的一行。
+n = len(src.splitlines())
 print(f"解析 {path}（{n} 行）…", flush=True)
 
 t0 = time.time()
