@@ -421,6 +421,20 @@ def main():
     print("── 真实数据 ──")
     files = [f for f in sorted(os.listdir(os.path.join(ROOT, "data")))
              if f.endswith(".json") and not any(x in f for x in SKIP)]
+    # 短的先跑：zec15（20160 根）单份就是小时级，按字母序它排第 6，会把后面 4 份小的全堵在它后面。
+    # 覆盖面一个不少，只换顺序（② 那份同改）。注意这只影响**报数顺序**，不影响任何判词。
+    _sizes = {}
+
+    def _nbars(fn):
+        if fn not in _sizes:
+            try:
+                _sizes[fn] = len(load_bars(fn) or [])
+            except Exception:                                    # noqa: BLE001
+                _sizes[fn] = 0
+        return _sizes[fn]
+
+    files.sort(key=_nbars)
+    print("顺序（按根数升序）：" + " → ".join("%s(%d)" % (f, _nbars(f)) for f in files))
     for fn in files:
         try:
             bars = load_bars(fn)
