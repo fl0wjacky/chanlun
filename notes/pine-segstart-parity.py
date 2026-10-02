@@ -27,20 +27,77 @@
     1  ★ 有不一致（印出族名 / 种子 / 笔序号）
     2  跑不动 —— 引擎侧没有这条守卫（= 这一支还没合 Atlas 的 core 改动）**查不了 ≠ 通过**
     3  --self-test 的**正臂没红** ⇒ 这个检查程序本身不算数
+    4  ★ 下面那四个坐标常数漂了（锚点对不上）—— 报告里的行号指不到它声称的东西
 """
 import argparse
+import hashlib
 import os
 import random
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import core.segment as S                                               # noqa: E402
 
-PINE_PREDICATE = "tradingview/chanlun.pine:426-436"   # 函数（含注释）
-PINE_GUARD = "tradingview/chanlun.pine:447-449"       # 调用点：守卫 + i += 1 + continue
-ENGINE_GUARD = "core/segment.py:182-194"              # _opening_overlaps
-ENGINE_LOOP = "core/segment.py:316-318"               # 循环头里的那三行
+# ★ 坐标 = 行号 **＋ 锚点**，缺一不可。行号会随文件长大而漂，而**漂到的落点往往看着很合理**
+#   （函数头、注释、空行）—— 那种比明显错的更误人，因为它不提示你去怀疑。
+#   @iris-64a1 2026-10-02 复核时逮到：这四个常数**全漂了**，落点还都在"像那么回事"的位置。
+#   锚点对不上 ⇒ check_coords() 当场喊、rc=4 ⇒ 别让一个绿盖住"它其实指错了地方"。
+PINE_PREDICATE = "tradingview/chanlun.pine:428-446"   # 谓词函数（含它自己那段注释）
+PINE_GUARD = "tradingview/chanlun.pine:459-461"       # 调用点：守卫 + i += 1 + continue
+ENGINE_GUARD = "core/segment.py:223-238"              # def _opening_overlaps
+ENGINE_LOOP = "core/segment.py:361-363"               # 循环头里的那三行
+
+# 每个坐标**必须**在它声称的那段里含有这个锚点。行号会漂，锚点不会。
+COORD_ANCHORS = (
+    ("PINE_PREDICATE", PINE_PREDICATE, "tradingview/chanlun.pine",
+     r"^openingOverlaps\(array<Unit> P, int i\) =>"),
+    ("PINE_GUARD", PINE_GUARD, "tradingview/chanlun.pine",
+     r"^\s*if not openingOverlaps\(P, i\)"),
+    ("ENGINE_GUARD", ENGINE_GUARD, "core/segment.py",
+     r"^def _opening_overlaps\("),
+    ("ENGINE_LOOP", ENGINE_LOOP, "core/segment.py",
+     r"^\s*if not _opening_overlaps\(pens, i\):"),
+)
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def blob_sha(path):
+    """git 的 blob 哈希 —— 和 `git rev-parse HEAD:<path>` 直接可比（不是纯 sha1(内容)）。"""
+    data = open(path, "rb").read()
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def check_coords():
+    """这四个常数是不是还指在它们声称的那段上。
+
+    返回 (漂掉的 [(名, 坐标, 为什么)], 读过的 [(rel, 行数, blob)])。
+    ★ 为什么要把 blob 一起返回：@iris-64a1 2026-10-02 —— **坐标必须带 sha**，
+      否则「我量过」量的是哪棵树都说不清。我今晚两次报错的根都是这个（一次把旧树的数
+      当成 main 的、一次 rc=2 实际测的是自己那条支）。所以"读了谁的字节"跟结论同排印出。
+    """
+    drift, stamps = [], []
+    for rel in dict.fromkeys(c[2] for c in COORD_ANCHORS):
+        path = os.path.join(_ROOT, rel)
+        try:
+            stamps.append((rel, len(open(path, encoding="utf-8").read().splitlines()),
+                           blob_sha(path)[:12]))
+        except OSError as e:
+            stamps.append((rel, -1, "读不到（%s）" % e))
+    for name, coord, rel, anchor in COORD_ANCHORS:
+        a, b = (int(x) for x in coord.rsplit(":", 1)[1].split("-"))
+        try:
+            lines = open(os.path.join(_ROOT, rel), encoding="utf-8").read().splitlines()
+        except OSError as e:
+            drift.append((name, coord, "读不到 %s（%s）" % (rel, e)))
+            continue
+        if not re.search(anchor, "\n".join(lines[a - 1:b]), re.M):
+            now = [i for i, l in enumerate(lines, 1) if re.search(anchor, l)]
+            drift.append((name, coord, "锚点不在这段里；它现在在 %s"
+                          % (("、".join(map(str, now))) if now else "**整份文件里都找不到**")))
+    return drift, stamps
 
 
 # ───────────── 以下：tradingview/chanlun.pine 的逐行翻译（别改成语义等价的"更好的写法"）─────────────
@@ -251,8 +308,21 @@ def main():
         print("⇒ 三支正臂全红，检查程序是活的。")
         return 0
 
+    drift, stamps = check_coords()
+    if drift:
+        print("!! 坐标漂了 —— 这份报告里的行号指不到它声称的东西：")
+        for name, coord, why in drift:
+            print("   %-15s %s" % (name, coord))
+            print("       ⇒ %s" % why)
+        print("   ⇒ **不算绿**：读者会照这些行号去核对，却核到别的代码上。修好坐标再报。")
+        for rel, n, sh in stamps:
+            print("   （我读的是：%s %s 行 blob %s）" % (rel, n, sh))
+        return 4
+
     print("照 pine %s / %s 逐行翻译，对 core/segment.py 的 %s / %s"
           % (PINE_PREDICATE, PINE_GUARD, ENGINE_GUARD, ENGINE_LOOP))
+    for rel, n, sh in stamps:
+        print("   ★ 我读的是这份字节：%-28s %4s 行  blob %s" % (rel, n, sh))
     print("\n【随机行情】（真实行情打不出这条守卫，所以必须有随机）")
     ti, tp, ts, worst = run()
     print("  小计：查 %d 处 ｜ 谓词不一致 %d ｜ 段不一致 %d" % (ti, tp, ts))
