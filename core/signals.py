@@ -6,6 +6,8 @@
         A 段 = 进入 B 之前最后一段向下走势，C 段 = 离开 B、创出 B 的波动范围新低（< DD）的那一段。
         C 段力度 < A 段力度 × 比例 → 背驰，一买在 C 段的终点。
         力度：MACD 柱面积（第 24 课「向下看绿柱子」，默认）或价格斜率（|Δ价| / K 线根数）。
+        前提③（第 53 课）：B 的中枢级别要比 A、C 里的都大，否则 A、B、C 会连成一个更大的中枢 ——
+        用上一层中枢是否把 A、B、C **整段**包住来判（check_premise3），**默认开**（2026-10-02 小栋拍板）。
         确认：背驰后回拉进最后一个中枢（高点 ≥ ZD），第 18 / 72 课「趋势结束的标志就是形成该级别的背驰后
         对最后一个中枢的回拉」；回拉之前先跌破 C 段低点 → 背驰失败，不算。一卖镜像。
     第二类（二买 / 二卖）—— 第 21 课「第一买点出现后的第二段次级别走势低点就构成第二类买点」：
@@ -122,14 +124,94 @@ def strength(u, hist, measure="macd"):
     return sum(h for h in seg if h > 0) if up else -sum(h for h in seg if h < 0)
 
 
-def signals(r, level="seg", measure="macd", ratio=1.0, fast=12, slow=26, sig=9):
-    """level: "seg" 线段中枢（默认）/ "pen" 类中枢；measure: "macd" / "slope"；ratio: C < A × ratio 才算背驰。"""
+def _higher_centers(r, level):
+    """本层的**上一层**中枢列表：笔层看线段中枢，线段层看扩展合成的大级别中枢。"""
+    return r["seg_centers"] if level == "pen" else r["big"]
+
+
+def check_premise3(higher, B, lo, hi, strict=True):
+    """前提③：A、B、C 是不是其实同处一个**更大级别**的中枢里（第 53 课 L53:91）。
+
+    原文：「B 的中枢级别比 A、C 里的中枢级别都要大，否则 A、B、C 就连成一个大的趋势或大的
+    中枢了。」—— 这里判的就是那个「否则」：上一层有没有一个中枢把 A、B、C **整段**包住。
+
+    strict=True  用中枢区间 [ZD, ZG] —— 原文「在一个大的中枢里」的字面读法（默认）
+    strict=False 用波动范围 [DD, GG] —— 更宽，挡下的更多
+    B 自己带 9 段升级（z["up"] 非空）时直接算成立：那本来就是「B 是高一级别中枢」。
+    """
+    if B.get("up"):
+        return dict(hit=False, center=None, why="B 自带 9 段升级，本身就是高一级别中枢")
+    for H in higher:
+        if (H["ZD"] <= lo and H["ZG"] >= hi) if strict else (H["DD"] <= lo and H["GG"] >= hi):
+            return dict(hit=True, center=H,
+                        why="上一层中枢 [%.4f, %.4f] 把 A、B、C 整段包住" % (H["ZD"], H["ZG"]))
+    return dict(hit=False, center=None, why="上一层没有中枢把 A、B、C 整段包住")
+
+
+def beichi(AU, Z, k, kind, strength_fn, hist, measure="macd", ratio=1.0,
+           higher=(), premise3=True, p3_strict=True):
+    """**背驰判法这一块**：取 A/B/C 段 → 判力度 → 判回拉 → 查前提③④。
+
+    signals() 与 check_signals() 都调它 —— 这两处原先各写了一遍取段规则，改判法要改两处，
+    改漏一处自检就会拿旧规则去核新判据。现在结构只有这一份。
+
+    力度由调用方**注入** strength_fn(u, hist, measure)：signals 传 strength()，
+    check_signals 传 _strength_by_definition() —— 「收成一块」收的是结构，力度那支的
+    独立性靠注入保住（见 _strength_by_definition 的说明）。
+
+    返回 dict(emit, blocks, why, a, c, A, B, C, ok, p3, p4)：
+      emit    True = 该发这个点
+      blocks  挡下它的**全部**理由（按判的先后排），空列表 ⇒ emit=True
+              'A/C 段找不到' | '没创新低' | '没背驰' | '前提③' | '回拉失败'
+      ok      回拉：True 已回拉进中枢 / False 回拉前先破了 C 的极值 / None 还没走到
+      p3      前提③ 的证据（hit=真被上一层中枢包住）
+      p4      A 之前、同层里已经结束的中枢（前提④ 的证据；六份数据上 11/11 都非空）
+    """
+    want_down = kind.endswith("买")
+    B = Z[k]
+    same = (lambda u: u["p1"] < u["p0"]) if want_down else (lambda u: u["p1"] > u["p0"])
+    a = next((q for q in range(B["PI0"] - 1, -1, -1) if same(AU[q])), None)                   # A 段
+    c = next((q for q in (B["PI1"] + 1, B["PI1"] + 2) if q < len(AU) and same(AU[q])), None)  # C 段
+    if a is None or c is None:
+        return dict(emit=False, blocks=["A/C 段找不到"], why="A/C 段找不到",
+                    a=a, c=c, A=None, B=B, C=None, ok=None, p3=None, p4=[])
+    A, C = AU[a], AU[c]
+    lo, hi = min(A["lo"], B["DD"], C["lo"]), max(A["hi"], B["GG"], C["hi"])
+    p3 = check_premise3(higher, B, lo, hi, p3_strict)
+    p4 = [z for z in Z[:k] if z["X1"] <= A["i0"]]
+
+    blocks = []
+    if not ((C["lo"] < B["DD"]) if want_down else (C["hi"] > B["GG"])):
+        blocks.append("没创新低")                      # 没创新低（新高）：不是离开段
+    elif not strength_fn(C, hist, measure) < strength_fn(A, hist, measure) * ratio:
+        blocks.append("没背驰")
+    if premise3 and p3["hit"]:
+        blocks.append("前提③")
+    ok = None                                          # 背驰后：先回拉进中枢，还是先破 C 的极值
+    for q in range(c + 1, len(AU)):
+        u = AU[q]
+        if (u["lo"] < C["p1"]) if want_down else (u["hi"] > C["p1"]):
+            ok = False; break
+        if (u["hi"] >= B["ZD"]) if want_down else (u["lo"] <= B["ZG"]):
+            ok = True; break
+    if ok is False:
+        blocks.append("回拉失败")
+    return dict(emit=not blocks, blocks=blocks, why=(blocks[0] if blocks else ""),
+                a=a, c=c, A=A, B=B, C=C, ok=ok, p3=p3, p4=p4)
+
+
+def signals(r, level="seg", measure="macd", ratio=1.0, fast=12, slow=26, sig=9,
+            premise3=True, p3_strict=True):
+    """level: "seg" 线段中枢（默认）/ "pen" 类中枢；measure: "macd" / "slope"；ratio: C < A × ratio 才算背驰。
+
+    premise3：前提③ **默认开**（小栋 2026-10-02 拍板 ①A）—— 用 check_premise3 挡掉
+    「A、B、C 其实同处一个更大级别中枢」的点。p3_strict：③ 用中枢区间（默认）还是波动范围。
+    """
     AU, U, Z = _units(r, level)
     hist = macd_hist(r["bars"], fast, slow, sig)
     n_done = len(U)                                  # U 里的单位下标与 AU 一致（已完成的在前）
     last_live = (level == "seg" and len(AU) > n_done) or level == "pen"
     done_idx = lambda q: q < len(AU) - (1 if last_live else 0)   # 这一段已经走完（后面又出了一段）
-    down = lambda u: u["p1"] < u["p0"]
     out = []
 
     def add(kind, q, k, weak=False):
@@ -150,32 +232,19 @@ def signals(r, level="seg", measure="macd", ratio=1.0, fast=12, slow=26, sig=9):
             elif u["p1"] < u["p0"] and w["hi"] < z["ZD"]:
                 add("三卖", j + 1, len(Z) - 1)
 
-    # ---- 第一类、第二类 ----
+    # ---- 第一类、第二类：判据全部收在 beichi() 一块里 ----
+    higher = _higher_centers(r, level)
     for k in range(1, len(Z)):
         B = Z[k]
         for want_down, rel, k1, k2 in ((True, "下跌延续", "一买", "二买"), (False, "上涨延续", "一卖", "二卖")):
             if B["rel"] != rel:
                 continue
-            same = (lambda u: down(u)) if want_down else (lambda u: not down(u))
-            a = next((q for q in range(B["PI0"] - 1, -1, -1) if same(AU[q])), None)          # A 段
-            c = next((q for q in (B["PI1"] + 1, B["PI1"] + 2) if q < len(AU) and same(AU[q])), None)  # C 段
-            if a is None or c is None:
+            blk = beichi(AU, Z, k, k1, strength, hist, measure, ratio,
+                         higher, premise3, p3_strict)
+            if not blk["emit"]:
                 continue
-            C = AU[c]
-            if (C["lo"] >= B["DD"]) if want_down else (C["hi"] <= B["GG"]):
-                continue                                                  # 没创新低（新高）：不是离开段
-            if not strength(C, hist, measure) < strength(AU[a], hist, measure) * ratio:
-                continue                                                  # 没背驰
-            ok = None                                                     # 背驰后：先回拉进中枢，还是先破 C 的极值
-            for q in range(c + 1, len(AU)):
-                u = AU[q]
-                if (u["lo"] < C["p1"]) if want_down else (u["hi"] > C["p1"]):
-                    ok = False; break
-                if (u["hi"] >= B["ZD"]) if want_down else (u["lo"] <= B["ZG"]):
-                    ok = True; break
-            if ok is False:
-                continue
-            confirmed = bool(ok) and done_idx(c)
+            C, c = AU[blk["c"]], blk["c"]
+            confirmed = bool(blk["ok"]) and done_idx(c)
             out.append(dict(kind=k1, bar=C["i1"], price=C["p1"], confirmed=confirmed, weak=False,
                             level=level, center=k + 1, unit=c))
             if confirmed and c + 2 < len(AU):                             # 第二类：一买后第二段次级别走势的终点
@@ -205,14 +274,28 @@ def _strength_by_definition(u, hist, measure):
     return -sum(h for h in seg if h < 0)
 
 
+# beichi() 的挡下理由 → 自检报告的违规文字（两处措辞不必一样，但不许缺项）
+_BLOCK_MSG = {
+    "A/C 段找不到": "一类买卖点之前找不到同向的 A 段 / 之后找不到同向的 C 段",
+    "没创新低": "一类买卖点的 C 段没创新低 / 新高",
+    "没背驰": "背驰不成立：独立重算 C 段力度不小于 A 段 × 比例",
+    "前提③": "前提③ 不成立：A、B、C 被上一层中枢整段包住，不构成更大级别",
+    "回拉失败": "背驰后没先回拉进中枢，而是先破了 C 的极值",
+}
+
+
 def check_signals(sig, r, level="seg", measure="macd", ratio=1.0, check_zero_axis=False,
-                  za_threshold=ZA_THRESHOLD):
+                  za_threshold=ZA_THRESHOLD, premise3=True, p3_strict=True):
     """独立复核（只用中枢与单位的原始字段，按定义另写一遍关键条件）。返回违规列表（应为空）。
 
-    measure / ratio 要跟产生 sig 的那次 signals() 调用一致，否则背驰那条会误报。
+    measure / ratio / premise3 / p3_strict 要跟产生 sig 的那次 signals() 调用一致，否则背驰
+    那几条会误报或漏报（前两项一直如此，后两项随第二轮加上）。
     **MACD 参数（fast / slow / sig）也要一致** —— 本函数没有这三个形参，它按默认 12 / 26 / 9
     重算 hist（下面 `macd_hist(r["bars"])`），所以调用方若给 signals() 换过参数，复核量的就不是
     同一条线（今天仓里没有这样的调用点：`tools/selfcheck.py:81` 传的都是默认值）。
+
+    一买 / 一卖这条**调 beichi() 同一块**（结构与 signals() 同一份），但注入的力度是
+    _strength_by_definition() —— 独立另写一遍，才核得住 strength()。
 
     check_zero_axis：**默认 False**。开了才把「B 段回抽 0 轴附近」这条必要条件算进违规。
     默认关是拍过板的（2026-09-30 小栋）：这条的口径（统计量 / 窗口 / 阈值）**全是我们发明的数**，
@@ -242,15 +325,14 @@ def check_signals(sig, r, level="seg", measure="macd", ratio=1.0, check_zero_axi
                 bad.append(("一类买卖点不在趋势的最后一个中枢之后", s["kind"], s["bar"]))
             if (u["lo"] >= z["DD"]) if buy else (u["hi"] <= z["GG"]):
                 bad.append(("一类买卖点的 C 段没创新低 / 新高", s["kind"], s["bar"]))
-            # 背驰：C 段力度 < A 段力度 × 比例。A 段的找法与 signals() 同一条规则，
-            # 但力度用 _strength_by_definition 独立算 —— 这一条是力度那一支唯一的守卫。
-            a = next((q for q in range(z["PI0"] - 1, -1, -1)
-                      if (AU[q]["p1"] < AU[q]["p0"]) == buy), None)
-            if a is None:
-                bad.append(("一类买卖点之前找不到同向的 A 段", s["kind"], s["bar"]))
-            elif not _strength_by_definition(u, hist, measure) < \
-                    _strength_by_definition(AU[a], hist, measure) * ratio:
-                bad.append(("背驰不成立：独立重算 C 段力度不小于 A 段 × 比例", s["kind"], s["bar"]))
+            # 取段 / 力度 / 回拉 / 前提③ 全部调 beichi() 这一块（与 signals() 同一份结构），
+            # 但力度注入独立实现 _strength_by_definition —— 这一条是力度那一支唯一的守卫。
+            blk = beichi(AU, Z, s["center"] - 1, s["kind"], _strength_by_definition, hist,
+                         measure, ratio, _higher_centers(r, level), premise3, p3_strict)
+            for b in blk["blocks"]:
+                if b == "没创新低":
+                    continue            # 上面那条结构检查（+ 三行前）已经报过同一个事实
+                bad.append((_BLOCK_MSG.get(b, b), s["kind"], s["bar"]))
             x = _za.get((s["kind"], s["bar"]))
             if x is not None and not x["ok"]:
                 bad.append(("B 段没把黄白线回抽 0 轴附近（r=%.3f > %.2f）" % (x["r"], za_threshold),
