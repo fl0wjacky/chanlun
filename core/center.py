@@ -38,6 +38,21 @@
        （v1 只用这一条，会把离开段算进前中枢，把前中枢的 GG / DD 撑大，连接段反向的中枢对
        永远判不成趋势。）
     · 两者都没出现 → 仍在延续（live）。
+
+可信度 `status`（每个中枢都带「已确认」/「暂定」两档之一）：
+    后到的 K 线会**改写末尾的中枢** —— 这不是缺陷，是「走势没走完」的必然结果。
+    审计（`docs/audit/engine-vs-spec_中枢走势组.md` §3）把改写分了三档：
+        A 档 仍在延续：边界每加一笔就往后长（X1/PI1/npens/nZ/DD/GG 都动）
+        B 档 会**倒退**：终结判据要等回抽段出现，回抽段还在走时 `live=False` 会被撤销、
+             边界回缩、ZG/ZD/F1 被重画
+        C 档 下一层跟着动：`big` 的合并、`seg_centers` 的条数、乃至中枢**个数**
+    实测（`notes/round2-tail-stability.py`，六份 data/ 砍尾）：砍掉末尾最多 233 根
+    K 线时，改写最远到「末尾第 4 个」；砍到 89 根以内则**不越出末尾 1 个**。
+    据此取**保守**的一刀：
+        暂定   = 仍在延续，**或**它是末尾中枢，**或**它与末尾中枢相邻
+        已确认 = 其余（live=False 且后面至少还有两个中枢）
+    ★ 这是**按实测改写半径给的档，不是保证**：`已确认` 的中枢在已有数据下没被改写过，
+    不构成「以后也不会被改写」的证明。要更强的保证得等数据把这一条钉死。
 """
 
 
@@ -145,12 +160,22 @@ def find_centers(pens):
         else:
             i += 1
 
-    # 给每个中枢补上「与前一个中枢的关系」
+    # 给每个中枢补上「与前一个中枢的关系」和「可信度档」
+    n = len(zs)
     for k, z in enumerate(zs):
         if k == 0:
             z["rel"], z["kind"] = "—", "—"
         else:
             z["rel"], z["kind"] = classify_pair(zs[k - 1], z)
+        # 暂定 / 已确认（见模块 docstring「可信度」）：末尾一个 + 相邻那个都会跟着末尾动
+        if z["live"]:
+            z["status"], z["status_note"] = "暂定", "仍在延续"
+        elif k == n - 1:
+            z["status"], z["status_note"] = "暂定", "末尾中枢（终结可能被撤销）"
+        elif k == n - 2:
+            z["status"], z["status_note"] = "暂定", "与末尾相邻（末尾一动它跟着动）"
+        else:
+            z["status"], z["status_note"] = "已确认", "—"
     return zs
 
 
@@ -173,7 +198,13 @@ def check_centers(zs, units):
         return d if outside(w, z) == d else 0
 
     bad = []
+    n_z = len(zs)                                # ★ 别叫 n：下面 9 段升级那一支会把它覆写成段数
     for k, z in enumerate(zs):
+        # 可信度档：只在带这个键的输出上重验（v1 参考实现不带）
+        if "status" in z:
+            want = "已确认" if (not z["live"] and k <= n_z - 3) else "暂定"
+            if z["status"] != want:
+                bad.append(("可信度档标错：应为 %s，实为 %s" % (want, z["status"]), k))
         i, j = z["PI0"], z["PI1"]
         if not (0 <= i and i + 2 <= j < len(units)):
             bad.append(("覆盖不足三段或序号越界", k)); continue
