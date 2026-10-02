@@ -12,13 +12,15 @@
   ① **改前/改后**：`data/` 每份数据的引擎输出哈希（逐位比，不比路径）；
   ② 真实数据上，六份的笔数／段数／开头无重叠数（改前 vs 改后）；
   ③ 随机行情：改前最短的反例长什么样，改后还在不在；
-  ③b 换 **6 族**生成器再问一次『段界之后会不会也出现』 —— 一族样本答不了『不可能』。
+  ③b 换 **6 族**生成器再问一次『段界之后会不会也出现』 —— 一族样本答不了『不可能』；
+  ⑤ **判据形状**的两条读数：证明『不能简化成只查相邻两笔』，并**更正**本卡初版那句
+     『不是两两重叠』（理由是错的，见 `_opening_overlaps` docstring 的更正）。
 
 用法：
     python3 docs/audit/round2-seg-start-demo.py                 # 对照 origin/main
     python3 docs/audit/round2-seg-start-demo.py --ref <sha>
 """
-import argparse, json, os, subprocess, sys
+import argparse, json, os, random, subprocess, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
@@ -256,6 +258,36 @@ def main():
     print("   %-9s %7s %7s %7d %7d" % ("合计", "", "", th, tm))
     print("   ⇒ 段界之后 %s" % ("**0 例** ⇒ 判据落在起点处成立" if tm == 0
                                 else "★ %d 例 ⇒ 注释里那句『只在开头触发』不成立，得改代码" % tm))
+
+    print()
+    print("=" * 78)
+    print("⑤ 判据形状 · 两条读数（更正初版那句『不是两两重叠』）")
+    print("=" * 78)
+    print("   1 维区间上，三对两两相交 ⟺ 三笔有公共段（Helly 数＝2）。")
+    print("   所以真正会漏的不是『两两』，而是**只看相邻两对**。")
+    print("   下面两个都是随机区间上的计数，**随分布变**，都不当发生率用。")
+    rng = random.Random(20261002)
+    N = 200000
+    pw_bad = adj_bad = 0
+    for _ in range(N):
+        iv = []
+        for _ in range(3):
+            a = rng.uniform(0, 100)
+            iv.append((a, a + rng.uniform(0.001, 40)))
+        A, B, C = iv
+        common = max(x[0] for x in iv) < min(x[1] for x in iv)
+        pw = (max(A[0], B[0]) < min(A[1], B[1])) and (max(B[0], C[0]) < min(B[1], C[1])) \
+            and (max(A[0], C[0]) < min(A[1], C[1]))
+        adj = (max(A[0], B[0]) < min(A[1], B[1])) and (max(B[0], C[0]) < min(B[1], C[1]))
+        if pw and not common:
+            pw_bad += 1
+        if adj and not common:
+            adj_bad += 1
+    print("   %d 组 · 种子 20261002（区间长 0.001~40，起点 0~100）" % N)
+    print("   两两（三对全查）相交但无公共段：%d 例（%.4f%%）" % (pw_bad, 100.0 * pw_bad / N))
+    print("   只查相邻两对  相交但无公共段：%d 例（%.4f%%）" % (adj_bad, 100.0 * adj_bad / N))
+    print("   ⇒ %s" % ("两两 ⟺ 公共（Helly 成立），要拦的是『别简化』" if pw_bad == 0
+                       else "★ 出现反例 ⇒ Helly 那条不成立，往下查"))
     return 0
 
 
