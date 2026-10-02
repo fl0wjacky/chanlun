@@ -28,7 +28,7 @@ def macd_lines(bars, fast=12, slow=26, sig=9):
     """MACD 的两条线：返回 (DIF, DEA)。DIF = 快慢 EMA 之差（白线），DEA = DIF 的 EMA（黄线）。
 
     EMA 用第一根收盘价起算（Pine 版照此手写，不用 ta.ema 的 SMA 起算，两边逐根一致）。
-    macd_hist 就是从这两条线相减得来的 —— 拆出来是为了「B 段回抽 0 轴」那条需要**分别**看两条线。
+    macd_hist 就是从这两条线相减得来的 —— 拆出来是为了『B 段回抽 0 轴』那条需要**分别**看两条线。
     """
     dif, dea = [], []
     ef = es = None
@@ -53,7 +53,7 @@ def macd_hist(bars, fast=12, slow=26, sig=9):
     return [x - y for x, y in zip(dif, dea)]
 
 
-# ---- 「B 段回抽 0 轴附近」这条必要条件：口径 ----
+# ---- 『B 段回抽 0 轴附近』这条必要条件：口径 ----
 # ★ 原文只给了「附近」两个字，**下面四个量全是我们发明的**，一律不许挂课号（见 README「0 轴回抽」）。
 ZA_STAT = "mean|DIF| 与 mean|DEA|（B 中枢窗口内，两条线到 0 的平均距离）"
 ZA_WINDOW = "B 中枢的 K 线跨度：起 = 构成它的第一段的起点 i0，止 = 最后一段的终点 i1"
@@ -62,13 +62,15 @@ ZA_THRESHOLD = 0.30
 
 
 def zero_axis(points, r, level="seg", fast=12, slow=26, sig=9, threshold=ZA_THRESHOLD):
-    """量「B 段把 MACD 黄白线回抽 0 轴附近」这条必要条件。**只量，不改买卖点判定。**
+    """量『B 段把 MACD 黄白线回抽 0 轴附近』这条必要条件。**只量，不改买卖点判定。**
 
     原文（两条都是**答疑**里的话，不是正文）：
       第 25 课答疑「用 MACD 判断背驰首先要有黄白线对 0 轴的回拉，这个都没有，
                      在该级别就不存在什么背驰」
       第 27 课答疑「如果 B 段不是回抽 0 轴附近，就根本不满足条件」
-    第 24 课正文说的是「B 这个中枢**一般会**把 MACD 的黄白线…回拉到 0 轴附近」—— 那是弱说法，
+    第 24 课正文说的是「B 这个中枢**一般会**把 MACD 的黄白线…回拉到 0 轴附近」—— 那是弱说法。
+    （**这条引文折叠了 OCR 叠字** —— 源页逐字是「B 这个中枢枢一般会把…回拉到 0 轴轴附近」，照抄去 grep 会不中；
+    块里的 `**` 是后加的着重、`…` 省掉了原文的括注 `(也就是 DIFF 和 DEA)`。标注口径同 README『引号口径』那条。）
     强说法出自上面两条答疑。
 
     **口径（阈值的数是我们发明的）**：见 ZA_STAT / ZA_WINDOW / ZA_REF / ZA_THRESHOLD。
@@ -128,15 +130,15 @@ def strength(u, hist, measure="macd"):
 def _higher_centers(r, level):
     """本层的**上一层**中枢列表：笔层看线段中枢，线段层看**线段中枢自己**的扩展合成。
 
-    ★ 线段层**不能**用 r["big"]：那两个是**同一级**的东西 —— r["seg_centers"] 是「线段当中枢」，
-    r["big"] 是「类中枢（笔中枢）扩展合成」，两个都是线段级（`extend.py` 第 54 课那条：三个
-    1 分钟中枢当成线段，重叠出的是 5 分钟中枢）。拿同级的来查「上一层有没有中枢包住」，是
+    ★ 线段层**不能**用 r["big"]：那两个是**同一级**的东西 —— r["seg_centers"] 是『线段当中枢』，
+    r["big"] 是『类中枢（笔中枢）扩展合成』，两个都是线段级（`extend.py` 第 54 课那条：三个
+    1 分钟中枢当成线段，重叠出的是 5 分钟中枢）。拿同级的来查『上一层有没有中枢包住』，是
     拿错了一级 ⇒ 线段层要再往上合成一次，即 build_hierarchy(seg_centers, 已完成线段)。
 
     ★ 线段层还要**只取真合成过的**（nmerge > 1）：build_hierarchy() 的返回值是**混级**的 ——
     合成出来的（level=2、nmerge>1）和**没合成、原样浅拷贝进来的单中枢**（nmerge=1、level 保持
-    本级别）混在同一个列表里（`extend.py:59` 自己写着「不合的原样留下（nmerge=1）」）。浅拷贝那条
-    **跟 B 是同一级**，拿它当「上一层的中枢」＝又犯一次「拿同级当上一层」的错。全仓已有的口径就是
+    本级别）混在同一个列表里（`extend.py:59` 自己写着『不合的原样留下（nmerge=1）』）。浅拷贝那条
+    **跟 B 是同一级**，拿它当『上一层的中枢』＝又犯一次『拿同级当上一层』的错。全仓已有的口径就是
     只认合成过的：`render/chart_nested.py:47`、`cards/c05_center.py:218` 都只取 nmerge>1 ——
     这里跟上，判据与画图/卡片读同一半。**笔层不滤**：seg_centers 是原始中枢（身上没有 nmerge
     这个键），它本来就是笔的上一层。
@@ -157,7 +159,7 @@ def check_premise3(higher, B, lo, hi, strict=True):
 
     strict=True  用中枢区间 [ZD, ZG] —— 原文「在一个大的中枢里」的字面读法（默认）
     strict=False 用波动范围 [DD, GG] —— 更宽，挡下的更多
-    B 自己带 9 段升级（z["up"] 非空）时直接算成立：那本来就是「B 是高一级别中枢」。
+    B 自己带 9 段升级（z["up"] 非空）时直接算成立：那本来就是『B 是高一级别中枢』。
     """
     if B.get("up"):
         return dict(hit=False, center=None, why="B 自带 9 段升级，本身就是高一级别中枢")
@@ -176,7 +178,7 @@ def beichi(AU, Z, k, kind, strength_fn, hist, measure="macd", ratio=1.0,
     改漏一处自检就会拿旧规则去核新判据。现在结构只有这一份。
 
     力度由调用方**注入** strength_fn(u, hist, measure)：signals 传 strength()，
-    check_signals 传 _strength_by_definition() —— 「收成一块」收的是结构，力度那支的
+    check_signals 传 _strength_by_definition() —— 『收成一块』收的是结构，力度那支的
     独立性靠注入保住（见 _strength_by_definition 的说明）。
 
     返回 dict(emit, blocks, why, a, c, A, B, C, ok, p3, p4)：
@@ -225,7 +227,7 @@ def signals(r, level="seg", measure="macd", ratio=1.0, fast=12, slow=26, sig=9,
     """level: "seg" 线段中枢（默认）/ "pen" 类中枢；measure: "macd" / "slope"；ratio: C < A × ratio 才算背驰。
 
     premise3：前提③ **默认开**（小栋 2026-10-02 拍板 ①A）—— 用 check_premise3 挡掉
-    「A、B、C 其实同处一个更大级别中枢」的点。p3_strict：③ 用中枢区间（默认）还是波动范围。
+    『A、B、C 其实同处一个更大级别中枢』的点。p3_strict：③ 用中枢区间（默认）还是波动范围。
     """
     AU, U, Z = _units(r, level)
     hist = macd_hist(r["bars"], fast, slow, sig)
@@ -278,12 +280,12 @@ def signals(r, level="seg", measure="macd", ratio=1.0, fast=12, slow=26, sig=9,
 def _strength_by_definition(u, hist, measure):
     """第 24 课的力度，**独立另写一份**——本函数存在的唯一理由就是它不调 strength()。
 
-    为什么要抄一遍同样的公式：力度是背驰判据里唯一「算出来的量」，而 check_signals 原先
+    为什么要抄一遍同样的公式：力度是背驰判据里唯一『算出来的量』，而 check_signals 原先
     只复核结构（点是不是段终点、方向、三类点的位置…），**没有一条看着力度**。
     实测：把 strength() 弄坏（斜率的 max(1, span) 换成 min，等长替换），ZEC 15m pen 的
     90 个买卖点里 12 个换了位置，而 check_signals 照样报 0——门一声不响。
-    复核必须独立于被测实现，所以这里宁可重复一遍公式——和 check_centers「另写一遍、
-    不调用 upgrades」是同一个写法。**改 strength 的公式时这里要一起改**，这是这份独立的代价。
+    复核必须独立于被测实现，所以这里宁可重复一遍公式——和 check_centers『另写一遍、
+    不调用 upgrades』是同一个写法。**改 strength 的公式时这里要一起改**，这是这份独立的代价。
     """
     if measure == "slope":
         span = u["i1"] - u["i0"]
@@ -317,7 +319,7 @@ def check_signals(sig, r, level="seg", measure="macd", ratio=1.0, check_zero_axi
     一买 / 一卖这条**调 beichi() 同一块**（结构与 signals() 同一份），但注入的力度是
     _strength_by_definition() —— 独立另写一遍，才核得住 strength()。
 
-    check_zero_axis：**默认 False**。开了才把「B 段回抽 0 轴附近」这条必要条件算进违规。
+    check_zero_axis：**默认 False**。开了才把『B 段回抽 0 轴附近』这条必要条件算进违规。
     默认关是拍过板的（2026-09-30 小栋）：这条的口径（统计量 / 窗口 / 阈值）**全是我们发明的数**，
     原文只给了"附近"两个字，而全库样本又少 ⇒ 先只当检查、不接进买卖点判定。口径见 ZA_* 常量。
     """
