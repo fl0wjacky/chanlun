@@ -355,7 +355,7 @@ var array<int>   zPend = array.from(-1)            // 待定分型：zFx 下标�
 var array<int>   zStack = array.new<int>()         // 工作栈（每根用完即空）
 var array<int>   zFxAtK = array.new<int>()         // 标准化下标 k -> zFx 下标
 var array<int>   zPSt  = array.from(0)             // 已喂进 zSeq 的分型个数
-var array<float> zSig  = array.from(-1.0, 0, 0, 0) // 已喂的**最后一个**分型的签名 [k, i, p, top]
+var array<float> zSig  = array.from(-1.0, 0.0, 0.0, 0.0) // 已喂的**最后一个**分型的签名 [k, i, p, top]
 
 // 一根一步。守卫三条 —— 正确性**不押在** ① 的"只增"不变量上，对不上就走第 3 条整段重算：
 //   1) 分型表没变（长度相同且尾分型签名相同）⇒ 无事可做
@@ -370,8 +370,7 @@ zPenStep(array<Fx> fx, array<float> sH, array<float> sL,
             seq.pop()
         pend.set(0, -1)
         st.set(0, 0)
-    else if m == st.get(0) and sig.get(0) == fx.get(m - 1).k and sig.get(1) == fx.get(m - 1).i \
-            and sig.get(2) == fx.get(m - 1).p and sig.get(3) == (fx.get(m - 1).top ? 1.0 : 0.0)
+    else if m == st.get(0) and sig.get(0) == fx.get(m - 1).k and sig.get(1) == fx.get(m - 1).i and sig.get(2) == fx.get(m - 1).p and sig.get(3) == (fx.get(m - 1).top ? 1.0 : 0.0)
         st.set(0, m)                                   // 守卫 1：分型表原封不动
     else
         if m == st.get(0) + 1
