@@ -9,7 +9,10 @@
 // 画法：笔与类中枢同色，线段与线段中枢同色；高一级别中枢用同色加粗框；未完成 / 仍在延续的一律虚线。
 // 中枢边框：**暂定的一律虚线** —— 仍在延续的、末尾那一个、以及与末尾相邻的那一个
 //   （走势没走完时，末尾的中枢会被后到的K线改写；口径与 Python 版 `centers[].status` 一致）。
-// 计算方式：只在最后一根K线上，用收集好的全部K线从头算一遍（与 Python 版逐步一致，便于对账）。
+// 计算方式：**逐根增量**。包含处理 / 分型 / 笔在每根K线上往下推一格（①②），只有最后一根
+//   （islast）才把线段、中枢、买卖点**整段重算一遍**并落图 —— 落图这一段仍是「从头算」，但
+//   它只画不算，逐根那一侧不依赖它。原先这里写的是「只在最后一根K线上从头算一遍」，
+//   ①② 之后已经不成立了。
 // 买卖点：默认只标『结构已确认』的；打开『显示待确认』后，未确认的用空心标签，之后可能改掉或消失。
 //
 // ⚠⚠ **本文件不是每一步都被运行验证过。**
@@ -834,6 +837,33 @@ var array<line>  gLines  = array.new<line>()
 var array<box>   gBoxes  = array.new<box>()
 var array<label> gLabels = array.new<label>()
 
+// ★ 每类**各自的**配额 —— 不是共用一个数。
+//   原先笔和线段共用一个上限：笔先画到 440，线段只剩 499-440 = 59 格。于是撞上限的用户
+//   （实测只有 zec15 @ drawBars=9000：窗口内 笔 523 / 线段 67 / 笔中枢 67 / 段中枢 11）看到的
+//   不是"细结构太多"，而是**线段这种粗结构被细笔挤没了**。配额按**粗结构优先**排：
+//   线段 / 段中枢先占住自己那份，笔 / 类中枢只能拿剩下的。
+//   下面的数是照上面那组**实测最坏值**往上留余量定的，不是拍的：
+//     线段 峰值 67  → 给 150（约 2.2 倍）
+//     笔   峰值 523 → 拿剩下的 349；★ 这一档**必然丢**，但丢的是最老的那头（见 islast 里的倒序）
+//     段中枢 峰值 11 → 给 120；笔中枢峰值占 82 格（1 + upZD 高框）→ 给 378
+//   三组合计都压在 max_*_count = 500 那条硬线以内，且各留 1~2 格给自检角标。
+//   ★ 标签分两档：**买卖点**单独留 300（挤不着），中枢那两类再分 198。
+//     中枢这 198 里，段中枢（价签，重要）和笔中枢（只有高一级别标签）**各留一半** ——
+//     同 Boxes 的道理：笔中枢先画，若共用一个数，段中枢的价签会被高一级别标签挤掉。
+//     ★ 实测两者合计才 26 个，现在**根本撞不到线**；分这一下是为"哪天撞到"时**顺序是对的**，
+//       不是因为它现在有用。别把它当成"已经出过事"的证据。
+int LINE_BUDGET = 499
+int PEN_LINE_CAP = 349
+int SEG_LINE_CAP = LINE_BUDGET - PEN_LINE_CAP          // 150
+int BOX_BUDGET  = 498
+int PC_BOX_CAP  = 378
+int SC_BOX_CAP  = BOX_BUDGET - PC_BOX_CAP              // 120
+int LB_BUDGET   = 498
+int SIG_LB_CAP  = 300
+int CTR_LB_CAP  = LB_BUDGET - SIG_LB_CAP               // 198
+int PC_LB_SHARE = CTR_LB_CAP / 2                       //  99：笔中枢（只出高一级别标签）
+int SC_LB_SHARE = CTR_LB_CAP - PC_LB_SHARE             //  99：段中枢（价签 + 高一级别标签）
+
 // 画图的 x：TradingView 只允许往回画 10000 根以内（xloc.bar_index），更早的夹到界线上
 xc(int x) => math.max(x, bar_index - 9990)
 
@@ -848,21 +878,32 @@ clearAll() =>
 
 // prov：这个中枢是不是『暂定』（仍会被后来到的K线改写）—— 由**调用点**按下标算，
 //   不进 `type Ctr`：这样判断只在一处、且任何新造的中枢都不可能漏标。
-drawCenter(Ctr z, int x0, int x1, color col, int w, bool withLabel, bool prov) =>
-    st = prov ? line.style_dashed : line.style_solid
-    gBoxes.push(box.new(x0, z.ZG, x1, z.ZD, border_color = col, border_width = w, border_style = st,
-         bgcolor = color.new(col, fillTr)))
-    if withLabel
-        gLabels.push(label.new(x0, z.ZG, str.format("[{0}, {1}]", str.tostring(z.ZD, format.mintick), str.tostring(z.ZG, format.mintick)),
-             style = label.style_label_lower_left, color = color.new(col, 80), textcolor = col, size = size.small))
-    if showUp and z.upZD.size() > 0
-        for [m, uzd] in z.upZD
-            uzg = z.upZG.get(m)
-            gBoxes.push(box.new(x0, uzg, x1, uzd, border_color = col, border_width = w + 2 * (m + 1), border_style = st,
-                 bgcolor = color.new(col, 100)))
-            gLabels.push(label.new(x0, uzg, "↑高" + array.from("一", "两", "三", "四").get(math.min(m, 3)) + "级",
-                 style = label.style_label_lower_left, color = color.new(col, 70), textcolor = color.white, size = size.small))
-    true
+//
+// ★ 配额检查必须在**这里**、不能留在调用点：下面 `upZD` 那组高一级别框是**本函数自己**推的，
+//   原先调用点写的 `gBoxes.size() < 480` 根本管不到它们 —— 480 从来就不是硬上限，只是"进场门槛"。
+//   现在改成**先算总账再进场**：一次要占 1 + upZD.size() 格，不够就整块不画。
+zdN(Ctr z) => showUp ? z.upZD.size() : 0
+
+// 返回 false = 配额不够、这次没画。调用点据此 break（倒序走，再往前只会更老，画了也是丢）。
+drawCenter(Ctr z, int x0, int x1, color col, int w, bool withLabel, bool prov, int boxCap, int lbCap) =>
+    ok = false
+    if gBoxes.size() + 1 + zdN(z) <= boxCap
+        st = prov ? line.style_dashed : line.style_solid
+        gBoxes.push(box.new(x0, z.ZG, x1, z.ZD, border_color = col, border_width = w, border_style = st,
+             bgcolor = color.new(col, fillTr)))
+        if withLabel and gLabels.size() < lbCap
+            gLabels.push(label.new(x0, z.ZG, str.format("[{0}, {1}]", str.tostring(z.ZD, format.mintick), str.tostring(z.ZG, format.mintick)),
+                 style = label.style_label_lower_left, color = color.new(col, 80), textcolor = col, size = size.small))
+        if zdN(z) > 0
+            for [m, uzd] in z.upZD
+                uzg = z.upZG.get(m)
+                gBoxes.push(box.new(x0, uzg, x1, uzd, border_color = col, border_width = w + 2 * (m + 1), border_style = st,
+                     bgcolor = color.new(col, 100)))
+                if gLabels.size() < lbCap
+                    gLabels.push(label.new(x0, uzg, "↑高" + array.from("一", "两", "三", "四").get(math.min(m, 3)) + "级",
+                         style = label.style_label_lower_left, color = color.new(col, 70), textcolor = color.white, size = size.small))
+        ok := true
+    ok
 
 if barstate.islast
     clearAll()
@@ -882,27 +923,62 @@ if barstate.islast
     x0Draw = n - 1 - drawBars - off                    // 相对下标：早于此的结构不画
     np = pens.size()
 
-    if showPC
-        for [k, z] in pcs
+    // ★★ 一律**从最新往回画**。超了要丢掉的是**最老**的那一头。
+    //   原先全是正序（最老 → 最新）配 `size() < 上限`，先撞上限、被丢的是**最新那段** ——
+    //   表现为"图右边空着、左边满满一屏"，正好和用户的直觉相反。
+    //
+    // ★ 倒序写法与三个坑（都不是猜的）：
+    //   1) `for k = arr.size() - 1 to 0` 靠 Pine 的**方向自动判定**（from > to 就往下数，见
+    //      语言参考 `for` 条）。**不要**画蛇添足加 `by -1`：文档里 step 是正数（"a positive value"），
+    //      v5 上加 by -1 直接报 `step must be greater than 0`。
+    //   2) **每个倒序 for 前面一律判空**。空表时 from = -1、to = 0，方向又翻回正序，
+    //      于是 get(-1) 越界 —— 空集合这个坑对正序写法同样成立（`for q = 0 to cnt - 1` 在
+    //      cnt = 0 时也变成往下数），两种写法都得先判空，判完空倒序反而更好读。
+    //   3) `break` 只在**配额用完**时用，不按窗口下标 break：那要求数组严格有序，
+    //      是额外的不变量；窗口仍用 `>= x0Draw` 过滤，倒序走一遍本来就便宜。
+    int nPenDrawn = 0
+    int nSegDrawn = 0
+    int nSigDrawn = 0
+    // ★ 两类中枢的框上限要按**各自的起点**算，不能拿全局 gBoxes.size() 去比一个小配额：
+    //   笔中枢先画、把 gBoxes 填到几十上百，段中枢再去比 `size() < 120` 就**一个都画不出来**
+    //   （我自己第一版就是这么写的）。这里先把各自的**绝对天花板**定死，再传下去。
+    boxLimPC = gBoxes.size() + PC_BOX_CAP
+    boxLimSC = gBoxes.size() + SC_BOX_CAP
+    lbLimPC = gLabels.size() + PC_LB_SHARE
+    lbLimSC = gLabels.size() + SC_LB_SHARE
+
+    if showPC and pcs.size() > 0
+        for k = pcs.size() - 1 to 0
+            z = pcs.get(k)
             a = pens.get(z.PI0).i0
             b = pens.get(z.PI1).i1
-            if b >= x0Draw and gBoxes.size() < 480
-                drawCenter(z, xc(base + a), xc(base + b), penCol, 1, false, z.live or k >= pcs.size() - 2)
-    if showSC
-        for [k, z] in scs
+            if b >= x0Draw
+                if not drawCenter(z, xc(base + a), xc(base + b), penCol, 1, false, z.live or k >= pcs.size() - 2, boxLimPC, lbLimPC)
+                    break
+    if showSC and scs.size() > 0
+        for k = scs.size() - 1 to 0
+            z = scs.get(k)
             a = done.get(z.PI0).i0
             b = done.get(z.PI1).i1
-            if b >= x0Draw and gBoxes.size() < 490
-                drawCenter(z, xc(base + a), xc(base + b), segCol, 2, true, z.live or k >= scs.size() - 2)
+            if b >= x0Draw
+                if not drawCenter(z, xc(base + a), xc(base + b), segCol, 2, true, z.live or k >= scs.size() - 2, boxLimSC, lbLimSC)
+                    break
     if showPen and np > 0
-        for t = 0 to np - 1
+        for t = np - 1 to 0
             p = pens.get(t)
-            if p.i1 >= x0Draw and gLines.size() < 440
+            if p.i1 >= x0Draw
+                if nPenDrawn >= PEN_LINE_CAP
+                    break
+                nPenDrawn += 1
                 gLines.push(line.new(xc(base + p.i0), p.p0, xc(base + p.i1), p.p1, color = penCol, width = penW,
                      style = t == np - 1 ? line.style_dashed : line.style_solid))
-    if showSeg
-        for s in segs
-            if s.i1 >= x0Draw and gLines.size() < 499
+    if showSeg and segs.size() > 0
+        for si = segs.size() - 1 to 0
+            s = segs.get(si)
+            if s.i1 >= x0Draw
+                if nSegDrawn >= SEG_LINE_CAP
+                    break
+                nSegDrawn += 1
                 xe = s.i1
                 ye = s.p1
                 if s.live                              // 未完成段画到迄今的极值
@@ -924,15 +1000,20 @@ if barstate.islast
                       signalsOf(pens, pcs, np, true, false, off, higher)
     names = array.from("一买", "二买", "三买", "一卖", "二卖", "三卖")
     shows = array.from(show1B, show2B, show3B, show1S, show2S, show3S)
-    for s in sigs
-        if shows.get(s.kind - 1) and (s.confirmed or showPend) and s.bar >= x0Draw and gLabels.size() < 499
-            buy = s.kind <= 3
-            col = buy ? buyCol : sellCol
-            txt = names.get(s.kind - 1) + (s.weak ? "(弱)" : "") + (s.confirmed ? "" : "?")
-            gLabels.push(label.new(xc(base + s.bar), s.price, txt,
-                 style = buy ? label.style_label_up : label.style_label_down,
-                 color = s.confirmed ? col : color.new(col, 100), textcolor = s.confirmed ? color.white : col,
-                 size = size.small))
+    if sigs.size() > 0
+        for gi = sigs.size() - 1 to 0                  // 倒序，同上面那三组：丢最老的
+            s = sigs.get(gi)
+            if shows.get(s.kind - 1) and (s.confirmed or showPend) and s.bar >= x0Draw
+                if nSigDrawn >= SIG_LB_CAP
+                    break
+                nSigDrawn += 1
+                buy = s.kind <= 3
+                col = buy ? buyCol : sellCol
+                txt = names.get(s.kind - 1) + (s.weak ? "(弱)" : "") + (s.confirmed ? "" : "?")
+                gLabels.push(label.new(xc(base + s.bar), s.price, txt,
+                     style = buy ? label.style_label_up : label.style_label_down,
+                     color = s.confirmed ? col : color.new(col, 100), textcolor = s.confirmed ? color.white : col,
+                     size = size.small))
 
     // 回滚自检角标
     if selfCheck
