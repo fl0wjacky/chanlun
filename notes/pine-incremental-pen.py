@@ -479,7 +479,10 @@ def run_self_test():
     ]
     rng = random.Random(20261002)
     series = [("rand", rand_bars(rng, 600, t), t) for t in (1.0, 0.5, 0.1)]
-    CAP = 1500          # 臂只为「该红的有没有红」，截 1500 根够覆盖实测的两个红点（362 / 530）
+    # 截这么长只为「该红的有没有红」：实测两个红点在 aaplusdt_30m@607 与 aaplusdt_1h@977，
+    # 取 1500 才盖得住。★ 这两个数会随序列顺序变（我改过一次顺序，它们就从 zec_2h:530
+    # 挪到了现在这两处）—— 所以这里是**跑出来再填**，不是先填了当判据。
+    CAP = 1500
     for fn, bars, tick in load_real():
         series.append((fn, bars[:CAP], tick))
     print("--self-test：臂跑在 %d 条序列上（随机 3 × 600 根 + 真实 %d 份 × 前 %d 根，逐前缀）"
