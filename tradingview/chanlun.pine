@@ -382,9 +382,11 @@ var array<float> zSig  = array.from(-1.0, 0.0, 0.0, 0.0) // 已喂的**最后一
 // 状态 = (zPens, zSegs, zSegI, zSegBorn, zSegSig)。zPens 是摊平笔（与 zSeq 同步的 Unit 序列），
 // zSegs 是**已确认段（只增）**。前提是「已确认段前缀稳定」：mode A（默认）9 份数据 + 2000 随机序列
 // 都 0 次撤销；mode B 不成立（反向分型可被后笔包含撤销），所以 B 不走逐根、在 islast 整段重算。
-// ★ 为什么已确认段永远不被尾笔改动碰坏：已确认段的末笔 endPen ≤ M-4（case-1 要破位笔 r > endPen、
-//   case-2 要 endPen 之后至少 3 笔做反向分型），而 zSeq 只可能动最后两格（seq[M-2]、seq[M-1]，
-//   见 ② 的「zRefx 只动 k=L-2 那一格」）⇒ 尾笔改动最多波及 zPens 的最后两笔 = 都在活尾巴里。
+// ★ 为什么缓存段不会 stale：续扫只在「纯追加一笔」时复用 (zSegI, zSegBorn)，其余一切改动
+//   （尾端点被换 / 缩水 / 跳变 / 深处回改）都走整段重算、从头补摊平 + 续扫归零。fix_start 能
+//   回改 5 笔深（zec15@3738、zec_2h@206 实测），会碰到已确认段的末笔（endPen ≤ M-4 挡不住），
+//   所以**不押**「zSeq 只动最后两格」——那说的是 zFx（② 的 zRefx 只动 k=L-2 那一格）、不是
+//   zSeq；押的是「非纯追加一律重算」这条（seg-sync-deepfix-probe.py 逐根对账 0 分歧）。
 var array<Unit>  zPens    = array.new<Unit>()          // 摊平笔（增量，与 zSeq 尾同步）
 var array<Unit>  zSegs    = array.new<Unit>()          // 已确认段（只增）
 var array<int>   zSegI    = array.from(0)              // 段扫描位置（= 上一段 endPen + 1）
@@ -656,10 +658,13 @@ buildSegments(array<Unit> P) =>
 // ── ③ 增量续扫（A 模式；B 在 islast 走整段 buildSegments）──────────────────
 // 与 buildSegments 的内层逐行对应，只是 (i, born) 变成跨根持久状态 (zSegI, zSegBorn)、
 // segs 变成只增的 var。每根最多确认 1 段（多数 0 段），摊还 O(1)。
-// 同步按 zSeq 尾部三格签名（zSegSig）分三种，全押在 ② 的「zRefx 只动 k=L-2 那一格」上：
-//   · 纯追加（多一笔、旧尾巴签名不动）⇒ push 一笔，续扫；
-//   · 尾端点被换（笔数不变、最后两格签名不动）⇒ 只重推最后一笔，续扫；
-//   · 其它（缩水/跳变/深处被改）⇒ 摊平 + 段全作废重来（O(n)，守卫 3 才触发，罕见）。
+// 同步按 zSeq 尾部三格签名（zSegSig）分两路：
+//   · 纯追加（多一笔、旧尾巴签名不动）⇒ push 一笔，续扫（旧前缀没动，复用 (zSegI, zSegBorn) 安全）；
+//   · 其它（尾端点被换 / 缩水 / 跳变 / 深处被改）⇒ 摊平 + 段全作废重来。
+//     ★ 尾端点被换也走整段重算、不是只重推最后一笔：换的是最后那根笔，会翻动 openingOverlaps
+//       倒数几格（i-2..i）的判词；续扫的 i 只增不回，已经跳过去的位置不会再问 ⇒ 缓存段会
+//       stale（seg-sync-deepfix-probe.py 实测 zec_1h@159：换最后那根笔把 openingOverlaps(0) 从
+//       假翻成真，而 i 早已跳到 1，位置 0 再没被问过）。
 mkPen(array<Fx> fx, array<int> seq, int t) =>
     a = fx.get(seq.get(t))
     b = fx.get(seq.get(t + 1))
@@ -673,13 +678,12 @@ zSegStep(array<Fx> fx, array<int> seq, array<Unit> pens, array<Unit> segs, array
     penCount = M >= 1 ? M - 1 : 0
     if penCount != pens.size() or e1 != sig.get(0) or e2 != sig.get(1) or e3 != sig.get(2)
         if penCount == pens.size() + 1 and e2 == sig.get(0) and e3 == sig.get(1)
-            // 纯追加：新长出一笔
+            // 纯追加：新长出一笔（旧前缀没动，续扫即可）
             pens.push(mkPen(fx, seq, penCount - 1))
-        else if penCount == pens.size() and penCount > 0 and e2 == sig.get(1)
-            // 尾端点被换：只重推最后一笔
-            pens.set(penCount - 1, mkPen(fx, seq, penCount - 1))
         else
-            // 整段重算：清空摊平 + 已确认段，从头补摊平、续扫归零
+            // 整段重算：清空摊平 + 已确认段，从头补摊平、续扫归零。
+            // 含「尾端点被换」：换最后那根笔会翻动 openingOverlaps 倒数几格，续扫的 i 只增不回，
+            // 跳过去的位置不会再问 ⇒ 缓存段 stale，所以也照缩水/跳变一样整段重算。
             while pens.size() > 0
                 pens.pop()
             while segs.size() > 0
