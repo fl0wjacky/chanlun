@@ -235,9 +235,13 @@ class NoCk(IncPens):
     为什么它本来就该绿（不是"没压到"）：① 的 `zRefx` 只会**追加**分型。
         · `zH.size() = L` 单调不减，分型的 k ≤ L−2；
         · **新增**（L→L+1）：旧分型的 k ≤ (L+1)−3 < (L+1)−2 ⇒ pop 条件 `k ≥ L−2` 打不到 ⇒ 旧格不动；
-        · **合并**（L 不变）：只重算 k = L−2 那一格，且**幂等** —— 顶分型要求 m[L−2].h > m[L−1].h
-          ⇒ 方向必向下 ⇒ 合并取 min ⇒ m[L−1].h 只会更低 ⇒ 还是顶；底分型镜像。
-    在真实 9 份 + 随机 60 条上量过：**36921 次 push，revised 0、shrank 0**。
+        · **合并**（L 不变）：只重算 k = L−2 那一格，判词**确实不变**。理由不是"取 min 更保险"，
+          而是**相邻标准化K线的高必不相等**（等号算包含 ⇒ 相等就被合并了，不可能相邻，
+          实测 26218 对里 0 例），于是 up/down 合并只会把 m[L−1] 沿判词有利的方向推，
+          而合并前那两条比较本来就成立。完整证明写在 ① 那份的 `Incremental._refx` 里。
+    （Nova 提过一个反例：m[L−1].h == m[L−2].h 时那格不是分型，来根包含K线就"长出来"了。
+      那个前提不可能成立 —— 高相等的相邻标准化K线会被合并掉。见 ① 的证明。）
+    在真实 9 份 + 随机 60 条上量过：**52495 次 push，revised 0、shrank 0**。
     ⇒ 分型表没有"被改的前缀"，检查点永远不必回退。绿是结论，不是漏测。
 
     快照**照样留在设计里**：一次几十个整数、每个分型一次，代价可忽略；换来的好处是
@@ -257,6 +261,49 @@ class NoCk(IncPens):
             self._feed(fx[0])
         else:
             self._feed(fx[m - 1])            # 直接在旧状态上喂，不回快照
+        return True
+
+
+def _sig(f):
+    return (f["k"], f["i"], f["type"], f["price"])
+
+
+class Guarded(IncPens):
+    """**pine 里真打算跑的形状** —— 与 IncPens 同解，但把"每根复制整份快照"换成 O(1) 守卫。
+
+    为什么必须换：pine 每根重放一次全历史（2 万根），每根 `array.copy(seq)`（seq 能到上千）
+    就是 2000 万次拷贝 —— 那正是这张卡要干掉的那种"每根重算一遍"。
+
+    守卫三条（按 ① 的不变量排的，但**正确性不押在它上面** —— 对不上就走第 3 条整段重算）：
+        1) m == done 且最后一个分型没变（比对签名）  ⇒ 无事可做
+        2) m == done + 1                            ⇒ 只喂新的那一个（O(1) 摊还）
+        3) 其余（缩了 / 跳变 / 最后一格被改）        ⇒ 从空重算（不在旧状态上猜）
+    """
+
+    def __init__(self, rule="old", min_gap=4):
+        IncPens.__init__(self, rule, min_gap)
+        self.done = 0
+        self.sig = None
+
+    def update(self, std, fx):
+        self.std = std
+        self.fxk = [None] * len(std)
+        for f in fx:
+            self.fxk[f["k"]] = f
+        m = len(fx)
+        if m == 0:
+            self.seq, self.pend, self.done, self.sig = [], None, 0, None
+            return False
+        if m == self.done and self.sig == _sig(fx[-1]):
+            return False                                    # 守卫 1：分型表没变
+        if m == self.done + 1:
+            self._feed(fx[m - 1])                           # 守卫 2：只喂新的
+        else:
+            self.rebuilds += 1
+            self.seq, self.pend = [], None                  # 守卫 3：整段重算
+            for i in range(m):
+                self._feed(fx[i])
+        self.done, self.sig = m, _sig(fx[-1])
         return True
 
 
@@ -349,9 +396,18 @@ def tick_of_soft(fn):
 
 def measure_append_only():
     """量「分型表只会追加」这条不变量 —— NoCk 预测绿的依据必须自己有数。"""
+    KEYS = ("grew", "grew_on_merge", "same", "revised", "shrank")
+
     def scan(bars, tick):
+        """口径写死，免得下一眼的人猜：
+            grew            分型表长度 +1，且旧表是新表的**前缀**（= 纯追加）
+            grew_on_merge   上面那种里，**标准化序列长度没涨**的那些（即"合并那一下长了一格"）
+            same            长度不变且整表逐位相同
+            revised         长度不变但内容变了，或长度 +1 而旧表不是前缀  ← 唯一要盯的数
+            shrank          分型表变短（= pop 掉没补回来）
+        """
         inc = IncKline()
-        prev, stat = None, {"same": 0, "grew": 0, "revised": 0, "shrank": 0}
+        prev, stat = None, dict.fromkeys(KEYS, 0)
         for b in bars:
             inc.push(b["h"], b["l"])
             _m, fx = inc.snapshot()
@@ -360,7 +416,12 @@ def measure_append_only():
                 if len(cur) == len(prev):
                     stat["same" if cur == prev else "revised"] += 1
                 elif len(cur) == len(prev) + 1:
-                    stat["grew" if cur[:len(prev)] == prev else "revised"] += 1
+                    if cur[:len(prev)] == prev:
+                        stat["grew"] += 1
+                        if not inc.grew:                 # 标准化序列没涨 ⇒ 合并长出来的
+                            stat["grew_on_merge"] += 1
+                    else:
+                        stat["revised"] += 1
                 elif len(cur) < len(prev):
                     stat["shrank"] += 1
                 else:
@@ -368,27 +429,29 @@ def measure_append_only():
             prev = cur
         return stat
 
-    tot = {"same": 0, "grew": 0, "revised": 0, "shrank": 0}
+    tot = dict.fromkeys(KEYS, 0)
     print("── 分型表：整表比长度、前缀比内容（真实数据，每个前缀）──")
+    print("  %-22s %7s %14s %7s %8s %7s" % ("数据", "grew", "其中合并长的", "same", "revised", "shrank"))
     for fn, bars, tick in load_real():
         st = scan(bars, tick)
         for kk in tot:
             tot[kk] += st[kk]
         flag = "" if st["revised"] == 0 and st["shrank"] == 0 else "   ★ 有改动/有缩短"
-        print("  %-22s grew %5d ｜ same %5d ｜ revised %d ｜ shrank %d%s"
-              % (fn, st["grew"], st["same"], st["revised"], st["shrank"], flag))
+        print("  %-22s %7d %14d %7d %8d %7d%s"
+              % (fn, st["grew"], st["grew_on_merge"], st["same"], st["revised"], st["shrank"], flag))
     rng = random.Random(20261002)
-    rst = {"same": 0, "grew": 0, "revised": 0, "shrank": 0}
+    rst = dict.fromkeys(KEYS, 0)
     for _ in range(60):
         tick = rng.choice((0.1, 0.25, 0.5, 1.0, 2.0))
         st = scan(rand_bars(rng, rng.randint(40, 500), tick), tick)
         for kk in rst:
             rst[kk] += st[kk]
             tot[kk] += st[kk]
-    print("  %-22s grew %5d ｜ same %5d ｜ revised %d ｜ shrank %d"
-          % ("随机 60 条", rst["grew"], rst["same"], rst["revised"], rst["shrank"]))
-    print("\n  合计：push 之后 grew %d ｜ same %d ｜ revised %d ｜ shrank %d"
-          % (tot["grew"], tot["same"], tot["revised"], tot["shrank"]))
+    print("  %-22s %7d %14d %7d %8d %7d"
+          % ("随机 60 条", rst["grew"], rst["grew_on_merge"], rst["same"],
+             rst["revised"], rst["shrank"]))
+    print("\n  合计：push 之后 grew %d（其中「合并那一下长了一格」%d）｜ same %d ｜ revised %d ｜ shrank %d"
+          % (tot["grew"], tot["grew_on_merge"], tot["same"], tot["revised"], tot["shrank"]))
     if tot["revised"] or tot["shrank"]:
         print("  ⇒ 分型表**会**被改/被删 ⇒ 检查点必须回退，NoCk 不再是负臂。")
         return 1
@@ -399,6 +462,7 @@ def measure_append_only():
 def run_self_test():
     """把增量版**故意改坏**，检查程序必须红。不红的正臂和没有臂同脸。"""
     arms = [
+        ("O(1) 守卫版（pine 要跑的形状）", Guarded, True),   # 第②步真正要进 pine 的那个形状
         ("没有检查点（不回退）", NoCk, True),      # 负臂：见 NoCk 的 docstring（①只会追加）
         ("快照丢了 seq（状态被扔）", ShallowCk, False),
         ("fix_start 之后不重喂", NoRefeed, False),

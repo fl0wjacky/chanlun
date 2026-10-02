@@ -121,13 +121,28 @@ class Incremental:
           （正好漏掉最后一格），它必须红；我一开始按"留 3 格余量"写，那支臂反而**不红** ——
           不是臂写坏了，是**那个余量本来就是多余的**。宁可供着的余量，是没被量过的边界。
 
-        ★ 另一条也是测出来的（`--self-test` 的负臂 StaleFx）：**合并不会改最后一格分型的取值。**
-          机制：合并只会把 m[-1] 沿**它已经走的方向**推得更远（up 由 m[-2]/m[-1] 定，合并期间不变），
-          而分型只问"谁高谁低"，推得更远不翻转比较 ⇒ 取值不变。
-          ⇒ 但**别据此省掉这次重算**：我试过"合并时把最后一格删掉、不补回来"，那是**真缺陷**
-            （把 m[-1] 合并前后方向存在的那一格分型直接删没了），臂当场红。
-          ⇒ 结论：合并时**重算**是对的写法（幂等、白做一点活）；合并时**删除**是错的。
-            这条我特意写下来，因为它长得像一次"免费的优化"。
+        ★ 合并**既不改取值、也不新增**（即真"幂等"）—— 这条被人当面质疑过，所以写全。
+          Nova 给过一个反例想说明"合并能让 L−2 从无到有"：设 m[L−1].h == m[L−2].h，
+          此时那格既不是顶也不是底（顶要严格大于），再来一根包含K线按 max 把 m[L−1].h
+          抬过 m[L−2].h，底分型就长出来了。
+          **这个前提在标准化序列里不可能成立：**
+              相邻两根标准化K线，**高必不相等、低必不相等**。
+              证：设 m[i-1].h == m[i].h。若 m[i-1].l <= m[i].l 则 m[i-1] 罩住 m[i]；
+                  否则 m[i].l < m[i-1].l，则 m[i] 罩住 m[i-1]。`_contains` 是**对称**的、
+                  且 **等号算包含** ⇒ 这两种情形都会被合并掉，永远不可能相邻。低同理。∎
+              实测：全部真实数据 26218 对相邻，高相等 0 ｜ 低相等 0。
+          ⇒ 于是 up 判据里 `p.h == p2.h and p.l > p2.l` 那半句是**死代码**（永远走不到）。
+          ⇒ 由"相邻高必不等"再推一步，合并时 L−2 那格的判词必然不变：
+              · up 合并（唯一可能：m[L−1].h > m[L−2].h）⇒ c.h := max 只会更高、c.l := max 只会更高，
+                底分型要的 `b.h < c.h`、`b.l < c.l` 只会更容易满足；而合并前这两条**本来就成立**
+                （若 b.l >= c.l 则 b 罩住 c 早就被合并了）。
+              · 与 a = m[L−3] 的三条比较完全没被合并碰到。
+              ⇒ 合并前是底则合并后仍是底；合并前不是底，失败只可能在 a 那侧，合并改不了。
+              顶方向对 down 合并镜像同理。
+          ⇒ 所以合并时 L−2 的判词**确实不变**（幂等），分型表**只增不改不删**。
+          ⇒ 三支臂各钉一个错法：MergeStale（跳过重算）**绿**、StaleFx（照抄旧值但愿意补）**绿** ——
+            两支都是负臂，红不了是因为上面这条；"删掉不补"那支早就红过。
+          ⇒ 这也正是 pen 层 NoCk 臂绿的道理：分型表只往后加，喂给笔的仍是追加。
         """
         L = len(self.m)
         self.fx = [f for f in self.fx if f["k"] < L - 2]
@@ -269,6 +284,22 @@ def run_self_test():
                     self.fx.append(nf)
     arms.append(("从不作废旧分型（负臂：必须保持绿）", StaleFx, "expect_green"))
 
+    class MergeStale(Incremental):
+        """**负臂（预测绿）**：合并那根整段跳过 k=L−2 的重算，照抄旧分型表。
+
+        本来是当正臂写的（Nova 要求："合并时不重算 L−2，照抄旧值，必须红"）。
+        **它红不了，而且不该红** —— 见 `_refx` 里那条证明：合并时 L−2 的判词不变
+        （相邻标准化K线高必不相等 ⇒ Nova 那个 `m[L−1].h == m[L−2].h` 的前提不可能成立）。
+        跳过重算与重算得到的结果**逐位相同**，所以红不了是**结论**，不是"没压到"。
+        实测：全部真实数据里"合并让分型表长出一格"发生 **0 次**。
+        留着它当哨兵：哪天 ① 改了 zRefx（比如不再重算），这里会先红。
+        """
+        def _refx(self):
+            if not self.grew:                       # grew 在 _refx 之前已经赋值
+                return
+            Incremental._refx(self)
+    arms.append(("合并时跳过 L−2 的重算（负臂：必须保持绿）", MergeStale, "expect_green"))
+
 
     rng = random.Random(20261002)
     series = [rand_bars(rng, 300, t) for t in (1.0, 0.5, 0.1)]
@@ -372,6 +403,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--random", type=int, default=300, help="随机序列条数")
+    ap.add_argument("--step", type=int, default=0,
+                    help="前缀抽稀步长；0 = 自动（>3000 根的每 13 个取一个），1 = 全跑不抽")
     ap.add_argument("--trace", action="store_true",
                     help="印一条手挑小序列的逐前缀期望状态，给**读 pine 的人**逐行对账")
     a = ap.parse_args()
@@ -397,7 +430,7 @@ def main():
         if not bars:
             continue
         datasets += 1
-        step = 1 if len(bars) <= 3000 else 13                    # 大的抽稀，小的全跑
+        step = a.step or (1 if len(bars) <= 3000 else 13)        # 默认大的抽稀、小的全跑；--step 1 强制全跑
         checked, bad = check_series(bars, fn, step)
         total_checked += checked
         if bad:
