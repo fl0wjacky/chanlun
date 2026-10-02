@@ -77,14 +77,18 @@ def draw_layers(g, r, X, Y, keep=lambda a, b: True, bar_w=2):
     sink = labels
 
     def tag(x, y, text, col):
-        """挂一个中枢价签：`col` 的 30% 底 + 白字，放在 (x, y) 上方一行。进 `sink` 那张表。
+        """挂一个中枢价签：`col` 的**实底 + 黑字**，放在 (x, y) 上方一行。进 `sink` 那张表。
 
         ★ 颜色**跟着框走**：谁的框用什么色，它的标签就用那个色（2026-10-02 小栋：
-          「每一个中枢左上角都标 [ZD, ZG]，颜色跟框一样」）。统一到「30% 同色底 + 白字」
-          这一条样式上，两边一致 —— 淡底 + 白字在深色图上是这一套里读得最清的那一档
-          （实测见 notes/pricetag-contrast.py）。
+          「每一个中枢左上角都标 [ZD, ZG]，颜色跟框一样」）。
+        ★★ 样式本身在 2026-10-02 下半天改过一次口：原来是「30% 同色底 + 白字」，那是**只按深色底
+          挑的** —— 小栋看的是**白底**图，30% 的淡底压在白底上几乎还是白，白字对比度只有 1.33~1.45:1。
+          现在统一成「**实底 + 黑字**」：底不透明 ⇒ 读不读得清与图底色无关，六色 × 两底全部过 AA。
+          数字在 notes/theme-contrast.py，`style.py` 的 `tag_fill` / `tag_ink` 是取值处。
+          （上午那把 notes/pricetag-contrast.py 是从成图上量旧写法的那一版，已标注过期，别拿它复核这一版。）
         """
-        sink.append(((max(x, 0) + 8, y - 36), text, col, col + (C.get("tag_fill", 77),)))
+        sink.append(((max(x, 0) + 8, y - 36), text, C.get("tag_ink", BLACK),
+                     col + (C.get("tag_fill", 255),)))
 
     def up_box(box, z, w, col):
         """高一级别框（满 9 段，第 33 课）：**两族分色**，线宽跟母框一样。
@@ -189,23 +193,23 @@ def draw_signals(g, r, X, Y, keep=lambda a, b: True):
 
 
 def draw_labels(g, labels, font, col, placed=None):
-    """带底色的标签，最后画；与已放下的框重叠就往上挪一行（最多 4 次）。
+    """带底色的标签，最后画；与已放下的框重叠就往上挪一行（最多 12 次）。
 
     标签元组两种形状：
         ((x, y), 文本)                 深底 + `col` 色的字（价格刻度这类）
         ((x, y), 文本, 文字色)         深底 + 指定的字色
-        ((x, y), 文本, 文字色, 底色)   ★ 价签：自带底色（30% 同色底），字一律纯白
-    ★ 价签（中枢区间、↑高N级）走第三种：A 表那一行「统一：30% 底 + 白字」（2026-10-02 小栋拍），
-      两边同一条规矩 —— TradingView 那边是 `color.new(col, 70)` + `textcolor = color.white`。
-      第四项给了就表示"这是价签"，字色直接用 WHITE，不再取第三项。
+        ((x, y), 文本, 文字色, 底色)   ★ 价签：自带底色，**字色也自带**
+    ★ 价签（中枢区间、↑高N级）走第三种，两边同一条规矩。样式 2026-10-02 下半天改过口：
+      原来第四项一出现就**硬把字色设成纯白**（对应 TradingView 的 `color.new(col, 70)` + 白字）——
+      那是只按深色底挑的，白底上白字对淡底只有 1.33~1.45:1。现在统一「实底 + 黑字」，
+      字色由调用方给（价签一律 `tag_ink`），这里**不再覆盖** —— 覆盖就是一个藏起来的假设。
+      数字见 notes/theme-contrast.py。
     """
     placed = [] if placed is None else placed
     for lab in labels:
         (x, y), text = lab[0], lab[1]
         c = lab[2] if len(lab) > 2 else col
         bg = lab[3] if len(lab) > 3 else BG + (215,)
-        if len(lab) > 3:
-            c = WHITE
         tw = g.textlength(text, font=font)
         box = lambda yy: (x - 6, yy - 2, x + tw + 6, yy + font.size + 8)
         # ★ 挪几次：原来只挪 4 行（每行 = 字高 + 12 ≈ 36 px，共 144 px）。2026-10-02 给小栋的
@@ -263,8 +267,8 @@ def legend(d, x, y, font, wrap_x=None):
                                      outline=C["up_seg"], width=C["sc_w"])],
          "高一级（满 9 段，第 33 课）：浅紫＝类中枢升 / 品红＝线段中枢升；框线跟母框一样粗，不另行加粗")
     item(lambda x0, y0: [d.rounded_rectangle([x0, y0 - 14, x0 + 122, y0 + 15], 6, fill=pc + (C["tag_fill"],)),
-                         d.text((x0 + 10, y0 - 13), "[ZD, ZG]", font=font, fill=WHITE)],
-         "价签（每个中枢都有，颜色跟框一样）：30% 同色底 + 白字", sw=138)
+                         d.text((x0 + 10, y0 - 13), "[ZD, ZG]", font=font, fill=C["tag_ink"])],
+         "价签（每个中枢都有，颜色跟框一样）：实底 + 黑字（白底/深底都读得清）", sw=168)
     item(lambda x0, y0: [d.line([x0, y0, x0 + 34, y0], fill=sc, width=C["seg_w"]),
                          dashed_line(d, (x0 + 34, y0), (x0 + 70, y0), sc, C["seg_w"], 22, 12)],
          "中枢框拆两截：前三笔实线 / 延续虚线")

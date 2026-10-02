@@ -85,8 +85,8 @@ def main():
     r, X, Y = U.mapping()
     pens, done = r["pens"], [s for s in r["segs"] if not s.get("live")]
     families = (
-        ("类中枢一族", r["centers"], pens, (122, 137, 166), [U.UP_PEN], "笔色"),
-        ("线段中枢一族", r["seg_centers"], done, (242, 193, 78), [U.UP_SEG], "段色"),
+        ("类中枢一族", r["centers"], pens, U.PEN_COL, [U.UP_PEN], "笔色"),
+        ("线段中枢一族", r["seg_centers"], done, U.SEG_COL, [U.UP_SEG], "段色"),
     )
     bad = 0
     for name, pool, host, pcol, newcols, pname in families:

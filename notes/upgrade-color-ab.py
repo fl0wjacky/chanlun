@@ -5,7 +5,7 @@
 **升级框不再加粗**，线宽跟母框一样。这个脚本把改动**量出来**，不是靠眼看：
 
     改前（11a6d43）：两个升级框同色 #A78BFA，线宽 = 母框 + 2×(级别+1)
-    改后（本支）    ：类中枢升的 #C4B5FD 浅紫、线段中枢升的 #D946EF 品红，线宽 = 母框
+    改后（本支）    ：两族**各自一色**（取值从 render/style.py 读，不在这抄一份），线宽 = 母框
 
 裁剪窗口**由数据算出来**（不是手填的像素）：照 chart_full_smooth.py 的 X/Y 把升级框映射到像素，
 取它的外接矩形加 padding。所以数据一变、窗口跟着变，不会出现「窗口还在老地方、里面已经不是那个框」。
@@ -13,7 +13,7 @@
 ★ 三道自检（任一不过就非零退出）：
     ① 两个升级框在**改前**图里必须真的存在（裁出来的窗口不能是空的）
     ② 改前 / 改后 在那个窗口里必须**真的不一样**（不然这张对照图什么都没证）
-    ③ 改后图里必须能数到两个新色（#C4B5FD / #D946EF）—— 光"不一样"可能是别的地方动了
+    ③ 改后图里必须能数到两个新色（现值见 render/style.py）—— 光"不一样"可能是别的地方动了
 
     python3 notes/upgrade-color-ab.py <改后.png> <改前.png> <输出.png>
 """
@@ -27,10 +27,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from PIL import Image, ImageDraw                                    # noqa: E402
 from config import data, tick_of                                    # noqa: E402
 from core.analyze import analyze                                    # noqa: E402
-from render.style import BG, TX, MU, F                              # noqa: E402
+from render.style import BG, TX, MU, F, CHART                       # noqa: E402
 
-UP_PEN = (196, 181, 253)
-UP_SEG = (217, 70, 239)
+# ★ 两个新色**从 render/style.py 现读**，不在这里抄一遍：抄一遍就会在配色再改时烂成
+#   「自检数不到颜色 → 报错」，而错的是这份抄件、不是图。段色/笔色同理（见 PEN_COL/SEG_COL）。
+UP_PEN = tuple(CHART["up_pen"])
+UP_SEG = tuple(CHART["up_seg"])
+PEN_COL = tuple(CHART["pen"])
+SEG_COL = tuple(CHART["seg"])
+# 改**前**那个紫 —— 它属于历史状态（11a6d43 的 #A78BFA），不跟着代码走，所以是字面量。
 OLD_UP = (167, 139, 250)
 
 
@@ -79,8 +84,9 @@ def main():
     im_a, im_b = Image.open(after_png).convert("RGB"), Image.open(before_png).convert("RGB")
     f_t, f_n = F(30), F(24)
 
-    # 自检 ③：改后图里必须真有两支新色
-    for name, col in (("浅紫 #C4B5FD", UP_PEN), ("品红 #D946EF", UP_SEG)):
+    # 自检 ③：改后图里必须真有两支新色（名字里带上现值，配色再改时一眼看得出数的是哪一支）
+    for name, col in (("类升级 #%02X%02X%02X" % UP_PEN, UP_PEN),
+                      ("段升级 #%02X%02X%02X" % UP_SEG, UP_SEG)):
         if not has(after_png, col):
             print("★ 改后图里数不到 %s —— 分色没生效？" % name)
             return 1
