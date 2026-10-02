@@ -473,10 +473,12 @@ def main():
                 if bad["first"]:
                     j, g, b = bad["first"]
                     print("      首个不同的标准化K线 @%d：增量 %s ／ 批量 %s" % (j, g, b))
-    total_checked += rand_checked
+    real_checked = total_checked      # ★ 真实数据那一档单独留一份：原先这行把随机那批并进
+    total_checked += rand_checked     #   同一个数，汇总行却写着「真实数据 N 份」⇒ 报出来是假的
     print("  ✓ %d 条随机序列 ｜ 查了 %d 个前缀" % (a.random, rand_checked))
 
-    print("\n真实数据 %d 份 ｜ 前缀合计查了 %d 个 ｜ 分歧 %d 处" % (datasets, total_checked, len(fails)))
+    print("\n真实数据 %d 份 ｜ 查了 %d 个前缀 ｜ 随机 %d 条 ｜ 查了 %d 个前缀 ｜ 合计 %d ｜ 分歧 %d 处"
+          % (datasets, real_checked, a.random, rand_checked, total_checked, len(fails)))
     if fails:
         print("⇒ **不一致**：增量版与批量版不是逐前缀相同。")
         return 1
