@@ -30,6 +30,7 @@
     4  ★ 下面那四个坐标常数漂了（锚点对不上）—— 报告里的行号指不到它声称的东西
 """
 import argparse
+import hashlib
 import os
 import random
 import re
@@ -63,9 +64,28 @@ COORD_ANCHORS = (
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def blob_sha(path):
+    """git 的 blob 哈希 —— 和 `git rev-parse HEAD:<path>` 直接可比（不是纯 sha1(内容)）。"""
+    data = open(path, "rb").read()
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
 def check_coords():
-    """这四个常数是不是还指在它们声称的那段上。返回漂掉的 [(名, 坐标, 为什么)]。"""
-    drift = []
+    """这四个常数是不是还指在它们声称的那段上。
+
+    返回 (漂掉的 [(名, 坐标, 为什么)], 读过的 [(rel, 行数, blob)])。
+    ★ 为什么要把 blob 一起返回：@iris-64a1 2026-10-02 —— **坐标必须带 sha**，
+      否则「我量过」量的是哪棵树都说不清。我今晚两次报错的根都是这个（一次把旧树的数
+      当成 main 的、一次 rc=2 实际测的是自己那条支）。所以"读了谁的字节"跟结论同排印出。
+    """
+    drift, stamps = [], []
+    for rel in dict.fromkeys(c[2] for c in COORD_ANCHORS):
+        path = os.path.join(_ROOT, rel)
+        try:
+            stamps.append((rel, len(open(path, encoding="utf-8").read().splitlines()),
+                           blob_sha(path)[:12]))
+        except OSError as e:
+            stamps.append((rel, -1, "读不到（%s）" % e))
     for name, coord, rel, anchor in COORD_ANCHORS:
         a, b = (int(x) for x in coord.rsplit(":", 1)[1].split("-"))
         try:
@@ -77,7 +97,7 @@ def check_coords():
             now = [i for i, l in enumerate(lines, 1) if re.search(anchor, l)]
             drift.append((name, coord, "锚点不在这段里；它现在在 %s"
                           % (("、".join(map(str, now))) if now else "**整份文件里都找不到**")))
-    return drift
+    return drift, stamps
 
 
 # ───────────── 以下：tradingview/chanlun.pine 的逐行翻译（别改成语义等价的"更好的写法"）─────────────
@@ -288,17 +308,21 @@ def main():
         print("⇒ 三支正臂全红，检查程序是活的。")
         return 0
 
-    drift = check_coords()
+    drift, stamps = check_coords()
     if drift:
         print("!! 坐标漂了 —— 这份报告里的行号指不到它声称的东西：")
         for name, coord, why in drift:
             print("   %-15s %s" % (name, coord))
             print("       ⇒ %s" % why)
         print("   ⇒ **不算绿**：读者会照这些行号去核对，却核到别的代码上。修好坐标再报。")
+        for rel, n, sh in stamps:
+            print("   （我读的是：%s %s 行 blob %s）" % (rel, n, sh))
         return 4
 
     print("照 pine %s / %s 逐行翻译，对 core/segment.py 的 %s / %s"
           % (PINE_PREDICATE, PINE_GUARD, ENGINE_GUARD, ENGINE_LOOP))
+    for rel, n, sh in stamps:
+        print("   ★ 我读的是这份字节：%-28s %4s 行  blob %s" % (rel, n, sh))
     print("\n【随机行情】（真实行情打不出这条守卫，所以必须有随机）")
     ti, tp, ts, worst = run()
     print("  小计：查 %d 处 ｜ 谓词不一致 %d ｜ 段不一致 %d" % (ti, tp, ts))
