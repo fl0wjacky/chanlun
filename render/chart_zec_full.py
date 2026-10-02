@@ -108,7 +108,7 @@ d.text((L + 4, 152), "笔 %d ｜ 类中枢 %d ｜ 完成线段 %d（+%d 条未�
           r["tick"], bars[-1]["c"]),
        font=f_s, fill=TX)
 xe = legend(d, L + 4, 222, f_n)
-d.text((xe + 40, 208), "约定：未完成的笔 / 线段、仍在延续的中枢一律虚线 ｜ 冲浪者 · %s" % datetime.date.today().isoformat(),
+d.text((xe + 40, 208), "约定：未完成的笔 / 线段一律虚线；中枢框拆两截，前三笔实线、延续虚线 ｜ 冲浪者 · %s" % datetime.date.today().isoformat(),
        font=f_n, fill=MU)
 
 im.save(out("zec15_full.png"), optimize=True)
