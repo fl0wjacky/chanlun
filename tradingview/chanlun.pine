@@ -87,7 +87,6 @@ type Ctr
     int   rel      // 0 无 / 1 下跌延续 / 2 上涨延续 / 3 扩展·向下 / 4 扩展·向上 / 5 区间重叠
     array<float> upZD
     array<float> upZG
-    bool  prov = false   // 暂定：仍会被后来到的K线改写（live，或末尾一个／与末尾相邻）
 
 type Sig
     int   kind     // 1 一买 2 二买 3 三买 4 一卖 5 二卖 6 三卖
@@ -512,10 +511,6 @@ findCenters(array<Unit> U) =>
         for k = 1 to zs.size() - 1
             z = zs.get(k)
             z.rel := relOf(zs.get(k - 1), z)
-    // 暂定 / 已确认（与 Python 版同口径）：走势没走完时，末尾的中枢会被改写 ——
-    // 仍在延续、末尾那一个、以及和它相邻的那一个，都算「暂定」，一律虚线。
-    for [k, z] in zs
-        z.prov := z.live or k >= zs.size() - 2
     zs
 
 // ───────────────────────── 买卖点（第 20 / 21 / 24 课）─────────────────────────
@@ -609,8 +604,10 @@ clearAll() =>
         lb.delete()
     gLines.clear(), gBoxes.clear(), gLabels.clear()
 
-drawCenter(Ctr z, int x0, int x1, color col, int w, bool withLabel) =>
-    st = z.prov ? line.style_dashed : line.style_solid
+// prov：这个中枢是不是「暂定」（仍会被后来到的K线改写）—— 由**调用点**按下标算，
+//   不进 `type Ctr`：这样判断只在一处、且任何新造的中枢都不可能漏标。
+drawCenter(Ctr z, int x0, int x1, color col, int w, bool withLabel, bool prov) =>
+    st = prov ? line.style_dashed : line.style_solid
     gBoxes.push(box.new(x0, z.ZG, x1, z.ZD, border_color = col, border_width = w, border_style = st,
          bgcolor = color.new(col, fillTr)))
     if withLabel
@@ -646,17 +643,17 @@ if barstate.islast
     np = pens.size()
 
     if showPC
-        for z in pcs
+        for [k, z] in pcs
             a = pens.get(z.PI0).i0
             b = pens.get(z.PI1).i1
             if b >= x0Draw and gBoxes.size() < 480
-                drawCenter(z, xc(base + a), xc(base + b), penCol, 1, false)
+                drawCenter(z, xc(base + a), xc(base + b), penCol, 1, false, z.live or k >= pcs.size() - 2)
     if showSC
-        for z in scs
+        for [k, z] in scs
             a = done.get(z.PI0).i0
             b = done.get(z.PI1).i1
             if b >= x0Draw and gBoxes.size() < 490
-                drawCenter(z, xc(base + a), xc(base + b), segCol, 2, true)
+                drawCenter(z, xc(base + a), xc(base + b), segCol, 2, true, z.live or k >= scs.size() - 2)
     if showPen and np > 0
         for t = 0 to np - 1
             p = pens.get(t)
