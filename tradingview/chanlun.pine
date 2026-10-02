@@ -1094,12 +1094,11 @@ if barstate.islast
     // ① 的产物（zH/zL/zIH/zIL/zFx）和 ② 的产物（zSeq）现在都只在**逐根**那一段用；
     // islast 这里不再需要 sH/sL/sIH/sIL/fx 那几个别名了（原来是喂 buildPens 的）。
     pens = zPens                                      // ② 的产物：摊平笔（逐根增量维护，见 zSegStep）
-    if featModeB
-        segs = buildSegments(pens)                    // B：全程按线段方向合并 ⇒ 前缀不稳定，整段重算
-    else
-        segs = array.copy(zSegs)                      // A：已确认段增量维护，这里补 live 尾巴（不落 var）
-        if pens.size() - zSegI.get(0) >= 3
-            segs.push(mkSeg(pens, zSegI.get(0), pens.size() - 1, true))
+    // ★ segs 必须在 if 外面声明：Pine 里 if 块内声明的变量出了块就不存在（小栋真机编译报「segs 未定义」）。
+    //   B：全程按线段方向合并 ⇒ 前缀不稳定，整段重算；A：已确认段增量维护，这里补 live 尾巴（不落 var）。
+    segs = featModeB ? buildSegments(pens) : array.copy(zSegs)
+    if not featModeB and pens.size() - zSegI.get(0) >= 3
+        segs.push(mkSeg(pens, zSegI.get(0), pens.size() - 1, true))
     done = array.new<Unit>()
     for s in segs
         if not s.live
