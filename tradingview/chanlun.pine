@@ -42,7 +42,8 @@ penW      = input.int(1, "线宽", minval = 1, maxval = 5, inline = "p", group =
 penCol    = input.color(color.rgb(122, 137, 166), "笔的颜色", group = G2,
      tooltip = "#7A89A6 灰蓝。笔是图上最密的一层（数量是线段的 3~5 倍），退到后面去，别跟买卖点抢眼睛。与 Python 版 render/style.py 的 pen 同值。")
 showSeg   = input.bool(true,  "线段", inline = "s", group = G2)
-segW      = input.int(3, "线宽", minval = 1, maxval = 8, inline = "s", group = G2)
+segW      = input.int(2, "线宽", minval = 1, maxval = 8, inline = "s", group = G2,
+     tooltip = "默认 3 → 2（2026-10-02 小栋）。笔 1 / 线段 2 ＝ 2:1，线段仍然是「一眼看去的主线」，但不再压过买卖点。")
 segCol    = input.color(color.rgb(242, 193, 78), "线段的颜色", group = G2,
      tooltip = "#F2C14E 琥珀。粗结构，保持醒目。与 Python 版 render/style.py 的 seg 同值。")
 
@@ -54,10 +55,14 @@ showSC    = input.bool(true,  "线段中枢（与线段同色）", group = G3)
 scFillTr  = input.int(90, "线段中枢填充透明度", minval = 0, maxval = 100, group = G3,
      tooltip = "90 ≈ 10% 不透明。线段中枢比类中枢重要，底色留得比它重一点。与 Python 版 sc_fill 一致。")
 showUp    = input.bool(true,  "高一级别中枢（满 9 段）", group = G3)
-upCol     = input.color(color.rgb(167, 139, 250), "高一级别的颜色", group = G3,
-     tooltip = "#A78BFA 紫。高一级别由子级别中枢构成，跟笔 / 线段都不是一家，单独给一个色相 —— 原先它跟母框同色，级别只能靠数边框粗几像素来分。")
+upColPen  = input.color(color.rgb(196, 181, 253), "高一级别 · 类中枢升上去的", group = G3,
+     tooltip = "#C4B5FD 浅紫。它跟母框是一家人（母框 = 笔的颜色），所以取笔那一族的色相往上提亮，看框就知道谁升的。")
+upColSeg  = input.color(color.rgb(217, 70, 239), "高一级别 · 线段中枢升上去的", group = G3,
+     tooltip = "#D946EF 品红。线段中枢那一族升上来的。跟笔 / 线段 / 买卖点四个色都不撞，是这套配色里唯一没被占用的色相。")
+// ★ 2026-10-02 小栋：两种升级中枢**分色**（原来它们是同一个 #A78BFA 紫），且**升级框不再加粗** ——
+//   线宽直接取母框的 `w`，级别只由颜色和标签文字区分。加粗那条通道让给别的用途了。
 upFillTr  = input.int(92, "高一级别填充透明度", minval = 0, maxval = 100, group = G3,
-     tooltip = "92 ≈ 8% 的淡紫底。原先是写死的全透明（color.new(col, 100)），等于没填充。与 Python 版 up_fill 一致。")
+     tooltip = "92 ≈ 8% 的淡底（颜色跟着上面两个色走）。原先是写死的全透明（color.new(col, 100)），等于没填充。与 Python 版 up_fill 一致。")
 
 G4 = "诊断"
 selfCheck = input.bool(false, "实时回滚自检（挂个角标）", group = G4,
@@ -861,10 +866,18 @@ var array<label> gLabels = array.new<label>()
 //     段中枢 峰值 11 → 给 120；笔中枢峰值占 82 格（1 + upZD 高框）→ 给 378
 //   三组合计都压在 max_*_count = 500 那条硬线以内，且各留 1~2 格给自检角标。
 //   ★ 标签分两档：**买卖点**单独留 300（挤不着），中枢那两类再分 198。
-//     中枢这 198 里，段中枢（价签，重要）和笔中枢（只有高一级别标签）**各留一半** ——
+//     中枢这 198 里，段中枢（价签，重要）和笔中枢（价签 + 高一级别标签）**各留一半** ——
 //     同 Boxes 的道理：笔中枢先画，若共用一个数，段中枢的价签会被高一级别标签挤掉。
-//     ★ 实测两者合计才 26 个，现在**根本撞不到线**；分这一下是为"哪天撞到"时**顺序是对的**，
-//       不是因为它现在有用。别把它当成"已经出过事"的证据。
+//     ★ 2026-10-02 起这条分界**真的开始起作用了**，不再是"为哪天撞到准备"。原来笔中枢那族
+//       只在满 9 段时出一个「↑高一级」，全库实测合计 26 个，撞不到 99；小栋要求「每一个中枢
+//       都标 [ZD, ZG]」之后，笔中枢这族变成「每个类中枢 1 个价签 + 升级另算」。逐份实测（全窗口）：
+//         zec15 类中枢 142 个、盒子占 176/378，**标签要 176 个只有 99 格 → 丢 77**；
+//         其余每一份都装得下（第二挤的 zec_1h：43 个中枢、要 52 个标签）；线段中枢那族最多
+//         zec15 的 19 个中枢 / 21 个标签，每一份都装得下。
+//       丢的 77 个是**最老的那些类中枢的价签** —— 倒序画、配额用完就 break，正好就是小栋要的
+//       「撞上限时保留最新的」。★ **线段中枢的价签不受影响**：它的 99 是在笔中枢画完之后另算的
+//       （见 islast 里 lbLimSC 那两行的位置注释），笔中枢再多也吃不掉它。
+//       算术在 notes/pine-label-quota.py（逐份数据重算一遍，谁都能复跑）。
 int LINE_BUDGET = 499
 int PEN_LINE_CAP = 349
 int SEG_LINE_CAP = LINE_BUDGET - PEN_LINE_CAP          // 150
@@ -874,8 +887,8 @@ int SC_BOX_CAP  = BOX_BUDGET - PC_BOX_CAP              // 120
 int LB_BUDGET   = 498
 int SIG_LB_CAP  = 300
 int CTR_LB_CAP  = LB_BUDGET - SIG_LB_CAP               // 198
-int PC_LB_SHARE = CTR_LB_CAP / 2                       //  99：笔中枢（只出高一级别标签）
-int SC_LB_SHARE = CTR_LB_CAP - PC_LB_SHARE             //  99：段中枢（价签 + 高一级别标签）
+int PC_LB_SHARE = CTR_LB_CAP / 2                       //  99：类中枢（价签 + 高一级别标签）
+int SC_LB_SHARE = CTR_LB_CAP - PC_LB_SHARE             //  99：线段中枢（价签 + 高一级别标签）
 
 // 画图的 x：TradingView 只允许往回画 10000 根以内（xloc.bar_index），更早的夹到界线上
 xc(int x) => math.max(x, bar_index - 9990)
@@ -907,7 +920,9 @@ clearAll() =>
 zdN(Ctr z) => showUp ? z.upZD.size() : 0
 
 // 返回 false = 配额不够、这次没画。调用点据此 break（倒序走，再往前只会更老，画了也是丢）。
-drawCenter(Ctr z, int x0, int x1, color col, int w, int fillTr, bool withLabel, bool hasUnfinished, int xm, int boxCap, int lbCap) =>
+// `upC` = 这一族升上去的高一级别框用什么颜色（类中枢 → upColPen，线段中枢 → upColSeg）。
+//   它是**参数**不是全局量：同一个 drawCenter 两个调用点，颜色只能由调用点说了算。
+drawCenter(Ctr z, int x0, int x1, color col, int w, int fillTr, bool withLabel, bool hasUnfinished, int xm, int boxCap, int lbCap, color upC) =>
     wholeDash = hasUnfinished
     split = not wholeDash and z.live and xm > x0 and xm < x1
     ok = false
@@ -920,18 +935,24 @@ drawCenter(Ctr z, int x0, int x1, color col, int w, int fillTr, bool withLabel, 
                  border_style = line.style_solid, bgcolor = color.new(col, 100)))
         if withLabel and gLabels.size() < lbCap
             gLabels.push(label.new(x0, z.ZG, str.format("[{0}, {1}]", str.tostring(z.ZD, format.mintick), str.tostring(z.ZG, format.mintick)),
-                 style = label.style_label_lower_left, color = color.new(col, 80), textcolor = col, size = size.small))
+                 // 价签统一成「30% 同色底 + 白字」＝ A 表那一行（2026-10-02 小栋拍 A）。原来这里跟
+                 //   下面那支高一级别的标签，一个 20% 同色底 + 同色字、一个 30% 底 + 白字 —— 同一个概念两套画法。
+                 style = label.style_label_lower_left, color = color.new(col, 70), textcolor = color.white, size = size.small))
         if zdN(z) > 0
             for [m, uzd] in z.upZD
                 uzg = z.upZG.get(m)
                 // 高一级别**不套规则 B**：它的「前三」没有定义（由子级别中枢构成，不是笔 / 线段）。
-                // 沿用旧口径 —— 中枢没结束就虚线、结束了实线；颜色换成独立的紫、给一层淡紫底。
-                gBoxes.push(box.new(x0, uzg, x1, uzd, border_color = upCol, border_width = w + 2 * (m + 1),
+                // 沿用旧口径 —— 中枢没结束就虚线、结束了实线；颜色按族取（类中枢升的浅紫 / 线段中枢升的品红），
+                // ★ 线宽 = `w`（母框的线宽），**不再加粗**（原 `w + 2 * (m + 1)`，级别靠粗几像素来分 ——
+                //   2026-10-02 小栋把这条通道收掉了：级别由颜色 + 标签文字区分）。
+                gBoxes.push(box.new(x0, uzg, x1, uzd, border_color = upC, border_width = w,
                      border_style = z.live ? line.style_dashed : line.style_solid,
-                     bgcolor = color.new(upCol, upFillTr)))
+                     bgcolor = color.new(upC, upFillTr)))
                 if gLabels.size() < lbCap
-                    gLabels.push(label.new(x0, uzg, "↑高" + array.from("一", "两", "三", "四").get(math.min(m, 3)) + "级",
-                         style = label.style_label_lower_left, color = color.new(upCol, 70), textcolor = color.white, size = size.small))
+                    // 价签统一成「30% 同色底 + 白字」＝ A 表那一行（2026-10-02 小栋拍 A），跟下面母框那支同一个写法；
+                    // 文本带上自己的区间：小栋说升级中枢要写成「↑高一级 [ZD, ZG]」。
+                    gLabels.push(label.new(x0, uzg, str.format("↑高{0}级 [{1}, {2}]", array.from("一", "两", "三", "四").get(math.min(m, 3)), str.tostring(uzd, format.mintick), str.tostring(uzg, format.mintick)),
+                         style = label.style_label_lower_left, color = color.new(upC, 70), textcolor = color.white, size = size.small))
         ok := true
     ok
 
@@ -993,7 +1014,10 @@ if barstate.islast
                 hasUnf = np - 1 < z.PI0 + 3
                 // 规则 B ③ 的分界：第三个成员的终点（中枢不足三个成员时退回最后一根笔的终点）
                 xm = xc(base + pens.get(math.min(z.PI0 + 2, np - 1)).i1)
-                if not drawCenter(z, xc(base + a), xc(base + b), penCol, 1, pcFillTr, false, hasUnf, xm, boxLimPC, lbLimPC)
+                // ★ 第 7 个实参 `true`（原来传 false）：2026-10-02 小栋要「每一个中枢左上角都标 [ZD, ZG]」，
+                //   类中枢也不例外。这一下笔中枢这族的标签需求从「只有升级标签」变成「每个中枢 1 个价签 + 升级另算」
+                //   —— 配额够不够见 PC_LB_SHARE 那段的算术。
+                if not drawCenter(z, xc(base + a), xc(base + b), penCol, 1, pcFillTr, true, hasUnf, xm, boxLimPC, lbLimPC, upColPen)
                     break
     // ★★ 段中枢的天花板**只能在这里算**：上面那个循环已经画完笔中枢，gBoxes / gLabels 是当下的真实占用。
     //   放到上面去（和 boxLimPC 并排）就退化成"拿绝对值 120 去比全局占用"，段中枢会被笔中枢挤没 ——
@@ -1011,7 +1035,7 @@ if barstate.islast
                 //   那条 live 段根本不进 done ⇒ 这一档恒不触发（与 Python 版传 None 一致）。
                 // 规则 B ③ 的分界：第三条已完成线段的终点（不足三条时退回最后一条的终点）
                 xm = xc(base + done.get(math.min(z.PI0 + 2, done.size() - 1)).i1)
-                if not drawCenter(z, xc(base + a), xc(base + b), segCol, 2, scFillTr, true, false, xm, boxLimSC, lbLimSC)
+                if not drawCenter(z, xc(base + a), xc(base + b), segCol, 2, scFillTr, true, false, xm, boxLimSC, lbLimSC, upColSeg)
                     break
     if showPen and np > 0
         for t = np - 1 to 0

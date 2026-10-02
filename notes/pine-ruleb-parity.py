@@ -5,8 +5,17 @@
 「引擎自 pine 上次改动以来变了没有」，**不回答「pine 和引擎判的是不是一回事」**。中枢框的
 虚实规则 B（2026-10-02 小栋定）是这一轮新写进 pine 的**判断**，本地必须有尺：
 
-    pine :993 / :995（类中枢）· :1011- :1013（线段中枢）的 wholeDash / split / xm
+    pine 两个调用点的 wholeDash / split / xm
         ⟷  render/full_common.py 的 box_split()（Python 侧已成图、小栋看过的那一支）
+
+★ **锚串取位置，不写行号**（行号会漂；本仓已经为「坐标漂了还看着像对的」付过一次账）：
+    类中枢   `hasUnf = np - 1 < z.PI0 + 3` ／ `xm = xc(base + pens.get(math.min(z.PI0 + 2, np - 1)).i1)`
+    线段中枢 `xm = xc(base + done.get(math.min(z.PI0 + 2, done.size() - 1)).i1)`
+              （同一处 `drawCenter(...)` 的第 8 实参传 `false` ＝ 线段层没有「没走完的那一员」）
+    共同判据 `wholeDash = hasUnfinished` ／ `split = not wholeDash and z.live and xm > x0 and xm < x1`
+  每个锚串在 pine 里应当**各命中一次**；命中数变了就说明 pine 动过、改这支脚本之前先重读。
+  （2026-10-02 价签统一那支给 `drawCenter` 的 label 行加了注释 ⇒ 下面这些行号整体下移，
+   锚串本身没变 —— 这就是不拿行号当输入的原因。）
 
 做法：**照 pine 的源码逐行翻译**（变量名、分支顺序对齐），在**全部数据**上逐个中枢比对
 「整框虚线 / 整框实线 / 拆两截」三档，并检查分界落点。
