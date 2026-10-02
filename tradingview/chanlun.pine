@@ -43,6 +43,9 @@ segCol    = input.color(color.rgb(255, 190, 60), "", inline = "s", group = G2)
 segW      = input.int(3, "线宽", minval = 1, maxval = 8, inline = "s", group = G2)
 showSC    = input.bool(true,  "线段中枢（与线段同色）", group = G2)
 showUp    = input.bool(true,  "高一级别中枢（满 9 段，同色加粗）", group = G2)
+selfCheck = input.bool(false, "实时回滚自检（挂个角标）", group = G2,
+     tooltip = "打开后图角挂一个标签。回滚生效时恒为 ✓；不生效时第二个 tick 就会 ✗。" +
+               "查的是数组（aM/zH），不是标量 —— 标量回滚不代表数组回滚。参照物是引擎值 bar_index。")
 fillTr    = input.int(85, "中枢填充透明度", minval = 0, maxval = 100, group = G2)
 drawBars  = input.int(3000, "只画最近多少根K线里的结构", minval = 100, maxval = 9000, group = G2,
      tooltip = "TradingView 每种图形最多 500 个；太长的历史会画不全，所以只画最近这一段。")
@@ -399,6 +402,27 @@ if zH.size() >= 3
     nf = zFx.size()
     zFxAtK.set(kk, nf > 0 and zFx.get(nf - 1).k == kk ? nf - 1 : -1)
 zPenStep(zFx, zH, zL, zSeq, zPend, zStack, zFxAtK, zPSt, zSig)
+
+// ── 实时回滚自检（开关默认关）───────────────────────────────────────────────
+// ① ② 的正确性都押在"var 状态在实时 tick 上会回滚到上一根"这件事上，而这件事**本机验不了**，
+// 只能上 TradingView。这个开关把它变成一眼能看的东西，不用"盯几分钟凭感觉"。
+//
+// ★ 查的是**数组**（aM 每根无条件 push），不是标量：标量回滚了不代表数组回滚了，
+//   而 ② 押的恰恰是数组（zSeq/zFxAtK/zPSt/zSig 四个）。
+// ★ 参照物只能是**引擎值** bar_index —— 它不参与 var 回滚。回滚生效则恒等式成立；
+//   不生效时多推一次，第二个 tick 当场 ✗。
+var bool   zSelfOK  = true
+var string zSelfMsg = ""
+if selfCheck
+    if aM.size() != bar_index + 1
+        zSelfOK  := false
+        zSelfMsg := "aM.size=" + str.tostring(aM.size()) + " ≠ bar_index+1=" + str.tostring(bar_index + 1) + "（数组没回滚）"
+    else if zN != bar_index + 1
+        zSelfOK  := false
+        zSelfMsg := "zN=" + str.tostring(zN) + " ≠ bar_index+1=" + str.tostring(bar_index + 1)
+    else if zH.size() > zN
+        zSelfOK  := false
+        zSelfMsg := "zH.size=" + str.tostring(zH.size()) + " > zN=" + str.tostring(zN)
 
 // ───────────────────────── 线段（第 67 / 71 / 78 课）─────────────────────────
 isUp(Unit u) => u.p1 > u.p0
@@ -905,3 +929,10 @@ if barstate.islast
                  style = buy ? label.style_label_up : label.style_label_down,
                  color = s.confirmed ? col : color.new(col, 100), textcolor = s.confirmed ? color.white : col,
                  size = size.small))
+
+    // 回滚自检角标
+    if selfCheck
+        gLabels.push(label.new(bar_index, high, zSelfOK ? "回滚自检 ✓" : "回滚自检 ✗  " + zSelfMsg,
+             style = zSelfOK ? label.style_label_down : label.style_label_up,
+             color = zSelfOK ? color.new(color.green, 15) : color.new(color.red, 0),
+             textcolor = color.white, size = size.normal))
