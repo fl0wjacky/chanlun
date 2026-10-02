@@ -132,11 +132,21 @@ def _higher_centers(r, level):
     r["big"] 是「类中枢（笔中枢）扩展合成」，两个都是线段级（`extend.py` 第 54 课那条：三个
     1 分钟中枢当成线段，重叠出的是 5 分钟中枢）。拿同级的来查「上一层有没有中枢包住」，是
     拿错了一级 ⇒ 线段层要再往上合成一次，即 build_hierarchy(seg_centers, 已完成线段)。
+
+    ★ 线段层还要**只取真合成过的**（nmerge > 1）：build_hierarchy() 的返回值是**混级**的 ——
+    合成出来的（level=2、nmerge>1）和**没合成、原样浅拷贝进来的单中枢**（nmerge=1、level 保持
+    本级别）混在同一个列表里（`extend.py:59` 自己写着「不合的原样留下（nmerge=1）」）。浅拷贝那条
+    **跟 B 是同一级**，拿它当「上一层的中枢」＝又犯一次「拿同级当上一层」的错。全仓已有的口径就是
+    只认合成过的：`render/chart_nested.py:47`、`cards/c05_center.py:218` 都只取 nmerge>1 ——
+    这里跟上，判据与画图/卡片读同一半。**笔层不滤**：seg_centers 是原始中枢（身上没有 nmerge
+    这个键），它本来就是笔的上一层。
     """
     if level == "pen":
         return r["seg_centers"]
+    if not r["seg_centers"]:
+        return []
     done = [s for s in r["segs"] if not s.get("live")]
-    return build_hierarchy(r["seg_centers"], done) if r["seg_centers"] else []
+    return [c for c in build_hierarchy(r["seg_centers"], done) if c.get("nmerge", 1) > 1]
 
 
 def check_premise3(higher, B, lo, hi, strict=True):

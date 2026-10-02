@@ -79,8 +79,9 @@ def hierarchy(zs, U):                  # pine: hierarchy(array<Ctr> zs, array<Un
                 k += 1
             out.append(dict(PI0=A["PI0"], PI1=PI1, ZD=ZD, ZG=ZG, DD=DD, GG=GG, live=live))
         else:
-            out.append(dict(PI0=A["PI0"], PI1=A["PI1"], ZD=A["ZD"], ZG=A["ZG"],
-                            DD=A["DD"], GG=A["GG"], live=bool(A.get("live"))))
+            # 没合成 ⇒ 不进输出。浅拷贝那条跟 B 是**同一级**，当不了「上一层的中枢」；
+            # 引擎侧 `_higher_centers` 也只取 nmerge>1（与 render/chart_nested.py:47、
+            # cards/c05_center.py:218 同口径）。两边必须一起滤，否则这脚本对不上。
             k += 1
     return out
 

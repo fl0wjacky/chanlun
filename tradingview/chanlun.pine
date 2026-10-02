@@ -531,7 +531,8 @@ strengthOf(Unit u, int off) =>
 // ── 扩展合成的大级别中枢（core/extend.py build_hierarchy 的移植）────────────────
 // 前中枢 A ＋ 连接段 ＋ 后中枢 B，三段重叠出区间 [ZD, ZG]（第 49 / 30 / 54 课）；
 // 之后再有中枢只要还碰到这个区间，就算震荡接进来 —— 区间不变，只扩波动范围（第 52 课）。
-// 相邻两中枢是「趋势」关系时不合成（第 17 / 42 / 43 课）。没合成的原样留下。
+// 相邻两中枢是「趋势」关系时不合成（第 17 / 42 / 43 课）。**没合成的不进输出** ——
+// 输出只含真合成过的高级别中枢（引擎侧 `_higher_centers` 只取 nmerge>1，与画图/卡片同口径）。
 hierarchy(array<Ctr> zs, array<Unit> U) =>
     out = array.new<Ctr>()
     k = 0
@@ -572,8 +573,7 @@ hierarchy(array<Ctr> zs, array<Unit> U) =>
             out.push(Ctr.new(A.PI0, PI1, ZD, ZG, DD, GG, live, 0, 0,
                  array.new<float>(), array.new<float>()))
         else
-            out.push(Ctr.new(A.PI0, A.PI1, A.ZD, A.ZG, A.DD, A.GG, A.live, A.term, A.rel,
-                 array.new<float>(), array.new<float>()))
+            // 没合成 ⇒ 不进输出：它跟 B 是同一级，不能当「上一层的中枢」用
             k += 1
     out
 
