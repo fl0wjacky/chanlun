@@ -7,6 +7,8 @@
 //   → 中枢终结：三买三卖为主、中心定理一兜底（第 20 / 38 课）→ 满 9 段升级（第 33 / 64 课）
 //   → 一二三类买卖点（第 20 / 21 / 24 课）
 // 画法：笔与类中枢同色，线段与线段中枢同色；高一级别中枢用同色加粗框；未完成 / 仍在延续的一律虚线。
+// 中枢边框：**暂定的一律虚线** —— 仍在延续的、末尾那一个、以及与末尾相邻的那一个
+//   （走势没走完时，末尾的中枢会被后到的K线改写；口径与 Python 版 `centers[].status` 一致）。
 // 计算方式：只在最后一根K线上，用收集好的全部K线从头算一遍（与 Python 版逐步一致，便于对账）。
 // 买卖点：默认只标「结构已确认」的；打开「显示待确认」后，未确认的用空心标签，之后可能改掉或消失。
 //@version=6
@@ -85,6 +87,7 @@ type Ctr
     int   rel      // 0 无 / 1 下跌延续 / 2 上涨延续 / 3 扩展·向下 / 4 扩展·向上 / 5 区间重叠
     array<float> upZD
     array<float> upZG
+    bool  prov = false   // 暂定：仍会被后来到的K线改写（live，或末尾一个／与末尾相邻）
 
 type Sig
     int   kind     // 1 一买 2 二买 3 三买 4 一卖 5 二卖 6 三卖
@@ -509,6 +512,10 @@ findCenters(array<Unit> U) =>
         for k = 1 to zs.size() - 1
             z = zs.get(k)
             z.rel := relOf(zs.get(k - 1), z)
+    // 暂定 / 已确认（与 Python 版同口径）：走势没走完时，末尾的中枢会被改写 ——
+    // 仍在延续、末尾那一个、以及和它相邻的那一个，都算「暂定」，一律虚线。
+    for [k, z] in zs
+        z.prov := z.live or k >= zs.size() - 2
     zs
 
 // ───────────────────────── 买卖点（第 20 / 21 / 24 课）─────────────────────────
@@ -603,7 +610,7 @@ clearAll() =>
     gLines.clear(), gBoxes.clear(), gLabels.clear()
 
 drawCenter(Ctr z, int x0, int x1, color col, int w, bool withLabel) =>
-    st = z.live ? line.style_dashed : line.style_solid
+    st = z.prov ? line.style_dashed : line.style_solid
     gBoxes.push(box.new(x0, z.ZG, x1, z.ZD, border_color = col, border_width = w, border_style = st,
          bgcolor = color.new(col, fillTr)))
     if withLabel
