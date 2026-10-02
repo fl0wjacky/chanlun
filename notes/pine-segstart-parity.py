@@ -27,7 +27,8 @@
     1  ★ 有不一致（印出族名 / 种子 / 笔序号）
     2  跑不动 —— 引擎侧没有这条守卫（= 这一支还没合 Atlas 的 core 改动）**查不了 ≠ 通过**
     3  --self-test 的**正臂没红** ⇒ 这个检查程序本身不算数
-    4  ★ 文件头那四个坐标锚点解不出来（改名／搬走／不再唯一）—— 报告里的指针失效
+    4  ★ 坐标锚点解不出来 —— 报告里的指针失效。四种因，**分开说**，别共用一句话术：
+       读不到（没读进来）／文件是空的（读进来了、里面没内容）／改名搬走（0 命中）／不再唯一（≥2 命中）
 """
 import argparse
 import hashlib
@@ -69,18 +70,22 @@ def check_coords():
     """把四个锚点解成当前的 (文件:行号)，顺便说清读的是哪份字节。
 
     返回 (解不到的 [(名, 为什么)], 解出来的 [(名, rel, 行号, 说明)], 读过的 [(rel, 行数, blob)])。
-    锚点必须**恰好命中 1 次** —— 0 次是代码改名/搬走了，≥2 次是它不再能定位。
+    锚点必须**恰好命中 1 次** —— ≥2 次是它不再能定位；0 次要再分三种因（读不到／文件是空的／
+    真被改名搬走了），**各说各的**，不许拿「改名了？搬走了？」去盖前两种。
     ★ 为什么连 blob 一起返回：@iris-64a1 2026-10-02 —— **坐标必须带 sha**，
       否则「我量过」量的是哪棵树都说不清。我今晚两次报错的根都是这个（一次把旧树的数
       当成 main 的、一次 rc=2 实际测的是自己那条支）。所以"读了谁的字节"跟结论同排印出。
     """
-    drift, resolved, stamps, cache, unreadable = [], [], [], {}, {}
+    drift, resolved, stamps, cache, unreadable, empty = [], [], [], {}, {}, {}
     for rel in dict.fromkeys(c[1] for c in COORD_ANCHORS):
         path = os.path.join(_ROOT, rel)
         try:
             text = open(path, encoding="utf-8").read()
             cache[rel] = text.splitlines()
-            stamps.append((rel, len(cache[rel]), blob_sha(path)[:12]))
+            sha = blob_sha(path)[:12]
+            stamps.append((rel, len(cache[rel]), sha))
+            if not cache[rel]:                      # 读到了、但这份里一个字都没有
+                empty[rel] = sha
         except OSError as e:
             cache[rel] = []
             unreadable[rel] = str(e)
@@ -91,6 +96,13 @@ def check_coords():
             #   —— 那是在对我从没读到的内容下判断。@iris-64a1 2026-10-02 指出这一格我没跑。
             drift.append((name, "**读不到** %s（%s）—— 不是「锚点在不在里面」，是这份文件没读进来"
                           % (rel, unreadable[rel])))
+            continue
+        if rel in empty:
+            # ★ 第三格（@iris-64a1 2026-10-02 在 `6d6e755` 上跑出来的余数）：读到了，但读到的是**空的**。
+            #   空文件里当然找不到锚点 —— 可那不是锚点的事。和前两格同族：
+            #   「一处都找不到（改名了？搬走了？）」是**内容层面的判断**，而这里根本没有内容可判。
+            drift.append((name, "这份 %s **是空的**（0 字节，blob %s）—— 不是「锚点改名／搬走」，是它没有内容"
+                          % (rel, empty[rel])))
             continue
         hits = [i for i, l in enumerate(cache[rel], 1) if re.search(anchor, l)]
         if len(hits) == 1:
