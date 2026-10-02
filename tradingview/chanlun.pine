@@ -11,6 +11,13 @@
 //   （走势没走完时，末尾的中枢会被后到的K线改写；口径与 Python 版 `centers[].status` 一致）。
 // 计算方式：只在最后一根K线上，用收集好的全部K线从头算一遍（与 Python 版逐步一致，便于对账）。
 // 买卖点：默认只标「结构已确认」的；打开「显示待确认」后，未确认的用空心标签，之后可能改掉或消失。
+//
+// ⚠⚠ **本文件不是每一步都被运行验证过。**
+//   Python 引擎（core/）有 pytest 和数据对账；**Pine 这一侧没有运行时**（改动者本机跑不了 TradingView），
+//   凡是与 Python 版"照搬"的段落，两边都只做了**静态对齐**（逐行读、逐处比坐标），**没有跑过**。
+//   `tools/pine_lockstep.py` 能证明的是「输出在这 12 份数据上**没变**」—— 它**证不了**「Pine 与 Python 行为等同」：
+//   真实行情上不触发的分支（例如线段起点的三笔重叠，见 `buildSegments`），在 lockstep 里**是看不见的**，
+//   改了也照绿。⇒ **别把绿当等同。** 有 TradingView 环境的人请优先复跑本文件。
 //@version=6
 indicator("缠论 · 笔 / 线段 / 中枢 / 买卖点", shorttitle = "缠论", overlay = true,
      max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
@@ -411,6 +418,21 @@ mkSeg(array<Unit> P, int a, int b, bool live) =>
         t += 1
     Unit.new(P.get(a).i0, P.get(b).i1, P.get(a).p0, P.get(b).p1, hi, lo, a, b, live)
 
+// 起点三笔是否有**公共**重叠区（L65:50-51／L77:69-70）—— 三笔各自的 [lo, hi] 交集非空。
+//   ★ 是**三重重合**，不是两两重叠：两两重叠在『一上一下夹一窄』时也成立，那时三笔并没有共同的一段。
+//   ★ 边界取**严格** `<`：公共区间退化成一个点不算『有重叠的部分』。
+//   ★ 只在**序列开头**能触发：段界由特征序列分型确认、本身已含重叠（实测 6 族随机 2481 段
+//     ＋ 真实 201 段，段界之后 0 例）—— 所以段界之后不需要它兜。
+//   ★★ 本函数与 Python 版 core/segment.py::_opening_overlaps 同形，但**未经运行验证**
+//      （本机无 TradingView 运行时，两边都只做了静态对齐）。
+openingOverlaps(array<Unit> P, int i) =>
+    bool ok = false
+    if i + 2 < P.size()
+        lo = math.max(math.max(P.get(i).lo, P.get(i + 1).lo), P.get(i + 2).lo)
+        hi = math.min(math.min(P.get(i).hi, P.get(i + 1).hi), P.get(i + 2).hi)
+        ok := lo < hi
+    ok
+
 buildSegments(array<Unit> P) =>
     segs = array.new<Unit>()
     n = P.size()
@@ -418,6 +440,13 @@ buildSegments(array<Unit> P) =>
     born = 0
     bool stop = false
     while i + 2 < n and not stop
+        // ★ L65:50-51／L77:69-70：线段开始的那三笔必须有重叠。没有公共重叠 ⇒ i 处**构不成线段**
+        //   ⇒ 往后挪一笔再看（L77:69-70 原文：「线段开始的那三笔，必须有重合，开始三笔没有重合的，是↵构不成线段的。」
+        //   块内 ↵ ＝ 原文硬折行）。与 Python 版同形：
+        //   挪过去的几笔都在头部、**没有上一段可并**，它们不构成任何线段（悬空前缀）。
+        if not openingOverlaps(P, i)
+            i += 1
+            continue
         up = isUp(P.get(i))
         k = i + 2
         while k < born
