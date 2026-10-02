@@ -21,6 +21,7 @@
 返回 [dict(kind="一买"…, bar=原始K线下标, price, confirmed, weak, level, center=中枢序号), ...]，按 bar 排序。
 """
 from .center import find_centers
+from .extend import build_hierarchy
 
 
 def macd_lines(bars, fast=12, slow=26, sig=9):
@@ -125,8 +126,17 @@ def strength(u, hist, measure="macd"):
 
 
 def _higher_centers(r, level):
-    """本层的**上一层**中枢列表：笔层看线段中枢，线段层看扩展合成的大级别中枢。"""
-    return r["seg_centers"] if level == "pen" else r["big"]
+    """本层的**上一层**中枢列表：笔层看线段中枢，线段层看**线段中枢自己**的扩展合成。
+
+    ★ 线段层**不能**用 r["big"]：那两个是**同一级**的东西 —— r["seg_centers"] 是「线段当中枢」，
+    r["big"] 是「类中枢（笔中枢）扩展合成」，两个都是线段级（`extend.py` 第 54 课那条：三个
+    1 分钟中枢当成线段，重叠出的是 5 分钟中枢）。拿同级的来查「上一层有没有中枢包住」，是
+    拿错了一级 ⇒ 线段层要再往上合成一次，即 build_hierarchy(seg_centers, 已完成线段)。
+    """
+    if level == "pen":
+        return r["seg_centers"]
+    done = [s for s in r["segs"] if not s.get("live")]
+    return build_hierarchy(r["seg_centers"], done) if r["seg_centers"] else []
 
 
 def check_premise3(higher, B, lo, hi, strict=True):
