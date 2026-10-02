@@ -104,7 +104,7 @@ def main():
     jobs = [
         ("① 线段线宽 7→5（沿法线实测 6.75 → 5.50 px）", duan_a, duan_b, S.seg_window()),
         ("② 类中枢新增价签 [ZD, ZG]（原来一个都不标）", duan_a, duan_b, S.find_chip(Image.open(duan_a).convert("RGB"), S.PEN_TAG)[0]),
-        ("③ 类中枢升上去的：浅紫 #C4B5FD（原来跟线段中枢升的同一个紫）", full_a, full_b, None),
+        ("③ 类中枢升上去的：#%02X%02X%02X 淡紫（原来跟线段中枢升的同一个紫）" % U.UP_PEN, full_a, full_b, None),
         ("④ 线段中枢升上去的：品红 #D946EF ＋ 升级框不再加粗", full_a, full_b, None),
     ]
     up = U.rects()

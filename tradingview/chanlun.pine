@@ -44,8 +44,9 @@ penCol    = input.color(color.rgb(122, 137, 166), "笔的颜色", group = G2,
 showSeg   = input.bool(true,  "线段", inline = "s", group = G2)
 segW      = input.int(2, "线宽", minval = 1, maxval = 8, inline = "s", group = G2,
      tooltip = "默认 3 → 2（2026-10-02 小栋）。笔 1 / 线段 2 ＝ 2:1，线段仍然是「一眼看去的主线」，但不再压过买卖点。")
-segCol    = input.color(color.rgb(242, 193, 78), "线段的颜色", group = G2,
-     tooltip = "#F2C14E 琥珀。粗结构，保持醒目。与 Python 版 render/style.py 的 seg 同值。")
+segCol    = input.color(color.rgb(196, 137, 1), "线段的颜色", group = G2,
+     tooltip = "#C48901 金（原 #F2C14E 琥珀）。琥珀在**白底**图上只有 1.68:1 —— 浅黄挨着白就是「一块比较暗的白」，主线立不起来。" +
+               "同色相（42°）里取彩度最高的那个解：白底 3.03 / 深底 5.90，两底都过。与 Python 版 render/style.py 的 seg 同值。")
 
 G3 = "中枢（框 / 填充）"
 showPC    = input.bool(true,  "类中枢（与笔同色）", group = G3)
@@ -55,8 +56,9 @@ showSC    = input.bool(true,  "线段中枢（与线段同色）", group = G3)
 scFillTr  = input.int(90, "线段中枢填充透明度", minval = 0, maxval = 100, group = G3,
      tooltip = "90 ≈ 10% 不透明。线段中枢比类中枢重要，底色留得比它重一点。与 Python 版 sc_fill 一致。")
 showUp    = input.bool(true,  "高一级别中枢（满 9 段）", group = G3)
-upColPen  = input.color(color.rgb(196, 181, 253), "高一级别 · 类中枢升上去的", group = G3,
-     tooltip = "#C4B5FD 浅紫。它跟母框是一家人（母框 = 笔的颜色），所以取笔那一族的色相往上提亮，看框就知道谁升的。")
+upColPen  = input.color(color.rgb(153, 141, 197), "高一级别 · 类中枢升上去的", group = G3,
+     tooltip = "#998DC5 淡紫（原 #C4B5FD）。它跟母框是一家人（母框 = 笔的颜色），所以取笔那一族的色相往上提亮。" +
+               "原色在**白底**上只有 1.85:1，框会「比白更白」等于没框；压暗到白底 3.01 / 深底 5.94，看框就知道谁升的。")
 upColSeg  = input.color(color.rgb(217, 70, 239), "高一级别 · 线段中枢升上去的", group = G3,
      tooltip = "#D946EF 品红。线段中枢那一族升上来的。跟笔 / 线段 / 买卖点四个色都不撞，是这套配色里唯一没被占用的色相。")
 // ★ 2026-10-02 小栋：两种升级中枢**分色**（原来它们是同一个 #A78BFA 紫），且**升级框不再加粗** ——
@@ -94,7 +96,7 @@ show1S    = input.bool(true, "一卖", inline = "x", group = G5)
 show2S    = input.bool(true, "二卖", inline = "x", group = G5)
 show3S    = input.bool(true, "三卖", inline = "x", group = G5)
 showPend  = input.bool(false, "显示待确认（空心，可能重画）", group = G5)
-buyCol    = input.color(color.rgb(0, 205, 125), "买点颜色", inline = "c", group = G5)
+buyCol    = input.color(color.rgb(0, 170, 104), "买点颜色", inline = "c", group = G5)
 sellCol   = input.color(color.rgb(255, 86, 86), "卖点颜色", inline = "c", group = G5)
 
 // ───────────────────────── 数据类型 ─────────────────────────
@@ -1056,9 +1058,11 @@ drawCenter(Ctr z, int x0, int x1, color col, int w, int fillTr, bool withLabel, 
                  border_style = line.style_solid, bgcolor = color.new(col, 100)))
         if withLabel and gLabels.size() < lbCap
             gLabels.push(label.new(x0, z.ZG, str.format("[{0}, {1}]", str.tostring(z.ZD, format.mintick), str.tostring(z.ZG, format.mintick)),
-                 // 价签统一成「30% 同色底 + 白字」＝ A 表那一行（2026-10-02 小栋拍 A）。原来这里跟
-                 //   下面那支高一级别的标签，一个 20% 同色底 + 同色字、一个 30% 底 + 白字 —— 同一个概念两套画法。
-                 style = label.style_label_lower_left, color = color.new(col, 70), textcolor = color.white, size = size.small))
+                 // 价签样式：**实底 + 黑字**。2026-10-02 下半天改口（上午那版是 30% 同色底 + 白字，只按深色底挑的）：
+                 //   小栋看的是**白底**图，30% 的淡底压在白底上几乎还是白，白字对淡底只有 1.33~1.45:1 —— 等于没字。
+                 //   实底的好处是**读不读得清跟图底色无关**（底不透明），深浅两套主题同一份代码都过 AA。
+                 //   ★ 两边透明度语义反着：这边第二个参数是**透明度**（0 = 不透明，所以这里直接写 col），Python 那边 alpha 255 = 不透明。
+                 style = label.style_label_lower_left, color = col, textcolor = color.black, size = size.small))
         if zdN(z) > 0
             for [m, uzd] in z.upZD
                 uzg = z.upZG.get(m)
@@ -1070,10 +1074,10 @@ drawCenter(Ctr z, int x0, int x1, color col, int w, int fillTr, bool withLabel, 
                      border_style = z.live ? line.style_dashed : line.style_solid,
                      bgcolor = color.new(upC, upFillTr)))
                 if gLabels.size() < lbCap
-                    // 价签统一成「30% 同色底 + 白字」＝ A 表那一行（2026-10-02 小栋拍 A），跟下面母框那支同一个写法；
+                    // 价签样式跟母框那支**同一个写法**（实底 + 黑字，理由见上面那一处）；
                     // 文本带上自己的区间：小栋说升级中枢要写成「↑高一级 [ZD, ZG]」。
                     gLabels.push(label.new(x0, uzg, str.format("↑高{0}级 [{1}, {2}]", array.from("一", "两", "三", "四").get(math.min(m, 3)), str.tostring(uzd, format.mintick), str.tostring(uzg, format.mintick)),
-                         style = label.style_label_lower_left, color = color.new(upC, 70), textcolor = color.white, size = size.small))
+                         style = label.style_label_lower_left, color = upC, textcolor = color.black, size = size.small))
         ok := true
     ok
 
