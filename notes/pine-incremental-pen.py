@@ -6,20 +6,25 @@
 
 ## 增量版的形状（第②步）
 
+**pine 里跑的是 `Guarded`** —— 无检查点的 O(1) 守卫版；全量验收默认 `--impl Guarded`。
+`IncPens`（检查点版）留作对照臂：两者同解，但它每根复制整份快照（seq 能到上千），
+正是这张卡要干掉的那种写法，**不进 pine**。
+
 `build_pens` 只有一个状态：`(seq, pend)`。它对分型表逐个 `feed`。`feed` 会**往回改**
 （`fix_start`：`seq[:] = seq[:j+1] + [P]`，j 可以到 0），也会重喂一段旧分型。所以
 「加一个新分型只动尾巴」**不是**代码看起来那样 —— 我先量过才敢写
 （notes/pen-reach-probe.py：回溯中位 1、p99 2、最大 5）。**但那个 5 是量出来的，不是上限**，
-所以正确性**不押在它上面**：
+所以正确性**不押在它上面**：守卫三条，任一条对不上就走第 3 条**从空整段重算**。
 
-    检查点 = 「喂最后一个分型**之前**的完整 (seq, pend) 快照」。
-    恢复 = 精确回到那个状态，再顺序重喂 —— 能回到 `fix_start` 实际要的任意深度。
-    回溯深度只决定**代价**，不决定**对不对**。
-    分型表缩了不止一格 ⇒ 快照不再对应任何前缀 ⇒ **从空重算**（不在快照上猜）。
+    守卫 1  长度没变、尾分型签名也没变      ⇒ 无事可做
+    守卫 2  长了一格 **且旧尾巴签名没变**    ⇒ 只喂新那一个（O(1) 摊还）
+    守卫 3  其余（缩了 / 跳变 / 旧尾巴被改） ⇒ 从空重算，不在旧状态上猜
 
-分型表只可能在尾部变（①那条不变量：只有 k = 长度−2 那一格会被增/改/删），所以快照的
-推进规则只有三条：长一格 ⇒ 快照 := 上一轮的 state；同长（改最后一格）⇒ 快照不动；
-缩一格 ⇒ 从空重算。
+守卫 2 里那次签名比较是**必须的**，不是保险：只比长度的话，「旧尾巴被改 + 又长一格」
+长度照样对得上，可被改的那一格得重喂。`done == 0` 时没有旧尾巴可比（m 必为 1）。
+
+`IncPens` 的检查点形状（仅供对照）：喂最后一个分型**之前**的 (seq, pend) 快照，
+恢复后顺序重喂；分型表缩了不止一格 ⇒ 从空重算。回溯深度只决定代价，不决定对不对。
 
 ## 这份尺子不证什么
 
@@ -296,8 +301,12 @@ class Guarded(IncPens):
             return False
         if m == self.done and self.sig == _sig(fx[-1]):
             return False                                    # 守卫 1：分型表没变
-        if m == self.done + 1:
-            self._feed(fx[m - 1])                           # 守卫 2：只喂新的
+        # 守卫 2：长了一格 **且旧尾巴没被动过** ⇒ 只喂新的那个。
+        # ★ 光比长度不够：旧尾巴被改 + 又长一格，长度也对得上，但那格得重喂。
+        #   `sig` 就是上一轮 fx[-1] 的签名，这一轮它是 fx[m-2]，比一下才敢只喂一个。
+        #   done == 0 时没有旧尾巴可比，m 必为 1，直接喂 fx[0]。
+        if m == self.done + 1 and (self.done == 0 or self.sig == _sig(fx[m - 2])):
+            self._feed(fx[m - 1])
         else:
             self.rebuilds += 1
             self.seq, self.pend = [], None                  # 守卫 3：整段重算
@@ -505,6 +514,9 @@ def main():
     ap.add_argument("--random", type=int, default=200)
     ap.add_argument("--max-bars", type=int, default=None)
     ap.add_argument("--arm", default=None, help="只跑某支臂：NoCk / NoRefeed / NoFixStart / ...")
+    ap.add_argument("--impl", default="Guarded", choices=["Guarded", "IncPens"],
+                    help="全量验收驱动哪个增量实现。默认 Guarded = **pine 里真跑的形状**；"
+                         "IncPens = 检查点版（每根复制整份快照，慢十倍，且**不进 pine**）")
     ap.add_argument("--files", default="", help="配合 --arm：逗号分隔的文件名（data/ 下）")
     a = ap.parse_args()
 
@@ -515,7 +527,7 @@ def main():
         return measure_append_only()
     if a.arm:
         cls = {"NoCk": NoCk, "ShallowCk": ShallowCk, "NoRefeed": NoRefeed,
-               "NoFixStart": NoFixStart, "IncPens": IncPens}.get(a.arm)
+               "NoFixStart": NoFixStart, "IncPens": IncPens, "Guarded": Guarded}.get(a.arm)
         if cls is None:
             print("未知臂 %s" % a.arm, file=sys.stderr)
             return 2
@@ -540,15 +552,28 @@ def main():
         return 1 if bad_total else 0
 
     from config import tick_of
+    impl = {"Guarded": Guarded, "IncPens": IncPens}[a.impl]
     fails, total, datasets = [], 0, 0
     t0 = time.time()
+    print("── 驱动实现：%s%s ──" % (a.impl, "（pine 里真跑的形状）" if a.impl == "Guarded" else
+                                "（检查点版，不进 pine —— 慢十倍）"))
     print("── 真实数据（每个前缀都跑，不抽稀）──")
     files = [f for f in sorted(os.listdir(os.path.join(ROOT, "data")))
              if f.endswith(".json") and not any(x in f for x in SKIP)]
+
+    def load(fn):
+        b = json.load(io.open(os.path.join(ROOT, "data", fn), encoding="utf-8"))
+        if isinstance(b, dict):
+            b = b.get("bars") or b.get("klines") or b
+        return b or []
+
+    # 短的先跑。按字母序 zec15（20160 根）排第 6，单份要跑几小时，会把后面 4 份小的全堵在它后面；
+    # 升序之后 8 份小的十几分钟就全出数，只有最大的那份长时间挂着。**覆盖面一个不少，只是换顺序。**
+    cache = {fn: load(fn) for fn in files}
+    files.sort(key=lambda fn: len(cache[fn]))
+    print("顺序（按根数升序）：" + " → ".join("%s(%d)" % (f, len(cache[f])) for f in files))
     for fn in files:
-        bars = json.load(io.open(os.path.join(ROOT, "data", fn), encoding="utf-8"))
-        if isinstance(bars, dict):
-            bars = bars.get("bars") or bars.get("klines") or bars
+        bars = cache[fn]
         if not bars:
             continue
         datasets += 1
@@ -557,7 +582,7 @@ def main():
         except Exception:                                       # noqa: BLE001
             tick = None
         t1 = time.time()
-        checked, bad = check_series(bars, fn, tick, max_bars=a.max_bars)
+        checked, bad = check_series(bars, fn, tick, max_bars=a.max_bars, cls=impl)
         total += checked
         if bad:
             fails.append(bad)
@@ -575,7 +600,7 @@ def main():
         tick = rng.choice((0.1, 0.25, 0.5, 1.0, 2.0))
         n = rng.randint(40, 500)
         bars = rand_bars(rng, n, tick)
-        checked, bad = check_series(bars, "rand#%d" % t, tick)
+        checked, bad = check_series(bars, "rand#%d" % t, tick, cls=impl)
         rand_checked += checked
         if bad:
             fails.append(bad)
@@ -583,12 +608,12 @@ def main():
                   % (t, tick, n, bad["k"], bad["got"], bad["want"]))
     print("  ✓ %d 条随机序列 ｜ 查了 %d 个前缀" % (a.random, rand_checked))
 
-    print("\n真实数据 %d 份 ｜ 前缀合计查了 %d 个 ｜ 分歧 %d 处 ｜ 用时 %.0fs"
-          % (datasets, total, len(fails), time.time() - t0))
+    print("\n驱动实现 %s ｜ 真实数据 %d 份 ｜ 前缀合计查了 %d 个 ｜ 分歧 %d 处 ｜ 用时 %.0fs"
+          % (a.impl, datasets, total, len(fails), time.time() - t0))
     if fails:
         print("⇒ **不一致**：增量笔与批量笔不是逐前缀相同。")
         return 1
-    print("⇒ 0 不一致：在第 k 根上，增量笔与『拿 [0..k] 重跑一遍』逐位相同。")
+    print("⇒ 0 不一致：在第 k 根上，**%s** 与『拿 [0..k] 重跑一遍』逐位相同。" % a.impl)
     return 0
 
 

@@ -359,8 +359,10 @@ var array<float> zSig  = array.from(-1.0, 0.0, 0.0, 0.0) // 已喂的**最后一
 
 // 一根一步。守卫三条 —— 正确性**不押在** ① 的"只增"不变量上，对不上就走第 3 条整段重算：
 //   1) 分型表没变（长度相同且尾分型签名相同）⇒ 无事可做
-//   2) 分型表长了一格                      ⇒ 只喂新的那一个（O(1) 摊还）
+//   2) 长了一格**且旧尾巴签名没变**          ⇒ 只喂新的那一个（O(1) 摊还）
 //   3) 其余（缩了 / 跳变 / 尾格被改）       ⇒ 从空重算，不在旧状态上猜
+// ★ 守卫 2 里那次签名比较是必须的，不是保险：只比长度的话，「旧尾巴被改 + 又长一格」
+//   长度照样对得上，可被改的那一格得重喂。有了它，上面那句"不押在①的不变量上"才成立。
 zPenStep(array<Fx> fx, array<float> sH, array<float> sL,
          array<int> seq, array<int> pend, array<int> stack, array<int> fxAtK,
          array<int> st, array<float> sig) =>
@@ -373,7 +375,10 @@ zPenStep(array<Fx> fx, array<float> sH, array<float> sL,
     else if m == st.get(0) and sig.get(0) == fx.get(m - 1).k and sig.get(1) == fx.get(m - 1).i and sig.get(2) == fx.get(m - 1).p and sig.get(3) == (fx.get(m - 1).top ? 1.0 : 0.0)
         st.set(0, m)                                   // 守卫 1：分型表原封不动
     else
-        if m == st.get(0) + 1
+        ok2 = m == st.get(0) + 1
+        if ok2 and st.get(0) > 0                           // 旧尾巴得没被动过才敢只喂一个
+            ok2 := sig.get(0) == fx.get(m - 2).k and sig.get(1) == fx.get(m - 2).i and sig.get(2) == fx.get(m - 2).p and sig.get(3) == (fx.get(m - 2).top ? 1.0 : 0.0)
+        if ok2
             stack.push(m - 1)                          // 守卫 2：只喂新长出来的那个
             zDrain(fx, sH, sL, seq, pend, stack, fxAtK)
         else
