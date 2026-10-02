@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """数据边界预处理层：前复权 + 会话/停牌/除权断点检测。
 
-插位置（Atlas spec docs/04_数据边界）：quantize → preprocess → standardize。
+插位置：quantize → preprocess → standardize。（这一层没有 spec —— 见
+docs/audit/engine-vs-spec_分型笔线段.md 第四节「数据边界」；先前这里指的
+docs/04_数据边界 从未存在。）
 preprocess 不改K线形状（除前复权回调 h/l/o/c），额外产出 breaks 交给
 standardize(bars, breaks=breaks) —— 断点两侧的K线永不合并。
 
