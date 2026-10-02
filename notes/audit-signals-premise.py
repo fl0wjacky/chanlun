@@ -54,8 +54,29 @@ def probe(r, level, s):
                 prior=prior, b_up=bool(B.get("up")), a=a, c=c, k=k)
 
 
+BASE_BLOB = "4f77649175a19fb094dc1f08866e5fc01eaaab4f"   # 审计基线 main 67e52ac 的 core/signals.py
+
+
+def _blob_now():
+    """工作区里 core/signals.py 的 blob。★ 别在这里写死提交号 —— 本器走的是 signals() 的
+    **当前**默认行为（第二轮起 前提③ 默认开），读数会随引擎版本变，写死的标签会静默失真。"""
+    import subprocess
+    try:
+        out = subprocess.run(["git", "rev-parse", "HEAD:core/signals.py"],
+                             capture_output=True, text=True, timeout=10)
+        return out.stdout.strip() if out.returncode == 0 else "(取不到)"
+    except Exception:
+        return "(取不到)"
+
+
 def main():
-    print("== 背驰 §五 四条件 · 回验（core/signals.py，提交 335e3a3）==")
+    now = _blob_now()
+    print("== 背驰 §五 四条件 · 回验（core/signals.py）==")
+    print("本次跑在的信号层 blob：%s" % now[:16])
+    if now != BASE_BLOB:
+        print("★ 与审计基线不同（基线 `67e52ac` 的 blob 是 %s…）：" % BASE_BLOB[:16])
+        print("  本器枚举的是 signals() 的**当前**发点，所以下面每个数都会随引擎版本动 ——")
+        print("  要跟审计表 §四 的数对上，得跑在基线 `67e52ac` 上；现 main 上跑是另一组数（不是表写错了）。")
     print("原文坐标：L53:89-94（干净重述）· L24:20-24（首述）\n")
     tot = dict(points=0, p3_strict=0, p3_loose=0, p4_none=0, za_off=0)
     for lv in ("seg", "pen"):
