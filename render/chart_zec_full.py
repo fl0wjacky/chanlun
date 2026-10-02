@@ -6,7 +6,8 @@
 各自缩放 —— 这段 ZEC 从一两百涨到一千多，共用一根价格轴会把前几个月压成一条线。
 横向连续：跨月的笔 / 线段 / 中枢在相邻两个面板里各画一截（面板间有分隔线，价格刻度各看各的）。
 想要从头到尾同一根价格轴，看 chart_zec_full_smooth.py（顺滑版）。
-约定：未完成的笔 / 线段、仍在延续的中枢，一律虚线（画法在 render/full_common.py）。
+约定：未完成的笔 / 线段一律虚线；中枢框按规则 B 拆两截 —— 前三笔那截实线、延续那截虚线，
+已结束的中枢整框实线，前三笔里夹着没走完的那根则整框虚线（画法在 render/full_common.py）。
 """
 import os, sys, json, math, datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
