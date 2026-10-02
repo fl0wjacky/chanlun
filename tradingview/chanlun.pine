@@ -1055,8 +1055,10 @@ drawCenter(Ctr z, int x0, int x1, color col, int w, int fillTr, bool withLabel, 
     split = not wholeDash and z.live and xm > x0 and xm < x1
     ok = false
     if gBoxes.size() + 1 + (split ? 1 : 0) + zdN(z) <= boxCap
+        // ★ 拆两截时底框必须是**虚线**，上面再盖前三那截实线 —— 底框画成实线的话，
+        //   延续那截就看不出虚（小栋 2026-10-02T13:23Z 真机截图指出：延续中的类中枢整框实线）。
         gBoxes.push(box.new(x0, z.ZG, x1, z.ZD, border_color = col, border_width = w,
-             border_style = wholeDash ? line.style_dashed : line.style_solid,
+             border_style = (wholeDash or split) ? line.style_dashed : line.style_solid,
              bgcolor = color.new(col, fillTr)))
         if split                                   // ③ 前三那截盖成实线；底下的填充只铺一次（这张全透明）
             gBoxes.push(box.new(x0, z.ZG, xm, z.ZD, border_color = col, border_width = w,
