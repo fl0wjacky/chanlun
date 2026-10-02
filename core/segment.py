@@ -26,6 +26,13 @@
       旧 v67 在整条特征序列上做包含，会跨过分界点合并 —— 与这句不符，已停用
       （保留为 build_segments_whole_seq，仅供对照）。
 
+★ 特征序列的**合并方向**有两条读法，做成开关（小栋 2026-10-02 ⑤，卡 card-205e04ea-302）：
+    A＝开头按线段方向、之后照 K 线那套按『最后两根』定方向（**默认**，＝改动前的行为）
+    B＝全程按线段方向（chan.py / YuYuKunKun / ZenTheory 的做法）
+  原文 `L67` 只说「也可以对此进行非包含处理」，**没有逐字规定方向怎么取** ⇒ 两条都是读法，
+  所以给出开关而不是替谁改判。默认 A 的输出与改动前**逐字节一致**（有对照跑为证）。
+  入口：build_segments(pens, min_pens=3, mode="A"|"B")；常量 FEAT_STD_A / FEAT_STD_B。
+
 对外：
     build_segments()            唯一口径（build_segments_v71 是它的别名，兼容旧调用）
     check_segments()            不变量（笔数单数、首尾相接、方向交替、开头三笔有公共重叠）
@@ -34,6 +41,16 @@
 """
 
 from .kline import fractals
+
+# 特征序列非包含处理时，**合并方向**的两种口径（小栋 2026-10-02 ⑤；卡 card-205e04ea-302）。
+#   A（默认，＝本引擎一直以来的行为）：开头按**线段方向**合，之后照 K 线那套按『最后两根』定方向。
+#   B（可选）：**全程按线段方向**合（chan.py / YuYuKunKun / ZenTheory 的做法）。
+# 两者的差别只在 len(m) ≥ 2 的那一支：B 不再看『最后两根』，一律听线段的。
+# ★ 默认必须是 A 且输出逐字节等于改动前 —— A 那支一个字都没动（见 check A≡旧 的对照跑）。
+FEAT_STD_A = "A"
+FEAT_STD_B = "B"
+FEAT_STD_MODES = (FEAT_STD_A, FEAT_STD_B)
+FEAT_STD_DEFAULT = FEAT_STD_A
 
 
 def _dir(pen):
@@ -49,19 +66,31 @@ def _features(pens, i0, seg_dir):
     return out
 
 
-def _feature_std(elems, up):
+def _feature_std(elems, up, mode=FEAT_STD_DEFAULT):
     """特征序列的非包含处理（第 67 课「标准特征序列」）。
 
     与 K 线的 standardize 只差开头：K 线开头互相包含时还定不出方向，只能丢掉；
-    特征序列属于一条有方向的线段，开头就按**这条线段的方向**合并（向上段取高高、向下段取低低），
-    之后照常按『最后两根』定方向。丢掉开头会漏掉元素（第 66 / 71 / 78 课要求这里必须合并）。
+    特征序列属于一条有方向的线段，开头就按**这条线段的方向**合并（向上段取高高、向下段取低低）。
+    丢掉开头会漏掉元素（第 66 / 71 / 78 课要求这里必须合并）。
+
+    mode —— 合并方向的口径（小栋 2026-10-02 ⑤，见文件头常量）：
+      · `"A"`（默认，＝一直以来行为）：开头按线段方向，**之后照 K 线那套**按『最后两根』定方向。
+      · `"B"`：**全程按线段方向**（chan.py / YuYuKunKun / ZenTheory 的做法）。
+    ★ 原文只说「如同一般 K 线图中找分型的方法，也存在所谓的包含关系，也可以对此进行非包含处理」
+      （`L67`），**没有逐字规定合并方向怎么取** —— A 与 B 都是对这句的读法，所以做成开关而不是改判。
+
     elems: [{h, l, i}, ...]；返回同样结构，i 取合并组里最后一个元素的。
     """
+    if mode not in FEAT_STD_MODES:
+        raise ValueError(f"_feature_std: 未知 mode {mode!r}，只认 {FEAT_STD_MODES}")
     m = []
     for e in elems:
         if m and ((m[-1]["h"] >= e["h"] and m[-1]["l"] <= e["l"]) or (e["h"] >= m[-1]["h"] and e["l"] <= m[-1]["l"])):
             a = m[-1]
-            go_up = up if len(m) < 2 else (a["h"] > m[-2]["h"])
+            if mode == FEAT_STD_B:
+                go_up = up
+            else:
+                go_up = up if len(m) < 2 else (a["h"] > m[-2]["h"])
             pick = max if go_up else min
             m[-1] = dict(h=pick(a["h"], e["h"]), l=pick(a["l"], e["l"]), i=e["i"], ih=e["i"], il=e["i"])
         else:
@@ -69,12 +98,12 @@ def _feature_std(elems, up):
     return m
 
 
-def _fractals_of(pens, i0, seg_dir, want):
+def _fractals_of(pens, i0, seg_dir, want, mode=FEAT_STD_DEFAULT):
     """在特征序列的标准形式上找分型。返回 [(hit, std, feats), ...]（按位置排序）"""
     feats = _features(pens, i0, seg_dir)
     if len(feats) < 3:
         return [], None, None
-    std = _feature_std([f[1] for f in feats], seg_dir == "up")
+    std = _feature_std([f[1] for f in feats], seg_dir == "up", mode)
     fx = fractals(std)
     return [f for f in fx if f["type"] == want], std, feats
 
@@ -93,7 +122,7 @@ def _has_gap(hit, std):
     return (a["l"] > b["h"]) or (a["h"] < b["l"])
 
 
-def _reverse_scan(pens, end_pen, seg_dir):
+def _reverse_scan(pens, end_pen, seg_dir, mode=FEAT_STD_DEFAULT):
     """第二种情况的确认：从端点之后的反向序列里，能不能找到分型。返回 (确认与否, 破位笔序号)。
 
     破位笔 = 价格重新越过端点的那一笔（None = 到数据末尾都没越过）。
@@ -132,16 +161,16 @@ def _reverse_scan(pens, end_pen, seg_dir):
         tail.append(p)
     if len(tail) < 3:
         return False, brk
-    hits, _, _ = _fractals_of(tail, 0, rev_dir, want2)
+    hits, _, _ = _fractals_of(tail, 0, rev_dir, want2, mode)
     return len(hits) > 0, brk
 
 
-def _reverse_confirms(pens, end_pen, seg_dir):
+def _reverse_confirms(pens, end_pen, seg_dir, mode=FEAT_STD_DEFAULT):
     """只要『确认与否』（旧整序列口径在用）。"""
-    return _reverse_scan(pens, end_pen, seg_dir)[0]
+    return _reverse_scan(pens, end_pen, seg_dir, mode)[0]
 
 
-def build_segments_whole_seq(pens, min_pens=3):
+def build_segments_whole_seq(pens, min_pens=3, mode=FEAT_STD_DEFAULT):
     """【旧口径，已停用】整条特征序列先做包含处理再找分型（旧 v67）。
 
     问题：包含处理会跨过假设的分界点合并前后元素，违反第 71 课「在这假设的转折点前后那两元素，是不存在包含关系的」。只留作对照（tools/ab_segment.py）。
@@ -150,7 +179,7 @@ def build_segments_whole_seq(pens, min_pens=3):
     while i + min_pens - 1 < n:
         seg_dir = _dir(pens[i])
         want = "top" if seg_dir == "up" else "bot"
-        hits, std, feats = _fractals_of(pens, i + 1, seg_dir, want)
+        hits, std, feats = _fractals_of(pens, i + 1, seg_dir, want, mode)
         if not hits:
             break
         chosen = None
@@ -162,7 +191,7 @@ def build_segments_whole_seq(pens, min_pens=3):
                 continue
             if not _has_gap(hit, std):          # 第一种情况：直接采用
                 chosen = (hit, ep, 1); break
-            if _reverse_confirms(pens, ep, seg_dir):   # 第二种情况：反向确认
+            if _reverse_confirms(pens, ep, seg_dir, mode):   # 第二种情况：反向确认
                 chosen = (hit, ep, 2); break
         if chosen is None:
             break
@@ -227,7 +256,7 @@ def check_segments(segs, pens):
     return bad
 
 
-def _case_at(pens, i, k, seg_dir):
+def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT):
     """第 71 课：假设 pens[k] 的终点 V 是分界点，按原文程序考察。
 
     返回 (case, at)：
@@ -263,7 +292,7 @@ def _case_at(pens, i, k, seg_dir):
     feats = [f for f in _features(pens, i + 1, seg_dir) if f[0] < k]
     if not feats or k + 1 >= len(pens):
         return None, None
-    E1 = _feature_std([f[1] for f in feats], up)[-1]
+    E1 = _feature_std([f[1] for f in feats], up, mode)[-1]
     V = pens[k]["p1"]
     E2 = dict(h=pens[k + 1]["hi"], l=pens[k + 1]["lo"])
     if (up and V <= E1["h"]) or (not up and V >= E1["l"]):
@@ -296,13 +325,13 @@ def _case_at(pens, i, k, seg_dir):
     else:
         if E2["l"] != V or not (E2["l"] < E3["l"] and E2["h"] < E3["h"]):
             return None, None
-    ok, brk = _reverse_scan(pens, k, seg_dir)
+    ok, brk = _reverse_scan(pens, k, seg_dir, mode)
     if ok:
         return 2, None
     return None, (brk if brk is not None else len(pens))   # 新高/新低 → 从破位处再找；否则待定
 
 
-def build_segments(pens, min_pens=3):
+def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT):
     """把笔聚合成线段 —— 第 67 课的定义 + 第 71 课的当下程序（逐个假设分界点）。
 
     原文：
@@ -338,7 +367,7 @@ def build_segments(pens, min_pens=3):
         while k < born:                       # 方向确立之前，本段不能结束
             k += 2
         while k < n - 1:
-            case, resume = _case_at(pens, i, k, seg_dir)
+            case, resume = _case_at(pens, i, k, seg_dir, mode)
             if case:
                 found = (k, case, resume); break
             k += 2
@@ -387,7 +416,7 @@ def nonextreme_endpoints(segs):
             ((s["dir"] == "up" and s["p1"] < s["hi"]) or (s["dir"] == "down" and s["p1"] > s["lo"]))]
 
 
-def verify_by_definition(segs, pens):
+def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
     """独立复核：不调用 _case_at / _reverse_scan，按原文定义另写一遍，逐段重算。返回违规列表。
 
     对每条已完成线段 [PI0, PI1]，检查：
@@ -399,17 +428,24 @@ def verify_by_definition(segs, pens):
       ④ 上一段以第一种情况结束时，本段终点不早于『本段第一笔结束位置被突破』那一笔。
     与引擎共用的只有 fractals（K 线层已由 selfcheck 单独验证）；特征序列的非包含处理在这里另写一遍。
     """
+    if mode not in FEAT_STD_MODES:
+        raise ValueError(f"verify_by_definition: 未知 mode {mode!r}，只认 {FEAT_STD_MODES}")
     N = len(pens)
 
     def std_feats(xs, up):
-        """非包含处理，另一种写法：先按线段方向把开头互相包含的并掉，再逐个按前两根定方向。"""
+        """非包含处理，另一种写法：先按线段方向把开头互相包含的并掉，再逐个按前两根定方向。
+
+        ★ 这条副尺**也带 mode**：B 下全程按线段方向（`rising = up`），与 _feature_std 的 B 同口径。
+          两处实现是**各写一遍**的（这里是元组、那边是 dict），所以 mode 也要各写一遍 ——
+          这是有意的：复核器与引擎共用一份实现就不再是复核。
+        """
         out = []
         for x in xs:
             h, l = x["h"], x["l"]
             if out:
                 ph, pl = out[-1]
                 if (ph - h) * (pl - l) <= 0:          # 一方罩住另一方（含相等）
-                    rising = up if len(out) == 1 else out[-1][0] > out[-2][0]
+                    rising = up if (mode == FEAT_STD_B or len(out) == 1) else out[-1][0] > out[-2][0]
                     out[-1] = (max(ph, h), max(pl, l)) if rising else (min(ph, h), min(pl, l))
                     continue
             out.append((h, l))
