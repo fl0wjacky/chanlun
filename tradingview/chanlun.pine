@@ -1037,7 +1037,7 @@ clearAll() =>
 //   ★ 先判 ① 再判 ② 最后 ③。反过来先看 z.live 的话，「还在长、但前三里夹着未完成笔」的中枢会
 //     被判成 ③ 去拆两截 —— 而它该是整框虚线。口径与 Python 版 render/full_common.py 的 box_split 一致。
 //   ★ 拆两截的落法：Pine 的 box **四条边一起画**，画不出「只有右边虚」的半框 —— 所以先铺一张整框
-//     （① 虚 / ②③ 实），③ 再叠一张**只画边框、填色全透明**的前三截实框盖上去。底下那张的虚线只会在
+//     （①③ 虚 / ② 实），③ 再叠一张**只画边框、填色全透明**的前三截实框盖上去。底下那张的虚线只会在
 //     分界右边露出来（要的就是这个），代价是分界处多一条竖边（Python 那边是 6 条边、没有这条）——
 //     这条竖线正好标出「前三到此为止」，留着。
 //   hasUnfinished / xm 都由**调用点**按层算（笔层＝最后一根笔；线段层没有这一员，见调用点）。
@@ -1055,8 +1055,10 @@ drawCenter(Ctr z, int x0, int x1, color col, int w, int fillTr, bool withLabel, 
     split = not wholeDash and z.live and xm > x0 and xm < x1
     ok = false
     if gBoxes.size() + 1 + (split ? 1 : 0) + zdN(z) <= boxCap
+        // ★ 拆两截时底框必须是**虚线**，上面再盖前三那截实线 —— 底框画成实线的话，
+        //   延续那截就看不出虚（小栋 2026-10-02T13:23Z 真机截图指出：延续中的类中枢整框实线）。
         gBoxes.push(box.new(x0, z.ZG, x1, z.ZD, border_color = col, border_width = w,
-             border_style = wholeDash ? line.style_dashed : line.style_solid,
+             border_style = (wholeDash or split) ? line.style_dashed : line.style_solid,
              bgcolor = color.new(col, fillTr)))
         if split                                   // ③ 前三那截盖成实线；底下的填充只铺一次（这张全透明）
             gBoxes.push(box.new(x0, z.ZG, xm, z.ZD, border_color = col, border_width = w,
