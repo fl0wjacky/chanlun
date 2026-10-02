@@ -7,7 +7,8 @@
     python3 render/chart_full_smooth.py btc_4h.json --name "BTC/USDT 永续" --tf "4 小时" --px 8 --ph 2400
     python3 render/chart_full_smooth.py zec15.json  --name "ZEC/USDT 永续" --tf "15 分钟" --px 2 --ph 3600
 输出默认 out/<数据文件名>_smooth.png。
-约定：未完成的笔 / 线段、仍在延续的中枢一律虚线；最后一根 K 线若尚未收盘，图上注明（画法在 render/full_common.py）。
+约定：未完成的笔 / 线段一律虚线；中枢框拆两截，前三笔那截实线、延续那截虚线（规则 B，2026-10-02 小栋定，
+已结束的中枢整框实线）；最后一根 K 线若尚未收盘，图上注明（画法在 render/full_common.py）。
 """
 import os, sys, json, math, time, datetime, argparse
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -87,7 +88,7 @@ def render(fn, name, tf, px, ph, out_name=None):
               r["tick"], "老" if r["pen_rule"] == "old" else "新", bars[-1]["c"]),
            font=f_s, fill=TX)
     xe = legend(d, L + 4, 222, f_n)
-    d.text((xe + 40, 208), "约定：未完成的笔 / 线段、仍在延续的中枢一律虚线 ｜ 冲浪者 · %s" % datetime.date.today().isoformat(),
+    d.text((xe + 40, 208), "约定：未完成的笔 / 线段一律虚线；中枢框拆两截，前三笔实线、延续虚线 ｜ 冲浪者 · %s" % datetime.date.today().isoformat(),
            font=f_n, fill=MU)
 
     path = out(out_name or fn.replace(".json", "_smooth.png"))
