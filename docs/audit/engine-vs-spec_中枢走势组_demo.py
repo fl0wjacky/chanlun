@@ -7,10 +7,10 @@
 
 五段演示，对应正文 §1 的 ⑤／⑧／⑨／⑤ / ㉗ 五行：
 
-    ① repaint       —— 走势没走完时，同一个中枢的哪些字段被后来改写（含「已终结又复活」）
-    ② 否决条件       —— L56:92-94「第三段向下倾斜不算中枢」按最松读法在本数据命中几个
+    ① repaint       —— 走势没走完时，同一个中枢的哪些字段被后来改写（含『已终结又复活』）
+    ② 否决条件       —— L56:92-94『第三段向下倾斜不算中枢』按最松读法在本数据命中几个
     ③ 终结方式       —— 12 个已终结类中枢里，有几个是靠第三类买卖点终结的
-    ④ 笔严格交替     —— center._range 用「起笔奇偶」挑 Z 段的前提是否成立
+    ④ 笔严格交替     —— center._range 用『起笔奇偶』挑 Z 段的前提是否成立
     ⑤ DD_all/GG_all —— 旧口径字段与 DD/GG 是否恒等
 
 只用 data/btc_4h.json，程序侧 pin 在 core/*.py @ 4d7082e。
@@ -90,7 +90,7 @@ for kind, filt in (
         print('        后: PI1=%s nZ=%s ZG=%.1f ZD=%.1f GG=%.1f DD=%.1f live=%s term=%s'
               % (b['PI1'], b['nZ'], b['ZG'], b['ZD'], b['GG'], b['DD'], b['live'], b['term']))
 
-print('\n「已终结又复活」那一处的笔（说明不是笔被重切，是回抽那一段还在长）：')
+print('\n『已终结又复活』那一处的笔（说明不是笔被重切，是回抽那一段还在长）：')
 for nm, rr in (('bar 1780', snap(1780)), ('bar 1796', snap(1796))):
     print('  %s：' % nm)
     for k in range(92, len(rr['pens'])):
@@ -100,7 +100,7 @@ for nm, rr in (('bar 1780', snap(1780)), ('bar 1796', snap(1796))):
 
 
 # ------------------------------------------------------------ ② 否决条件
-head('② L56:92-94「第三段向下倾斜的不算中枢」· 最松读法量一遍')
+head('② L56:92-94『第三段向下倾斜的不算中枢』· 最松读法量一遍')
 
 CENTERS = FULL['centers']
 P = FULL['pens']
@@ -112,7 +112,7 @@ for k, z in enumerate(CENTERS):
     beyond = (c['lo'] < a['lo']) if down_a else (c['hi'] > a['hi'])
     if beyond:
         hit.append((k, i, down_a, a, c))
-print('读法（本轮我的读法，未定）：第一段若向下，第三段终点再破第一段终点 ⇒ 视为「第三段向下倾斜」。')
+print('读法（本轮我的读法，未定）：第一段若向下，第三段终点再破第一段终点 ⇒ 视为『第三段向下倾斜』。')
 print('命中 %d / %d 个类中枢：' % (len(hit), len(CENTERS)))
 for k, i, dn, a, c in hit:
     print('   中枢#%2d PI0=%2d 第一段%s [%.1f→%.1f]  第三段 [%.1f→%.1f] ⇒ 破 %.1f'
@@ -126,12 +126,12 @@ print('类中枢终结方式：', dict(term))
 by3 = term.get('三买', 0) + term.get('三卖', 0)
 byleave = term.get('Z 段向上离开', 0) + term.get('Z 段向下离开', 0)
 gone = by3 + byleave
-print('已终结 %d 个：三买/三卖 %d 个（%.0f%%），纯靠「Z 段离开」%d 个（%.0f%%）'
+print('已终结 %d 个：三买/三卖 %d 个（%.0f%%），纯靠『Z 段离开』%d 个（%.0f%%）'
       % (gone, by3, 100.0 * by3 / gone, byleave, 100.0 * byleave / gone))
 print('线段中枢终结方式：', dict(collections.Counter(z['term'] for z in FULL['seg_centers'])))
 
 # ------------------------------------------------------------ ④ 笔交替
-head('④ center._range 用「起笔奇偶」挑 Z 段 —— 前提「笔严格交替」在本数据成立吗')
+head('④ center._range 用『起笔奇偶』挑 Z 段 —— 前提『笔严格交替』在本数据成立吗')
 bad = [k for k in range(1, len(P))
        if (P[k]['p1'] > P[k]['p0']) == (P[k - 1]['p1'] > P[k - 1]['p0'])]
 print('笔数 %d，方向不交替处：%s' % (len(P), bad or '无（严格交替）'))
