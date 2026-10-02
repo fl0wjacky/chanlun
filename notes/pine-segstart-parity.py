@@ -74,7 +74,7 @@ def check_coords():
       否则「我量过」量的是哪棵树都说不清。我今晚两次报错的根都是这个（一次把旧树的数
       当成 main 的、一次 rc=2 实际测的是自己那条支）。所以"读了谁的字节"跟结论同排印出。
     """
-    drift, resolved, stamps, cache = [], [], [], {}
+    drift, resolved, stamps, cache, unreadable = [], [], [], {}, {}
     for rel in dict.fromkeys(c[1] for c in COORD_ANCHORS):
         path = os.path.join(_ROOT, rel)
         try:
@@ -83,8 +83,15 @@ def check_coords():
             stamps.append((rel, len(cache[rel]), blob_sha(path)[:12]))
         except OSError as e:
             cache[rel] = []
+            unreadable[rel] = str(e)
             stamps.append((rel, -1, "读不到（%s）" % e))
     for name, rel, anchor, desc in COORD_ANCHORS:
+        if rel in unreadable:
+            # ★ 这一格单说：文件压根没读进来时，不许印「锚点找不到（改名了？搬走了？）」
+            #   —— 那是在对我从没读到的内容下判断。@iris-64a1 2026-10-02 指出这一格我没跑。
+            drift.append((name, "**读不到** %s（%s）—— 不是「锚点在不在里面」，是这份文件没读进来"
+                          % (rel, unreadable[rel])))
+            continue
         hits = [i for i, l in enumerate(cache[rel], 1) if re.search(anchor, l)]
         if len(hits) == 1:
             resolved.append((name, rel, hits[0], desc))
@@ -311,7 +318,8 @@ def main():
             print("   %-15s ⇒ %s" % (name, why))
         print("   ⇒ **不算绿**：读者会照这份报告去核对，却找不到指的那个东西。")
         for rel, n, sh in stamps:
-            print("   （我读的是：%s %s 行 blob %s）" % (rel, n, sh))
+            print("   （我读的是：%s %s）"
+                  % (rel, ("%d 行 blob %s" % (n, sh)) if n >= 0 else sh))
         return 4
 
     d = {n: "%s:%d" % (rel, ln) for n, rel, ln, _ in resolved}
