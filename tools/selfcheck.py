@@ -120,7 +120,8 @@ import core.segment as SG
 from core.kline import standardize
 rows = json.load(open(data("m15_sub.json"), encoding="utf-8"))["BNBUSDT"]
 Pb = analyze([dict(t=i, o=o, h=h, l=l, c=c) for i, (_, o, h, l, c) in enumerate(rows)])["pens"]
-_good, SG._feature_std = SG._feature_std, lambda xs, up: [dict(x, ih=x["i"], il=x["i"]) for x in standardize(xs)]
+# ★ 第三参数跟着 `_feature_std(elems, up, mode)` 走（默认值放最右，老调用点不用改）。
+_good, SG._feature_std = SG._feature_std, lambda xs, up, mode=None: [dict(x, ih=x["i"], il=x["i"]) for x in standardize(xs)]
 caught = len(verify_by_definition(SG.build_segments(Pb), Pb))
 SG._feature_std = _good
 count("特征序列开头丢弃未被发现", 0 if caught else 1, "　（抓到 %d 处）" % caught)

@@ -63,8 +63,8 @@ def main(tree):
     orig_fs = S._feature_std
     hit = {"n": 0, "diff": 0}
 
-    def flip(elems, up):
-        return orig_fs(elems, not up)
+    def flip(elems, up, mode=S.FEAT_STD_DEFAULT):   # mode 跟随 `_feature_std(elems, up, mode)`（2026-10-02 ⑤ 加的）
+        return orig_fs(elems, not up, mode)
 
     S._feature_std = flip
     e1 = {f: sig(S.build_segments(p)) for f, p in runs}
@@ -84,7 +84,7 @@ def main(tree):
     orig_rs = S._reverse_scan
     calls = {"n": 0, "diff": 0}
 
-    def rs_nobound(pens, end_pen, seg_dir):
+    def rs_nobound(pens, end_pen, seg_dir, mode=S.FEAT_STD_DEFAULT):   # mode 跟随 `_reverse_scan(..., mode)`
         pivot = pens[end_pen]["p1"]
         rev_dir = "down" if seg_dir == "up" else "up"
         want2 = "bot" if rev_dir == "down" else "top"
@@ -96,9 +96,9 @@ def main(tree):
                 brk = j
             tail.append(p)
         r = (False, brk) if len(tail) < 3 else (
-            len(S._fractals_of(tail, 0, rev_dir, want2)[0]) > 0, brk)
+            len(S._fractals_of(tail, 0, rev_dir, want2, mode)[0]) > 0, brk)
         calls["n"] += 1
-        if r[0] != orig_rs(pens, end_pen, seg_dir)[0]:
+        if r[0] != orig_rs(pens, end_pen, seg_dir, mode)[0]:
             calls["diff"] += 1
         return r
 
