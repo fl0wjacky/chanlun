@@ -69,34 +69,59 @@ def draw_layers(g, r, X, Y, keep=lambda a, b: True, bar_w=2):
             return None, True                         # ② 中枢已结束 ⇒ 整框实线
         return X(host[min(j0 + 2, last)]["i1"]), True  # ③ 仍在延续 ⇒ 拆两截，前三实线、延续虚线
 
-    def up_box(box, z, w):
-        """高一级别框（满 9 段，第 33 课）：A 方案换成独立的紫色，并给一层淡紫底（main 上跟母框同色、且不填）。
+    # ★ 价签先塞进哪张表 —— 决定**谁先占位**。`draw_labels` 的避让是「先到先得」：先放进
+    #   `placed` 的那一个占住原位，后来的重叠了才往上挪。类中枢一多（zec15 那份有 142 个），
+    #   要是它们先进表，就会把线段中枢的价签挤到上面去 —— 2026-10-02 小栋的原话是
+    #   「别把线段中枢的价签挤掉」。他说的虽然是 TradingView 的标签配额，同一条优先次序在
+    #   这边的避让上一样成立，所以**类中枢（含它升上去的）的价签攒着，两个循环跑完再进表**。
+    sink = labels
+
+    def tag(x, y, text, col):
+        """挂一个中枢价签：`col` 的 30% 底 + 白字，放在 (x, y) 上方一行。进 `sink` 那张表。
+
+        ★ 颜色**跟着框走**：谁的框用什么色，它的标签就用那个色（2026-10-02 小栋：
+          「每一个中枢左上角都标 [ZD, ZG]，颜色跟框一样」）。统一到「30% 同色底 + 白字」
+          这一条样式上，两边一致 —— 淡底 + 白字在深色图上是这一套里读得最清的那一档
+          （实测见 notes/pricetag-contrast.py）。
+        """
+        sink.append(((max(x, 0) + 8, y - 36), text, col, col + (C.get("tag_fill", 77),)))
+
+    def up_box(box, z, w, col):
+        """高一级别框（满 9 段，第 33 课）：**两族分色**，线宽跟母框一样。
+
+        2026-10-02 小栋定：① 类中枢升上去的、线段中枢升上去的**要分开**（浅紫 vs 品红，
+        见 style.py 的 UP_PEN／UP_SEG）；② **不再加粗** —— 原来 `w + up_w × 级别`，现在
+        直接就是母框的 `w`，级别靠颜色和标签文字区分（满 27 段的框只多一行「↑高两级」，
+        框本身与满 9 段那个同色同宽 —— 线宽这条通道已经让给「不加粗」了）。
 
         ★ 它没跟着「拆两截」—— 高一级别的「前三笔」没有定义（它由子级别中枢构成，不是笔/线段）。
         """
         for u in z.get("up", []):
             ub = [box[0], Y(u["ZG"]), box[2], Y(u["ZD"])]
-            uw = w + C["up_w"] * u["up"]
-            frame(ub, C["up"], uw, C.get("up_fill", 0), None, not z["live"])
-            labels.append(((max(box[0], 0) + 8, ub[1] - 36), "↑高%s级 [%g, %g]" % (
-                "一两三四"[u["up"] - 1], round(u["ZD"], 2), round(u["ZG"], 2)), C["up"]))
+            frame(ub, col, w, C.get("up_fill", 0), None, not z["live"])
+            tag(box[0], ub[1], "↑高%s级 [%g, %g]" % (
+                "一两三四"[u["up"] - 1], round(u["ZD"], 2), round(u["ZG"], 2)), col)
 
+    pen_tags = []                                     # 类中枢那族的价签：先攒着，最后进表（见上面的 `sink`）
+    sink = pen_tags
     for z in r["centers"]:                            # 类中枢：与笔同色
         a, b = pens[z["PI0"]]["i0"], pens[z["PI1"]]["i1"]
         if keep(a, b):
             box = [X(a), Y(z["ZG"]), X(b), Y(z["ZD"])]
             xm, solid = box_split(z, pens, len(pens) - 1)     # 未走完的那根＝最后一根笔
             frame(box, C["pen"], C["pc_w"], C["pc_fill"], xm, solid)
-            up_box(box, z, C["pc_w"])
+            up_box(box, z, C["pc_w"], C["up_pen"])    # ↑ 类中枢升上去的：浅紫
+            tag(box[0], box[1], "[%g, %g]" % (round(z["ZD"], 2), round(z["ZG"], 2)), C["pen"])
+    sink = labels
     for z in r["seg_centers"]:                        # 线段中枢：与线段同色
         a, b = done[z["PI0"]]["i0"], done[z["PI1"]]["i1"]
         if keep(a, b):
             box = [X(a), Y(z["ZG"]), X(b), Y(z["ZD"])]
             xm, solid = box_split(z, done, None)              # 线段层没有「没走完」这一员，见 box_split
             frame(box, C["seg"], C["sc_w"], C["sc_fill"], xm, solid)
-            up_box(box, z, C["sc_w"])
-            labels.append(((max(box[0], 0) + 8, box[1] - 36), "[%g, %g]" % (round(z["ZD"], 2), round(z["ZG"], 2)),
-                           C["seg"]))
+            up_box(box, z, C["sc_w"], C["up_seg"])    # ↑ 线段中枢升上去的：品红
+            tag(box[0], box[1], "[%g, %g]" % (round(z["ZD"], 2), round(z["ZG"], 2)), C["seg"])
+    labels.extend(pen_tags)                           # 线段中枢的价签已经占好位了，类中枢的补在后面
     for i, b in enumerate(bars):                      # K 线：影线 + 实体
         if keep(i, i):
             col = UP if b["c"] >= b["o"] else DN
@@ -164,46 +189,84 @@ def draw_signals(g, r, X, Y, keep=lambda a, b: True):
 
 
 def draw_labels(g, labels, font, col, placed=None):
-    """带底色的标签，最后画；与已放下的框重叠就往上挪一行（最多 4 次）。"""
+    """带底色的标签，最后画；与已放下的框重叠就往上挪一行（最多 4 次）。
+
+    标签元组两种形状：
+        ((x, y), 文本)                 深底 + `col` 色的字（价格刻度这类）
+        ((x, y), 文本, 文字色)         深底 + 指定的字色
+        ((x, y), 文本, 文字色, 底色)   ★ 价签：自带底色（30% 同色底），字一律纯白
+    ★ 价签（中枢区间、↑高N级）走第三种：A 表那一行「统一：30% 底 + 白字」（2026-10-02 小栋拍），
+      两边同一条规矩 —— TradingView 那边是 `color.new(col, 70)` + `textcolor = color.white`。
+      第四项给了就表示"这是价签"，字色直接用 WHITE，不再取第三项。
+    """
     placed = [] if placed is None else placed
     for lab in labels:
         (x, y), text = lab[0], lab[1]
         c = lab[2] if len(lab) > 2 else col
+        bg = lab[3] if len(lab) > 3 else BG + (215,)
+        if len(lab) > 3:
+            c = WHITE
         tw = g.textlength(text, font=font)
         box = lambda yy: (x - 6, yy - 2, x + tw + 6, yy + font.size + 8)
-        for _ in range(4):
+        # ★ 挪几次：原来只挪 4 行（每行 = 字高 + 12 ≈ 36 px，共 144 px）。2026-10-02 给小栋的
+        #   zec15 图实测：每一个中枢都挂价签之后标签从 21 个涨到 38 个，**4 行不够用了，
+        #   有 2 对标签摞在一起**（挪 4 次上面 4 行也占满了，再挪就放弃 —— 放弃就重叠着画）。
+        #   改成 12 行（432 px），并且**只在真的挪不动时才认输**：notes/label-overlap.py 量得到
+        #   改前 0 对、改后 0 对。别把它调回小数字 —— 它不是一个审美参数，是避让的成功条件。
+        for _ in range(12):
             bx = box(y)
             if not any(bx[0] < q[2] and q[0] < bx[2] and bx[1] < q[3] and q[1] < bx[3] for q in placed):
                 break
             y -= font.size + 12
-        g.rounded_rectangle(box(y), 6, fill=BG + (215,))
+        g.rounded_rectangle(box(y), 6, fill=bg)
         g.text((x, y), text, font=font, fill=c)
         placed.append(box(y))
     return placed
 
 
-def legend(d, x, y, font):
-    """图例样例与实际画法一致：K 线红绿、笔 / 线段是线、中枢是框、未完成是虚线。"""
-    def item(draw_sample, name):
-        nonlocal x
+def legend(d, x, y, font, wrap_x=None):
+    """图例样例与实际画法一致：K 线红绿、笔 / 线段是线、中枢是框、未完成是虚线。
+
+    线宽**直接取 `CHART`**（笔 2 / 段 5 / 类中枢框 2 / 线段中枢框 4），不再各写一个手抄的数字 ——
+    2026-10-02 小栋「线段 3→2」这一改，图例要是还画着 7，图例就是唯一一处说假话的地方。
+
+    `wrap_x` 给了就在**放不下下一项之前**换行（返回最后一项的右边界，语义跟不换行时一样）。
+    加这个是因为这一行本来就已经装不下了：2900 宽的图上，图例原样排到 x=3286，
+    最后那项「买卖点（…）」有 386 px 被画布切掉 —— 我量过 `out/zec15_duan.png` 的图例行，
+    最右边的像素一直到 x=2899（画布最后一列）都还有墨。**是旧账**（这一行的项和字都没动过），
+    但中枢价签这一改正要再往这行里塞东西，先把它收干净。
+    """
+    x0 = x
+
+    def item(draw_sample, name, sw=84):
+        """`sw` = 给样例留的宽度（样例比 84 宽就得自己说，不然字会贴上去）。"""
+        nonlocal x, y
+        if wrap_x is not None and x > x0 and x + sw + d.textlength(name, font=font) > wrap_x:
+            x = x0
+            y += font.size + 22
         draw_sample(x, y)
-        d.text((x + 84, y - 14), name, font=font, fill=TX)
-        x += 84 + d.textlength(name, font=font) + 56
+        d.text((x + sw, y - 14), name, font=font, fill=TX)
+        x += sw + d.textlength(name, font=font) + 56
     item(lambda x0, y0: [d.rectangle([x0 + k * 14, y0 - 10 + (k % 2) * 6, x0 + k * 14 + 8, y0 + 6 + (k % 2) * 6],
                                      fill=(UP, DN)[k % 2]) for k in range(5)], "K线")
     C = CHART
     pc, sc = C["pen"], C["seg"]
-    item(lambda x0, y0: d.line([x0, y0, x0 + 70, y0], fill=pc, width=3), "笔")
-    item(lambda x0, y0: d.rectangle([x0, y0 - 14, x0 + 70, y0 + 14], fill=pc + (C["pc_fill"],), outline=pc, width=2),
-         "类中枢（与笔同色）")
-    item(lambda x0, y0: d.line([x0, y0, x0 + 70, y0], fill=sc, width=7), "线段")
-    item(lambda x0, y0: d.rectangle([x0, y0 - 14, x0 + 70, y0 + 14], fill=sc + (C["sc_fill"],), outline=sc, width=4),
-         "线段中枢（与线段同色）")
-    item(lambda x0, y0: d.rectangle([x0, y0 - 14, x0 + 70, y0 + 14], fill=C["up"] + (C.get("up_fill", 0),),
-                                    outline=C["up"], width=4 + C["up_w"]),
-         "紫加粗框 = 高一级（满 9 段，第 33 课）")
-    item(lambda x0, y0: [d.line([x0, y0, x0 + 34, y0], fill=sc, width=7),
-                         dashed_line(d, (x0 + 34, y0), (x0 + 70, y0), sc, 7, 22, 12)],
+    item(lambda x0, y0: d.line([x0, y0, x0 + 70, y0], fill=pc, width=C["pen_w"]), "笔")
+    item(lambda x0, y0: d.rectangle([x0, y0 - 14, x0 + 70, y0 + 14], fill=pc + (C["pc_fill"],),
+                                    outline=pc, width=C["pc_w"]), "类中枢（与笔同色）")
+    item(lambda x0, y0: d.line([x0, y0, x0 + 70, y0], fill=sc, width=C["seg_w"]), "线段")
+    item(lambda x0, y0: d.rectangle([x0, y0 - 14, x0 + 70, y0 + 14], fill=sc + (C["sc_fill"],),
+                                    outline=sc, width=C["sc_w"]), "线段中枢（与线段同色）")
+    item(lambda x0, y0: [d.rectangle([x0, y0 - 14, x0 + 34, y0 + 14], fill=C["up_pen"] + (C.get("up_fill", 0),),
+                                     outline=C["up_pen"], width=C["pc_w"]),
+                         d.rectangle([x0 + 40, y0 - 14, x0 + 74, y0 + 14], fill=C["up_seg"] + (C.get("up_fill", 0),),
+                                     outline=C["up_seg"], width=C["sc_w"])],
+         "高一级（满 9 段，第 33 课）：浅紫＝类中枢升 / 品红＝线段中枢升；框线跟母框一样粗，不另行加粗")
+    item(lambda x0, y0: [d.rounded_rectangle([x0, y0 - 14, x0 + 122, y0 + 15], 6, fill=pc + (C["tag_fill"],)),
+                         d.text((x0 + 10, y0 - 13), "[ZD, ZG]", font=font, fill=WHITE)],
+         "价签（每个中枢都有，颜色跟框一样）：30% 同色底 + 白字", sw=138)
+    item(lambda x0, y0: [d.line([x0, y0, x0 + 34, y0], fill=sc, width=C["seg_w"]),
+                         dashed_line(d, (x0 + 34, y0), (x0 + 70, y0), sc, C["seg_w"], 22, 12)],
          "中枢框拆两截：前三笔实线 / 延续虚线")
     item(lambda x0, y0: [d.polygon([(x0 + 18, y0 - 12), (x0 + 6, y0 + 12), (x0 + 30, y0 + 12)], fill=C["buy"]),
                          d.polygon([(x0 + 52, y0 + 12), (x0 + 40, y0 - 12), (x0 + 64, y0 - 12)], fill=C["sell"])],
