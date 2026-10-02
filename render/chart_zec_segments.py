@@ -59,7 +59,7 @@ d.rectangle([X0 - 1, Y0 - 1, X1, Y1], outline=LINE, width=1)
 for p in ticks:                                     # 价格刻度在绘图区右侧
     d.text((X1 + 14, Y0 + Y(p) - 14), "%g" % p, font=f_n, fill=MU)
 
-legend(d, 64, Y1 + 62, f_n)
+legend(d, 64, Y1 + 62, f_n, wrap_x=W - 60)   # 给了 wrap_x：这一行原来排到 3286、右端被画布切掉
 
 # 统计
 up = sum(1 for s in segs if s["dir"] == "up")
