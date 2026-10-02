@@ -18,7 +18,7 @@ def seg(n, a, b):
 COORD = re.compile(r'L(\d{1,3}):(\d+)(?:`?\s*[-–－~～]\s*`?:?(\d+))?')
 Q = re.compile(r'「([^「」]{4,})」')
 files = sorted(glob.glob(REPO + '/docs/concepts/inventory_*.md') + glob.glob(REPO + '/docs/spec/*.md') + [REPO + '/docs/concepts/README.md', REPO + '/docs/concepts/兜底_nova.md'])
-rep = {'A': [], 'B': [], 'ok': 0, 'blocks': 0, 'coordblocks': 0}
+rep = {'A': [], 'B': [], 'ok_coord': 0, 'ok_nocoord': 0, 'blocks': 0, 'coordblocks': 0}
 for fp in files:
     for i, line in enumerate(open(fp, encoding='utf-8'), 1):
         qs = Q.findall(line)
@@ -48,6 +48,8 @@ for fp in files:
                     inl = any(all(norm(p) in whole[n] for p in parts) for n, a, b in cs)
                     rep['B'].append((os.path.relpath(fp, REPO), i, q[:40], [f'L{n}:{a}-{b}' for n, a, b in cs][:3], 'same-lesson' if inl else 'other-lesson'))
                     continue
-            rep['ok'] += 1
+                rep['ok_coord'] += 1
+            else:
+                rep['ok_nocoord'] += 1  # 原文里找得到，但同行无坐标 ⇒ 坐标没核过，不算「核过且对」
 print(json.dumps({k: (len(v) if isinstance(v, list) else v) for k, v in rep.items()}, ensure_ascii=False))
 json.dump(rep, open('/tmp/v1_out.json', 'w'), ensure_ascii=False, indent=0)

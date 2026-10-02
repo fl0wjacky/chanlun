@@ -118,6 +118,8 @@
 
 ## 审阅记录
 
+- **2026-10-02 计数口径改**（Atlas、Bram 指出）：`v1_quotes.py` 旧版的 `ok` 混了『坐标核过且对』与『同行没坐标、根本没核』。现拆成 `ok_coord` 与 `ok_nocoord`。main `4e6200e` 上：A 0 ／ B 146 ／ ok_coord 3263 ／ **ok_nocoord 1197** ／ blocks 4606 ／ coordblocks 3409。本文上面各处的旧 `ok` 数照旧留档，按此拆读。
+
 - **脚本能跑的范围**：`v1_quotes.py` 写死了四份文件名（含 `兜底_nova.md`），在那份文件还没有的旧 revision 上会直接报 FileNotFoundError（Bram 在 `30d57df` 上撞到）。复算请在 `4719aa8` 及之后。
 
 - Atlas 独立核了 ④-3 与 ⑤-#3（属实），并纠正 ④ 第一行收尾那句；其余各节**未经他人逐条复核**。
