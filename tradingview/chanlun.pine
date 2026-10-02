@@ -28,8 +28,6 @@ penRule   = input.string("老笔", "笔的标准", options = ["老笔", "新笔"
      tooltip = "老笔（第 77 课）：顶底分型之间至少隔一根独立K线。新笔（第 81 课）：包含处理后不共用K线，且两个极值K线之间原始K线 ≥ 3 根。")
 tickSize  = input.float(0.0, "价格精度（0 = 用原始价格）", minval = 0.0, group = G1,
      tooltip = "第 64 课：精度一旦预设就要一路保持。填 0.1 表示高低价按 0.1 取整后再算。")
-calcBars  = input.int(3000, "参与计算的K线数（最近）", minval = 300, maxval = 10000, group = G1,
-     tooltip = "越多越慢；报「loop 执行超过 500ms」或脚本超时就调小。")
 // 特征序列**合并方向**的两种口径（小栋 2026-10-02 ⑤；与 Python 引擎 core/segment.py 的 mode 一一对应）
 featDir   = input.string("A 开头按线段方向", "特征序列合并方向", options = ["A 开头按线段方向", "B 全程按线段方向"], group = G1,
      tooltip = "第 67 课只说特征序列也要做非包含处理，没说合并方向怎么取。A（默认）＝开头按线段方向、之后按『最后两根』定方向；B＝全程按线段方向（chan.py / YuYuKunKun / ZenTheory 的做法）。默认 A 与历史输出一致。")
@@ -45,6 +43,9 @@ segCol    = input.color(color.rgb(255, 190, 60), "", inline = "s", group = G2)
 segW      = input.int(3, "线宽", minval = 1, maxval = 8, inline = "s", group = G2)
 showSC    = input.bool(true,  "线段中枢（与线段同色）", group = G2)
 showUp    = input.bool(true,  "高一级别中枢（满 9 段，同色加粗）", group = G2)
+selfCheck = input.bool(false, "实时回滚自检（挂个角标）", group = G2,
+     tooltip = "打开后图角挂一个标签。回滚生效时恒为 ✓；不生效时第二个 tick 就会 ✗。" +
+               "查的是数组（aM/zH），不是标量 —— 标量回滚不代表数组回滚。参照物是引擎值 bar_index。")
 fillTr    = input.int(85, "中枢填充透明度", minval = 0, maxval = 100, group = G2)
 drawBars  = input.int(3000, "只画最近多少根K线里的结构", minval = 100, maxval = 9000, group = G2,
      tooltip = "TradingView 每种图形最多 500 个；太长的历史会画不全，所以只画最近这一段。")
@@ -111,14 +112,62 @@ type Sig
 // ───────────────────────── 逐根收集数据 ─────────────────────────
 q(float p) => tickSize > 0 ? math.round(p / tickSize) * tickSize : p
 
-var array<float> aH = array.new<float>()
-var array<float> aL = array.new<float>()
-var array<float> aM = array.new<float>()   // MACD 柱（DIF − DEA，EMA 以第一根收盘价起算，与 Python 版一致）
+contains(float ah, float al, float bh, float bl) => (ah >= bh and al <= bl) or (bh >= ah and bl <= al)
+
+// ───────────────────────── K线：包含处理与分型（第 65 课）─────────────────────────
+// ★ 逐根增量（本卡第①步）。原来是每根K线往 aH/aL 里存、在 barstate.islast 里把整段
+//   standardize() + fractals() 重算一遍 —— 那就是 500ms/超时的来源。现在改成 var 状态，
+//   每根只推进一步，islast 只负责画。
+//
+//   与 Python 侧 core/kline.py 的**批量**实现逐前缀等价：notes/pine-incremental-parity.py
+//   （9 份真实数据 + 300 条随机行情，90804 个前缀，0 分歧；--self-test 两支正臂全红）。
+//   等价靠的不变量：**一次推入只追加一根、或只改动最后一根**。因此
+//     · 只有最后一个分型格子（k = 长度−2）的判据含被改动的元素 ⇒ 重算只需它一格；
+//     · 合并时那一格要**重算**（值可能变），但**不能删掉不补** —— 那会丢掉一个真分型。
+//   两条边界都是量出来的，不是估的（详见上面那份笔记）。
+//
+//   zIH/zIL 的含义与批量版一致：『这个极值是哪根原始K线贡献的』——画图精确定位用。
+//   注意它们现在是**原始下标**（off 恒为 0），不再是 slice 内的相对下标。
+//
+//   ★ 关于数组长度（不是漏了，是故意的）：这几支和下面的 aM 都**不再截断**，
+//     会一直长到「图上K线数」。上限是 Pine 的数组容量 10 万，而主流套餐单张图最多几万根
+//     （原来是 >20000 就 shift 掉）。**不能 shift**：shift 掉之后数组下标就跟「原始下标」
+//     错位了，而 zIH/zIL 和 aM.get(off + t) 全都按原始下标取值 —— 那是静默错位，不是省内存。
+var array<float> zH  = array.new<float>()   // 标准化序列：高
+var array<float> zL  = array.new<float>()   //               低
+var array<int>   zIH = array.new<int>()     //               最高点来自哪根原始K线
+var array<int>   zIL = array.new<int>()     //               最低点来自哪根原始K线
+var array<Fx>    zFx = array.new<Fx>()      // 分型表（k 递增、顶底严格交替）
+var bool  zStarted = false                  // 方向是否已定（标准化序列已有 ≥2 根）
+var float zPrevH = na                       // 未定方向时扫到的最后一根候选（即原算法里的 k−1）
+var float zPrevL = na
+var int   zPrevI = na
+var int   zN     = 0                        // 已推入的原始K线根数 = 原始下标的上界
+
+// 重算最后一个分型格子。数组一律走参数（函数里不碰全局）。
+zRefx(array<float> H, array<float> L, array<int> IH, array<int> IL, array<Fx> FX) =>
+    n = H.size()
+    while FX.size() > 0 and FX.get(FX.size() - 1).k >= n - 2    // 等价于批量版的 k < 长度−2 过滤
+        FX.pop()
+    if n >= 3
+        k = n - 2
+        h0 = H.get(k - 1)
+        h1 = H.get(k)
+        h2 = H.get(k + 1)
+        l0 = L.get(k - 1)
+        l1 = L.get(k)
+        l2 = L.get(k + 1)
+        if h1 > h0 and h1 > h2 and l1 > l0 and l1 > l2
+            FX.push(Fx.new(k, IH.get(k), true, h1))
+        else if l1 < l0 and l1 < l2 and h1 < h0 and h1 < h2
+            FX.push(Fx.new(k, IL.get(k), false, l1))
+    true
+
+// MACD 柱（DIF − DEA，EMA 以第一根收盘价起算，与 Python 版一致）
+var array<float> aM = array.new<float>()
 var float emaF = na
 var float emaS = na
 var float dea  = na
-aH.push(q(high))
-aL.push(q(low))
 if na(emaF)
     emaF := close
     emaS := close
@@ -128,66 +177,68 @@ else
     emaS += (close - emaS) * 2.0 / (mSlow + 1)
     dea  += (emaF - emaS - dea) * 2.0 / (mSig + 1)
 aM.push(emaF - emaS - dea)
-if aH.size() > 20000                              // 数组上限 10 万；只留最近 2 万根（calcBars ≤ 1 万）
-    aH.shift(), aL.shift(), aM.shift()
+// ★ aM 也不再截断（原来 >20000 就 shift）：strengthOf 里是 aM.get(off + t)，off=0 时 t 就是原始下标。
+//   一旦 shift，下标就和增量状态对不上了 —— 性能旋钮不能拿来讲正确性。
 
-// ───────────────────────── K线：包含处理与分型（第 65 课）─────────────────────────
-contains(float ah, float al, float bh, float bl) => (ah >= bh and al <= bl) or (bh >= ah and bl <= al)
-
-standardize(array<float> H, array<float> L) =>
-    n = H.size()
-    sH = array.new<float>()
-    sL = array.new<float>()
-    sIH = array.new<int>()
-    sIL = array.new<int>()
-    if n > 0
-        k = 1
-        while k < n and contains(H.get(k - 1), L.get(k - 1), H.get(k), L.get(k))
-            k += 1
-        if k >= n
-            sH.push(H.get(0)), sL.push(L.get(0)), sIH.push(0), sIL.push(0)
-        else
-            sH.push(H.get(k - 1)), sL.push(L.get(k - 1)), sIH.push(k - 1), sIL.push(k - 1)
-            sH.push(H.get(k)), sL.push(L.get(k)), sIH.push(k), sIL.push(k)
-            i = k + 1
-            while i < n
-                bh = H.get(i)
-                bl = L.get(i)
-                m = sH.size()
-                ph = sH.get(m - 1)
-                pl = sL.get(m - 1)
-                up = ph > sH.get(m - 2) or (ph == sH.get(m - 2) and pl > sL.get(m - 2))
-                if contains(ph, pl, bh, bl)
-                    if up
-                        sH.set(m - 1, math.max(ph, bh)), sL.set(m - 1, math.max(pl, bl))
-                        if bh > ph
-                            sIH.set(m - 1, i)
-                        if bl > pl
-                            sIL.set(m - 1, i)
-                    else
-                        sH.set(m - 1, math.min(ph, bh)), sL.set(m - 1, math.min(pl, bl))
-                        if bh < ph
-                            sIH.set(m - 1, i)
-                        if bl < pl
-                            sIL.set(m - 1, i)
-                else
-                    sH.push(bh), sL.push(bl), sIH.push(i), sIL.push(i)
-                i += 1
-    [sH, sL, sIH, sIL]
-
-fractals(array<float> sH, array<float> sL, array<int> sIH, array<int> sIL) =>
-    fx = array.new<Fx>()
-    m = sH.size()
-    k = 1
-    while k < m - 1
-        h0 = sH.get(k - 1), h1 = sH.get(k), h2 = sH.get(k + 1)
-        l0 = sL.get(k - 1), l1 = sL.get(k), l2 = sL.get(k + 1)
-        if h1 > h0 and h1 > h2 and l1 > l0 and l1 > l2
-            fx.push(Fx.new(k, sIH.get(k), true, h1))
-        else if l1 < l0 and l1 < l2 and h1 < h0 and h1 < h2
-            fx.push(Fx.new(k, sIL.get(k), false, l1))
-        k += 1
-    fx
+// ── 本根推入增量状态（下面这段就是原 standardize() 那个单遍扫描，逐行搬到顶层逐根跑）──
+// ★ 未定方向那一段（原算法里的前缀扫描）。**整段互相包含时批量版塌成「第一根」**，
+//   不是最后一根 —— 所以第 0 根就先摆进状态，等方向定下来那一刻再把第 0 格换成 k−1 那根。
+//   （这一条我第一版照搬时漏了，是逐行对回 Python 才看见的；见 notes/pine-incremental-parity.py
+//    的 snapshot()，与 core/kline.py 的 `if k >= n: return [bars[0]...]` 同义。）
+zcH = q(high)
+zcL = q(low)
+if zH.size() == 0
+    zH.push(zcH)
+    zL.push(zcL)
+    zIH.push(zN)
+    zIL.push(zN)
+    zPrevH := zcH
+    zPrevL := zcL
+    zPrevI := zN
+else if not zStarted
+    if contains(zPrevH, zPrevL, zcH, zcL)
+        zPrevH := zcH                                       // 仍在互相包含：候选往后挪（状态里留的仍是第一根）
+        zPrevL := zcL
+        zPrevI := zN
+    else
+        zH.set(0, zPrevH)                                   // 方向定下来了：第 0 格换成 k−1 那根，再追加本根
+        zL.set(0, zPrevL)
+        zIH.set(0, zPrevI)
+        zIL.set(0, zPrevI)
+        zH.push(zcH)
+        zL.push(zcL)
+        zIH.push(zN)
+        zIL.push(zN)
+        zStarted := true
+else
+    zm = zH.size()
+    zph = zH.get(zm - 1)
+    zpl = zL.get(zm - 1)
+    zup = zph > zH.get(zm - 2) or (zph == zH.get(zm - 2) and zpl > zL.get(zm - 2))
+    if contains(zph, zpl, zcH, zcL)
+        if zup                                              // 向上：两个端点都取高
+            zH.set(zm - 1, math.max(zph, zcH))
+            zL.set(zm - 1, math.max(zpl, zcL))
+            if zcH > zph
+                zIH.set(zm - 1, zN)
+            if zcL > zpl
+                zIL.set(zm - 1, zN)
+        else                                                // 向下：两个端点都取低
+            zH.set(zm - 1, math.min(zph, zcH))
+            zL.set(zm - 1, math.min(zpl, zcL))
+            if zcH < zph
+                zIH.set(zm - 1, zN)
+            if zcL < zpl
+                zIL.set(zm - 1, zN)
+    else
+        zH.push(zcH)
+        zL.push(zcL)
+        zIH.push(zN)
+        zIL.push(zN)
+zRefx(zH, zL, zIH, zIL, zFx)
+zN += 1
+// ★ 本根的「喂笔」在下面笔那一节的末尾（`zPenStep` 定义之后）—— pine 要求先定义后调用。
+//   中间那一段全是函数定义，不执行，所以逐根顺序仍是：标准化 → 分型 → 喂笔。
 
 // ───────────────────────── 笔（第 77 课 + 回头修正；第 81 课新笔）─────────────────────────
 far(Fx a, Fx b) => penRule == "老笔" ? b.k - a.k >= 4 : (b.k - a.k >= 3 and math.abs(b.i - a.i) >= 4)
@@ -250,53 +301,132 @@ fixStart(array<Fx> fx, array<int> seq, array<int> pend, array<int> stack, array<
                 j -= 1
     true
 
-buildPens(array<Fx> fx, array<float> sH, array<float> sL) =>
-    seq = array.new<int>()
-    pend = array.from(-1)
-    stack = array.new<int>()
-    fxAtK = array.new<int>(sH.size(), -1)
-    for [n, f] in fx
-        fxAtK.set(f.k, n)
-    nfx = 0
-    while nfx < fx.size()
-        stack.push(nfx)
-        nfx += 1
-        while stack.size() > 0
-            fi = stack.pop()
-            f = fx.get(fi)
-            ns = seq.size()
-            if ns == 0
-                seq.push(fi)
-            else
-                last = fx.get(seq.get(ns - 1))
-                if f.top == last.top
-                    if beyond(f, last)
-                        pd = pend.get(0)
-                        if pd >= 0 and (ns < 3 or not beyond(last, fx.get(seq.get(ns - 3))))
-                            pend.set(0, -1)
-                            seq.pop()
-                            seq.set(seq.size() - 1, pd)
-                            pushRange(stack, fxAtK, fx.get(pd).k, f.k)       // 先压：它在 fixStart 的重看之后处理
-                            fixStart(fx, seq, pend, stack, fxAtK, sH, sL)
-                        else
-                            seq.set(ns - 1, fi)
-                            pend.set(0, -1)
-                            fixStart(fx, seq, pend, stack, fxAtK, sH, sL)
-                else if far(last, f) and extremeIn(f, last.k, f.k, sH, sL)
-                    seq.push(fi)
-                    pend.set(0, -1)
-                else if not far(last, f) and ns >= 2 and beyond(f, fx.get(seq.get(ns - 2)))
+// 栈的排空循环：从工作栈里取分型、喂进 (seq, pend)。批量与逐根增量**共用这一段**
+// —— 两处各抄一份的话，改了一处忘了另一处是迟早的事。
+zDrain(array<Fx> fx, array<float> sH, array<float> sL,
+       array<int> seq, array<int> pend, array<int> stack, array<int> fxAtK) =>
+    while stack.size() > 0
+        fi = stack.pop()
+        f = fx.get(fi)
+        ns = seq.size()
+        if ns == 0
+            seq.push(fi)
+        else
+            last = fx.get(seq.get(ns - 1))
+            if f.top == last.top
+                if beyond(f, last)
                     pd = pend.get(0)
-                    if pd < 0 or beyond(f, fx.get(pd))
-                        pend.set(0, fi)
-    pens = array.new<Unit>()
+                    if pd >= 0 and (ns < 3 or not beyond(last, fx.get(seq.get(ns - 3))))
+                        pend.set(0, -1)
+                        seq.pop()
+                        seq.set(seq.size() - 1, pd)
+                        pushRange(stack, fxAtK, fx.get(pd).k, f.k)       // 先压：它在 fixStart 的重看之后处理
+                        fixStart(fx, seq, pend, stack, fxAtK, sH, sL)
+                    else
+                        seq.set(ns - 1, fi)
+                        pend.set(0, -1)
+                        fixStart(fx, seq, pend, stack, fxAtK, sH, sL)
+            else if far(last, f) and extremeIn(f, last.k, f.k, sH, sL)
+                seq.push(fi)
+                pend.set(0, -1)
+            else if not far(last, f) and ns >= 2 and beyond(f, fx.get(seq.get(ns - 2)))
+                pd = pend.get(0)
+                if pd < 0 or beyond(f, fx.get(pd))
+                    pend.set(0, fi)
+    true
+
+// 端点下标 → 笔。只在 islast 里调一次（O(笔数)，画图本来也要走这么多）。
+zUnits(array<Fx> fx, array<int> seq) =>
+    out = array.new<Unit>()
     m = seq.size()
     if m >= 2
         for t = 0 to m - 2
             a = fx.get(seq.get(t))
             b = fx.get(seq.get(t + 1))
-            pens.push(Unit.new(a.i, b.i, a.p, b.p, math.max(a.p, b.p), math.min(a.p, b.p)))
-    pens
+            out.push(Unit.new(a.i, b.i, a.p, b.p, math.max(a.p, b.p), math.min(a.p, b.p)))
+    out
+
+// ── 第②步：笔逐根 ─────────────────────────────────────────────────────────
+// 状态只有 (zSeq, zPend)：笔端点在 zFx 里的下标，和待定分型。zFx 只会往后加
+// （① 的 zRefx 不删不改旧格 —— 证明见 core 那边的注释），所以**下标是稳定的**，
+// 这里可以安心存下标而不是存分型本身。
+var array<int>   zSeq  = array.new<int>()          // 笔端点：zFx 下标
+var array<int>   zPend = array.from(-1)            // 待定分型：zFx 下标，-1 = 无
+var array<int>   zStack = array.new<int>()         // 工作栈（每根用完即空）
+var array<int>   zFxAtK = array.new<int>()         // 标准化下标 k -> zFx 下标
+var array<int>   zPSt  = array.from(0)             // 已喂进 zSeq 的分型个数
+var array<float> zSig  = array.from(-1.0, 0.0, 0.0, 0.0) // 已喂的**最后一个**分型的签名 [k, i, p, top]
+
+// 一根一步。守卫三条 —— 正确性**不押在** ① 的"只增"不变量上，对不上就走第 3 条整段重算：
+//   1) 分型表没变（长度相同且尾分型签名相同）⇒ 无事可做
+//   2) 长了一格**且旧尾巴签名没变**          ⇒ 只喂新的那一个（O(1) 摊还）
+//   3) 其余（缩了 / 跳变 / 尾格被改）       ⇒ 从空重算，不在旧状态上猜
+// ★ 守卫 2 里那次签名比较是必须的，不是保险：只比长度的话，「旧尾巴被改 + 又长一格」
+//   长度照样对得上，可被改的那一格得重喂。有了它，上面那句"不押在①的不变量上"才成立。
+zPenStep(array<Fx> fx, array<float> sH, array<float> sL,
+         array<int> seq, array<int> pend, array<int> stack, array<int> fxAtK,
+         array<int> st, array<float> sig) =>
+    m = fx.size()
+    if m == 0
+        while seq.size() > 0
+            seq.pop()
+        pend.set(0, -1)
+        st.set(0, 0)
+    else if m == st.get(0) and sig.get(0) == fx.get(m - 1).k and sig.get(1) == fx.get(m - 1).i and sig.get(2) == fx.get(m - 1).p and sig.get(3) == (fx.get(m - 1).top ? 1.0 : 0.0)
+        st.set(0, m)                                   // 守卫 1：分型表原封不动
+    else
+        ok2 = m == st.get(0) + 1
+        if ok2 and st.get(0) > 0                           // 旧尾巴得没被动过才敢只喂一个
+            ok2 := sig.get(0) == fx.get(m - 2).k and sig.get(1) == fx.get(m - 2).i and sig.get(2) == fx.get(m - 2).p and sig.get(3) == (fx.get(m - 2).top ? 1.0 : 0.0)
+        if ok2
+            stack.push(m - 1)                          // 守卫 2：只喂新长出来的那个
+            zDrain(fx, sH, sL, seq, pend, stack, fxAtK)
+        else
+            while seq.size() > 0                       // 守卫 3：整段重算
+                seq.pop()
+            pend.set(0, -1)
+            for i = 0 to m - 1
+                stack.push(i)
+                zDrain(fx, sH, sL, seq, pend, stack, fxAtK)
+        st.set(0, m)
+        sig.set(0, fx.get(m - 1).k)
+        sig.set(1, fx.get(m - 1).i)
+        sig.set(2, fx.get(m - 1).p)
+        sig.set(3, fx.get(m - 1).top ? 1.0 : 0.0)
+    true
+
+// ── 第②步：本根把新分型喂进增量笔状态（位置在这里是因为 pine 要先定义后调用）──
+// zRefx 只可能动 k = L−2 那一格（pop 掉旧的、再按新值决定要不要补回来），所以 fxAtK
+// 的维护是 O(1)：把那一格先当空、再看 zFx 尾巴是不是正好落在它上面。
+// zFx 只会从**尾部**增删 ⇒ 其余分型在 zFx 里的下标**永不改变**，而 zSeq 存的就是这些下标。
+if zH.size() >= 3
+    kk = zH.size() - 2
+    while zFxAtK.size() <= kk
+        zFxAtK.push(-1)
+    nf = zFx.size()
+    zFxAtK.set(kk, nf > 0 and zFx.get(nf - 1).k == kk ? nf - 1 : -1)
+zPenStep(zFx, zH, zL, zSeq, zPend, zStack, zFxAtK, zPSt, zSig)
+
+// ── 实时回滚自检（开关默认关）───────────────────────────────────────────────
+// ① ② 的正确性都押在"var 状态在实时 tick 上会回滚到上一根"这件事上，而这件事**本机验不了**，
+// 只能上 TradingView。这个开关把它变成一眼能看的东西，不用"盯几分钟凭感觉"。
+//
+// ★ 查的是**数组**（aM 每根无条件 push），不是标量：标量回滚了不代表数组回滚了，
+//   而 ② 押的恰恰是数组（zSeq/zFxAtK/zPSt/zSig 四个）。
+// ★ 参照物只能是**引擎值** bar_index —— 它不参与 var 回滚。回滚生效则恒等式成立；
+//   不生效时多推一次，第二个 tick 当场 ✗。
+var bool   zSelfOK  = true
+var string zSelfMsg = ""
+if selfCheck
+    if aM.size() != bar_index + 1
+        zSelfOK  := false
+        zSelfMsg := "aM.size=" + str.tostring(aM.size()) + " ≠ bar_index+1=" + str.tostring(bar_index + 1) + "（数组没回滚）"
+    else if zN != bar_index + 1
+        zSelfOK  := false
+        zSelfMsg := "zN=" + str.tostring(zN) + " ≠ bar_index+1=" + str.tostring(bar_index + 1)
+    else if zH.size() > zN
+        zSelfOK  := false
+        zSelfMsg := "zH.size=" + str.tostring(zH.size()) + " > zN=" + str.tostring(zN)
 
 // ───────────────────────── 线段（第 67 / 71 / 78 课）─────────────────────────
 isUp(Unit u) => u.p1 > u.p0
@@ -736,14 +866,12 @@ drawCenter(Ctr z, int x0, int x1, color col, int w, bool withLabel, bool prov) =
 
 if barstate.islast
     clearAll()
-    n = aH.size()
-    off = math.max(0, n - calcBars)                   // 截取最近 calcBars 根；相对下标 i 在数组里是 off + i
-    base = bar_index - (n - 1) + off                  // 相对下标 i 对应的 bar_index = base + i（数组开头可能已被 shift 掉）
-    H = aH.slice(off, n)
-    L = aL.slice(off, n)
-    [sH, sL, sIH, sIL] = standardize(H, L)
-    fx = fractals(sH, sL, sIH, sIL)
-    pens = buildPens(fx, sH, sL)
+    n = zN                                            // 原始K线根数（不再截断 —— 增量状态从第 0 根攒起）
+    off = 0                                           // ★ 相对下标 == 原始下标。保留这个名字只为 signalsOf/strengthOf 的调用点不动：aM.get(off + t)
+    base = bar_index - (n - 1) + off                  // 原始下标 i 对应的 bar_index = base + i
+    // ① 的产物（zH/zL/zIH/zIL/zFx）和 ② 的产物（zSeq）现在都只在**逐根**那一段用；
+    // islast 这里不再需要 sH/sL/sIH/sIL/fx 那几个别名了（原来是喂 buildPens 的）。
+    pens = zUnits(zFx, zSeq)                           // ② 的产物：笔端点序列在每根上增量维护，这里只摊平成 Unit
     segs = buildSegments(pens)
     done = array.new<Unit>()
     for s in segs
@@ -805,3 +933,10 @@ if barstate.islast
                  style = buy ? label.style_label_up : label.style_label_down,
                  color = s.confirmed ? col : color.new(col, 100), textcolor = s.confirmed ? color.white : col,
                  size = size.small))
+
+    // 回滚自检角标
+    if selfCheck
+        gLabels.push(label.new(bar_index, high, zSelfOK ? "回滚自检 ✓" : "回滚自检 ✗  " + zSelfMsg,
+             style = zSelfOK ? label.style_label_down : label.style_label_up,
+             color = zSelfOK ? color.new(color.green, 15) : color.new(color.red, 0),
+             textcolor = color.white, size = size.normal))
