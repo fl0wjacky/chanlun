@@ -72,6 +72,11 @@ selfCheck = input.bool(false, "实时回滚自检（挂个角标）", group = G4
                "查的是数组（aM/zH），不是标量 —— 标量回滚不代表数组回滚。参照物是引擎值 bar_index。")
 drawBars  = input.int(3000, "只画最近多少根K线里的结构", minval = 100, maxval = 9000, group = G4,
      tooltip = "TradingView 每种图形最多 500 个；太长的历史会画不全，所以只画最近这一段。")
+segCheck  = input.bool(false, "线段逐根自检（挂个角标）", group = G4,
+     tooltip = "打开后在 islast 把增量 (zPens, zSegs) 跟整段重算 buildSegments(zUnits(...)) 对一遍。" +
+               "这是唯一取值级验证：语法解析只证写法、lockstep 只证结构、Python 参照证的是算法（另一门语言）。" +
+               "B 模式下不生效（B 本来就整段重算）。" +
+               "打开会让 islast 又变回 O(n)（仅这一次，用于真机对账，不影响逐根摊还）。")
 
 G5 = "买卖点"
 sigLevel  = input.string("线段中枢", "按哪层中枢判", options = ["线段中枢", "类中枢"], group = G5,
@@ -380,6 +385,21 @@ var array<int>   zFxAtK = array.new<int>()         // 标准化下标 k -> zFx �
 var array<int>   zPSt  = array.from(0)             // 已喂进 zSeq 的分型个数
 var array<float> zSig  = array.from(-1.0, 0.0, 0.0, 0.0) // 已喂的**最后一个**分型的签名 [k, i, p, top]
 
+// ── 第③步：线段逐根 ─────────────────────────────────────────────────────────
+// 状态 = (zPens, zSegs, zSegI, zSegBorn, zSegSig)。zPens 是摊平笔（与 zSeq 同步的 Unit 序列），
+// zSegs 是**已确认段（只增）**。前提是「已确认段前缀稳定」：mode A（默认）9 份数据 + 2000 随机序列
+// 都 0 次撤销；mode B 不成立（反向分型可被后笔包含撤销），所以 B 不走逐根、在 islast 整段重算。
+// ★ 为什么缓存段不会 stale：续扫只在「纯追加一笔」时复用 (zSegI, zSegBorn)，其余一切改动
+//   （尾端点被换 / 缩水 / 跳变 / 深处回改）都走整段重算、从头补摊平 + 续扫归零。fix_start 能
+//   回改 5 笔深（zec15@3738、zec_2h@206 实测），会碰到已确认段的末笔（endPen ≤ M-4 挡不住），
+//   所以**不押**「zSeq 只动最后两格」——那说的是 zFx（② 的 zRefx 只动 k=L-2 那一格）、不是
+//   zSeq；押的是「非纯追加一律重算」这条（seg-sync-deepfix-probe.py 逐根对账 0 分歧）。
+var array<Unit>  zPens    = array.new<Unit>()          // 摊平笔（增量，与 zSeq 尾同步）
+var array<Unit>  zSegs    = array.new<Unit>()          // 已确认段（只增）
+var array<int>   zSegI    = array.from(0)              // 段扫描位置（= 上一段 endPen + 1）
+var array<int>   zSegBorn = array.from(0)              // 方向确立的破位笔（case-1 的 at；case-2 归 0）
+var array<int>   zSegSig  = array.from(-1, -1, -1)     // 笔序列尾签名 [last, 2nd-last, 3rd-last]（zFx 下标，-1 = 无）
+
 // 一根一步。守卫三条 —— 正确性**不押在** ① 的"只增"不变量上，对不上就走第 3 条整段重算：
 //   1) 分型表没变（长度相同且尾分型签名相同）⇒ 无事可做
 //   2) 长了一格**且旧尾巴签名没变**          ⇒ 只喂新的那一个（O(1) 摊还）
@@ -450,6 +470,10 @@ if selfCheck
     else if zH.size() > zN
         zSelfOK  := false
         zSelfMsg := "zH.size=" + str.tostring(zH.size()) + " > zN=" + str.tostring(zN)
+
+// ── ③ 逐根自检角标（segCheck）：在 islast 把增量 (zPens, zSegs) 跟整段重算对一遍 ──
+var bool   segOK  = true
+var string segMsg = ""
 
 // ───────────────────────── 线段（第 67 / 71 / 78 课）─────────────────────────
 isUp(Unit u) => u.p1 > u.p0
@@ -637,6 +661,108 @@ buildSegments(array<Unit> P) =>
     if n - i >= 3
         segs.push(mkSeg(P, i, n - 1, true))
     segs
+
+// ── ③ 增量续扫（A 模式；B 在 islast 走整段 buildSegments）──────────────────
+// 与 buildSegments 的内层逐行对应，只是 (i, born) 变成跨根持久状态 (zSegI, zSegBorn)、
+// segs 变成只增的 var。每根最多确认 1 段（多数 0 段），摊还 O(1)。
+// 同步按 zSeq 尾部三格签名（zSegSig）分两路：
+//   · 纯追加（多一笔、旧尾巴签名不动）⇒ push 一笔，续扫（旧前缀没动，复用 (zSegI, zSegBorn) 安全）；
+//   · 其它（尾端点被换 / 缩水 / 跳变 / 深处被改）⇒ 摊平 + 段全作废重来。
+//     ★ 尾端点被换也走整段重算、不是只重推最后一笔：换的是最后那根笔，会翻动 openingOverlaps
+//       倒数几格（i-2..i）的判词；续扫的 i 只增不回，已经跳过去的位置不会再问 ⇒ 缓存段会
+//       stale（seg-sync-deepfix-probe.py 实测 zec_1h@159：换最后那根笔把 openingOverlaps(0) 从
+//       假翻成真，而 i 早已跳到 1，位置 0 再没被问过）。
+//     ★★ 更深一层：「只从最后一个已确认段末笔之后重扫」也不安全（seg-partial-rejected.md）。
+//       **已确认段本身押在尾巴上** —— case-1 的破位笔、case-2 的反向分型都要读段 endPen 之后的笔
+//       直到当前尾巴，尾笔一换就能把前面已确认的段翻掉（zec_1h@1433：{73,79} endPen=79 ≤ M-4，
+//       可 case-1 破位笔扫到 pens[81..82]，尾笔一换这段就撤销）。所以非纯追加一律整段重算，
+//       别想省成「只重扫尾巴」—— 那个「最后已确认段」自己可能就是 stale 的。
+mkPen(array<Fx> fx, array<int> seq, int t) =>
+    a = fx.get(seq.get(t))
+    b = fx.get(seq.get(t + 1))
+    Unit.new(a.i, b.i, a.p, b.p, math.max(a.p, b.p), math.min(a.p, b.p))
+
+zSegStep(array<Fx> fx, array<int> seq, array<Unit> pens, array<Unit> segs, array<int> segI, array<int> segBorn, array<int> sig) =>
+    M = seq.size()
+    e1 = M >= 1 ? seq.get(M - 1) : -1
+    e2 = M >= 2 ? seq.get(M - 2) : -1
+    e3 = M >= 3 ? seq.get(M - 3) : -1
+    penCount = M >= 1 ? M - 1 : 0
+    if penCount != pens.size() or e1 != sig.get(0) or e2 != sig.get(1) or e3 != sig.get(2)
+        if penCount == pens.size() + 1 and e2 == sig.get(0) and e3 == sig.get(1)
+            // 纯追加：新长出一笔（旧前缀没动，续扫即可）
+            pens.push(mkPen(fx, seq, penCount - 1))
+        else
+            // 整段重算：清空摊平 + 已确认段，从头补摊平、续扫归零。
+            // 含「尾端点被换」：换最后那根笔会翻动 openingOverlaps 倒数几格，续扫的 i 只增不回，
+            // 跳过去的位置不会再问 ⇒ 缓存段 stale，所以也照缩水/跳变一样整段重算。
+            while pens.size() > 0
+                pens.pop()
+            while segs.size() > 0
+                segs.pop()
+            segI.set(0, 0)
+            segBorn.set(0, 0)
+            while pens.size() < penCount
+                pens.push(mkPen(fx, seq, pens.size()))
+        sig.set(0, e1)
+        sig.set(1, e2)
+        sig.set(2, e3)
+        // 续扫（镜像 buildSegments 内层）
+        n = pens.size()
+        i = segI.get(0)
+        born = segBorn.get(0)
+        bool stop = false
+        while i + 2 < n and not stop
+            if not openingOverlaps(pens, i)
+                i += 1
+                continue
+            up = isUp(pens.get(i))
+            k = i + 2
+            while k < born
+                k += 2
+            int endPen = -1
+            int res = -1
+            while k < n - 1 and endPen < 0
+                [cse, at] = caseAt(pens, i, k, up)
+                if cse > 0
+                    endPen := k
+                    res := cse == 1 ? at : 0
+                else
+                    k += 2
+                    if at >= 0
+                        while k < at
+                            k += 2
+            if endPen < 0
+                stop := true
+            else
+                born := res
+                segs.push(mkSeg(pens, i, endPen, false))
+                i := endPen + 1
+        segI.set(0, i)
+        segBorn.set(0, born)
+    true
+
+zSegStep(zFx, zSeq, zPens, zSegs, zSegI, zSegBorn, zSegSig)
+
+// ③ 自检用的整段对照：增量 (zPens, zSegs) 必须跟整段重算逐格/逐段相同。
+// i0/i1 已唯一确定一根笔（p0/p1/hi/lo 都由同一对端点推出），所以只比 i0/i1；段比 PI0/PI1 + live。
+pensSame(array<Unit> A, array<Unit> B) =>
+    bool ok = A.size() == B.size()
+    int t = 0
+    while ok and t < A.size()
+        if A.get(t).i0 != B.get(t).i0 or A.get(t).i1 != B.get(t).i1
+            ok := false
+        t += 1
+    ok
+
+segsSame(array<Unit> A, array<Unit> B) =>
+    bool ok = A.size() == B.size()
+    int t = 0
+    while ok and t < A.size()
+        if A.get(t).PI0 != B.get(t).PI0 or A.get(t).PI1 != B.get(t).PI1 or A.get(t).live != B.get(t).live
+            ok := false
+        t += 1
+    ok
 
 // ───────────────────────── 中枢（第 17 / 20 / 38 课）与 9 段升级（第 33 / 64 课）─────────────────────────
 relOf(Ctr A, Ctr B) =>
@@ -967,14 +1093,26 @@ if barstate.islast
     base = bar_index - (n - 1) + off                  // 原始下标 i 对应的 bar_index = base + i
     // ① 的产物（zH/zL/zIH/zIL/zFx）和 ② 的产物（zSeq）现在都只在**逐根**那一段用；
     // islast 这里不再需要 sH/sL/sIH/sIL/fx 那几个别名了（原来是喂 buildPens 的）。
-    pens = zUnits(zFx, zSeq)                           // ② 的产物：笔端点序列在每根上增量维护，这里只摊平成 Unit
-    segs = buildSegments(pens)
+    pens = zPens                                      // ② 的产物：摊平笔（逐根增量维护，见 zSegStep）
+    if featModeB
+        segs = buildSegments(pens)                    // B：全程按线段方向合并 ⇒ 前缀不稳定，整段重算
+    else
+        segs = array.copy(zSegs)                      // A：已确认段增量维护，这里补 live 尾巴（不落 var）
+        if pens.size() - zSegI.get(0) >= 3
+            segs.push(mkSeg(pens, zSegI.get(0), pens.size() - 1, true))
     done = array.new<Unit>()
     for s in segs
         if not s.live
             done.push(s)
     pcs = findCenters(pens)
     scs = findCenters(done)
+    // ③ 逐根自检：把增量 (zPens, zSegs) 跟整段重算对一遍（A 模式才做；B 本来就整段）
+    if segCheck and not featModeB
+        pensRef = zUnits(zFx, zSeq)
+        bool okPens = pensSame(zPens, pensRef)
+        bool okSegs = okPens and segsSame(segs, buildSegments(pensRef))
+        segOK  := okPens and okSegs
+        segMsg := not okPens ? "摊平笔不一致" : not okSegs ? "确认段不一致" : ""
     x0Draw = n - 1 - drawBars - off                    // 相对下标：早于此的结构不画
     np = pens.size()
 
@@ -1098,4 +1236,10 @@ if barstate.islast
         gLabels.push(label.new(bar_index, high, zSelfOK ? "回滚自检 ✓" : "回滚自检 ✗  " + zSelfMsg,
              style = zSelfOK ? label.style_label_down : label.style_label_up,
              color = zSelfOK ? color.new(color.green, 15) : color.new(color.red, 0),
+             textcolor = color.white, size = size.normal))
+    // 线段逐根自检角标（A 模式；B 本来整段，不比）
+    if segCheck and not featModeB
+        gLabels.push(label.new(bar_index, low, segOK ? "线段自检 ✓" : "线段自检 ✗  " + segMsg,
+             style = segOK ? label.style_label_down : label.style_label_up,
+             color = segOK ? color.new(color.green, 15) : color.new(color.red, 0),
              textcolor = color.white, size = size.normal))
