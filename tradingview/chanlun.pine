@@ -234,6 +234,8 @@ else
         zIL.push(zN)
 zRefx(zH, zL, zIH, zIL, zFx)
 zN += 1
+// ★ 本根的「喂笔」在下面笔那一节的末尾（`zPenStep` 定义之后）—— pine 要求先定义后调用。
+//   中间那一段全是函数定义，不执行，所以逐根顺序仍是：标准化 → 分型 → 喂笔。
 
 // ───────────────────────── 笔（第 77 课 + 回头修正；第 81 课新笔）─────────────────────────
 far(Fx a, Fx b) => penRule == "老笔" ? b.k - a.k >= 4 : (b.k - a.k >= 3 and math.abs(b.i - a.i) >= 4)
@@ -296,53 +298,107 @@ fixStart(array<Fx> fx, array<int> seq, array<int> pend, array<int> stack, array<
                 j -= 1
     true
 
-buildPens(array<Fx> fx, array<float> sH, array<float> sL) =>
-    seq = array.new<int>()
-    pend = array.from(-1)
-    stack = array.new<int>()
-    fxAtK = array.new<int>(sH.size(), -1)
-    for [n, f] in fx
-        fxAtK.set(f.k, n)
-    nfx = 0
-    while nfx < fx.size()
-        stack.push(nfx)
-        nfx += 1
-        while stack.size() > 0
-            fi = stack.pop()
-            f = fx.get(fi)
-            ns = seq.size()
-            if ns == 0
-                seq.push(fi)
-            else
-                last = fx.get(seq.get(ns - 1))
-                if f.top == last.top
-                    if beyond(f, last)
-                        pd = pend.get(0)
-                        if pd >= 0 and (ns < 3 or not beyond(last, fx.get(seq.get(ns - 3))))
-                            pend.set(0, -1)
-                            seq.pop()
-                            seq.set(seq.size() - 1, pd)
-                            pushRange(stack, fxAtK, fx.get(pd).k, f.k)       // 先压：它在 fixStart 的重看之后处理
-                            fixStart(fx, seq, pend, stack, fxAtK, sH, sL)
-                        else
-                            seq.set(ns - 1, fi)
-                            pend.set(0, -1)
-                            fixStart(fx, seq, pend, stack, fxAtK, sH, sL)
-                else if far(last, f) and extremeIn(f, last.k, f.k, sH, sL)
-                    seq.push(fi)
-                    pend.set(0, -1)
-                else if not far(last, f) and ns >= 2 and beyond(f, fx.get(seq.get(ns - 2)))
+// 栈的排空循环：从工作栈里取分型、喂进 (seq, pend)。批量与逐根增量**共用这一段**
+// —— 两处各抄一份的话，改了一处忘了另一处是迟早的事。
+zDrain(array<Fx> fx, array<float> sH, array<float> sL,
+       array<int> seq, array<int> pend, array<int> stack, array<int> fxAtK) =>
+    while stack.size() > 0
+        fi = stack.pop()
+        f = fx.get(fi)
+        ns = seq.size()
+        if ns == 0
+            seq.push(fi)
+        else
+            last = fx.get(seq.get(ns - 1))
+            if f.top == last.top
+                if beyond(f, last)
                     pd = pend.get(0)
-                    if pd < 0 or beyond(f, fx.get(pd))
-                        pend.set(0, fi)
-    pens = array.new<Unit>()
+                    if pd >= 0 and (ns < 3 or not beyond(last, fx.get(seq.get(ns - 3))))
+                        pend.set(0, -1)
+                        seq.pop()
+                        seq.set(seq.size() - 1, pd)
+                        pushRange(stack, fxAtK, fx.get(pd).k, f.k)       // 先压：它在 fixStart 的重看之后处理
+                        fixStart(fx, seq, pend, stack, fxAtK, sH, sL)
+                    else
+                        seq.set(ns - 1, fi)
+                        pend.set(0, -1)
+                        fixStart(fx, seq, pend, stack, fxAtK, sH, sL)
+            else if far(last, f) and extremeIn(f, last.k, f.k, sH, sL)
+                seq.push(fi)
+                pend.set(0, -1)
+            else if not far(last, f) and ns >= 2 and beyond(f, fx.get(seq.get(ns - 2)))
+                pd = pend.get(0)
+                if pd < 0 or beyond(f, fx.get(pd))
+                    pend.set(0, fi)
+    true
+
+// 端点下标 → 笔。只在 islast 里调一次（O(笔数)，画图本来也要走这么多）。
+zUnits(array<Fx> fx, array<int> seq) =>
+    out = array.new<Unit>()
     m = seq.size()
     if m >= 2
         for t = 0 to m - 2
             a = fx.get(seq.get(t))
             b = fx.get(seq.get(t + 1))
-            pens.push(Unit.new(a.i, b.i, a.p, b.p, math.max(a.p, b.p), math.min(a.p, b.p)))
-    pens
+            out.push(Unit.new(a.i, b.i, a.p, b.p, math.max(a.p, b.p), math.min(a.p, b.p)))
+    out
+
+// ── 第②步：笔逐根 ─────────────────────────────────────────────────────────
+// 状态只有 (zSeq, zPend)：笔端点在 zFx 里的下标，和待定分型。zFx 只会往后加
+// （① 的 zRefx 不删不改旧格 —— 证明见 core 那边的注释），所以**下标是稳定的**，
+// 这里可以安心存下标而不是存分型本身。
+var array<int>   zSeq  = array.new<int>()          // 笔端点：zFx 下标
+var array<int>   zPend = array.from(-1)            // 待定分型：zFx 下标，-1 = 无
+var array<int>   zStack = array.new<int>()         // 工作栈（每根用完即空）
+var array<int>   zFxAtK = array.new<int>()         // 标准化下标 k -> zFx 下标
+var array<int>   zPSt  = array.from(0)             // 已喂进 zSeq 的分型个数
+var array<float> zSig  = array.from(-1.0, 0, 0, 0) // 已喂的**最后一个**分型的签名 [k, i, p, top]
+
+// 一根一步。守卫三条 —— 正确性**不押在** ① 的"只增"不变量上，对不上就走第 3 条整段重算：
+//   1) 分型表没变（长度相同且尾分型签名相同）⇒ 无事可做
+//   2) 分型表长了一格                      ⇒ 只喂新的那一个（O(1) 摊还）
+//   3) 其余（缩了 / 跳变 / 尾格被改）       ⇒ 从空重算，不在旧状态上猜
+zPenStep(array<Fx> fx, array<float> sH, array<float> sL,
+         array<int> seq, array<int> pend, array<int> stack, array<int> fxAtK,
+         array<int> st, array<float> sig) =>
+    m = fx.size()
+    if m == 0
+        while seq.size() > 0
+            seq.pop()
+        pend.set(0, -1)
+        st.set(0, 0)
+    else if m == st.get(0) and sig.get(0) == fx.get(m - 1).k and sig.get(1) == fx.get(m - 1).i \
+            and sig.get(2) == fx.get(m - 1).p and sig.get(3) == (fx.get(m - 1).top ? 1.0 : 0.0)
+        st.set(0, m)                                   // 守卫 1：分型表原封不动
+    else
+        if m == st.get(0) + 1
+            stack.push(m - 1)                          // 守卫 2：只喂新长出来的那个
+            zDrain(fx, sH, sL, seq, pend, stack, fxAtK)
+        else
+            while seq.size() > 0                       // 守卫 3：整段重算
+                seq.pop()
+            pend.set(0, -1)
+            for i = 0 to m - 1
+                stack.push(i)
+                zDrain(fx, sH, sL, seq, pend, stack, fxAtK)
+        st.set(0, m)
+        sig.set(0, fx.get(m - 1).k)
+        sig.set(1, fx.get(m - 1).i)
+        sig.set(2, fx.get(m - 1).p)
+        sig.set(3, fx.get(m - 1).top ? 1.0 : 0.0)
+    true
+
+// ── 第②步：本根把新分型喂进增量笔状态（位置在这里是因为 pine 要先定义后调用）──
+// zRefx 只可能动 k = L−2 那一格（pop 掉旧的、再按新值决定要不要补回来），所以 fxAtK
+// 的维护是 O(1)：把那一格先当空、再看 zFx 尾巴是不是正好落在它上面。
+// zFx 只会从**尾部**增删 ⇒ 其余分型在 zFx 里的下标**永不改变**，而 zSeq 存的就是这些下标。
+if zH.size() >= 3
+    kk = zH.size() - 2
+    while zFxAtK.size() <= kk
+        zFxAtK.push(-1)
+    nf = zFx.size()
+    zFxAtK.set(kk, nf > 0 and zFx.get(nf - 1).k == kk ? nf - 1 : -1)
+zPenStep(zFx, zH, zL, zSeq, zPend, zStack, zFxAtK, zPSt, zSig)
 
 // ───────────────────────── 线段（第 67 / 71 / 78 课）─────────────────────────
 isUp(Unit u) => u.p1 > u.p0
@@ -790,7 +846,7 @@ if barstate.islast
     sIH = zIH
     sIL = zIL
     fx = zFx                                          //    分型表同理
-    pens = buildPens(fx, sH, sL)
+    pens = zUnits(zFx, zSeq)                           // ② 的产物：笔端点序列在每根上增量维护，这里只摊平成 Unit
     segs = buildSegments(pens)
     done = array.new<Unit>()
     for s in segs
