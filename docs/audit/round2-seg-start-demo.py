@@ -85,7 +85,7 @@ rng = random.Random(20261002)
 n_seg = n_bad = n_head = n_mid = 0
 shotest = None
 # ★ 阴性对照：新增一条判据很容易顺手把别的判据撞坏（往后挪一笔 → 相接断了／奇偶翻了）。
-#   所以不能只看「新判据 0 违规」，还要把 check_segments 的**整张单子**收上来。
+#   所以不能只看『新判据 0 违规』，还要把 check_segments 的**整张单子**收上来。
 kinds = {}
 for _ in range(3000):
     r = analyze(gen(rng)); pens = r["pens"]
@@ -96,7 +96,7 @@ for _ in range(3000):
         n_seg += 1
         if bad(pens, s["PI0"]):
             n_bad += 1
-            # ★ 分「序列开头」与「段界之后」两格 —— 决定这条判据该挂在哪儿
+            # ★ 分『序列开头』与『段界之后』两格 —— 决定这条判据该挂在哪儿
             if s["PI0"] == 0: n_head += 1
             else: n_mid += 1
             w = s["PI1"] - s["PI0"] + 1
@@ -108,7 +108,7 @@ json.dump(dict(segs=n_seg, bad=n_bad, head=n_head, mid=n_mid, shortest=shotest, 
 '''
 
 
-# 「段界之后会不会也出现」—— 只用一族生成器答不了「不可能」，换 6 族再问一次。
+# 『段界之后会不会也出现』—— 只用一族生成器答不了『不可能』，换 6 族再问一次。
 FAM_SNIPPET = r'''
 import json, random, sys
 tree = sys.argv[1]
@@ -242,7 +242,7 @@ def main():
 
     print()
     print("=" * 78)
-    print("③b 换 6 族生成器 × 300 组 · 「段界之后」到底会不会出现？（只问改前那棵树）")
+    print("③b 换 6 族生成器 × 300 组 · 『段界之后』到底会不会出现？（只问改前那棵树）")
     print("=" * 78)
     print("   只用一族答不了『不可能』，所以换族重问。**段界之后只要有一例**，")
     print("   这条判据就不能只挂在序列开头。")
