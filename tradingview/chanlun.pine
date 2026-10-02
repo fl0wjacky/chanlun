@@ -30,6 +30,10 @@ tickSize  = input.float(0.0, "价格精度（0 = 用原始价格）", minval = 0
      tooltip = "第 64 课：精度一旦预设就要一路保持。填 0.1 表示高低价按 0.1 取整后再算。")
 calcBars  = input.int(3000, "参与计算的K线数（最近）", minval = 300, maxval = 10000, group = G1,
      tooltip = "越多越慢；报「loop 执行超过 500ms」或脚本超时就调小。")
+// 特征序列**合并方向**的两种口径（小栋 2026-10-02 ⑤；与 Python 引擎 core/segment.py 的 mode 一一对应）
+featDir   = input.string("A 开头按线段方向", "特征序列合并方向", options = ["A 开头按线段方向", "B 全程按线段方向"], group = G1,
+     tooltip = "第 67 课只说特征序列也要做非包含处理，没说合并方向怎么取。A（默认）＝开头按线段方向、之后按『最后两根』定方向；B＝全程按线段方向（chan.py / YuYuKunKun / ZenTheory 的做法）。默认 A 与历史输出一致。")
+featModeB = featDir == "B 全程按线段方向"
 
 G2 = "显示"
 showPen   = input.bool(true,  "笔", inline = "p", group = G2)
@@ -297,8 +301,11 @@ buildPens(array<Fx> fx, array<float> sH, array<float> sL) =>
 // ───────────────────────── 线段（第 67 / 71 / 78 课）─────────────────────────
 isUp(Unit u) => u.p1 > u.p0
 
-// 特征序列的非包含处理：开头按线段方向合并（向上段取高高、向下段取低低），之后按最后两根定方向
-featStd(array<float> eh, array<float> el, bool up) =>
+// 特征序列的非包含处理（第 67 课「标准特征序列」）。合并方向由 modeB 选：
+//   A（modeB = false，默认）：开头按线段方向合并（向上段取高高、向下段取低低），之后按最后两根定方向。
+//   B（modeB = true）：全程按线段方向合并。
+// 与 Python `core/segment.py::_feature_std(elems, up, mode)` 逐支对应；两支的差别只在 m ≥ 2 那一支。
+featStd(array<float> eh, array<float> el, bool up, bool modeB) =>
     mh = array.new<float>()
     ml = array.new<float>()
     n = eh.size()
@@ -310,7 +317,7 @@ featStd(array<float> eh, array<float> el, bool up) =>
         if m > 0 and contains(mh.get(m - 1), ml.get(m - 1), h, l)
             ah = mh.get(m - 1)
             al = ml.get(m - 1)
-            goUp = m < 2 ? up : ah > mh.get(m - 2)
+            goUp = modeB ? up : (m < 2 ? up : ah > mh.get(m - 2))
             mh.set(m - 1, goUp ? math.max(ah, h) : math.min(ah, h))
             ml.set(m - 1, goUp ? math.max(al, l) : math.min(al, l))
         else
@@ -349,7 +356,7 @@ reverseScan(array<Unit> P, int endPen, bool segUp) =>
         j += 1
     bool ok = false
     if ntail >= 3 and eh.size() >= 3
-        [mh, ml] = featStd(eh, el, not segUp)
+        [mh, ml] = featStd(eh, el, not segUp, featModeB)
         ok := hasFractal(mh, ml, not segUp)
     [ok, brk]
 
@@ -366,7 +373,7 @@ caseAt(array<Unit> P, int i, int k, bool up) =>
             eh.push(P.get(j).hi), el.push(P.get(j).lo)
         j += 1
     if eh.size() > 0 and k + 1 < n
-        [mh, ml] = featStd(eh, el, up)
+        [mh, ml] = featStd(eh, el, up, featModeB)
         e1h = mh.last()
         e1l = ml.last()
         V = P.get(k).p1
