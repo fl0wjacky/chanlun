@@ -49,13 +49,13 @@ segCol    = input.color(color.rgb(196, 137, 1), "线段的颜色", group = G2,
                "同色相（42°）里取彩度最高的那个解：白底 3.03 / 深底 5.90，两底都过。与 Python 版 render/style.py 的 seg 同值。")
 
 G3 = "中枢（框 / 填充）"
-showPC    = input.bool(true,  "类中枢（与笔同色）", group = G3)
+showPC    = input.bool(false, "类中枢（与笔同色）", group = G3)
 pcFillTr  = input.int(92, "类中枢填充透明度", minval = 0, maxval = 100, group = G3,
      tooltip = "Pine 的透明度：0 = 不透明、100 = 全透明。92 ≈ 8% 不透明（原 85 = 15%，色雾太糊）。与 Python 版 pc_fill 一致。")
 showSC    = input.bool(true,  "线段中枢（与线段同色）", group = G3)
 scFillTr  = input.int(90, "线段中枢填充透明度", minval = 0, maxval = 100, group = G3,
      tooltip = "90 ≈ 10% 不透明。线段中枢比类中枢重要，底色留得比它重一点。与 Python 版 sc_fill 一致。")
-showUp    = input.bool(true,  "高一级别中枢（满 9 段）", group = G3)
+showUp    = input.bool(false, "高一级别中枢（满 9 段）", group = G3)
 upColPen  = input.color(color.rgb(153, 141, 197), "高一级别 · 类中枢升上去的", group = G3,
      tooltip = "#998DC5 淡紫（原 #C4B5FD）。它跟母框是一家人（母框 = 笔的颜色），所以取笔那一族的色相往上提亮。" +
                "原色在**白底**上只有 1.85:1，框会「比白更白」等于没框；压暗到白底 3.01 / 深底 5.94，看框就知道谁升的。")
@@ -70,7 +70,7 @@ G4 = "诊断"
 selfCheck = input.bool(false, "实时回滚自检（挂个角标）", group = G4,
      tooltip = "打开后图角挂一个标签。回滚生效时恒为 ✓；不生效时第二个 tick 就会 ✗。" +
                "查的是数组（aM/zH），不是标量 —— 标量回滚不代表数组回滚。参照物是引擎值 bar_index。")
-drawBars  = input.int(3000, "只画最近多少根K线里的结构", minval = 100, maxval = 9000, group = G4,
+drawBars  = input.int(9000, "只画最近多少根K线里的结构", minval = 100, maxval = 9000, group = G4,
      tooltip = "TradingView 每种图形最多 500 个；太长的历史会画不全，所以只画最近这一段。")
 segCheck  = input.bool(false, "线段逐根自检（挂个角标）", group = G4,
      tooltip = "打开后在 islast 把增量 (zPens, zSegs) 跟整段重算 buildSegments(zUnits(...)) 对一遍。" +
@@ -89,12 +89,12 @@ p3On      = input.bool(true, "前提③：B 的中枢级别要大于 A、C 里�
 mFast     = input.int(12, "MACD 快线", minval = 1, inline = "m", group = G5)
 mSlow     = input.int(26, "慢线", minval = 2, inline = "m", group = G5)
 mSig      = input.int(9, "信号", minval = 1, inline = "m", group = G5)
-show1B    = input.bool(true, "一买", inline = "b", group = G5)
-show2B    = input.bool(true, "二买", inline = "b", group = G5)
-show3B    = input.bool(true, "三买", inline = "b", group = G5)
-show1S    = input.bool(true, "一卖", inline = "x", group = G5)
-show2S    = input.bool(true, "二卖", inline = "x", group = G5)
-show3S    = input.bool(true, "三卖", inline = "x", group = G5)
+show1B    = input.bool(false, "一买", inline = "b", group = G5)
+show2B    = input.bool(false, "二买", inline = "b", group = G5)
+show3B    = input.bool(false, "三买", inline = "b", group = G5)
+show1S    = input.bool(false, "一卖", inline = "x", group = G5)
+show2S    = input.bool(false, "二卖", inline = "x", group = G5)
+show3S    = input.bool(false, "三卖", inline = "x", group = G5)
 showPend  = input.bool(false, "显示待确认（空心，可能重画）", group = G5)
 buyCol    = input.color(color.rgb(0, 170, 104), "买点颜色", inline = "c", group = G5)
 sellCol   = input.color(color.rgb(255, 86, 86), "卖点颜色", inline = "c", group = G5)
