@@ -6,9 +6,9 @@
 //   → 线段（第 67 / 71 / 78 课，特征序列）→ 类中枢（笔构成）/ 线段中枢
 //   → 中枢终结：三买三卖为主、中心定理一兜底（第 20 / 38 课）→ 满 9 段升级（第 33 / 64 课）
 //   → 一二三类买卖点（第 20 / 21 / 24 课）；一买一卖还要过前提③（第 53 课，可关，默认开）
-// 画法：笔与类中枢同色，线段与线段中枢同色；高一级别中枢用同色加粗框；未完成 / 仍在延续的一律虚线。
-// 中枢边框：**暂定的一律虚线** —— 仍在延续的、末尾那一个、以及与末尾相邻的那一个
-//   （走势没走完时，末尾的中枢会被后到的K线改写；口径与 Python 版 `centers[].status` 一致）。
+// 画法：笔与类中枢同色，线段与线段中枢同色；高一级别中枢用紫色加粗框；未完成的笔 / 线段一律虚线。
+// 中枢边框按**规则 B** 分三档（顺序不能反）：① 前三笔（段）里夹着还没走完的那一员 ⇒ 整框虚线；
+//   ② 中枢已结束 ⇒ 整框实线；③ 仍在延续 ⇒ 拆两截，前三那截实线、延续那截虚线（分界在第三个成员的终点）。
 // 计算方式：**逐根增量**。包含处理 / 分型 / 笔在每根K线上往下推一格（①②），只有最后一根
 //   （islast）才把线段、中枢、买卖点**整段重算一遍**并落图 —— 落图这一段仍是「从头算」，但
 //   它只画不算，逐根那一侧不依赖它。原先这里写的是「只在最后一根K线上从头算一遍」，
@@ -36,43 +36,56 @@ featDir   = input.string("A 开头按线段方向", "特征序列合并方向", 
      tooltip = "第 67 课只说特征序列也要做非包含处理，没说合并方向怎么取。A（默认）＝开头按线段方向、之后按『最后两根』定方向；B＝全程按线段方向（chan.py / YuYuKunKun / ZenTheory 的做法）。默认 A 与历史输出一致。")
 featModeB = featDir == "B 全程按线段方向"
 
-G2 = "显示"
+G2 = "结构线（笔 / 线段）"
 showPen   = input.bool(true,  "笔", inline = "p", group = G2)
-penCol    = input.color(color.rgb(86, 142, 255), "", inline = "p", group = G2)
 penW      = input.int(1, "线宽", minval = 1, maxval = 5, inline = "p", group = G2)
-showPC    = input.bool(true,  "类中枢（与笔同色）", group = G2)
+penCol    = input.color(color.rgb(122, 137, 166), "笔的颜色", group = G2,
+     tooltip = "#7A89A6 灰蓝。笔是图上最密的一层（数量是线段的 3~5 倍），退到后面去，别跟买卖点抢眼睛。与 Python 版 render/style.py 的 pen 同值。")
 showSeg   = input.bool(true,  "线段", inline = "s", group = G2)
-segCol    = input.color(color.rgb(255, 190, 60), "", inline = "s", group = G2)
 segW      = input.int(3, "线宽", minval = 1, maxval = 8, inline = "s", group = G2)
-showSC    = input.bool(true,  "线段中枢（与线段同色）", group = G2)
-showUp    = input.bool(true,  "高一级别中枢（满 9 段，同色加粗）", group = G2)
-selfCheck = input.bool(false, "实时回滚自检（挂个角标）", group = G2,
+segCol    = input.color(color.rgb(242, 193, 78), "线段的颜色", group = G2,
+     tooltip = "#F2C14E 琥珀。粗结构，保持醒目。与 Python 版 render/style.py 的 seg 同值。")
+
+G3 = "中枢（框 / 填充）"
+showPC    = input.bool(true,  "类中枢（与笔同色）", group = G3)
+pcFillTr  = input.int(92, "类中枢填充透明度", minval = 0, maxval = 100, group = G3,
+     tooltip = "Pine 的透明度：0 = 不透明、100 = 全透明。92 ≈ 8% 不透明（原 85 = 15%，色雾太糊）。与 Python 版 pc_fill 一致。")
+showSC    = input.bool(true,  "线段中枢（与线段同色）", group = G3)
+scFillTr  = input.int(90, "线段中枢填充透明度", minval = 0, maxval = 100, group = G3,
+     tooltip = "90 ≈ 10% 不透明。线段中枢比类中枢重要，底色留得比它重一点。与 Python 版 sc_fill 一致。")
+showUp    = input.bool(true,  "高一级别中枢（满 9 段）", group = G3)
+upCol     = input.color(color.rgb(167, 139, 250), "高一级别的颜色", group = G3,
+     tooltip = "#A78BFA 紫。高一级别由子级别中枢构成，跟笔 / 线段都不是一家，单独给一个色相 —— 原先它跟母框同色，级别只能靠数边框粗几像素来分。")
+upFillTr  = input.int(92, "高一级别填充透明度", minval = 0, maxval = 100, group = G3,
+     tooltip = "92 ≈ 8% 的淡紫底。原先是写死的全透明（color.new(col, 100)），等于没填充。与 Python 版 up_fill 一致。")
+
+G4 = "诊断"
+selfCheck = input.bool(false, "实时回滚自检（挂个角标）", group = G4,
      tooltip = "打开后图角挂一个标签。回滚生效时恒为 ✓；不生效时第二个 tick 就会 ✗。" +
                "查的是数组（aM/zH），不是标量 —— 标量回滚不代表数组回滚。参照物是引擎值 bar_index。")
-fillTr    = input.int(85, "中枢填充透明度", minval = 0, maxval = 100, group = G2)
-drawBars  = input.int(3000, "只画最近多少根K线里的结构", minval = 100, maxval = 9000, group = G2,
+drawBars  = input.int(3000, "只画最近多少根K线里的结构", minval = 100, maxval = 9000, group = G4,
      tooltip = "TradingView 每种图形最多 500 个；太长的历史会画不全，所以只画最近这一段。")
 
-G3 = "买卖点"
-sigLevel  = input.string("线段中枢", "按哪层中枢判", options = ["线段中枢", "类中枢"], group = G3,
+G5 = "买卖点"
+sigLevel  = input.string("线段中枢", "按哪层中枢判", options = ["线段中枢", "类中枢"], group = G5,
      tooltip = "线段中枢是原文承认的正规中枢（第 83 课）；类中枢由笔构成（第 64 课），信号多但稳定性差。")
-measure   = input.string("MACD 柱面积", "背驰力度（一买一卖）", options = ["MACD 柱面积", "价格斜率"], group = G3,
+measure   = input.string("MACD 柱面积", "背驰力度（一买一卖）", options = ["MACD 柱面积", "价格斜率"], group = G5,
      tooltip = "第 24 课：离开段（C 段）的 MACD 柱面积比进入段（A 段）小即背驰。斜率 = |价差| / K线根数。")
-divRatio  = input.float(1.0, "背驰比例：C < A × ", minval = 0.1, maxval = 1.0, step = 0.05, group = G3)
-p3On      = input.bool(true, "前提③：B 的中枢级别要大于 A、C 里的", group = G3,
+divRatio  = input.float(1.0, "背驰比例：C < A × ", minval = 0.1, maxval = 1.0, step = 0.05, group = G5)
+p3On      = input.bool(true, "前提③：B 的中枢级别要大于 A、C 里的", group = G5,
      tooltip = "第 53 课：B 的中枢级别比 A、C 里的中枢级别都要大，否则 A、B、C 就连成一个大的中枢了。判法：上一层有没有中枢把 A、B、C 整段包住（严格口径，用中枢区间 [ZD, ZG]）。默认开，与引擎 core/signals.py 的 premise3=True 一致。")
-mFast     = input.int(12, "MACD 快线", minval = 1, inline = "m", group = G3)
-mSlow     = input.int(26, "慢线", minval = 2, inline = "m", group = G3)
-mSig      = input.int(9, "信号", minval = 1, inline = "m", group = G3)
-show1B    = input.bool(true, "一买", inline = "b", group = G3)
-show2B    = input.bool(true, "二买", inline = "b", group = G3)
-show3B    = input.bool(true, "三买", inline = "b", group = G3)
-show1S    = input.bool(true, "一卖", inline = "x", group = G3)
-show2S    = input.bool(true, "二卖", inline = "x", group = G3)
-show3S    = input.bool(true, "三卖", inline = "x", group = G3)
-showPend  = input.bool(false, "显示待确认（空心，可能重画）", group = G3)
-buyCol    = input.color(color.rgb(0, 205, 125), "买点颜色", inline = "c", group = G3)
-sellCol   = input.color(color.rgb(255, 86, 86), "卖点颜色", inline = "c", group = G3)
+mFast     = input.int(12, "MACD 快线", minval = 1, inline = "m", group = G5)
+mSlow     = input.int(26, "慢线", minval = 2, inline = "m", group = G5)
+mSig      = input.int(9, "信号", minval = 1, inline = "m", group = G5)
+show1B    = input.bool(true, "一买", inline = "b", group = G5)
+show2B    = input.bool(true, "二买", inline = "b", group = G5)
+show3B    = input.bool(true, "三买", inline = "b", group = G5)
+show1S    = input.bool(true, "一卖", inline = "x", group = G5)
+show2S    = input.bool(true, "二卖", inline = "x", group = G5)
+show3S    = input.bool(true, "三卖", inline = "x", group = G5)
+showPend  = input.bool(false, "显示待确认（空心，可能重画）", group = G5)
+buyCol    = input.color(color.rgb(0, 205, 125), "买点颜色", inline = "c", group = G5)
+sellCol   = input.color(color.rgb(255, 86, 86), "卖点颜色", inline = "c", group = G5)
 
 // ───────────────────────── 数据类型 ─────────────────────────
 type Fx
@@ -876,32 +889,49 @@ clearAll() =>
         lb.delete()
     gLines.clear(), gBoxes.clear(), gLabels.clear()
 
-// prov：这个中枢是不是『暂定』（仍会被后来到的K线改写）—— 由**调用点**按下标算，
-//   不进 `type Ctr`：这样判断只在一处、且任何新造的中枢都不可能漏标。
+// 规则 B（小栋 2026-10-02T06:21Z 定，见文件头 :9-11）—— 中枢框的虚实，三档，**顺序不能反**：
+//   ① hasUnfinished：前三笔（段）里夹着「还没走完」的那一员 ⇒ **整框虚线**，等它走完再转实线；
+//   ② not z.live：中枢**已结束** ⇒ **整框实线**（上下沿早就定死了，延续那截不用再标虚线）；
+//   ③ z.live：**仍在延续** ⇒ **拆两截**，前三那截实线、延续那截虚线，分界在第三个成员的终点 `xm`。
+//   ★ 先判 ① 再判 ② 最后 ③。反过来先看 z.live 的话，「还在长、但前三里夹着未完成笔」的中枢会
+//     被判成 ③ 去拆两截 —— 而它该是整框虚线。口径与 Python 版 render/full_common.py 的 box_split 一致。
+//   ★ 拆两截的落法：Pine 的 box **四条边一起画**，画不出「只有右边虚」的半框 —— 所以先铺一张整框
+//     （① 虚 / ②③ 实），③ 再叠一张**只画边框、填色全透明**的前三截实框盖上去。底下那张的虚线只会在
+//     分界右边露出来（要的就是这个），代价是分界处多一条竖边（Python 那边是 6 条边、没有这条）——
+//     这条竖线正好标出「前三到此为止」，留着。
+//   hasUnfinished / xm 都由**调用点**按层算（笔层＝最后一根笔；线段层没有这一员，见调用点）。
 //
 // ★ 配额检查必须在**这里**、不能留在调用点：下面 `upZD` 那组高一级别框是**本函数自己**推的，
 //   原先调用点写的 `gBoxes.size() < 480` 根本管不到它们 —— 480 从来就不是硬上限，只是"进场门槛"。
-//   现在改成**先算总账再进场**：一次要占 1 + upZD.size() 格，不够就整块不画。
+//   现在改成**先算总账再进场**：一次要占 1 + （拆两截时的 1）+ upZD.size() 格，不够就整块不画。
 zdN(Ctr z) => showUp ? z.upZD.size() : 0
 
 // 返回 false = 配额不够、这次没画。调用点据此 break（倒序走，再往前只会更老，画了也是丢）。
-drawCenter(Ctr z, int x0, int x1, color col, int w, bool withLabel, bool prov, int boxCap, int lbCap) =>
+drawCenter(Ctr z, int x0, int x1, color col, int w, int fillTr, bool withLabel, bool hasUnfinished, int xm, int boxCap, int lbCap) =>
+    wholeDash = hasUnfinished
+    split = not wholeDash and z.live and xm > x0 and xm < x1
     ok = false
-    if gBoxes.size() + 1 + zdN(z) <= boxCap
-        st = prov ? line.style_dashed : line.style_solid
-        gBoxes.push(box.new(x0, z.ZG, x1, z.ZD, border_color = col, border_width = w, border_style = st,
+    if gBoxes.size() + 1 + (split ? 1 : 0) + zdN(z) <= boxCap
+        gBoxes.push(box.new(x0, z.ZG, x1, z.ZD, border_color = col, border_width = w,
+             border_style = wholeDash ? line.style_dashed : line.style_solid,
              bgcolor = color.new(col, fillTr)))
+        if split                                   // ③ 前三那截盖成实线；底下的填充只铺一次（这张全透明）
+            gBoxes.push(box.new(x0, z.ZG, xm, z.ZD, border_color = col, border_width = w,
+                 border_style = line.style_solid, bgcolor = color.new(col, 100)))
         if withLabel and gLabels.size() < lbCap
             gLabels.push(label.new(x0, z.ZG, str.format("[{0}, {1}]", str.tostring(z.ZD, format.mintick), str.tostring(z.ZG, format.mintick)),
                  style = label.style_label_lower_left, color = color.new(col, 80), textcolor = col, size = size.small))
         if zdN(z) > 0
             for [m, uzd] in z.upZD
                 uzg = z.upZG.get(m)
-                gBoxes.push(box.new(x0, uzg, x1, uzd, border_color = col, border_width = w + 2 * (m + 1), border_style = st,
-                     bgcolor = color.new(col, 100)))
+                // 高一级别**不套规则 B**：它的「前三」没有定义（由子级别中枢构成，不是笔 / 线段）。
+                // 沿用旧口径 —— 中枢没结束就虚线、结束了实线；颜色换成独立的紫、给一层淡紫底。
+                gBoxes.push(box.new(x0, uzg, x1, uzd, border_color = upCol, border_width = w + 2 * (m + 1),
+                     border_style = z.live ? line.style_dashed : line.style_solid,
+                     bgcolor = color.new(upCol, upFillTr)))
                 if gLabels.size() < lbCap
                     gLabels.push(label.new(x0, uzg, "↑高" + array.from("一", "两", "三", "四").get(math.min(m, 3)) + "级",
-                         style = label.style_label_lower_left, color = color.new(col, 70), textcolor = color.white, size = size.small))
+                         style = label.style_label_lower_left, color = color.new(upCol, 70), textcolor = color.white, size = size.small))
         ok := true
     ok
 
@@ -957,7 +987,13 @@ if barstate.islast
             a = pens.get(z.PI0).i0
             b = pens.get(z.PI1).i1
             if b >= x0Draw
-                if not drawCenter(z, xc(base + a), xc(base + b), penCol, 1, false, z.live or k >= pcs.size() - 2, boxLimPC, lbLimPC)
+                // 规则 B ①：笔层「还没走完的那一员」＝**最后一根笔**（下标 np - 1，它的终点还会被更极端的
+                //   分型替换）。判它有没有夹在前三个成员里 —— 等价于 Python 的 `j0 <= np-1 < min(j0+3, np)`：
+                //   后半段 `np-1 < np` 恒真，所以只剩 `np - 1 < z.PI0 + 3`。
+                hasUnf = np - 1 < z.PI0 + 3
+                // 规则 B ③ 的分界：第三个成员的终点（中枢不足三个成员时退回最后一根笔的终点）
+                xm = xc(base + pens.get(math.min(z.PI0 + 2, np - 1)).i1)
+                if not drawCenter(z, xc(base + a), xc(base + b), penCol, 1, pcFillTr, false, hasUnf, xm, boxLimPC, lbLimPC)
                     break
     // ★★ 段中枢的天花板**只能在这里算**：上面那个循环已经画完笔中枢，gBoxes / gLabels 是当下的真实占用。
     //   放到上面去（和 boxLimPC 并排）就退化成"拿绝对值 120 去比全局占用"，段中枢会被笔中枢挤没 ——
@@ -971,7 +1007,11 @@ if barstate.islast
             a = done.get(z.PI0).i0
             b = done.get(z.PI1).i1
             if b >= x0Draw
-                if not drawCenter(z, xc(base + a), xc(base + b), segCol, 2, true, z.live or k >= scs.size() - 2, boxLimSC, lbLimSC)
+                // 规则 B ①：线段层**没有**「还没走完的那一员」—— 线段中枢只由**已完成**线段（done）算出来，
+                //   那条 live 段根本不进 done ⇒ 这一档恒不触发（与 Python 版传 None 一致）。
+                // 规则 B ③ 的分界：第三条已完成线段的终点（不足三条时退回最后一条的终点）
+                xm = xc(base + done.get(math.min(z.PI0 + 2, done.size() - 1)).i1)
+                if not drawCenter(z, xc(base + a), xc(base + b), segCol, 2, scFillTr, true, false, xm, boxLimSC, lbLimSC)
                     break
     if showPen and np > 0
         for t = np - 1 to 0
