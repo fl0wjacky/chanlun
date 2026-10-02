@@ -841,11 +841,8 @@ if barstate.islast
     n = zN                                            // 原始K线根数（不再截断 —— 增量状态从第 0 根攒起）
     off = 0                                           // ★ 相对下标 == 原始下标。保留这个名字只为 signalsOf/strengthOf 的调用点不动：aM.get(off + t)
     base = bar_index - (n - 1) + off                  // 原始下标 i 对应的 bar_index = base + i
-    sH = zH                                           // ① 的产物：标准化序列直接取增量状态，不再重算
-    sL = zL
-    sIH = zIH
-    sIL = zIL
-    fx = zFx                                          //    分型表同理
+    // ① 的产物（zH/zL/zIH/zIL/zFx）和 ② 的产物（zSeq）现在都只在**逐根**那一段用；
+    // islast 这里不再需要 sH/sL/sIH/sIL/fx 那几个别名了（原来是喂 buildPens 的）。
     pens = zUnits(zFx, zSeq)                           // ② 的产物：笔端点序列在每根上增量维护，这里只摊平成 Unit
     segs = buildSegments(pens)
     done = array.new<Unit>()
