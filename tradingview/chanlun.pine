@@ -5,7 +5,7 @@
 //   K线包含处理（第 65 课）→ 分型 → 笔（第 77 课，端点必为极值、带回头修正；可选第 81 课新笔）
 //   → 线段（第 67 / 71 / 78 课，特征序列）→ 类中枢（笔构成）/ 线段中枢
 //   → 中枢终结：三买三卖为主、中心定理一兜底（第 20 / 38 课）→ 满 9 段升级（第 33 / 64 课）
-//   → 一二三类买卖点（第 20 / 21 / 24 课）
+//   → 一二三类买卖点（第 20 / 21 / 24 课）；一买一卖还要过前提③（第 53 课，可关，默认开）
 // 画法：笔与类中枢同色，线段与线段中枢同色；高一级别中枢用同色加粗框；未完成 / 仍在延续的一律虚线。
 // 中枢边框：**暂定的一律虚线** —— 仍在延续的、末尾那一个、以及与末尾相邻的那一个
 //   （走势没走完时，末尾的中枢会被后到的K线改写；口径与 Python 版 `centers[].status` 一致）。
@@ -44,6 +44,8 @@ sigLevel  = input.string("线段中枢", "按哪层中枢判", options = ["线�
 measure   = input.string("MACD 柱面积", "背驰力度（一买一卖）", options = ["MACD 柱面积", "价格斜率"], group = G3,
      tooltip = "第 24 课：离开段（C 段）的 MACD 柱面积比进入段（A 段）小即背驰。斜率 = |价差| / K线根数。")
 divRatio  = input.float(1.0, "背驰比例：C < A × ", minval = 0.1, maxval = 1.0, step = 0.05, group = G3)
+p3On      = input.bool(true, "前提③：B 的中枢级别要大于 A、C 里的", group = G3,
+     tooltip = "第 53 课：B 的中枢级别比 A、C 里的中枢级别都要大，否则 A、B、C 就连成一个大的中枢了。判法：上一层有没有中枢把 A、B、C 整段包住（严格口径，用中枢区间 [ZD, ZG]）。默认开，与引擎 core/signals.py 的 premise3=True 一致。")
 mFast     = input.int(12, "MACD 快线", minval = 1, inline = "m", group = G3)
 mSlow     = input.int(26, "慢线", minval = 2, inline = "m", group = G3)
 mSig      = input.int(9, "信号", minval = 1, inline = "m", group = G3)
@@ -526,8 +528,72 @@ strengthOf(Unit u, int off) =>
             t += 1
     s
 
+// ── 扩展合成的大级别中枢（core/extend.py build_hierarchy 的移植）────────────────
+// 前中枢 A ＋ 连接段 ＋ 后中枢 B，三段重叠出区间 [ZD, ZG]（第 49 / 30 / 54 课）；
+// 之后再有中枢只要还碰到这个区间，就算震荡接进来 —— 区间不变，只扩波动范围（第 52 课）。
+// 相邻两中枢是「趋势」关系时不合成（第 17 / 42 / 43 课）。**没合成的不进输出** ——
+// 输出只含真合成过的高级别中枢（引擎侧 `_higher_centers` 只取 nmerge>1，与画图/卡片同口径）。
+hierarchy(array<Ctr> zs, array<Unit> U) =>
+    out = array.new<Ctr>()
+    k = 0
+    while k < zs.size()
+        A = zs.get(k)
+        bool merge = false
+        if k + 1 < zs.size()
+            rl = relOf(A, zs.get(k + 1))
+            merge := not A.live and rl != 1 and rl != 2
+        if merge
+            B = zs.get(k + 1)
+            float s2lo = B.DD                    // 连接段的高低点；没有连接段就用后中枢自己的
+            float s2hi = B.GG
+            if B.PI0 - 1 >= A.PI1 + 1
+                s2lo := U.get(A.PI1 + 1).lo
+                s2hi := U.get(A.PI1 + 1).hi
+                t = A.PI1 + 2
+                while t <= B.PI0 - 1
+                    s2lo := math.min(s2lo, U.get(t).lo)
+                    s2hi := math.max(s2hi, U.get(t).hi)
+                    t += 1
+            float ZD = math.max(A.DD, math.max(s2lo, B.DD))
+            float ZG = math.min(A.GG, math.min(s2hi, B.GG))
+            float DD = math.min(A.DD, math.min(s2lo, B.DD))
+            float GG = math.max(A.GG, math.max(s2hi, B.GG))
+            int PI1 = B.PI1
+            bool live = B.live
+            k += 2
+            while k < zs.size() and ZG >= ZD and not live
+                Cn = zs.get(k)
+                if Cn.DD > ZG or Cn.GG < ZD
+                    break
+                DD := math.min(DD, Cn.DD)
+                GG := math.max(GG, Cn.GG)
+                PI1 := Cn.PI1
+                live := Cn.live
+                k += 1
+            out.push(Ctr.new(A.PI0, PI1, ZD, ZG, DD, GG, live, 0, 0,
+                 array.new<float>(), array.new<float>()))
+        else
+            // 没合成 ⇒ 不进输出：它跟 B 是同一级，不能当「上一层的中枢」用
+            k += 1
+    out
+
+// 前提③（第 53 课）：B 的中枢级别要比 A、C 里的都大，否则 A、B、C 就连成一个更大的中枢了。
+// 判法（core/signals.py check_premise3 的移植，严格口径）：**上一层**有没有中枢把 A、B、C 整段包住。
+//   笔层   → 上一层 = 线段中枢（scs）
+//   线段层 → 上一层 = 线段中枢自己的扩展合成（hierarchy(scs, 已完成线段)）
+// B 自带满 9 段升级时直接算成立（那本来就是高一级别中枢）。
+p3Hit(array<Ctr> higher, Ctr B, float lo, float hi) =>
+    bool hit = false
+    if B.upZD.size() == 0
+        for H in higher
+            if H.ZD <= lo and H.ZG >= hi
+                hit := true
+                break
+    hit
+
 // AU：全部单位（线段层含最后一条未完成的）；Z：中枢；lastLive：AU 最后一个还在走
-signalsOf(array<Unit> AU, array<Ctr> Z, int nDone, bool lastLive, bool segLevel, int off) =>
+// higher：上一层中枢（判前提③用；线段的上一层见上）
+signalsOf(array<Unit> AU, array<Ctr> Z, int nDone, bool lastLive, bool segLevel, int off, array<Ctr> higher) =>
     out = array.new<Sig>()
     nAU = AU.size()
     // 第三类：与中枢终结同一口径
@@ -578,13 +644,18 @@ signalsOf(array<Unit> AU, array<Ctr> Z, int nDone, bool lastLive, bool segLevel,
                                 ok := 1
                             qq += 1
                         if ok >= 0
-                            cDone = not (lastLive and c == nAU - 1)
-                            conf = ok == 1 and cDone
-                            out.push(Sig.new(wantDown ? 1 : 4, C.i1, C.p1, conf, false))
-                            if conf and c + 2 < nAU
-                                s2 = AU.get(c + 2)
-                                weak = wantDown ? s2.p1 < C.p1 : s2.p1 > C.p1
-                                out.push(Sig.new(wantDown ? 2 : 5, s2.i1, s2.p1, not (lastLive and c + 2 == nAU - 1), weak))
+                            // 前提③：上一层有没有中枢把 A、B、C 整段包住（包住 ⇒ 不构成背驰，不发点）
+                            A3 = AU.get(a)
+                            lo3 = math.min(A3.lo, math.min(B.DD, C.lo))
+                            hi3 = math.max(A3.hi, math.max(B.GG, C.hi))
+                            if not (p3On and p3Hit(higher, B, lo3, hi3))
+                                cDone = not (lastLive and c == nAU - 1)
+                                conf = ok == 1 and cDone
+                                out.push(Sig.new(wantDown ? 1 : 4, C.i1, C.p1, conf, false))
+                                if conf and c + 2 < nAU
+                                    s2 = AU.get(c + 2)
+                                    weak = wantDown ? s2.p1 < C.p1 : s2.p1 > C.p1
+                                    out.push(Sig.new(wantDown ? 2 : 5, s2.i1, s2.p1, not (lastLive and c + 2 == nAU - 1), weak))
     out
 
 // ───────────────────────── 画图 ─────────────────────────
@@ -676,8 +747,12 @@ if barstate.islast
                      style = s.live ? line.style_dashed : line.style_solid))
 
     segLevel = sigLevel == "线段中枢"
-    sigs = segLevel ? signalsOf(segs, scs, done.size(), segs.size() > done.size(), true, off) :
-                      signalsOf(pens, pcs, np, true, false, off)
+    // 前提③ 的「上一层」：笔层 = 线段中枢；线段层 = 线段中枢自己再扩展合成一级
+    array<Ctr> higher = scs
+    if segLevel
+        higher := hierarchy(scs, done)
+    sigs = segLevel ? signalsOf(segs, scs, done.size(), segs.size() > done.size(), true, off, higher) :
+                      signalsOf(pens, pcs, np, true, false, off, higher)
     names = array.from("一买", "二买", "三买", "一卖", "二卖", "三卖")
     shows = array.from(show1B, show2B, show3B, show1S, show2S, show3S)
     for s in sigs

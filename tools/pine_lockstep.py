@@ -8,10 +8,23 @@
 ★ 基线**不是**手写的 sha，是现取的：`git log -1 -- tradingview/chanlun.pine`。
   理由：手写基线会在"有人改了 pine 但忘了改常数"时**静默过期**，而屏幕上与一次合法通过逐字同形。
 
+★★ 量的是**两层**，键名分得开：
+    `<数据>.json`        结构层 —— `core.analyze()` 的整份输出（分型 / 笔 / 线段 / 中枢）
+    `<数据>.json|seg|pen` 信号层 —— `core.signals()` 的输出（买卖点）
+  原先**只量结构层**。后果实测过：第二轮把 `signals()`（背驰判据 + 前提③）改了、买卖点从 156
+  变 154，这个程序照样印 `rc=0 引擎输出逐位相同 ⇒ pine 不用动` —— 而 pine 确实移植了买卖点
+  （`signalsOf`），于是**引擎与 pine 在信号层已经不同步，尺子却看不见**。信号层的键补上以后，
+  只动 `signals()` 的改动也会红。
+
+★ 这个程序证的是「**陈旧**」：引擎自 pine 上次改动以来变没变。它**不证**「pine 算得对」——
+  Pine 在这台机器上编译不了、跑不了，所以一次移植对不对，得靠人读（本轮另配了
+  `notes/pine-p3-parity.py`：把 pine 新写的算法逐行抄成 Python 跟引擎对账）。
+
 用法：
     python3 tools/pine_lockstep.py                # 基线 vs origin/main
     python3 tools/pine_lockstep.py --head <sha>   # 基线 vs 指定的提交
-    python3 tools/pine_lockstep.py --self-test    # 正臂：拿一对**已知不同**的提交自证它会红
+    python3 tools/pine_lockstep.py --self-test    # 两条正臂自证：结构层一对已知不同的提交 ＋
+                                                  # 信号层「故意改一个信号」（压背驰比例），都必须红
 退出码：
     0  输出逐位同 ⇒ pine 不用改
     1  ★ 输出不同 ⇒ pine 要改（印出差异键与数据名）
@@ -44,12 +57,26 @@ def materialize(sha):
     return d
 
 
-def outputs(tree):
-    """{数据文件: sha256(analyze 输出)}。整支在一个子进程里跑，避免两棵树的 core 互相污染。"""
+SIGNAL_LEVELS = ("seg", "pen")        # 与 pine 的 sigLevel 两个选项对应（线段中枢 / 类中枢）
+
+
+def outputs(tree, perturb=False):
+    """{键: sha256(输出)} —— 结构层 `<数据>.json` ＋ 信号层 `<数据>.json|seg|pen`。
+
+    整支在一个子进程里跑，避免两棵树的 core 互相污染。
+
+    perturb=True 时把背驰比例压到 0（**只动信号层，不动结构层**）—— 给 --self-test 的信号层
+    正臂用：同一棵树上改了信号，信号键**必须**变，否则说明这个探针根本没接上。
+    """
     code = r'''
-import hashlib, importlib, io, json, os, sys
-tree = sys.argv[1]; sys.path.insert(0, tree)
+import hashlib, io, json, os, sys
+tree, outp, perturb = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
+sys.path.insert(0, tree)
 import core
+
+def H(o):
+    return hashlib.sha256(json.dumps(o, sort_keys=True, ensure_ascii=False,
+                                     default=str).encode()).hexdigest()[:16]
 out = {}
 for f in sorted(os.listdir(os.path.join(tree, "data"))):
     if not f.endswith(".json"): continue
@@ -57,15 +84,26 @@ for f in sorted(os.listdir(os.path.join(tree, "data"))):
         bars = json.load(io.open(os.path.join(tree, "data", f), encoding="utf-8"))
         if isinstance(bars, dict):
             bars = bars.get("bars") or bars.get("klines") or bars
-        r = core.analyze(bars)
-        out[f] = hashlib.sha256(json.dumps(r, sort_keys=True, ensure_ascii=False,
-                                          default=str).encode()).hexdigest()[:16]
     except Exception as e:
-        out[f] = "跑不动:%s" % type(e).__name__
-json.dump(out, open(sys.argv[2], "w"))
+        out[f] = "读不动:%s" % type(e).__name__
+        continue
+    try:
+        r = core.analyze(bars)
+    except Exception as e:
+        out[f] = "analyze 跑不动:%s" % type(e).__name__
+        continue
+    out[f] = H(r)
+    for lv in ("seg", "pen"):                      # 信号层：买卖点
+        k = "%s|%s" % (f, lv)
+        try:
+            out[k] = H(core.signals(r, lv, "macd", ratio=(0.0 if perturb else 1.0)))
+        except Exception as e:
+            out[k] = "signals 跑不动:%s" % type(e).__name__
+json.dump(out, open(outp, "w"))
 '''
     fd, tmp = tempfile.mkstemp(suffix=".json"); os.close(fd)
-    p = subprocess.run([sys.executable, "-c", code, tree, tmp], capture_output=True, text=True)
+    p = subprocess.run([sys.executable, "-c", code, tree, tmp, "1" if perturb else "0"],
+                       capture_output=True, text=True)
     if p.returncode:
         print("★ 引擎在 %s 上跑不动 ⇒ 查不了（**不是「通过」**）：" % tree)
         print(p.stderr.strip()[-800:])
@@ -73,12 +111,19 @@ json.dump(out, open(sys.argv[2], "w"))
     return json.load(io.open(tmp, encoding="utf-8"))
 
 
-def ref_tree(sha):
+def ref_tree(sha, perturb=False):
     d = materialize(sha)
     try:
-        return outputs(d)
+        return outputs(d, perturb)
     finally:
         shutil.rmtree(d, ignore_errors=True)
+
+
+def split_keys(keys):
+    """把键分成结构层 / 信号层两拨（信号键形如 `zec_1h.json|pen`）。"""
+    struct = sorted(k for k in keys if "|" not in k)
+    sigs = sorted(k for k in keys if "|" in k)
+    return struct, sigs
 
 
 def compare(a_sha, b_sha, label_a, label_b):
@@ -86,30 +131,54 @@ def compare(a_sha, b_sha, label_a, label_b):
     print("对照 %s = %s" % (label_b, b_sha[:12]))
     A = ref_tree(a_sha)
     B = ref_tree(b_sha)
-    bad = [(k, A.get(k), B.get(k)) for k in sorted(set(A) | set(B)) if A.get(k) != B.get(k)]
-    n = len(set(A) | set(B))
-    print("  %d 份数据 · %d 份不同" % (n, len(bad)))
+    keys = set(A) | set(B)
+    bad = [(k, A.get(k), B.get(k)) for k in sorted(keys) if A.get(k) != B.get(k)]
+    struct, sigs = split_keys(keys)
+    bad_s = [k for k, _x, _y in bad if "|" not in k]
+    bad_g = [k for k, _x, _y in bad if "|" in k]
+    print("  结构层 %d 个键（%d 不同）· 信号层 %d 个键（%d 不同）"
+          % (len(struct), len(bad_s), len(sigs), len(bad_g)))
     if not bad:
-        print("  ⇒ 引擎输出**逐位相同** ⇒ `%s` 不用动。" % PINE)
+        print("  ⇒ 引擎输出**逐位相同**（结构 + 信号）⇒ `%s` 不用动。" % PINE)
         return 0
     print("  ⇒ ★ 引擎输出变了 ⇒ `%s` **必须重移植**：" % PINE)
     for k, x, y in bad:
-        print("      %-24s %s → %s" % (k, x, y))
+        print("      %-28s %s → %s" % (k + ("  [信号层]" if "|" in k else "  [结构层]"), x, y))
     return 1
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--head", default=None, help="对照的提交（默认 origin/main）")
-    ap.add_argument("--self-test", action="store_true", help="正臂：一对已知不同的提交，必须红")
+    ap.add_argument("--self-test", action="store_true",
+                    help="两条正臂：结构层一对已知不同的提交，信号层「故意改一个信号」，都必须红")
     a = ap.parse_args()
 
     if a.self_test:
+        # ── 正臂①（结构层）：一对已知引擎被重写过的提交，输出必须不同
         rc = compare(SELFTEST_OLD, SELFTEST_NEW, "自证·旧", "自证·新")
         if rc == 0:
-            print("★ 正臂**没红** ⇒ 这个检查程序判不出差异 ⇒ 它印的「不用动」不算数（exit=3）。")
+            print("★ 正臂①（结构层）**没红** ⇒ 这个检查程序判不出差异 ⇒ 它印的「不用动」不算数（exit=3）。")
             return 3
-        print("⇒ 正臂红了（exit=%d）✓ —— 它接上了，所以它印的「不用动」才算数。" % rc)
+        print("⇒ 正臂①（结构层）红了（exit=%d）✓" % rc)
+
+        # ── 正臂②（信号层）：同一棵树，把背驰比例压到 0 —— **故意改一个信号**，信号键必须变。
+        #    没有这一条，"只动 signals() 的改动"照样能印出绿色的「不用动」（2026-10-02 实测踩过）。
+        tree = a.head or "HEAD"
+        A = ref_tree(tree, perturb=False)
+        B = ref_tree(tree, perturb=True)
+        sig_keys = [k for k in A if "|" in k]
+        if not sig_keys:
+            print("★ 正臂②（信号层）**一个信号键都没有** ⇒ 探针没接上（exit=3）。")
+            return 3
+        moved = [k for k in sig_keys if A[k] != B.get(k)]
+        if not moved:
+            print("★ 正臂②（信号层）**没红**：改了背驰比例，%d 个信号键一个没变 ⇒ 这个探针不算数（exit=3）。"
+                  % len(sig_keys))
+            return 3
+        print("⇒ 正臂②（信号层）红了：把背驰比例压到 0 ⇒ %d/%d 个信号键变了 ✓"
+              % (len(moved), len(sig_keys)))
+        print("    （探针连上了。它**不**证明引擎算得对，只证明「信号一变，它就看得见」。）")
         return 0
 
     rc, base, _e = sh("git log -1 --format=%%H -- %s" % PINE)
