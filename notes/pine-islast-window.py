@@ -125,13 +125,24 @@ def win(items, end, x0):
     return [it for it in items if end(it) >= x0]
 
 
-def run_new(W):
-    """按**新规则**（倒序 + 各留配额）算出实际留下的东西。"""
+def boxes(W, sc_mode="share"):
+    """两类中枢的框怎么分。`sc_mode` 只有两种取值，专门为了让正臂能打到**同一个代码路径**上：
+
+      "share"（正确，pine 现在的写法）：段中枢的天花板 = **笔中枢画完之后的真实占用 + SC_BOX_CAP**
+                                        （对应 pine 里 `boxLimSC = gBoxes.size() + SC_BOX_CAP`
+                                          写在**笔中枢循环之后** —— 位置本身就是修复内容）
+      "abs"  （错的写法）：天花板 = 绝对值 SC_BOX_CAP。
+              等价于把 `boxLimSC` 和 `boxLimPC` 并排写在两个循环**之前**：那时 clearAll 刚做完、
+              gBoxes.size()==0 ⇒ 算出来就是 120。**我确实这么写过一版**，
+              @nova-8980 逐行读出来的。
+
+    ★ 这个函数存在的理由：先前 `run_new` 里 `gB` 跨两类共用、直接拿绝对值 `SC_BOX_CAP` 去比，
+      **跟 pine 是同一个错** ⇒ 两个错互相印证，九份数据里又恰好没有"笔中枢超过 120 格"的情况
+      （实测最坏 zec15@9000 是 82 格），于是**一直是绿的**。建模错了，尺子就跟着瞎。
+    """
     x0 = W["x0"]
-    kept_pen = select_new(W["pens"], PEN_LINE_CAP, W["e_pen"], x0)
-    kept_seg = select_new(W["segs"], SEG_LINE_CAP, W["e_seg"], x0)
     gB = 0
-    kept_pc, kept_sc = [], []
+    kept_pc = []
     for z in reversed(W["pcs"]):
         if W["e_pc"](z) < x0:
             continue
@@ -139,13 +150,24 @@ def run_new(W):
             break
         gB += 1 + n_up(z)
         kept_pc.append(z)
+    lim = (gB + SC_BOX_CAP) if sc_mode == "share" else SC_BOX_CAP
+    kept_sc = []
     for z in reversed(W["scs"]):
         if W["e_sc"](z) < x0:
             continue
-        if gB + 1 + n_up(z) > SC_BOX_CAP:
+        if gB + 1 + n_up(z) > lim:
             break
         gB += 1 + n_up(z)
         kept_sc.append(z)
+    return kept_pc, kept_sc, gB
+
+
+def run_new(W):
+    """按**新规则**（倒序 + 各留配额）算出实际留下的东西。"""
+    x0 = W["x0"]
+    kept_pen = select_new(W["pens"], PEN_LINE_CAP, W["e_pen"], x0)
+    kept_seg = select_new(W["segs"], SEG_LINE_CAP, W["e_seg"], x0)
+    kept_pc, kept_sc, gB = boxes(W, "share")
     return {"pen": kept_pen, "seg": kept_seg, "pc": kept_pc, "sc": kept_sc, "boxes": gB}
 
 
@@ -215,7 +237,30 @@ def self_test(data):
             print("     ★ 臂① 没红：要么这档撞不到 %d 笔，要么选择规则没接上。" % OLD_PEN_CAP)
         if not arm2:
             print("     ★ 臂② 没红：线段没被挤掉，这条臂在这份数据上不成立。")
-        ok = arm1 and arm2
+
+        # ── 臂③ 段中枢不许被笔中枢挤掉 ──────────────────────────────────────────
+        # ★ 真实九份数据**打不到**这一条：实测最坏（zec15@9000）笔中枢才占 82 格 < 119，
+        #   所以旧的那版错法在这九份上照样绿 —— 这正是它能活到被 @nova-8980 逐行读出来的原因。
+        #   要让它红，得**合成**一个"笔中枢多到占满"的窗口：把窗口里的 pcs 复制几份。
+        #   复制的是中枢**条目**，每个条目仍指向真实的笔（PI1 不变）⇒ 判据本身没被改软。
+        only_pc = dict(W, scs=[])
+        base_used = boxes(only_pc, "share")[2]
+        reps = 1
+        while base_used * reps <= SC_BOX_CAP and base_used * (reps + 1) <= PC_BOX_CAP:
+            reps += 1
+        W2 = dict(W, pcs=W["pcs"] * reps)
+        n_sc_in = len(win(W["scs"], W["e_sc"], W["x0"]))
+        n_share = len(boxes(W2, "share")[1])
+        n_abs = len(boxes(W2, "abs")[1])
+        arm3 = (n_abs == 0) and (n_share == n_sc_in)
+        print("  臂③ 段中枢份额：合成 %d 倍笔中枢（占 %d 格 > %d）后，窗口内 %d 个段中枢 —— "
+              "份额写法留 %d，绝对值写法留 %d  ⇒ %s"
+              % (reps, base_used * reps, SC_BOX_CAP, n_sc_in, n_share, n_abs,
+                 "红 ✓" if arm3 else "★ 没红 ✗"))
+        if not arm3:
+            print("     ★ 臂③ 没红：份额写法没比绝对值写法多留下来 ⇒ 这条臂没打中那个错。")
+
+        ok = arm1 and arm2 and arm3
     if W is None:
         print("   ★ 找不到 zec15.json ⇒ 正臂跑不了（exit=3）")
         return False

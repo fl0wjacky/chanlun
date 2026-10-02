@@ -940,12 +940,16 @@ if barstate.islast
     int nSegDrawn = 0
     int nSigDrawn = 0
     // ★ 两类中枢的框上限要按**各自的起点**算，不能拿全局 gBoxes.size() 去比一个小配额：
-    //   笔中枢先画、把 gBoxes 填到几十上百，段中枢再去比 `size() < 120` 就**一个都画不出来**
-    //   （我自己第一版就是这么写的）。这里先把各自的**绝对天花板**定死，再传下去。
+    //   笔中枢先画、把 gBoxes 填到几十上百，段中枢再去比 `size() < 120` 就**一个都画不出来**。
+    //
+    // ★★ 位置是**这个 bug 的全部**：`boxLimSC`/`lbLimSC` **必须在笔中枢画完之后**才算。
+    //   我第一版把四个上限写在同一个地方（都在两个循环**之前**），那时 clearAll 刚做完、
+    //   gBoxes.size()==0 ⇒ boxLimSC 就等于**绝对值 120**，等于病情原封不动，只是注释里写着
+    //   "按各自起点算" —— **意图写对了，位置放错了**。@nova-8980 逐行读出来才发现的。
+    //   实测上它当时还没显形（zec15@9000 笔中枢只占 82 格 < 119，段中枢还挤得进去），
+    //   余量只剩 38 格 ⇒ 是"靠数据碰巧没触发"，不是"对"。
     boxLimPC = gBoxes.size() + PC_BOX_CAP
-    boxLimSC = gBoxes.size() + SC_BOX_CAP
     lbLimPC = gLabels.size() + PC_LB_SHARE
-    lbLimSC = gLabels.size() + SC_LB_SHARE
 
     if showPC and pcs.size() > 0
         for k = pcs.size() - 1 to 0
@@ -955,6 +959,12 @@ if barstate.islast
             if b >= x0Draw
                 if not drawCenter(z, xc(base + a), xc(base + b), penCol, 1, false, z.live or k >= pcs.size() - 2, boxLimPC, lbLimPC)
                     break
+    // ★★ 段中枢的天花板**只能在这里算**：上面那个循环已经画完笔中枢，gBoxes / gLabels 是当下的真实占用。
+    //   放到上面去（和 boxLimPC 并排）就退化成"拿绝对值 120 去比全局占用"，段中枢会被笔中枢挤没 ——
+    //   这个位置本身就是修复内容，不是排版问题。
+    boxLimSC = gBoxes.size() + SC_BOX_CAP
+    lbLimSC = gLabels.size() + SC_LB_SHARE
+
     if showSC and scs.size() > 0
         for k = scs.size() - 1 to 0
             z = scs.get(k)
