@@ -297,11 +297,87 @@ def run_self_test():
     return ok
 
 
+# 一条**手挑的**小序列：专门压 pine 里那几处只有人读得出来的分支。
+# 每一行是 (高, 低)。设计意图逐条写在下面，跑 `--trace` 会印出每个前缀的期望状态 ——
+# 这份表是给**读 pine 的人**对账用的（本仓跑不了 Pine，逐前缀尺子只能证 Python 那一半）。
+TRACE_CASE = [
+    (10.0, 5.0),     # 1  第一根 ⇒ seed
+    (9.5, 6.0),      # 2  包含 ⇒ chain（**状态里留的仍是第 1 根**）
+    (9.0, 6.5),      # 3  包含 ⇒ chain
+    (11.0, 7.0),     # 4  不包含 ⇒ break：第 0 格换成第 3 根，再追加本根，方向向上
+    (10.5, 7.5),     # 5  被最后一根罩住、方向向上 ⇒ merge（两端点都取高）
+    (12.0, 8.5),     # 6  不包含 ⇒ append（第 3 根标准化K线，分型窗口打开）
+    (11.5, 9.0),     # 7  被罩住、方向向上 ⇒ merge
+    (13.0, 10.0),    # 8  不包含 ⇒ append
+    (12.0, 8.0),     # 9  不包含 ⇒ append ⇒ 前一根成为**顶分型**
+    (11.0, 7.0),     # 10 不包含 ⇒ append
+    (10.0, 5.0),     # 11 不包含 ⇒ append
+    (9.0, 4.0),      # 12 不包含 ⇒ append
+    (9.5, 6.0),      # 13 不包含 ⇒ append ⇒ 前一根成为**底分型**
+]
+
+
+def trace():
+    """印出手挑序列的逐前缀期望状态 —— 给读 pine 的人逐行对账用。
+
+    ★ 这份表**只能**用来对 Python 那一半（`core/kline.py` 的批量实现 == 增量实现）。
+      它证不了 pine 里那段跟这份 Python 逐行相同 —— 那只能靠人读，所以要印得能读。
+    """
+    inc = Incremental()
+    bad = 0
+    seen = {}
+    print("手挑序列（h, l）逐前缀期望状态。读 pine 的人按这个对：")
+    print("  前缀  本根          走的哪条分支   标准化序列(h,l)                       分型(k:i:type@price)")
+    merge_touched = 0
+    for k, (h, l) in enumerate(TRACE_CASE, 1):
+        was_started = inc.started
+        L0 = len(inc.m)
+        fx0 = {f["k"]: key_fx([f]) for f in inc.fx}
+        inc.push(h, l)
+        if not was_started and inc.started:
+            br = "break"
+        elif not was_started:
+            br = "seed" if k == 1 else "chain"
+        elif len(inc.m) > L0:
+            br = "append"
+        else:
+            br = "merge"
+        seen[br] = seen.get(br, 0) + 1
+        # 只盯「**原本就存在**的那一格分型，重算之后变了没有」—— append 新添一格不算。
+        fx1 = {f["k"]: key_fx([f]) for f in inc.fx}
+        touched = [kk for kk in fx0 if fx1.get(kk) != fx0[kk]]
+        if br == "merge" and touched:
+            merge_touched += 1
+        gm, gfx = inc.snapshot()
+        bm = standardize([{"h": a, "l": b} for a, b in TRACE_CASE[:k]], None)
+        bfx = fractals(bm)
+        same = key_m(gm) == key_m(bm) and key_fx(gfx) == key_fx(bfx)
+        bad += 0 if same else 1
+        chg = ("  ← 已存在的分型 @k=%s 被重算改掉了" % touched) if touched else ""
+        ser = " ".join("(%.4g,%.4g)" % (x["h"], x["l"]) for x in gm)
+        fxs = " ".join("%d:i%d:%s@%.4g" % (f["k"], f["i"], f["type"], f["price"]) for f in gfx) or "—"
+        print("  %2d   (%-9s)  %-12s  %-35s  %s%s%s"
+              % (k, "%.4g,%.4g" % (h, l), br, ser, fxs,
+                 chg, "" if same else "   ★ 与批量版不一致！"))
+    print("  分支覆盖：" + "  ".join("%s×%d" % (b, seen[b]) for b in
+                                    ("seed", "chain", "break", "merge", "append") if b in seen))
+    print("  merge 次数 %d ｜ 其中「已存在的分型格被重算改掉」 %d 次"
+          % (seen.get("merge", 0), merge_touched))
+    print("  ⇒ %s" % ("与批量版逐前缀一致（%d 个前缀）。" % len(TRACE_CASE) if not bad
+                    else "★ %d 个前缀不一致 —— 别拿这份表去对 pine。" % bad))
+    return 0 if not bad else 1
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--random", type=int, default=300, help="随机序列条数")
+    ap.add_argument("--trace", action="store_true",
+                    help="印一条手挑小序列的逐前缀期望状态，给**读 pine 的人**逐行对账")
     a = ap.parse_args()
+
+    if a.trace:
+        return trace()
 
     if a.self_test:
         print("--self-test：把增量版故意改坏，检查程序必须红")

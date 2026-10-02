@@ -28,8 +28,6 @@ penRule   = input.string("老笔", "笔的标准", options = ["老笔", "新笔"
      tooltip = "老笔（第 77 课）：顶底分型之间至少隔一根独立K线。新笔（第 81 课）：包含处理后不共用K线，且两个极值K线之间原始K线 ≥ 3 根。")
 tickSize  = input.float(0.0, "价格精度（0 = 用原始价格）", minval = 0.0, group = G1,
      tooltip = "第 64 课：精度一旦预设就要一路保持。填 0.1 表示高低价按 0.1 取整后再算。")
-calcBars  = input.int(3000, "参与计算的K线数（最近）", minval = 300, maxval = 10000, group = G1,
-     tooltip = "越多越慢；报「loop 执行超过 500ms」或脚本超时就调小。")
 // 特征序列**合并方向**的两种口径（小栋 2026-10-02 ⑤；与 Python 引擎 core/segment.py 的 mode 一一对应）
 featDir   = input.string("A 开头按线段方向", "特征序列合并方向", options = ["A 开头按线段方向", "B 全程按线段方向"], group = G1,
      tooltip = "第 67 课只说特征序列也要做非包含处理，没说合并方向怎么取。A（默认）＝开头按线段方向、之后按『最后两根』定方向；B＝全程按线段方向（chan.py / YuYuKunKun / ZenTheory 的做法）。默认 A 与历史输出一致。")
@@ -111,14 +109,57 @@ type Sig
 // ───────────────────────── 逐根收集数据 ─────────────────────────
 q(float p) => tickSize > 0 ? math.round(p / tickSize) * tickSize : p
 
-var array<float> aH = array.new<float>()
-var array<float> aL = array.new<float>()
-var array<float> aM = array.new<float>()   // MACD 柱（DIF − DEA，EMA 以第一根收盘价起算，与 Python 版一致）
+contains(float ah, float al, float bh, float bl) => (ah >= bh and al <= bl) or (bh >= ah and bl <= al)
+
+// ───────────────────────── K线：包含处理与分型（第 65 课）─────────────────────────
+// ★ 逐根增量（本卡第①步）。原来是每根K线往 aH/aL 里存、在 barstate.islast 里把整段
+//   standardize() + fractals() 重算一遍 —— 那就是 500ms/超时的来源。现在改成 var 状态，
+//   每根只推进一步，islast 只负责画。
+//
+//   与 Python 侧 core/kline.py 的**批量**实现逐前缀等价：notes/pine-incremental-parity.py
+//   （9 份真实数据 + 300 条随机行情，90804 个前缀，0 分歧；--self-test 两支正臂全红）。
+//   等价靠的不变量：**一次推入只追加一根、或只改动最后一根**。因此
+//     · 只有最后一个分型格子（k = 长度−2）的判据含被改动的元素 ⇒ 重算只需它一格；
+//     · 合并时那一格要**重算**（值可能变），但**不能删掉不补** —— 那会丢掉一个真分型。
+//   两条边界都是量出来的，不是估的（详见上面那份笔记）。
+//
+//   zIH/zIL 的含义与批量版一致：『这个极值是哪根原始K线贡献的』——画图精确定位用。
+//   注意它们现在是**原始下标**（off 恒为 0），不再是 slice 内的相对下标。
+var array<float> zH  = array.new<float>()   // 标准化序列：高
+var array<float> zL  = array.new<float>()   //               低
+var array<int>   zIH = array.new<int>()     //               最高点来自哪根原始K线
+var array<int>   zIL = array.new<int>()     //               最低点来自哪根原始K线
+var array<Fx>    zFx = array.new<Fx>()      // 分型表（k 递增、顶底严格交替）
+var bool  zStarted = false                  // 方向是否已定（标准化序列已有 ≥2 根）
+var float zPrevH = na                       // 未定方向时扫到的最后一根候选（即原算法里的 k−1）
+var float zPrevL = na
+var int   zPrevI = na
+var int   zN     = 0                        // 已推入的原始K线根数 = 原始下标的上界
+
+// 重算最后一个分型格子。数组一律走参数（函数里不碰全局）。
+zRefx(array<float> H, array<float> L, array<int> IH, array<int> IL, array<Fx> FX) =>
+    n = H.size()
+    while FX.size() > 0 and FX.get(FX.size() - 1).k >= n - 2    // 等价于批量版的 k < 长度−2 过滤
+        FX.pop()
+    if n >= 3
+        k = n - 2
+        h0 = H.get(k - 1)
+        h1 = H.get(k)
+        h2 = H.get(k + 1)
+        l0 = L.get(k - 1)
+        l1 = L.get(k)
+        l2 = L.get(k + 1)
+        if h1 > h0 and h1 > h2 and l1 > l0 and l1 > l2
+            FX.push(Fx.new(k, IH.get(k), true, h1))
+        else if l1 < l0 and l1 < l2 and h1 < h0 and h1 < h2
+            FX.push(Fx.new(k, IL.get(k), false, l1))
+    true
+
+// MACD 柱（DIF − DEA，EMA 以第一根收盘价起算，与 Python 版一致）
+var array<float> aM = array.new<float>()
 var float emaF = na
 var float emaS = na
 var float dea  = na
-aH.push(q(high))
-aL.push(q(low))
 if na(emaF)
     emaF := close
     emaS := close
@@ -128,66 +169,66 @@ else
     emaS += (close - emaS) * 2.0 / (mSlow + 1)
     dea  += (emaF - emaS - dea) * 2.0 / (mSig + 1)
 aM.push(emaF - emaS - dea)
-if aH.size() > 20000                              // 数组上限 10 万；只留最近 2 万根（calcBars ≤ 1 万）
-    aH.shift(), aL.shift(), aM.shift()
+// ★ aM 也不再截断（原来 >20000 就 shift）：strengthOf 里是 aM.get(off + t)，off=0 时 t 就是原始下标。
+//   一旦 shift，下标就和增量状态对不上了 —— 性能旋钮不能拿来讲正确性。
 
-// ───────────────────────── K线：包含处理与分型（第 65 课）─────────────────────────
-contains(float ah, float al, float bh, float bl) => (ah >= bh and al <= bl) or (bh >= ah and bl <= al)
-
-standardize(array<float> H, array<float> L) =>
-    n = H.size()
-    sH = array.new<float>()
-    sL = array.new<float>()
-    sIH = array.new<int>()
-    sIL = array.new<int>()
-    if n > 0
-        k = 1
-        while k < n and contains(H.get(k - 1), L.get(k - 1), H.get(k), L.get(k))
-            k += 1
-        if k >= n
-            sH.push(H.get(0)), sL.push(L.get(0)), sIH.push(0), sIL.push(0)
-        else
-            sH.push(H.get(k - 1)), sL.push(L.get(k - 1)), sIH.push(k - 1), sIL.push(k - 1)
-            sH.push(H.get(k)), sL.push(L.get(k)), sIH.push(k), sIL.push(k)
-            i = k + 1
-            while i < n
-                bh = H.get(i)
-                bl = L.get(i)
-                m = sH.size()
-                ph = sH.get(m - 1)
-                pl = sL.get(m - 1)
-                up = ph > sH.get(m - 2) or (ph == sH.get(m - 2) and pl > sL.get(m - 2))
-                if contains(ph, pl, bh, bl)
-                    if up
-                        sH.set(m - 1, math.max(ph, bh)), sL.set(m - 1, math.max(pl, bl))
-                        if bh > ph
-                            sIH.set(m - 1, i)
-                        if bl > pl
-                            sIL.set(m - 1, i)
-                    else
-                        sH.set(m - 1, math.min(ph, bh)), sL.set(m - 1, math.min(pl, bl))
-                        if bh < ph
-                            sIH.set(m - 1, i)
-                        if bl < pl
-                            sIL.set(m - 1, i)
-                else
-                    sH.push(bh), sL.push(bl), sIH.push(i), sIL.push(i)
-                i += 1
-    [sH, sL, sIH, sIL]
-
-fractals(array<float> sH, array<float> sL, array<int> sIH, array<int> sIL) =>
-    fx = array.new<Fx>()
-    m = sH.size()
-    k = 1
-    while k < m - 1
-        h0 = sH.get(k - 1), h1 = sH.get(k), h2 = sH.get(k + 1)
-        l0 = sL.get(k - 1), l1 = sL.get(k), l2 = sL.get(k + 1)
-        if h1 > h0 and h1 > h2 and l1 > l0 and l1 > l2
-            fx.push(Fx.new(k, sIH.get(k), true, h1))
-        else if l1 < l0 and l1 < l2 and h1 < h0 and h1 < h2
-            fx.push(Fx.new(k, sIL.get(k), false, l1))
-        k += 1
-    fx
+// ── 本根推入增量状态（下面这段就是原 standardize() 那个单遍扫描，逐行搬到顶层逐根跑）──
+// ★ 未定方向那一段（原算法里的前缀扫描）。**整段互相包含时批量版塌成「第一根」**，
+//   不是最后一根 —— 所以第 0 根就先摆进状态，等方向定下来那一刻再把第 0 格换成 k−1 那根。
+//   （这一条我第一版照搬时漏了，是逐行对回 Python 才看见的；见 notes/pine-incremental-parity.py
+//    的 snapshot()，与 core/kline.py 的 `if k >= n: return [bars[0]...]` 同义。）
+zcH = q(high)
+zcL = q(low)
+if zH.size() == 0
+    zH.push(zcH)
+    zL.push(zcL)
+    zIH.push(zN)
+    zIL.push(zN)
+    zPrevH := zcH
+    zPrevL := zcL
+    zPrevI := zN
+else if not zStarted
+    if contains(zPrevH, zPrevL, zcH, zcL)
+        zPrevH := zcH                                       // 仍在互相包含：候选往后挪（状态里留的仍是第一根）
+        zPrevL := zcL
+        zPrevI := zN
+    else
+        zH.set(0, zPrevH)                                   // 方向定下来了：第 0 格换成 k−1 那根，再追加本根
+        zL.set(0, zPrevL)
+        zIH.set(0, zPrevI)
+        zIL.set(0, zPrevI)
+        zH.push(zcH)
+        zL.push(zcL)
+        zIH.push(zN)
+        zIL.push(zN)
+        zStarted := true
+else
+    zm = zH.size()
+    zph = zH.get(zm - 1)
+    zpl = zL.get(zm - 1)
+    zup = zph > zH.get(zm - 2) or (zph == zH.get(zm - 2) and zpl > zL.get(zm - 2))
+    if contains(zph, zpl, zcH, zcL)
+        if zup                                              // 向上：两个端点都取高
+            zH.set(zm - 1, math.max(zph, zcH))
+            zL.set(zm - 1, math.max(zpl, zcL))
+            if zcH > zph
+                zIH.set(zm - 1, zN)
+            if zcL > zpl
+                zIL.set(zm - 1, zN)
+        else                                                // 向下：两个端点都取低
+            zH.set(zm - 1, math.min(zph, zcH))
+            zL.set(zm - 1, math.min(zpl, zcL))
+            if zcH < zph
+                zIH.set(zm - 1, zN)
+            if zcL < zpl
+                zIL.set(zm - 1, zN)
+    else
+        zH.push(zcH)
+        zL.push(zcL)
+        zIH.push(zN)
+        zIL.push(zN)
+zRefx(zH, zL, zIH, zIL, zFx)
+zN += 1
 
 // ───────────────────────── 笔（第 77 课 + 回头修正；第 81 课新笔）─────────────────────────
 far(Fx a, Fx b) => penRule == "老笔" ? b.k - a.k >= 4 : (b.k - a.k >= 3 and math.abs(b.i - a.i) >= 4)
@@ -736,13 +777,14 @@ drawCenter(Ctr z, int x0, int x1, color col, int w, bool withLabel, bool prov) =
 
 if barstate.islast
     clearAll()
-    n = aH.size()
-    off = math.max(0, n - calcBars)                   // 截取最近 calcBars 根；相对下标 i 在数组里是 off + i
-    base = bar_index - (n - 1) + off                  // 相对下标 i 对应的 bar_index = base + i（数组开头可能已被 shift 掉）
-    H = aH.slice(off, n)
-    L = aL.slice(off, n)
-    [sH, sL, sIH, sIL] = standardize(H, L)
-    fx = fractals(sH, sL, sIH, sIL)
+    n = zN                                            // 原始K线根数（不再截断 —— 增量状态从第 0 根攒起）
+    off = 0                                           // ★ 相对下标 == 原始下标。保留这个名字只为 signalsOf/strengthOf 的调用点不动：aM.get(off + t)
+    base = bar_index - (n - 1) + off                  // 原始下标 i 对应的 bar_index = base + i
+    sH = zH                                           // ① 的产物：标准化序列直接取增量状态，不再重算
+    sL = zL
+    sIH = zIH
+    sIL = zIL
+    fx = zFx                                          //    分型表同理
     pens = buildPens(fx, sH, sL)
     segs = buildSegments(pens)
     done = array.new<Unit>()
