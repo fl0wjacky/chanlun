@@ -63,6 +63,20 @@ def same_dir_starts(centers, pens, segs):
     return sum(1 for z in centers if pdir(pens[z["PI0"]]) == seg_dir.get(z["PI0"]))
 
 
+def cross_seg_links(centers, big, segs):
+    """类中枢之间的趋势/背驰/扩展合成限同一段内（小栋 10-03 定 A；L69:23 / L94:24 / L65:112 段内类背驰）——
+    数两样跨段的东西（应都为 0）：① 前后两个类中枢不在同一段、rel 却不是『—』；② 合成体成员跨了段。
+    段归属**从 segs 按 PI0 现算**，不读引擎自己打的 `seg` 字段（尺不读被测对象的自报）。"""
+    owner = {}
+    for si, s in enumerate(segs):
+        for k in range(s["PI0"], s["PI1"] + 1):
+            owner.setdefault(k, si)              # 段界那根笔两段共用：归前一段（类中枢 PI0 ≥ 段 PI0+1，碰不到）
+    rel = sum(1 for k in range(1, len(centers))
+              if owner.get(centers[k - 1]["PI0"]) != owner.get(centers[k]["PI0"]) and centers[k]["rel"] != "—")
+    syn = sum(1 for b in big if len({owner.get(m["PI0"]) for m in b.get("members", [b])}) > 1)
+    return rel, syn
+
+
 for tag, r in R.items():
     m = r["std"]
     print("=" * 72)
@@ -94,6 +108,9 @@ for tag, r in R.items():
     count("类中枢起笔与段同向", same_dir_starts(r["centers"], P, S),
           "　← L64:31/L64:35-36 首笔必须反向（下跌段里是上下上）")
     count("类中枢扩展合成违规", len(check_hierarchy(r["big"], r["centers"], P)))
+    _xr, _xs = cross_seg_links(r["centers"], r["big"], S)
+    count("类中枢跨段 rel", _xr, "　← 段首 rel 必须是『—』（L69:23 / L94:24 段内类背驰）")
+    count("类中枢跨段合成", _xs)
     count("买卖点复核违规", sum(len(check_signals(signals(r, lv, m), r, lv, m)) for lv in ("seg", "pen") for m in ("macd", "slope")))
     # 「B 段回抽 0 轴附近」那条必要条件 —— **默认不接进买卖点判定**（2026-09-30 拍板）。
     # 这里印的是**读数不是红**：口径（统计量 / 窗口 / 阈值）全是我们发明的数，原文只给"附近"两个字，
@@ -195,6 +212,23 @@ else:
     Zd[_ds]["PI0"] -= 1
     count("起笔与段同向未被发现",
           0 if same_dir_starts(Zd, R["ZEC 15m"]["pens"], R["ZEC 15m"]["segs"]) else 1)
+# 类中枢跨段：两条变异各一格 —— ① 把 rel 改回全局重算（复现 6eea8c4 的现状）；② 把相邻两段的
+# 首尾两个类中枢硬并成一个合成体。cross_seg_links 必须各自报错（它不读 `seg`，所以抹掉 seg 也骗不过它）。
+from core.center import classify_pair                          # noqa: E402
+Zx = copy.deepcopy(R["ZEC 15m"]["centers"])
+_xk = [k for k in range(1, len(Zx)) if Zx[k - 1].get("seg") != Zx[k].get("seg")]
+if not _xk:
+    skip("跨段 rel 未被发现", "ZEC 15m 没有相邻两段都有类中枢的段界，夹具造不出")
+    skip("跨段合成未被发现", "同上")
+else:
+    for k in range(1, len(Zx)):
+        Zx[k]["rel"], Zx[k]["kind"] = classify_pair(Zx[k - 1], Zx[k])
+    for z in Zx:
+        z.pop("seg", None)
+    count("跨段 rel 未被发现", 0 if cross_seg_links(Zx, [], R["ZEC 15m"]["segs"])[0] else 1)
+    _a, _b = R["ZEC 15m"]["centers"][_xk[0] - 1], R["ZEC 15m"]["centers"][_xk[0]]
+    _bx = [dict(_a, nmerge=2, members=[_a, _b])]
+    count("跨段合成未被发现", 0 if cross_seg_links(R["ZEC 15m"]["centers"], _bx, R["ZEC 15m"]["segs"])[1] else 1)
 # 买卖点：把一个三买挪到离开段的终点、把一个一买挪到没创新低的位置，复核必须报错
 Rz = R["ZEC 15m"]
 S = signals(Rz, "pen")

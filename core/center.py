@@ -176,10 +176,14 @@ def find_centers(pens, start_dir=None):
 
 
 def classify_relations(zs):
-    """给中枢列表补上『与前一个中枢的关系』（趋势 / 扩展 / 同一中枢）和『可信度档』。"""
+    """给中枢列表补上『与前一个中枢的关系』（趋势 / 扩展 / 同一中枢）和『可信度档』。
+
+    『关系』只在前一个中枢与它**同段**时才算（类中枢带 `seg` 字段，跨段不接续；
+    线段中枢不带 `seg`，`None == None`，退回全局两两算）。不带 `seg` 的列表段首（k==0）
+    或带 `seg` 的列表里每段段首，`rel` 都是『—』。"""
     n = len(zs)
     for k, z in enumerate(zs):
-        if k == 0:
+        if k == 0 or zs[k - 1].get("seg") != z.get("seg"):
             z["rel"], z["kind"] = "—", "—"
         else:
             z["rel"], z["kind"] = classify_pair(zs[k - 1], z)
@@ -202,8 +206,8 @@ def find_centers_by_segment(pens, segs):
     次级别走势类型，跨段的重叠归线段中枢，所以类中枢不该横跨线段分界。
     每条线段（含未完成那条 live）里的笔单独跑 find_centers，得到的 PI0/PI1 是段内下标，
     加回段起点 rebase 成全局笔下标；段与段之间的分界处不接续、不合并。
-    『与前一个中枢的关系』和『可信度档』最后全局重算（关系是「两个中枢之间」的，
-    可信度档看的是整份数据的末尾，都不是中枢本身跨段）。
+    『与前一个中枢的关系』只在**同段内**的两两之间算（`z["seg"]` 记归属线段，跨段不接续，
+    每段段首 rel='—'）；『可信度档』看的是整份数据的末尾，与跨段无关，仍全局重算。
 
     起笔（L64:31 / L64:35-36）：线段的首笔是与段同向的进入笔，类中枢要从第一根
     **反向**笔起找（下跌段里是「上下上」，首笔反向），而且**每个**中枢的首笔都得是
@@ -217,13 +221,14 @@ def find_centers_by_segment(pens, segs):
     『所在线段结束』；只有最后那条未完成线段里的才保留 find_centers 给的 live。
     """
     out = []
-    for s in segs:
+    for si, s in enumerate(segs):
         base = s["PI0"] + 1                     # 跳过与段同向的进入笔，从第一根反向笔起（L64:31 / L64:35-36）
         reverse = "down" if s["dir"] == "up" else "up"   # 首笔必须反向（下跌段里是「上下上」）
         seg_live = s.get("live", False)
         for z in find_centers(pens[base:s["PI1"] + 1], start_dir=reverse):
             z["PI0"] += base
             z["PI1"] += base
+            z["seg"] = si                       # 归属哪条线段：rel / 扩展合成只在同段内接续
             if z["live"] and not seg_live:
                 z["live"] = False
                 z["term"] = "所在线段结束"
@@ -313,6 +318,9 @@ def check_centers(zs, units, stops=None):
         if k > 0:
             if i <= zs[k - 1]["PI1"]:
                 bad.append(("与前一个中枢重叠或乱序", k))
-            if (z["rel"], z["kind"]) != classify_pair(zs[k - 1], z):
+            if zs[k - 1].get("seg") != z.get("seg"):
+                if (z["rel"], z["kind"]) != ("—", "—"):
+                    bad.append(("跨段不应有 rel，应标『—』", k))
+            elif (z["rel"], z["kind"]) != classify_pair(zs[k - 1], z):
                 bad.append(("与前一个中枢的关系标错", k))
     return bad

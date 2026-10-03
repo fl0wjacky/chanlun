@@ -127,6 +127,7 @@ type Ctr
     bool  live
     int   term     // 0 仍在延续 / 1 三买 / 2 三卖 / 3 Z 段向上离开 / 4 Z 段向下离开 / 5 所在线段结束
     int   rel      // 0 无 / 1 下跌延续 / 2 上涨延续 / 3 扩展·向下 / 4 扩展·向上 / 5 区间重叠
+    int   seg = -1 // 归属哪条线段（-1 = 非段内算，如线段中枢）；类中枢只在同段内接续 rel/合成
     array<float> upZD
     array<float> upZG
 
@@ -831,7 +832,7 @@ findCenters(array<Unit> U, int startDir) =>
                     gZG := na(gZG) ? hi : math.min(gZG, hi)
                 upZD.push(gZD), upZG.push(gZG)
                 g *= 3
-            zs.push(Ctr.new(i, endU, ZD, ZG, DD, GG, reason == 0, reason, 0, upZD, upZG))
+            zs.push(Ctr.new(i, endU, ZD, ZG, DD, GG, reason == 0, reason, 0, -1, upZD, upZG))
             i := reason != 0 ? nxt : endU + 1
         else
             i += 1
@@ -843,7 +844,8 @@ findCenters(array<Unit> U, int startDir) =>
 
 // 类中枢改段内算：按线段把笔切开，每段内各自 findCenters —— 类中枢不跨线段（L65:145-146 / L57:21）。
 // 每条线段（含未完成那条 live）里的笔单独跑，PI0/PI1 是段内下标，加回段起点 rebase 成全局笔下标；
-// 段与段之间不接续、不合并。「与前一个中枢的关系」最后全局重算（关系是两中枢之间的，不是中枢本身跨段）。
+// 段与段之间不接续、不合并。「与前一个中枢的关系」只在同段内算：findCenters 对每段切片已经算好了
+// 段内 rel（段首 rel=0 无），这里只打 seg 归属，不再全局重算 —— 跨段不接续，每段段首 rel 就是「无」。
 // 起笔（L64:31 / L64:35-36）：段首笔是与段同向的进入笔，类中枢从第一根反向笔起（下跌段里是上下上），
 // 而且每个中枢的首笔都得反向、不只第一个 —— 不重叠时 findCenters 挪到下一根（同向）笔，终结后 nxt 也可能
 // 落在同向笔上。所以每段跳过第 0 笔（base = PI0 + 1），再把段方向的反向传给 findCenters（首笔方向约束）。
@@ -851,23 +853,22 @@ findCenters(array<Unit> U, int startDir) =>
 // 一律改 live=false、term=5（所在线段结束）；只有最后那条未完成线段才保留 findCenters 给的 live。
 findCentersBySegment(array<Unit> pens, array<Unit> segs) =>
     zs = array.new<Ctr>()
-    for s in segs
-        base = s.PI0 + 1
-        int sdir = isUp(s) ? 1 : -1
-        cs = findCenters(pens.slice(base, s.PI1 + 1), -sdir)
-        if cs.size() > 0
-            for ci = 0 to cs.size() - 1
-                z = cs.get(ci)
-                z.PI0 := z.PI0 + base
-                z.PI1 := z.PI1 + base
-                if z.live and not s.live
-                    z.live := false
-                    z.term := 5
-                zs.push(z)
-    if zs.size() > 1
-        for k = 1 to zs.size() - 1
-            z = zs.get(k)
-            z.rel := relOf(zs.get(k - 1), z)
+    if segs.size() > 0                 // 空数组时 for 0 to -1 会倒着跑
+        for si = 0 to segs.size() - 1
+            s = segs.get(si)
+            base = s.PI0 + 1
+            int sdir = isUp(s) ? 1 : -1
+            cs = findCenters(pens.slice(base, s.PI1 + 1), -sdir)
+            if cs.size() > 0
+                for ci = 0 to cs.size() - 1
+                    z = cs.get(ci)
+                    z.PI0 := z.PI0 + base
+                    z.PI1 := z.PI1 + base
+                    z.seg := si
+                    if z.live and not s.live
+                        z.live := false
+                        z.term := 5
+                    zs.push(z)
     zs
 
 // ───────────────────────── 买卖点（第 20 / 21 / 24 课）─────────────────────────
@@ -896,7 +897,8 @@ hierarchy(array<Ctr> zs, array<Unit> U) =>
         bool merge = false
         if k + 1 < zs.size()
             rl = relOf(A, zs.get(k + 1))
-            merge := not A.live and rl != 1 and rl != 2
+            // 类中枢带 seg：合成只在同一段内（跨段不接续）；线段中枢 seg 都是 -1，退回全局合成
+            merge := not A.live and A.seg == zs.get(k + 1).seg and rl != 1 and rl != 2
         if merge
             B = zs.get(k + 1)
             float s2lo = B.DD                    // 连接段的高低点；没有连接段就用后中枢自己的
@@ -918,6 +920,8 @@ hierarchy(array<Ctr> zs, array<Unit> U) =>
             k += 2
             while k < zs.size() and ZG >= ZD and not live
                 Cn = zs.get(k)
+                if Cn.seg != A.seg         // 跨段：不接续，大中枢到此为止
+                    break
                 if Cn.DD > ZG or Cn.GG < ZD
                     break
                 DD := math.min(DD, Cn.DD)
@@ -925,7 +929,7 @@ hierarchy(array<Ctr> zs, array<Unit> U) =>
                 PI1 := Cn.PI1
                 live := Cn.live
                 k += 1
-            out.push(Ctr.new(A.PI0, PI1, ZD, ZG, DD, GG, live, 0, 0,
+            out.push(Ctr.new(A.PI0, PI1, ZD, ZG, DD, GG, live, 0, 0, -1,
                  array.new<float>(), array.new<float>()))
         else
             // 没合成 ⇒ 不进输出：它跟 B 是同一级，不能当『上一层的中枢』用

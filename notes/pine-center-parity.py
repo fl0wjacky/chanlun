@@ -51,6 +51,16 @@ TERM_INT = {0: "仍在延续", 1: "三买", 2: "三卖", 3: "Z 段向上离开",
             5: "所在线段结束"}
 
 
+# pine 里 rel 的 int 枚举 → 引擎的中文字符串（chanlun.pine:129 的注释逐字；0「无」在引擎里是「—」）
+REL_INT = {0: "—", 1: "下跌延续", 2: "上涨延续", 3: "扩展·向下", 4: "扩展·向上", 5: "区间重叠"}
+
+
+def pine_rel_of(A, B):                # pine:769  relOf(Ctr A, Ctr B)
+    return 1 if B["GG"] < A["DD"] else 2 if B["DD"] > A["GG"] else \
+        3 if (B["ZG"] < A["ZD"] and B["GG"] >= A["DD"]) else \
+        4 if (B["ZD"] > A["ZG"] and B["DD"] <= A["GG"]) else 5
+
+
 # ─────────────────── 以下两支：tradingview/chanlun.pine 的逐行翻译 ───────────────────
 
 def isUp(u):                          # pine:479  isUp(Unit u) => u.p1 > u.p0
@@ -104,14 +114,19 @@ def pine_find_centers(U, start_dir=0):
 def pine_find_centers_by_segment(pens, segs):
     """pine 的 findCentersBySegment() 逐行翻译（含空段守卫 + 已完成线段 live 改法 + 首笔反向）。"""
     zs = []
-    for s in segs:
+    for si, s in enumerate(segs):                          # pine: for si = 0 to segs.size() - 1（外面有 size>0 守卫）
         base = s["PI0"] + 1                                # pine: base = s.PI0 + 1（跳过与段同向的进入笔）
         sdir = 1 if isUp(s) else -1                        # pine: int sdir = isUp(s) ? 1 : -1（段方向）
         cs = pine_find_centers(pens[base:s["PI1"] + 1], -sdir)   # pine: findCenters(..., -sdir)（首笔反向）
         if len(cs) > 0:                                   # pine: if cs.size() > 0
-            for z in cs:
+            for ci, z in enumerate(cs):
                 z["PI0"] += base
                 z["PI1"] += base
+                z["seg"] = si                               # pine: z.seg := si
+                # pine 的 rel 是 findCenters 在**本段切片**末尾算的（relOf(zs[k-1], z)），
+                # findCentersBySegment 不再全局重算 ⇒ 段首 rel=0，其余跟同段前一个配对。
+                # 这里只抄「跟谁配对」（全局下标；None = 段首 rel 0），值用引擎的 ZD/ZG/DD/GG 按 relOf 算。
+                z["rel_prev"] = None if ci == 0 else len(zs) - 1
                 if z["live"] and not s.get("live", False):  # pine: if z.live and not s.live
                     z["live"] = False
                     z["term"] = 5                           # pine: z.term := 5
@@ -126,8 +141,16 @@ def check_pine_anchors():
     want = ["if cs.size() > 0", "if z.live and not s.live", "base = s.PI0 + 1",
             "findCenters(array<Unit> U, int startDir)",
             "if startDir != 0 and (isUp(U.get(i)) ? 1 : -1) != startDir",
-            "cs = findCenters(pens.slice(base, s.PI1 + 1), -sdir)"]
+            "cs = findCenters(pens.slice(base, s.PI1 + 1), -sdir)",
+            # 类中枢 rel / 合成只在同段内：打 seg、合成两处看 seg、外层空数组守卫
+            "z.seg := si", "if segs.size() > 0",
+            "merge := not A.live and A.seg == zs.get(k + 1).seg and rl != 1 and rl != 2",
+            "if Cn.seg != A.seg"]
     bad = [(w, src.count(w)) for w in want if src.count(w) != 1]
+    # 反锚：findCentersBySegment 里不许再有全局重算 rel 那段（relOf 只该在 findCenters 末尾和 hierarchy 里各一处）
+    body = src[src.index("findCentersBySegment(array<Unit> pens"):src.index("// ───────────────────────── 买卖点")]
+    if "relOf(" in body:
+        bad.append(("findCentersBySegment 里又全局重算 rel", body.count("relOf(")))
     return bad
 
 
@@ -168,6 +191,9 @@ def main():
             for key in ("PI0", "PI1", "live"):
                 if p[key] != e[key]:
                     diff.append("%s: pine=%s 引擎=%s" % (key, p[key], e[key]))
+            prel = 0 if p["rel_prev"] is None else pine_rel_of(eng_cs[p["rel_prev"]], e)
+            if REL_INT[prel] != e["rel"]:
+                diff.append("rel: pine=%s(%d) 引擎=%s" % (REL_INT[prel], prel, e["rel"]))
             if TERM_INT[p["term"]] != e["term"]:
                 diff.append("term: pine=%s(%d) 引擎=%s" % (TERM_INT[p["term"]], p["term"], e["term"]))
             if diff:

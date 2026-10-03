@@ -56,15 +56,22 @@ def _absorb(big, C):
 
 
 def build_hierarchy(zs, pens):
-    """在全体同级别中枢上跑一遍，合成高一级别的中枢；不合的原样留下（nmerge=1）。"""
+    """在全体同级别中枢上跑一遍，合成高一级别的中枢；不合的原样留下（nmerge=1）。
+
+    类中枢带 `seg` 字段时，合成**只在同一段内**进行（段与段之间不接续、不合并）；
+    线段中枢不带 `seg`（`None == None`），退回全局合成，行为与从前一致。"""
     from .center import classify_pair
     out, k = [], 0
     while k < len(zs):
         A = zs[k]
-        if k + 1 < len(zs) and not A.get("live") and classify_pair(A, zs[k + 1])[1] != "趋势":
+        if k + 1 < len(zs) and not A.get("live") \
+                and A.get("seg") == zs[k + 1].get("seg") \
+                and classify_pair(A, zs[k + 1])[1] != "趋势":
             big = merge_extended(A, zs[k + 1], pens)
             k += 2
             while k < len(zs) and big["valid"] and not big["live"]:
+                if zs[k].get("seg") != A.get("seg"):   # 跨段：不接续，大中枢到此为止
+                    break
                 lo, hi = _span(zs[k])
                 if lo > big["ZG"] or hi < big["ZD"]:   # 整段离开大中枢区间 → 大中枢到此为止
                     break
@@ -84,7 +91,8 @@ def check_hierarchy(big, zs, pens):
     · 成员首尾相接、覆盖全部中枢、顺序不乱；
     · 区间 = 前三段（前中枢、连接段、后中枢）重算，之后的成员不改区间（第 52 课「只看前三段」）；
     · 合成的前两个成员不是「趋势」关系（第 17 / 42 / 43 课：有重叠就必然扩展）；
-    · 接进来的成员都还碰到区间；没接进来的下一个中枢确实整段离开了（或它前面已经 live）；
+    · 类中枢（带 `seg`）合成**不跨段**：同一合成体的成员必须同段；
+    · 接进来的成员都还碰到区间；没接进来的下一个中枢确实整段离开了（或它前面已经 live、或它跨了段）；
     · 级别：合成体 = 成员级别 + 1，不随链长增加。
     """
     from .center import classify_pair
@@ -96,6 +104,8 @@ def check_hierarchy(big, zs, pens):
             bad.append(("nmerge 与成员数不符", n))
         if len(ms) == 1:
             continue
+        if len({m.get("seg") for m in ms}) > 1:
+            bad.append(("合成体成员跨了线段", n))
         A, B = ms[0], ms[1]
         if classify_pair(A, B)[1] == "趋势":
             bad.append(("前两个成员是趋势关系，不该合成", n))
@@ -115,8 +125,9 @@ def check_hierarchy(big, zs, pens):
         if (b["PI0"], b["PI1"]) != (A["PI0"], ms[-1]["PI1"]) or b["DD"] != lo or b["GG"] != hi:
             bad.append(("覆盖范围 / 波动范围与成员不符", n))
         nxt = next((z for z in zs if z["PI0"] > ms[-1]["PI1"]), None)
-        if nxt is not None and b["valid"] and not ms[-1].get("live") and \
-                not (nxt["DD"] > b["ZG"] or nxt["GG"] < b["ZD"]):
+        if nxt is not None and b["valid"] and not ms[-1].get("live") \
+                and nxt.get("seg") == ms[-1].get("seg") \
+                and not (nxt["DD"] > b["ZG"] or nxt["GG"] < b["ZD"]):
             bad.append(("下一个中枢仍碰到区间却没接进来", n))
     if seen != [z["PI0"] for z in zs]:
         bad.append(("合成结果没有恰好覆盖全部中枢（漏了、重了或乱序）", -1))
