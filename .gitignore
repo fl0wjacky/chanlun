@@ -27,3 +27,6 @@ cards/*.png
 
 # 本地核对用的临时 worktree/克隆，勿入库
 workspace/wm-*/
+
+# 临时拉的实时数据（改图自核用，2026-10-03）：一律 --out <标的前缀>…_tmp.json，不入库
+data/*_tmp.json
