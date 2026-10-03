@@ -26,17 +26,26 @@
     44 字 ≈357px（放得下）；实测「六种全齐＋待确认」那种 49 字整句＝356px —— 只差 6px 就换行，
     所以 44 这条线会把那种边缘情形叫红。**知道它偏保守，是保守，不是准。**
 
-第二件（2026-10-03 线上逮到之后加的）：图脚**末尾那格「数据源」不许是空的**。
-  `web/app.js` 的模板印 `${state.source}`，而 `state.source` 从声明（`''`）起**从没被赋过值** ——
+第二件（2026-10-03 线上逮到之后加的）：图脚**末尾那格「数据源」不许是空的、也不许说假话**。
+  `web/app.js` 的模板原先印 `${state.source}`，而 `state.source` 从声明（`''`）起**从没被赋过值** ——
   `load()` 把出处挂在**返回对象**上（`'api'` ／ `'样本 x.json'`），`draw()` 只存了 `state.data`。
   真源和离线两条路都印不出出处 ⇒ 线上图脚末尾常年挂着一个光杆「｜ 数据源」。
   ★ 这格当时是**绿着漏过去的**：本尺子上一条判据量的是「标签＋列表」的宽度，**空字段不在判据里**。
-  ★ 所以这一格不读代码、**真跑**：把 `RENDER_META` 模板 ＋ `SOURCE_WIRE` 那一行抠出来，配一个假 DOM
-    调一次 `renderMeta`，看它写进 `#meta` 的那句话里「｜ 数据源」后面到底是什么。接线一摘就红（探针⑦）。
+
+  ★★ 第一版的补法（给 `draw()` 补一行把 `d.source` 写回 `state.source`）**自己又带了一个洞**，
+     Atlas 2026-10-03 挑出来的：本尺子当时是**把「赋值那一行」和「模板」两块抠出来自己拼**，
+     固定「先赋值、后 renderMeta」—— **量的是尺子造出来的顺序，不是 `draw()` 里真实的顺序**。
+     把 `renderMeta(d)` 挪到赋值之前（真页面上会印**上一次** load 的出处），尺子照样绿。
+     ⇒ 现在的修法是**把那个中间变量整个删掉**：模板直接读传进来的 `d`（`d.source` / `d.stale`），
+       没有顺序可以错，尺子也不用再造替身。这块叫「判据量了替身」，跟「判据漏了一半」是两族。
+  ★ 判据四格（都**真跑** `renderMeta`，不读代码）：真源（不 stale）⇒「币安实时」／ 真源 stale ⇒「币安缓存」
+     ／ 离线样本 ⇒「样本 x.json」原样 ／ 出处字段缺 ⇒「未知」（空着是看不出来，未知是看得出来的不知道）。
+     「币安缓存」那一态不是洁癖：stale 为真时角上同时挂着「★ 旧数据（本轮拉取失败）」，
+     图脚要是还说「实时」，同一屏上两句话就打架了。
 
 跑法：
   python3 tools/web_footer_check.py            # 主跑：拿实时规模的样本量 ＋ 数据源那格
-  python3 tools/web_footer_check.py --selftest # 探针：八格都得变红（尺子自己先证明会红）
+  python3 tools/web_footer_check.py --selftest # 探针：十格都得变红（尺子自己先证明会红）
 """
 import json
 import os
@@ -51,9 +60,10 @@ FIX = os.path.join(ROOT, "web", "fixtures", "signals_zec15m_live.json")
 
 BEGIN = "// >>> SIG_TIER_TEXT"
 END = "// <<< SIG_TIER_TEXT"
-# 图脚末尾那格「数据源」：模板 ＋ 给它赋值的那一行，两处都抠出来真跑（2026-10-03 线上逮到的洞）
+# 图脚末尾那格「数据源」：**只抠模板这一块**真跑（2026-10-03 线上逮到的洞）。
+# ★ 这里**没有**第二块要拼 —— 早先那版还抠「给 state.source 赋值」的一行拼在前面，
+#   那等于尺子自己造了个顺序去量（Atlas 挑出来的假绿）。模板直接读 d，就没得拼。
 MBEGIN, MEND = "// >>> RENDER_META", "// <<< RENDER_META"
-WBEGIN, WEND = "// >>> SOURCE_WIRE", "// <<< SOURCE_WIRE"
 SRC_RE = re.compile(r"｜\s*数据源\s*(.*)$")
 
 LINE_PX = 362.0        # 390px 视口下图脚那格的 clientWidth（量出来的）
@@ -160,19 +170,23 @@ PAYLOAD = {
 }
 
 
-def footer_text(payload, wire=True, path=JS):
-    """把 SIG_TIER_TEXT ＋ RENDER_META ＋ SOURCE_WIRE 三块拼成一个小模块，配**假 DOM** 真跑一遍
-    `renderMeta`，收它写进 `#meta` 的那整句话。`wire=False` 时故意不拼 SOURCE_WIRE —— 那是探针。"""
-    js = (block(path) + "\n" + block(path, MBEGIN, MEND) + """
+def footer_text(payload, path=JS, block_js=None):
+    """把 SIG_TIER_TEXT ＋ RENDER_META 两块拼成一个小模块，配**假 DOM** 真跑一遍 `renderMeta`，
+    收它写进 `#meta` 的那整句话。`block_js` 给探针用：拿一版**被改过**的模板替进去。
+
+    ★ 这里**不拼 draw()、也不经任何中间变量**：模板直接读传进来的 d（`d.source` / `d.stale`）。
+      早先那版先拼「给 state.source 赋值」那一行 —— 那是**尺子自己造了一个顺序**，量的是替身
+      （把 renderMeta(d) 挪到赋值之前，真页面会印上一次 load 的出处，尺子照样绿）。
+    ★ 假 DOM 里**故意不定义 `state`**：模板要是回头去读 `state.xxx`，这里当场 ReferenceError ⇒ 直接红。
+      探针 ⑨ 钉的就是这个形状 —— 当初那个洞正是「模板读了一个没人赋值的 state 字段」。"""
+    js = (block(path) + "\n" + (block(path, MBEGIN, MEND) if block_js is None else block_js) + """
 const out = {};
 const el = (id) => ({ set textContent(v) { out[id] = v; }, get textContent() { return out[id] || ''; },
                       set className(v) {}, set title(v) {} });
-const state = { source: '' };
 const d = JSON.parse(process.argv[2]);
+renderMeta(d);
+process.stdout.write(JSON.stringify({ meta: out.meta }));
 """)
-    if wire:
-        js += block(path, WBEGIN, WEND) + "\n"
-    js += "\nrenderMeta(d);\nprocess.stdout.write(JSON.stringify({ meta: out.meta }));\n"
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
         f.write(js)
         tmp = f.name
@@ -194,16 +208,32 @@ def source_of(meta):
 
 
 def data_source_check(quiet=False):
-    """判据：图脚末尾那格**必须印出真实的出处** —— 真源走 'api'、离线样本走 '样本 x.json'。
-    2026-10-03 线上逮到的洞正是这一格：模板印 `${state.source}`，而 `state.source` 从声明起
-    从没被赋过值（`load()` 把出处挂返回对象上，`draw()` 只存了 `state.data`）⇒ 常年空着，
-    而当时的尺②全绿 —— 它量的是「标签＋列表」的宽度，空字段不在判据里。"""
+    """判据：图脚末尾那格**必须印出真实的出处，而且不许说假话**。四格：
+      真源（不 stale）⇒「币安实时」／ 真源 stale ⇒「币安缓存」／ 离线样本 ⇒「样本 x.json」原样
+      ／ 出处字段缺 ⇒「未知」。
+
+    ★ 报红的时候只印**实际印出来的值**，不印预设的原因 —— 早先那版把「接线摘掉」的失败信息
+      写死成「印出来是空的」，可实测印的是别的，写死的解释把人往错处带（Atlas 2026-10-03 指出的）。"""
     live = source_of(footer_text(PAYLOAD))
+    st = source_of(footer_text(dict(PAYLOAD, stale=True)))
     off = source_of(footer_text(dict(PAYLOAD, source="样本 zec_15m.json")))
-    ok = live == "api" and off == "样本 zec_15m.json"
+    unk = source_of(footer_text({k: v for k, v in PAYLOAD.items() if k != "source"}))
+    got = (live, st, off, unk)
+    want = ("币安实时", "币安缓存", "样本 zec_15m.json", "未知")
+    ok = got == want
     if not quiet:
-        print("  数据源那格：真源 ⇒ %r ／ 离线样本 ⇒ %r（要 'api' ／ '样本 zec_15m.json'）" % (live, off))
-    return (live, off), ok
+        for name, g, w in zip(("真源（不 stale）", "真源 stale", "离线样本", "出处字段缺"), got, want):
+            print("  数据源那格：%-14s ⇒ %-22r（要 %r）" % (name, g, w))
+    return got, ok
+
+
+def mutate(js, old, new):
+    """探针里改源码用。**改动必须真落到抠出来的那段上** —— 落不上就抛，不许白捡一个红：
+    Atlas 2026-10-03 那格探针就是这么假红的（他删的是标记块里那一行，块因为空了才红，
+    红得不是地方 —— 「红的原因」也得核）。"""
+    if old not in js:
+        raise SystemExit("探针改不动：抠出来的模板里没有 %r" % old)
+    return js.replace(old, new)
 
 
 def node_eval(js):
@@ -220,7 +250,7 @@ def node_eval(js):
 
 
 def selftest():
-    """六格探针：每一格都必须变红。尺子先证明自己会红，绿才算数。"""
+    """十格探针：每一格都必须变红。尺子先证明自己会红，绿才算数。"""
     cases = []
     old = ("const sigTierText = (s) => s.map((x) => `${x.kind}${x.confirmed ? '' : '?'}`)"
            ".join('·') || '无';")
@@ -318,24 +348,53 @@ process.stdout.write(JSON.stringify({t: sigTierText([
     finally:
         os.unlink(tmp)
 
-    # ⑦ ★ 2026-10-03 线上那个洞本身：把 SOURCE_WIRE 那一行摘掉（＝接线没接上）⇒ 数据源必须印成空的
-    #    ⇒ 尺子的新判据必须红。这一格就是拿**真发生过的那个 bug** 打的。
-    try:
-        bad = source_of(footer_text(PAYLOAD, wire=False))
-        cases.append(("⑦ 接线摘掉（draw 里不赋 state.source）⇒ 数据源印成 %r，必须红" % bad, bad == ""))
-    except SystemExit:
-        cases.append(("⑦ 接线摘掉 ⇒ 数据源印成空的、必须红", False))
+    # ⑦⑧⑨ 「数据源」那格的三格探针：拿**改过的模板**跑，看尺子的判据认不认得出来。
+    #    ★ 先把「改得动吗」跟「改完跑出什么」分开：改不动是**探针自己坏了**，判 False（不许白捡一个红）。
+    MB = block(JS, MBEGIN, MEND)
 
-    # ⑧ SOURCE_WIRE 标记被删 ⇒ 必须报错（不许静默跳过被测量，跟 ② 同一条规矩）
-    src = open(JS, encoding="utf-8").read().replace(WBEGIN, "// (marker removed)")
+    def _mut(old, new):
+        try:
+            return mutate(MB, old, new)
+        except SystemExit as e:
+            cases.append(("（探针自身失效，不算红）%s" % e, False))
+            return None
+
+    def _run(bjs, payload):
+        """跑一版被改过的模板，返回它印出来的数据源值；跑不起来返回 None。"""
+        try:
+            return source_of(footer_text(payload, block_js=bjs))
+        except SystemExit:
+            return None
+
+    # ⑦ stale 那态塌成一态（Nova 点名的「两态各配一格」之一）⇒ stale 必须印不出「币安缓存」
+    b = _mut("stale ? '币安缓存' : '币安实时'", "'币安实时'")
+    if b is not None:
+        got = _run(b, dict(PAYLOAD, stale=True))
+        cases.append(("⑦ stale 两态塌成一态 ⇒ 印成 %r，判据必须不认" % got, got != "币安缓存"))
+
+    # ⑧ 缺字段那态退回空（＝Atlas 指出的「光杆 ｜ 数据源」那个症状回来了）⇒ 必须印不出非空
+    b = _mut("src || '未知'", "src || ''")
+    if b is not None:
+        got = _run(b, {k: v for k, v in PAYLOAD.items() if k != "source"})
+        cases.append(("⑧ 缺字段退回空 ⇒ 印成 %r，判据必须不认" % got, not got))
+
+    # ⑨ ★ 当初那个 bug 的形状：模板回头去读中间变量 `state.source`。
+    #    假 DOM 里没有 `state` ⇒ 跑挂 ⇒ 判据不可能认（「中间变量」这条路就算被封死了）
+    b = _mut("sourceLabel(d.source, d.stale)", "state.source")
+    if b is not None:
+        got = _run(b, PAYLOAD)
+        cases.append(("⑨ 模板回头读 state.source ⇒ 印成 %r，判据必须不认" % got, got != "币安实时"))
+
+    # ⑩ RENDER_META 标记被删 ⇒ 必须报错（不许静默跳过被测量，跟 ② 同一条规矩）
+    src = open(JS, encoding="utf-8").read().replace(MBEGIN, "// (marker removed)")
     with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
         f.write(src)
         tmp = f.name
     try:
-        block(tmp, WBEGIN, WEND)
-        cases.append(("⑧ 接线标记被删掉 ⇒ 报错", False))
+        block(tmp, MBEGIN, MEND)
+        cases.append(("⑩ RENDER_META 标记被删掉 ⇒ 报错", False))
     except SystemExit:
-        cases.append(("⑧ 接线标记被删掉 ⇒ 报错", True))
+        cases.append(("⑩ RENDER_META 标记被删掉 ⇒ 报错", True))
     finally:
         os.unlink(tmp)
 
@@ -363,5 +422,5 @@ if __name__ == "__main__":
     if not ok:
         print("✗ 有一段放不下一行 —— 图脚在手机上是几行糊在一起的字（见上面的 ≈px）")
     if not ds_ok:
-        print("✗ 「数据源」那格印出来是空的 —— 图脚末尾挂着一个光杆「｜ 数据源」")
+        print("✗ 「数据源」那格印出来的值不对 —— 实际值印在上面每一行里，照那个看，别猜原因")
     sys.exit(1)

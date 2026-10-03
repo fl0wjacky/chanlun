@@ -72,7 +72,7 @@ URL 参数（都可分享 / 可截图复现同一段）：
 python3 tools/web_theme_sync.py              # ① 色/线宽跟 style.py ＋ chanlun.pine 逐格比；不对就 rc=1
 python3 tools/web_theme_sync.py --selftest   #    探针：改错一格必须变红（证明这把尺真会红）
 python3 tools/web_footer_check.py            # ② 图脚「买卖点」那段在 390px 下放不放得下一行 ＋「数据源」那格不许空
-python3 tools/web_footer_check.py --selftest #    探针：八格都得变红
+python3 tools/web_footer_check.py --selftest #    探针：十格都得变红
 python3 web/check_parity.py                  # ③ 结构与 Python 逐根对账（9 份数据 / 2707 个结构；要 PIL）
 python3 tools/web_fmt_check.py               # ④ 价签数字 ≡ Python 的 `"%g" % round(v, 2)`（逐字相同）
 python3 tools/web_fmt_check.py --selftest    #    探针：六格都得变红（含「取整交给 toFixed」那版）
@@ -90,12 +90,22 @@ python3 tools/web_fitbox_check.py --selftest #    探针：八格都得变红（
 量的是**整句**不是光量列表，标签**从 `app.js` 的模板里读**（改名自动跟，抠不到就报错）——
 只量列表会假绿：列表卡在 44 字时加上标签就是 47 字 ≈ 381px，其实要换行（尺 ⑤ 那格探针专钉这个）。
 
-尺 ② 还管**图脚末尾那格「数据源」不许是空的**（2026-10-03 对着线上真身核联调时逮到的）：
-模板印 `${state.source}`，而 `state.source` 从声明起从没被赋过值（出处挂在 `load()` 的返回对象上，
+尺 ② 还管**图脚末尾那格「数据源」不许是空的、也不许说假话**（2026-10-03 对着线上真身核联调时逮到的）：
+模板原先印 `${state.source}`，而 `state.source` 从声明起从没被赋过值（出处挂在 `load()` 的返回对象上，
 `draw()` 只存了 `state.data`）⇒ 真源和离线两条路都印不出出处，线上就是一个光杆「｜ 数据源」。
 **当时这把尺子是绿的** —— 它上面那条判据量的是「标签＋列表」的宽度，空字段不在判据里。
-所以这一格不读代码：把 `RENDER_META` 模板和 `SOURCE_WIRE` 那一行抠出来配假 DOM **真跑**一次
-`renderMeta`，看「｜ 数据源」后面到底是什么；接线一摘就红（探针 ⑦）。
+
+★ 第一版的补法是给 `draw()` 补一行接线，**那版自己又带了一个洞**（Atlas 挑出来的）：
+尺子当时是把「赋值那一行」和「模板」两块**抠出来自己拼**，固定「先赋值、后 renderMeta」——
+量的其实是**尺子造出来的顺序**。把 `renderMeta(d)` 挪到赋值之前（真页面上会印上一次 load 的出处），
+尺子照样绿。⇒ 现在把那个**中间变量整个删掉**：`renderMeta` 直接读传进来的 `d`（`d.source` / `d.stale`），
+没有顺序可以错，尺子也不用再造替身。
+
+判据四格（都**真跑** `renderMeta`，不读代码）：
+真源（不 stale）⇒「币安实时」／ 真源 stale ⇒「币安缓存」／ 离线样本 ⇒「样本 x.json」原样 ／
+出处字段缺 ⇒「未知」。`api` 是给日志看的词，用户看不懂；而 stale 为真时角上同时挂着
+「★ 旧数据（本轮拉取失败）」，图脚要是还说「实时」，同一屏上两句话就打架了。
+（`refreshing`——后台在后台刷、手上这份还是好的——**不另起第三态**，照写「实时」。）
 
 尺 ④ 钉的是**读数**，不是审美：中枢区间的上下沿就是判三买三卖的**价**，`1681.99` 显示成 `1682`
 就"像破了"、其实没破。取整那一步**不能交给 `toFixed`/`toPrecision`** —— 它俩"正好一半就进位"，

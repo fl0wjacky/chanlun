@@ -42,7 +42,7 @@ const DEFAULTS = {
 
 const el = (id) => document.getElementById(id);
 const opts = { ...DEFAULTS, sigKinds: { ...DEFAULTS.sigKinds } };
-const state = { data: null, opts, candleSeries: null, source: '' };
+const state = { data: null, opts, candleSeries: null };
 const primitives = [];
 
 const chart = LWC.createChart(el('chart'), {
@@ -115,12 +115,6 @@ async function load(symbol, tf) {
 // ---------------------------------------------------------------- 画一张
 function draw(d) {
   state.data = d;
-  // >>> SOURCE_WIRE  （tools/web_footer_check.py 抠这一行真跑：量「图脚那格印出来的数据源」）
-  // ★ 2026-10-03 线上逮到的：`load()` 把出处挂在**返回对象**上（'api' ／ '样本 x.json'），
-  //   这里原先只存了 `state.data`，`state.source` 就一直停在声明时的 `''` ⇒ 图脚末尾常年是
-  //   「｜ 数据源」后面空着（尺②当时全绿：它量的是「标签＋列表」的宽度，空字段不在判据里）。
-  state.source = d.source || '';      // 缺就留空 —— 不知道的事不编
-  // <<< SOURCE_WIRE
   const bars = d.bars.map((b) => ({ time: b.t / 1000, open: b.o, high: b.h, low: b.l, close: b.c }));
   candle.applyOptions({ priceFormat: priceFormat(d.meta?.tick) });
   candle.setData(bars);
@@ -296,6 +290,22 @@ function sigTierText(s) {
 // <<< SIG_TIER_TEXT
 
 // >>> RENDER_META  （tools/web_footer_check.py 抠出来配假 DOM 真跑，量图脚整句）
+// ★ 2026-10-03 线上逮到的那个洞（图脚末尾「｜ 数据源」后面**常年空着**）的根因不是模板写错，
+//   而是模板印的 `state.source` **从来没被赋过值** —— load() 把出处挂在**返回对象**上
+//   （'api' ／ '样本 x.json'），draw() 只存了 `state.data`。当时的修法是给 draw() 补一行接线，
+//   Atlas 随即指出那还留着第二个洞：**接线有顺序** —— 把 renderMeta(d) 挪到接线前面，
+//   真页面会印**上一次** load 的出处，而尺子量的是它自己拼出来的顺序，照样绿。
+//   ⇒ 现在的写法让那个顺序**不存在**：直接从传进来的 d 上取，不经中间的 state。
+//   ★ 教训（写给下一个动这里的人）：**「模板印了什么」和「那个值从哪来」是两件事**；
+//     中间多一个变量就多一处能走错的接线。这里不留中间变量。
+function sourceLabel(src, stale) {
+  // 'api' 是给日志看的词，用户看不懂 —— 说人话。但 stale 为真时数据是**上一轮**从币安拉的，
+  // 那时写「实时」就是一句假话（角上同时挂着「★ 旧数据（本轮拉取失败）」），所以分两态。
+  // ★ refreshing（后台正在后台刷、手上这份还是好的）不另起第三态：数据本身没坏，照写「实时」。
+  if (src === 'api') return stale ? '币安缓存' : '币安实时';
+  return src || '未知';        // 离线样本原样透出；字段缺就写「未知」—— 空着是看不出来，未知是看得出来的不知道
+}
+
 function renderMeta(d) {
   const done = d.segs.filter((s) => !s.live).length;
   el('meta').textContent =
@@ -303,7 +313,7 @@ function renderMeta(d) {
     + ` ｜ 完成线段 ${done}（+${d.segs.length - done} 未完成）｜ 线段中枢 ${d.seg_centers.length}`
     + ` ｜ 精度 ${d.meta?.tick} ｜ ${d.meta?.pen_rule === 'new' ? '新笔' : '老笔'}`
     + ` ｜ 买卖点 线段中枢层 ${sigTierText(d.signals?.seg || [])} · 类中枢层 ${sigTierText(d.signals?.pen || [])}`
-    + ` ｜ 数据源 ${state.source}`;
+    + ` ｜ 数据源 ${sourceLabel(d.source, d.stale)}`;
 }
 // <<< RENDER_META
 
