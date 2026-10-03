@@ -22,7 +22,7 @@ import json
 
 from .kline import standardize, fractals, quantize
 from .pen import build_pens
-from .center import find_centers
+from .center import find_centers, find_centers_by_segment
 from .extend import build_hierarchy
 from .segment import build_segments
 
@@ -32,8 +32,8 @@ def analyze(bars, tick=None, pen="old", min_gap=4):
     std = standardize(quantize(bars, tick))
     fx = fractals(std)
     pens, seq = build_pens(fx, std, pen, min_gap)
-    centers = find_centers(pens)
     segs = build_segments(pens)
+    centers = find_centers_by_segment(pens, segs)
     return dict(bars=bars, std=std, fx=fx, pens=pens, seq=seq,
                 centers=centers, big=build_hierarchy(centers, pens),
                 segs=segs, seg_centers=find_centers([s for s in segs if not s.get("live")]),

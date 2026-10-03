@@ -122,6 +122,18 @@ def gap_rows():
     return gap_rows_and_z()[0]
 
 
+def seg_fallback_count():
+    """线段中枢层的兜底（中心定理一）结束还有多少个 —— 给脚注当例子。
+
+    类中枢改段内算以后，本卡数据（aaplusdt_4h）里那个由中心定理一兜底判终结的类中枢
+    在线段边界就结束了（term='所在线段结束'），脚注里原来的「贯穿」实例没了。但线段
+    中枢层仍按老规则兜底：这里从 ZEC 15m 现算，换数据或改引擎自动跟着变，不会过期。
+    """
+    r = analyze_file("zec15.json")
+    return sum(1 for z in r.get("seg_centers", [])
+               if z["term"] in ("Z 段向上离开", "Z 段向下离开"))
+
+
 def cross_check(rows, Z):
     """拿引擎自己的中枢终结原因跟卡片的判定对账——**这只查漂移，不构成对原文的验证。**
 
@@ -204,11 +216,10 @@ def draw_evidence(d):
     d.text((86, yy + 104), "　 三买按定义就是中枢终结（第 38 课「第三类买卖点，和中枢延伸的结束是一回事情」）：",
            font=f_n, fill=MU)
     d.text((86, yy + 136), "　 离开段从中枢里出发、回试整段不回到区间，当下就判中枢结束，离开段算连接段。", font=f_n, fill=MU)
-    thru = [t for t, n, z, hi, lo, v in rows if v == "贯穿"]
-    if thru:
-        d.text((86, yy + 168), "　 贯穿：%s 那次离开段从 ZD 下方整段穿过区间，不是从中枢里出发，由中心定理一兜底判终结。"
-               % "、".join(thru), font=f_n, fill=MU)
-    yy0 = yy + 168 + 32 * bool(thru)
+    d.text((86, yy + 168),
+           "　 类中枢改段内算后兜底退成『所在线段结束』，但线段中枢层仍有（ZEC 15m 有 %d 个以 Z 段离开结束）。"
+           % seg_fallback_count(), font=f_n, fill=MU)
+    yy0 = yy + 200
     d.text((86, yy0), "　 样本只有 %d 次，只作示意。" % len(rows), font=f_n, fill=MU)
 
     # 对账（本卡唯一会失败的地方）：期望值来自引擎自己的 term，而不是本文件把

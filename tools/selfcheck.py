@@ -76,7 +76,7 @@ for tag, r in R.items():
     count("线段定义复核违规", len(verify_by_definition(S, P)),
           "　｜ 诊断：终点非段内极值 %d（原文未要求，只报数）" % len(nonextreme_endpoints(S)))
     # 中枢层
-    count("类中枢不变量违规", len(check_centers(r["centers"], P)))
+    count("类中枢不变量违规", len(check_centers(r["centers"], P, stops=[s["PI1"] + 1 for s in S])))
     count("类中枢扩展合成违规", len(check_hierarchy(r["big"], r["centers"], P)))
     count("买卖点复核违规", sum(len(check_signals(signals(r, lv, m), r, lv, m)) for lv in ("seg", "pen") for m in ("macd", "slope")))
     # 「B 段回抽 0 轴附近」那条必要条件 —— **默认不接进买卖点判定**（2026-09-30 拍板）。
@@ -137,13 +137,14 @@ caught = sum(len(check_hierarchy(extend_v1.build_hierarchy(R[t]["centers"], R[t]
 count("v1 扩展合成的毛病未被发现", 0 if caught else 1, "　（抓到 %d 处）" % caught)
 # 9 段升级：把一个满 9 段中枢的升级记录抹掉 / 把区间改一点，校验器必须报错
 import copy
+_stops15 = [s["PI1"] + 1 for s in R["ZEC 15m"]["segs"]]
 Zc = copy.deepcopy(R["ZEC 15m"]["centers"])
 k9 = next((k for k, z in enumerate(Zc) if z["up"]), None)
 if k9 is None:
     # 变异可以把「满 9 段」整个消掉，夹具就造不出来。**这里不编数**：先问检查器对这份
     # 输入有没有话说 —— 有 ⇒ 报它的裁决（那才是真的违规数，别从 StopIteration 后面漏掉）；
     # 它也没话说 ⇒ 报「本格未执行」，绝不写死 1（写死 1 在盲区图上会变成"抓住了"）。
-    _n = len(check_centers(Zc, R["ZEC 15m"]["pens"]))
+    _n = len(check_centers(Zc, R["ZEC 15m"]["pens"], stops=_stops15))
     for _lab in ("漏掉的 9 段升级未被发现", "算错的升级区间未被发现"):
         if _n:
             count(_lab, _n, "　（没有可动的 up：报检查器对这份输入的裁决）")
@@ -151,10 +152,23 @@ if k9 is None:
             skip(_lab, "没有任何中枢带 up，夹具造不出，检查器也无话可说")
 else:
     Zc[k9]["up"] = []
-    count("漏掉的 9 段升级未被发现", 0 if check_centers(Zc, R["ZEC 15m"]["pens"]) else 1)
+    count("漏掉的 9 段升级未被发现", 0 if check_centers(Zc, R["ZEC 15m"]["pens"], stops=_stops15) else 1)
     Zc = copy.deepcopy(R["ZEC 15m"]["centers"])
     Zc[k9]["up"][0]["ZG"] += 0.01
-    count("算错的升级区间未被发现", 0 if check_centers(Zc, R["ZEC 15m"]["pens"]) else 1)
+    count("算错的升级区间未被发现", 0 if check_centers(Zc, R["ZEC 15m"]["pens"], stops=_stops15) else 1)
+# 段内截断的 live 改法：把一个「所在线段结束」的中枢翻回 live=True（复现被审出的那条 bug），校验器必须报错。
+# 这一格守的是 check_centers 里「bound < len(units) ⇒ 必须 live=False 且 term='所在线段结束'」那条 ——
+# 没有它，段内算又把中间段的中枢标成「仍在延续」，selfcheck 会静默放过（Nova 审 8f61ece 抓的就是这个）。
+_cut = next((k for k, z in enumerate(R["ZEC 15m"]["centers"]) if z["term"] == "所在线段结束"), None)
+if _cut is None:
+    skip("段内截断标成 live 未被发现", "没有任何『所在线段结束』的中枢，夹具造不出")
+else:
+    Zm = copy.deepcopy(R["ZEC 15m"]["centers"])
+    Zm[_cut]["live"] = True
+    Zm[_cut]["term"] = "仍在延续"
+    Zm[_cut]["status"] = "暂定"
+    Zm[_cut]["status_note"] = "仍在延续"
+    count("段内截断标成 live 未被发现", 0 if check_centers(Zm, R["ZEC 15m"]["pens"], stops=_stops15) else 1)
 # 买卖点：把一个三买挪到离开段的终点、把一个一买挪到没创新低的位置，复核必须报错
 Rz = R["ZEC 15m"]
 S = signals(Rz, "pen")
