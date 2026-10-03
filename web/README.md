@@ -66,13 +66,18 @@ URL 参数（都可分享 / 可截图复现同一段）：
 **虚线**：lightweight-charts 只给几种预设，给不了 Python 那边的 dash 长度（16/10、26/16…）。
 所以虚线上守的是**实/虚二分与谁虚**，不追长度（`theme.js` 的 `DASH` 那段写了这个取舍）。
 
-## 三把尺
+## 五把尺
 
 ```bash
 python3 tools/web_theme_sync.py              # ① 色/线宽跟 style.py ＋ chanlun.pine 逐格比；不对就 rc=1
 python3 tools/web_theme_sync.py --selftest   #    探针：改错一格必须变红（证明这把尺真会红）
 python3 tools/web_footer_check.py            # ② 图脚「买卖点」那段在 390px 下放不放得下一行
 python3 tools/web_footer_check.py --selftest #    探针：六格都得变红
+python3 web/check_parity.py                  # ③ 结构与 Python 逐根对账（9 份数据 / 2707 个结构；要 PIL）
+python3 tools/web_fmt_check.py               # ④ 价签数字 ≡ Python 的 `"%g" % round(v, 2)`（逐字相同）
+python3 tools/web_fmt_check.py --selftest    #    探针：六格都得变红（含「取整交给 toFixed」那版）
+python3 tools/web_fitbox_check.py            # ⑤ 文字落框：不出视口 / 有空格子就不许压 / 横不动 / 高不变
+python3 tools/web_fitbox_check.py --selftest #    探针：八格都得变红（含 tag() 里「夹右边界」的顺序）
 ```
 
 尺 ② 是 2026-10-03 联调补的：图脚那段买卖点文字原来是**逐个信号列出来**的，长度跟着**信号数**涨 ——
@@ -84,6 +89,18 @@ python3 tools/web_footer_check.py --selftest #    探针：六格都得变红
 主语和宽度都写死（390px 视口、图脚格 362px、字号 10px），不然同一句规则两个结果；
 量的是**整句**不是光量列表，标签**从 `app.js` 的模板里读**（改名自动跟，抠不到就报错）——
 只量列表会假绿：列表卡在 44 字时加上标签就是 47 字 ≈ 381px，其实要换行（尺 ⑤ 那格探针专钉这个）。
+
+尺 ④ 钉的是**读数**，不是审美：中枢区间的上下沿就是判三买三卖的**价**，`1681.99` 显示成 `1682`
+就"像破了"、其实没破。取整那一步**不能交给 `toFixed`/`toPrecision`** —— 它俩"正好一半就进位"，
+Python 的 `round()`/`%g` 是"一半取偶"，`100000.5` 两边差 1；所以 `fmtG()` 自己把 20 位有效数字摊开、
+判第 7 位起有没有过半。探针里有一格专门拿"取整交给 toFixed"的那版去撞（**必红**）。
+
+尺 ⑤ 钉的是**落框**（价签和买卖点文字**共用**的那一份 `fitBox()`）：网页是视口，没有 Python 整幅图
+顶上那 300px 边距，所以框要**夹两头**（上沿不得 < 0、下沿不得 > 画布高，都是**整框移、不改高**）、
+撞上了要挪（跟 `draw_labels` 同一条：**判 12 个候选行**；上沿顶到 0 之后**往下试**）。
+判四样：**落点逐坐标 / 不出视口 / 横不动**（锚点是那根 K 线，横着挪＝把标签从它的点上挪开，
+所以左边刻意不夹）**/ 高不变**。它另抠出 `tag()` 配一个假 ctx 跑一格：**夹右边界必须在避让之前**，
+否则推回来的框没人复查碰撞（Atlas 指出的一处老顺序）。
 
 `web/theme.js` 是**唯一**写色值的地方：`style.css` 里除了 `:root` 那几个「JS 没跑起来时别白屏」的兜底，
 一个色都不许写死（值由 app.js 灌进 CSS 变量；**连徽标边框那种「同色压到底色上」的值也在 JS 里算**）。
