@@ -89,6 +89,13 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 190px; min-height: 0
 }
 .legend .lg { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .legend svg { display: block; }
+/* 价签那一格的样例：**HTML 一格**，宽度由里面的字量出来 —— 不再用定宽 SVG 把 `[ZD, ZG]` 切掉。
+   高度 14、字号 9、圆角 3 跟原来那格 SVG 对齐（`[ZD, ZG]` 在 9px 下实测 35.2px ⇒ 这格 ≈ 41px 宽）。 */
+.legend .tagsw {
+  display: inline-flex; align-items: center; height: 14px; padding: 0 3px;
+  border-radius: 3px; font-size: 9px; line-height: 1; white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
 
 .foot {
   display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap;
@@ -112,6 +119,22 @@ main { display: grid; grid-template-columns: minmax(0, 1fr) 190px; min-height: 0
     -webkit-overflow-scrolling: touch;
   }
   .chip { flex: 0 0 auto; }
+  /* ★ 2026-10-03 真机反馈：这一行右边被切掉、看着像"少了一个按钮"。
+     实测**本来就能横滑**（overflow-x:auto、scrollWidth 953 / clientWidth 390），缺的只是**提示**。
+     渐隐只在「那个方向还有东西」时出现（类由 app.js 按 scrollLeft / scrollWidth 挂），
+     滑到头就不淡 —— 否则右边明明没了还淡着，又是一句假话。 */
+  /* 渐隐用 mask（不是盖一层同色渐变 —— 那要多包一层元素，页面结构为个提示就改了不值）。
+     mask **只看 alpha**，用哪个色都一样；这里写 `var(--tx)` 是因为尺 ⑤（web_theme_sync）规定
+     `:root` 之外不许出现裸色值 —— 与其换个写法绕开那把尺，不如就用一个现成的不透明变量。 */
+  .panel.fade-r { --fade: linear-gradient(to right, var(--tx) calc(100% - 26px), transparent); }
+  .panel.fade-l { --fade: linear-gradient(to left, var(--tx) calc(100% - 26px), transparent); }
+  .panel.fade-lr {
+    --fade: linear-gradient(to right, transparent, var(--tx) 26px, var(--tx) calc(100% - 26px), transparent);
+  }
+  .panel.fade-r, .panel.fade-l, .panel.fade-lr {
+    -webkit-mask-image: var(--fade);                  /* Safari 15.4 之前只认带前缀的 */
+    mask-image: var(--fade);
+  }
   .legend { font-size: 10px; gap: 4px 10px; padding: 6px 10px; }
   .foot { font-size: 10px; }
   /* 手机上这一句必须能折行：它 nowrap 时 min-content ≈ 450px，比视口还宽（见上面 body > * 那条） */
