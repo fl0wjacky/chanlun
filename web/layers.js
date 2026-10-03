@@ -150,7 +150,11 @@ function drawFrame(ctx, x0, ytop, x1, ybot, col, width, fillAlpha, splitAt, soli
 // 挂在最后加的线段系列上、zOrder=top ⇒ 压在 K 线与线段之上，跟 Python「标签最后画」一致。
 // ---------------------------------------------------------------------------
 export function makeAnnotPrimitive(state) {
-  const placed = [];                       // 这一帧已经占位的价签框：先到先得，重叠就往上挪
+  const placed = [];                       // 这一帧已经占位的文字框：先到先得，重叠就往上挪
+  state.labelBoxes = placed;               // 验收用只读出口（跟 app.js 的 `window.__app` 同性质，只读不改画）：
+                                           // 「文字之间零重叠」这条判据要**量**，不能靠眼睛 —— 拿这张表两两求交。
+                                           // ★ 仓里没有这把尺：量它要真浏览器，而仓里不带 playwright 依赖
+                                           //   （见 web/README.md「三把尺」那一节的分工）。
   return {
     attached(p) { this._chart = p.chart; this._series = p.series; },
     detached() {},
@@ -184,7 +188,28 @@ export function makeAnnotPrimitive(state) {
                 }
               }
 
-              // ② 价签：线段中枢先（优先占位），类中枢后；升级标签跟着各自的框走
+              // ② 买卖点：**这一步只画三角**，文字留到 ④（判据在 core/signals.py，前端只画）
+              //    ★ 次序是 2026-10-03 改的，改的就是次序：
+              //      Python 在 chart_full_smooth.py:68 先 `draw_signals()` 画三角，然后把文字标签请求
+              //      **并进 `center_labels`**，:72 跟中枢价签**同一次** `draw_labels(d, center_labels, f_n, CY, placed)`
+              //      画出来 ⇒ ① 文字最后画、**压在三角上面**；② 买卖点文字和中枢价签**共用一个 placed**、互相避让。
+              //      网页原来把「三角 ＋ 文字」一起放在价签**之后**画 ⇒ 三角压在价签上，价签数字被盖掉
+              //      （390px 实测：倒三角把 `[1004, 1682]` 中间两位整个吃掉）。搬的时候丢了「文字走同一个注册表」这半。
+              const sigs = [];
+              if (opts.sig) {
+                for (const tier of ['seg', 'pen']) {
+                  for (const s of data.signals?.[tier] || []) {
+                    if (!opts.sigKinds[s.kind]) continue;
+                    if (!s.confirmed && !(opts.sigPend && CHART.sig_pending)) continue;
+                    const x = vp.xOfBar(s.bar), y = vp.yOfPrice(s.price);
+                    if (!onScreen(x, W, 40) || y === null) continue;
+                    sigs.push({ x, y0: drawSignalGlyph(ctx, x, y, s, tier), s, tier });
+                  }
+                }
+              }
+
+              // ③ 价签：线段中枢先（优先占位），类中枢后；升级标签跟着各自的框走
+              //    （跟 Python 同序：`center_labels` 里价签在前、买卖点文字在后 ⇒ 价签优先占位）
               for (const tier of ['seg', 'pen']) {
                 const on = tier === 'seg' ? opts.sc : opts.pc;
                 if (!on) continue;
@@ -204,20 +229,14 @@ export function makeAnnotPrimitive(state) {
                 }
               }
 
-              // ③ 买卖点：两层各一份（判据在 core/signals.py，前端只画）
-              if (opts.sig) {
-                for (const tier of ['seg', 'pen']) {
-                  for (const s of data.signals?.[tier] || []) {
-                    if (!opts.sigKinds[s.kind]) continue;
-                    if (!s.confirmed && !(opts.sigPend && CHART.sig_pending)) continue;
-                    const x = vp.xOfBar(s.bar), y = vp.yOfPrice(s.price);
-                    if (!onScreen(x, W, 40) || y === null) continue;
-                    drawSignal(ctx, x, y, s, tier);
-                  }
-                }
-              }
+              // ④ 买卖点**文字**：最后画，跟价签共用 `placed` ⇒ 文字之间互相避让、价签也避开它；
+              //    压在三角上面 ⇒ 数字/字完整可读（与 Python 出图的结论一致）。
+              //    `y0` 是②里画三角时算出来的底边 —— 传过来，免得「文字挂在哪条边」这个式子写两份。
+              for (const g of sigs) drawSignalText(ctx, placed, g.x, g.y0, g.s, g.tier);
 
-              // ④ 未收盘的最后一根：虚线框 + 「未收盘」（Python dashed_rect + 琥珀字）
+              // ⑤ 未收盘的最后一根：虚线框 + 「未收盘」（Python dashed_rect + 琥珀字）
+              //    ★ 这一句**不登记 placed** —— 跟 Python 一致：那边它也是直接画的、不在 draw_labels 里
+              //      （所以 Python 图上「未收盘」会压在线段端点的圈上）。照搬，不擅自"顺手修好"。
               if (!data.closed && data.bars.length) {
                 const i = data.bars.length - 1, b = data.bars[i];
                 const x = vp.xOfBar(i), yh = vp.yOfPrice(b.h), yl = vp.yOfPrice(b.l);
@@ -269,7 +288,9 @@ function tag(ctx, placed, x, y, text, col, W) {   // placed 由调用方传：�
   placed.push([x, y - h, x + w, y]);
 }
 
-function drawSignal(ctx, x, y, s, tier) {
+/** 买卖点的**三角**（只画形状）。文字拆到 `drawSignalText` —— 拆开是为了让三角先落地、
+ *  文字最后走 `placed`，跟 Python `draw_signals()` 与 `draw_labels()` 的分工同构。 */
+function drawSignalGlyph(ctx, x, y, s, tier) {
   const buy = s.kind.endsWith('买');
   const base = buy ? CHART.buy : CHART.sell;
   const a = s.confirmed ? SIG.confirmedAlpha : SIG.pendingAlpha;
@@ -280,10 +301,37 @@ function drawSignal(ctx, x, y, s, tier) {
   ctx.moveTo(x, tip); ctx.lineTo(x - sz, y0); ctx.lineTo(x + sz, y0); ctx.closePath();
   if (tier === 'seg') { ctx.fillStyle = rgba(base, a); ctx.fill(); }
   else { ctx.strokeStyle = rgba(base, a); ctx.lineWidth = 1.5; ctx.stroke(); }
+  return y0;                                                             // 文字要挂在三角的底边
+}
+
+/** 买卖点的**文字**：无底色的那种标签，但**照样登记进 `placed`** ——
+ *  Python 那边它走的是 `draw_labels()` 的默认背景那一支（`bg = BG + (215,)`），
+ *  所以「登记」这件事它本来就有，只是网页当初没搬。避让节奏跟 `tag()` 用同一档（往上挪一行 19px），
+ *  这样价签和文字挪在同一个网格上，不会一个挪 19、一个挪 36。 */
+function drawSignalText(ctx, placed, x, y0, s, tier) {
+  const buy = s.kind.endsWith('买');
+  const base = buy ? CHART.buy : CHART.sell;
   const txt = s.kind + (s.weak ? SIG.weakText : '') + (tier === 'pen' ? '·笔' : '') + (s.confirmed ? '' : SIG.pendingMark);
   ctx.font = FONT_SM;
+  const tw = ctx.measureText(txt).width;
+  const h = 15;                                                          // 与 tag() 同高
+  const anchor = y0 + (buy ? 13 : -6);                                   // 原来的字位，不许漂
+  // ★ 挪动**只许在画布里**（2026-10-03）：Python 那张整幅图都在画布上、顶上还留着 `T = 300`
+  //   的边距，所以「往上挪 12 行」怎么挪都还在图里；网页是个**视口**，最高的那个卖点本来就
+  //   贴着顶边，照搬 12 行会把这个位置的标签**整条挪出画布** —— 不是被压住，是根本看不见
+  //   （390px 实测：两个文字框 y 挪到 -12 和 -31，后者整框在画布外，图上什么都没了）。
+  //   所以：候选位只接受**整框都在画布内**的；一个都不接受就退回锚点位、照实重叠 ——
+  //   那正是没接 placed 之前的样子，不会比修前更差。
+  let ty = anchor;
+  for (let n = 0; n < 12; n++) {                                         // 同 draw_labels：最多挪 12 行
+    const bx = [x - tw / 2 - 5, ty - h, x + tw / 2 + 5, ty + 4];
+    if (!placed.some((q) => bx[0] < q[2] && q[0] < bx[2] && bx[1] < q[3] && q[1] < bx[3])) break;
+    if (ty - h - (h + 4) < 0) { ty = anchor; break; }                    // 再挪一步就出画布 ⇒ 回锚点
+    ty -= h + 4;                                                         // 12 行都占着 ⇒ 停在第 12 行（同 Python）
+  }
   ctx.fillStyle = s.confirmed ? base : rgba(base, 180);
   ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
-  ctx.fillText(txt, x, y0 + (buy ? 13 : -6));
+  ctx.fillText(txt, x, ty);
   ctx.textAlign = 'left';
+  placed.push([x - tw / 2 - 5, ty - h, x + tw / 2 + 5, ty + 4]);
 }
