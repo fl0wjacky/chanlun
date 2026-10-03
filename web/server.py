@@ -23,7 +23,9 @@
 """
 import argparse
 import gzip
+import hashlib
 import ipaddress
+import re
 import json
 import math
 import os
@@ -203,6 +205,53 @@ def prewarm():
     log("prewarm %d/%d in %.1fs" % (ok, len(SLOTS), time.time() - t0))
 
 
+# ───────────────────────── 静态资源版本号 ─────────────────────────
+# Cloudflare 会把 .js/.css 的浏览器缓存改写成 4 小时（max-age=14400，不管我们发 60），边缘也会缓存
+# ⇒ 前端一更新，访客最多 4 小时拿旧 JS，app.js / layers.js 还可能一新一旧混着跑（Nova 10-03 外测）。
+# 修法：送页面时把本地资源引用改写成 `x.js?v=<hash>`，hash = 这个资源**送出去的字节**的 sha256 前 10 位。
+#   · 「送出去的字节」含它自己被改写过的 import ⇒ theme.js 一变，app.js 里那行 import 跟着变 ⇒ app.js
+#     的 hash 也变 ⇒ index.html 也变。版本号由内容推出来，不靠人手改、也不靠 git（部署目录 pull 就生效）。
+#   · 带对了 v 的请求：一年 + immutable（URL 变了就是新资源，旧的缓存永远不会被读到）；
+#     不带 v / v 对不上（旧页面引用的旧版本）：只给 no-cache，不让错的内容占住一个长缓存的键。
+#   · index.html 本身：no-cache（每次回源验证；Cloudflare 对 html 默认不缓存）。
+VERSIONED = {".html", ".js", ".css"}     # 会被改写、也会被带上 v 的类型
+_HTML_REF = re.compile(r'(\s(?:src|href)=)(["\'])([^"\'?#:]+\.(?:js|css))\2')
+_JS_IMPORT = re.compile(r'((?:\bfrom|\bimport)\s*)(["\'])(\./[^"\'?#]+\.js)\2')
+
+
+def _asset_path(rel_from, ref):
+    """引用（相对 rel_from 所在目录）→ web/ 里的绝对路径；出了 web/ 返回 None。"""
+    full = os.path.realpath(os.path.join(os.path.dirname(rel_from), ref))
+    root = os.path.realpath(STATIC)
+    return full if full.startswith(root + os.sep) and os.path.isfile(full) else None
+
+
+def served(full, _stack=()):
+    """→ (送出去的字节, 版本号)。.html / .js 会把引用改写成带 v 的；其它原样。
+    每次现算、不缓存：一共几个小文件，读 + sha256 不到 1 ms；缓存了反而要操心「依赖变了自己没变」。"""
+    with open(full, "rb") as f:
+        body = f.read()
+    ext = os.path.splitext(full)[1].lower()
+    if ext in (".html", ".js") and full not in _stack:
+        pat = _HTML_REF if ext == ".html" else _JS_IMPORT
+        text = body.decode("utf-8")
+
+        def sub(m):
+            dep = _asset_path(full, m.group(3))
+            if dep is None or dep in _stack:
+                return m.group(0)
+            return "%s%s%s?v=%s%s" % (m.group(1), m.group(2), m.group(3), served(dep, _stack + (full,))[1], m.group(2))
+        body = pat.sub(sub, text).encode("utf-8")
+    return body, hashlib.sha256(body).hexdigest()[:10]
+
+
+def cache_for(ext, want, ver):
+    """html：no-cache；带对了 v：一年 + immutable；不带 v / 旧 v：no-cache（别让它占一个长缓存的键）。"""
+    if ext != ".html" and want == ver:
+        return "public, max-age=31536000, immutable"
+    return "no-cache"
+
+
 # ───────────────────────── HTTP ─────────────────────────
 
 ERR = {400: "bad request", 404: "not found", 405: "method not allowed", 503: "data not available yet"}
@@ -271,9 +320,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._err(400)
             return self._send(200, json.dumps(dict(symbols=list(SYMBOLS), tfs=list(TFS),
                                                    days=DAYS, refresh_s=REFRESH_S)).encode())
-        return self._static(u.path)
+        return self._static(u.path, u.query)
 
-    def _static(self, path):
+    def _static(self, path, query=""):
         name = "index.html" if path in ("", "/") else urllib.parse.unquote(path).lstrip("/")
         full = os.path.realpath(os.path.join(STATIC, name))
         root = os.path.realpath(STATIC)
@@ -282,9 +331,14 @@ class Handler(BaseHTTPRequestHandler):
         if (not full.startswith(root + os.sep) or ext not in STATIC_EXT or not os.path.isfile(full)
                 or any(part.startswith(".") for part in rel.split(os.sep))):
             return self._err(404)                         # 出了 web/、不认的类型、点文件、不存在：统一 404
-        with open(full, "rb") as f:
-            body = f.read()
-        self._send(200, body, ctype=STATIC_EXT[ext], cache="public, max-age=60")
+        if ext in VERSIONED:
+            body, ver = served(full)
+            cache = cache_for(ext, urllib.parse.parse_qs(query).get("v", [None])[0], ver)
+        else:
+            with open(full, "rb") as f:
+                body = f.read()
+            cache = "public, max-age=60"
+        self._send(200, body, ctype=STATIC_EXT[ext], cache=cache)
 
 
 class Server(ThreadingHTTPServer):
