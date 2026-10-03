@@ -237,14 +237,36 @@ function renderLegend() {
   }).join('');
 }
 
+// >>> SIG_TIER_TEXT —— tools/web_footer_check.py 把这两行之间**整段抠出来单跑**（纯函数，不碰 DOM）。
+//     抠不到这块，尺子直接报红；改这里就等于改那把尺子的被测量。
+// 买卖点那段**按 kind 归并计数**，不逐个列。原先逐个 join：仓里的样本只有 4~17 个信号
+//（btc_4h 4 个＝11 字符、zec_1h 17 个＝50 字符），看着就是一句归纳；换成 Bram 后台的实时源
+//（ZEC 15m，20160 根）一次 66 个 ⇒ 197 字符，390px 下图脚那段要 471px＝**两行**（整块 8 行）。
+// ★ 不是「不小心写长了」：逐个列的长度**跟着信号数涨**，样本比线上小两个数量级，尺子就量不到 ——
+//   这类毛病只在实时数据上显形。归并之后长度只跟**种类数**有关（最多 6 种 × 已确认/待确认），
+//   与 K 线多少根无关。
+const SIG_KINDS = ['一买', '二买', '三买', '一卖', '二卖', '三卖'];   // 与上面 chip 同序，出图稳定
+function sigTierText(s) {
+  const n = new Map();
+  for (const x of s) {
+    const k = x.kind + (x.confirmed ? '' : '?');   // 「?＝待确认」，与图例同一套写法
+    n.set(k, (n.get(k) || 0) + 1);
+  }
+  // 排序：已知 kind 按 SIG_KINDS 序（未确认的紧跟同 kind 之后），认不出的排最后 —— 引擎将来加了
+  // 新类型，这里要看得见，不许静默吞掉（与「判据只许有一处」同一条账）。0 个的不出现。
+  const rank = (k) => { const i = SIG_KINDS.indexOf(k.replace('?', '')); return i < 0 ? 99 : i * 2 + (k.endsWith('?') ? 1 : 0); };
+  return [...n.entries()].sort((a, b) => rank(a[0]) - rank(b[0]))
+    .map(([k, c]) => (c > 1 ? `${k}×${c}` : k)).join('·') || '无';
+}
+// <<< SIG_TIER_TEXT
+
 function renderMeta(d) {
   const done = d.segs.filter((s) => !s.live).length;
-  const mk = (s) => s.map((x) => `${x.kind}${x.confirmed ? '' : '?'}`).join('·') || '无';
   el('meta').textContent =
     `${d.name || d.symbol} · ${d.tf} ｜ ${d.nbars} 根 ｜ 笔 ${d.pens.length} ｜ 类中枢 ${d.centers.length}`
     + ` ｜ 完成线段 ${done}（+${d.segs.length - done} 未完成）｜ 线段中枢 ${d.seg_centers.length}`
     + ` ｜ 精度 ${d.meta?.tick} ｜ ${d.meta?.pen_rule === 'new' ? '新笔' : '老笔'}`
-    + ` ｜ 买卖点 线段中枢层 ${mk(d.signals?.seg || [])} · 类中枢层 ${mk(d.signals?.pen || [])}`
+    + ` ｜ 买卖点 线段中枢层 ${sigTierText(d.signals?.seg || [])} · 类中枢层 ${sigTierText(d.signals?.pen || [])}`
     + ` ｜ 数据源 ${state.source}`;
 }
 

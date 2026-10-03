@@ -40,9 +40,13 @@ URL 参数（都可分享 / 可截图复现同一段）：
 | `segs[]` | `{i0,p0,i1,p1,dir,PI0,PI1,hi,lo,live?}`；`live` 的那条画到迄今的极值 |
 | `centers[]` / `seg_centers[]` | `{PI0,PI1,ZD,ZG,live,up[{ZD,ZG,up}]}`；横跨区要靠 `PI0/PI1` 回查宿主（笔 / **已完成**线段） |
 | `signals` | `{seg[], pen[]}`，元素 `{kind,bar,price,confirmed,weak}` —— **引擎算好送过来** |
+| `big[]` | 相邻两中枢「扩展」合出来的高一级类中枢（`core/extend.py` `build_hierarchy`，`nmerge>1` 才是真合成）。`members` 是成员在 `centers[]` 里的 `PI0`。**前端现在不画这一层**（Python 出图 `chart_full_smooth.py` 也只画 `up`、不画 `big`），带上是为了把数据给全；要画是产品决定 |
 | `meta` | `{tick, pen_rule, min_gap}` 口径，只读展示 |
 
 ★ 前端**不判信号**、不重算结构：判据只许有一处（`core/signals.py`），前端画两处必然分家。
+
+★ `big` 与中枢里内嵌的 `up[{ZD,ZG,up}]` **不是一回事**：`up` 是**一个**中枢自己延伸满 9 段升上去的
+（第 33 课，`center.upgrades`），前端画的「↑高N级」就是它；`big` 是**相邻两个**中枢合出来的。别混。
 
 ## 画法从哪儿来
 
@@ -62,12 +66,21 @@ URL 参数（都可分享 / 可截图复现同一段）：
 **虚线**：lightweight-charts 只给几种预设，给不了 Python 那边的 dash 长度（16/10、26/16…）。
 所以虚线上守的是**实/虚二分与谁虚**，不追长度（`theme.js` 的 `DASH` 那段写了这个取舍）。
 
-## 两把尺
+## 三把尺
 
 ```bash
-python3 tools/web_theme_sync.py              # 色/线宽跟 style.py ＋ chanlun.pine 逐格比；不对就 rc=1
-python3 tools/web_theme_sync.py --selftest   # 探针：改错一格必须变红（证明这把尺真会红）
+python3 tools/web_theme_sync.py              # ① 色/线宽跟 style.py ＋ chanlun.pine 逐格比；不对就 rc=1
+python3 tools/web_theme_sync.py --selftest   #    探针：改错一格必须变红（证明这把尺真会红）
+python3 tools/web_footer_check.py            # ② 图脚「买卖点」那段在 390px 下放不放得下一行
+python3 tools/web_footer_check.py --selftest #    探针：四格都得变红
 ```
+
+尺 ② 是 2026-10-03 联调补的：图脚那段买卖点文字原来是**逐个信号列出来**的，长度跟着**信号数**涨 ——
+仓里的样本只有 4~17 个信号（最长 50 字符），看着就是一句归纳，配色尺和并排图全是绿的；换成后台的
+实时源（ZECUSDT 15m，20160 根）一次 66 个信号 ⇒ 197 字符，390px 下面手机上是八行糊在一起。
+**样本比线上小两个数量级，尺子就量不到。** 所以这把尺量的是**实时规模**的样本
+（`web/fixtures/signals_zec15m_live.json`），判据是「**每个层级**那段文字 ≤ 一行」——
+主语和宽度都写死（390px 视口、图脚格 362px、字号 10px），不然同一句规则两个结果。
 
 `web/theme.js` 是**唯一**写色值的地方：`style.css` 里除了 `:root` 那几个「JS 没跑起来时别白屏」的兜底，
 一个色都不许写死（值由 app.js 灌进 CSS 变量；**连徽标边框那种「同色压到底色上」的值也在 JS 里算**）。
@@ -84,7 +97,9 @@ web/
   style.css    layers.js   结构层：中枢框（拆两截）、价签、买卖点、未收盘那根
   theme.js     配色与线宽（唯一出处；出处写在每行右边）
   vendor/lightweight-charts/   TradingView 的 lightweight-charts 5.2.1（Apache-2.0，本地打包，不走 CDN）
-  fixtures/    离线样本（由 tools/make_web_fixture.py 烤出来的）
+  fixtures/    离线样本：btc_4h / zec_1h 由 tools/make_web_fixture.py 烤；另有一份
+               signals_zec15m_live.json 是**从后台实时源存下来的图脚样本**（20160 根），
+               只喂给尺 ② 用，不是给页面看的
 ```
 
 **图例**不是装饰：每一项的样例直接取 `theme.js` 的色与线宽画出来 —— 图例和图上不一样，
