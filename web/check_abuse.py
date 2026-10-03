@@ -11,9 +11,10 @@
   ③ 15 个（品种, 周期）各并发 10 次 ⇒ 拉 15 次（每格 1 次，不多不少）；
   ④ 乱参数 / 白名单外 / 路径穿越 / 写方法 ⇒ 全 4xx、拉币安 0 次、响应里没有路径 / 堆栈；
   ⑤ 刷新期内再并发 100 次 ⇒ 拉 0 次；
-  ⑥ 过了刷新期、币安挂了 ⇒ 回上一次结果（200 + stale=true + 旧的 data_at），并发 100 次只试 1 次；
+  ⑥ 过了刷新期、币安挂了 ⇒ 先回旧缓存（refreshing=true），后台失败后回上次结果（stale=true），只试 1 次；
   ⑦ 一次都没成功过的格 + 币安挂了 ⇒ 503 固定措辞、并发 100 次只试 1 次；
-  ⑧ 币安恢复 ⇒ 过了重试间隔后回到 stale=false。
+  ⑧ 币安恢复 ⇒ 过了重试间隔，先回旧的、后台拉成后回到 stale=false / refreshing=false；
+  ⑨ 币安慢 5 秒 ⇒ 过期请求仍 <100ms 回旧缓存，币安只被调 1 次（stale-while-revalidate）。
 """
 import concurrent.futures as cf
 import gzip
@@ -31,10 +32,11 @@ sys.path.insert(0, HERE)
 import server                                           # noqa: E402
 
 ROOT = os.path.dirname(HERE)
-LEAKS = [ROOT, os.path.expanduser("~"), "Traceback", 'File "', "/Users/", "/home/", ".py"]
+# 'File \\"' 是 JSON 里转义过的堆栈行：堆栈被塞进 JSON 字段时，裸的 'File "' 匹配不到
+LEAKS = [ROOT, os.path.expanduser("~"), "Traceback", 'File "', 'File \\"', "/Users/", "/home/", ".py"]
 
 BARS = json.load(open(os.path.join(ROOT, "data", "zec_4h.json"), encoding="utf-8"))
-calls = {"n": 0, "down": False, "inflight": 0, "peak": 0}
+calls = {"n": 0, "down": False, "inflight": 0, "peak": 0, "delay": 0.3}
 lock = threading.Lock()
 
 
@@ -44,7 +46,7 @@ def fake_fetch(symbol, tf, a, b):
         calls["inflight"] += 1
         calls["peak"] = max(calls["peak"], calls["inflight"])
     try:
-        time.sleep(0.3)                                  # 模拟慢的币安，让并发真的撞在一起
+        time.sleep(calls["delay"])                       # 模拟慢的币安，让并发真的撞在一起（⑨ 调成 5 秒）
     finally:
         with lock:
             calls["inflight"] -= 1
@@ -78,6 +80,7 @@ def burst(port, n, method, path):
 
 
 def main():
+    calls.update(n=0, down=False, inflight=0, peak=0, delay=0.3)   # 每一跑从同一个起点开始（自测会连跑多臂）
     server.fetch = fake_fetch
     srv = server.make_server(0)
     port = srv.server_address[1]
@@ -124,8 +127,9 @@ def main():
     cell("② 同格并发 100 次：全 200、拉 1 次、内容一致", codes == {200} and calls["n"] == 1 and same,
          "codes=%s 拉=%d 内容种数=%d" % (codes, calls["n"], len({b for _, b in rs})))
     meta = json.loads(rs[0][1])
-    cell("   带 fetched_at、stale=false", meta.get("stale") is False and str(meta.get("fetched_at", "")).endswith("Z"),
-         str({k: meta.get(k) for k in ("symbol", "tf", "fetched_at", "stale")}))
+    cell("   带 fetched_at、stale=false、refreshing=false",
+         meta.get("stale") is False and meta.get("refreshing") is False and str(meta.get("fetched_at", "")).endswith("Z"),
+         str({k: meta.get(k) for k in ("symbol", "tf", "fetched_at", "stale", "refreshing")}))
 
     # ③
     calls["n"] = 0
@@ -170,22 +174,44 @@ def main():
     burst(port, 100, "GET", "/api/chart?symbol=BTCUSDT&tf=1h")
     cell("⑤ 刷新期内再并发 100 次：拉 0 次", calls["n"] == 0, "拉=%d" % calls["n"])
 
+    def settle(sl, limit=15.0):
+        """等后台刷新收尾（refreshing 落回 False）；超时就算这格没收尾。"""
+        t = time.time()
+        while time.time() - t < limit:
+            with sl.lock:
+                if not sl.refreshing:
+                    return True
+            time.sleep(0.05)
+        return False
+
+    def flags(rs):
+        ms = [json.loads(b) for c, b in rs if c == 200]
+        return ms, {(m["stale"], m["refreshing"]) for m in ms}
+
     # ⑥：把 ZEC 4h 的「上次碰币安」拨回刷新期之前，再让币安挂掉
     slot = server.SLOTS[("ZECUSDT", "4h")]
     old_at = json.loads(slot.body)["fetched_at"]
     slot.tried_at -= server.REFRESH_S + 1
     calls["n"], calls["down"] = 0, True
     rs = burst(port, 100, "GET", "/api/chart?symbol=ZECUSDT&tf=4h")
-    metas = [json.loads(b) for c, b in rs if c == 200]
+    ms, fl = flags(rs)
     lk = sorted({w for _, b in rs for w in leaks(b)})
-    cell("⑥ 币安挂了：回上次结果、stale=true、旧 fetched_at",
-         len(metas) == 100 and all(m["stale"] and m["fetched_at"] == old_at for m in metas) and not lk,
-         "200 有 %d 条 · stale=%s · 泄漏 %s" % (len(metas), {m["stale"] for m in metas}, lk))
-    cell("   ⑥ 并发 100 次只试 1 次", calls["n"] == 1, "试=%d" % calls["n"])
+    cell("⑥ 过期 + 币安挂了：先回旧缓存（stale=F refreshing=T）",
+         len(ms) == 100 and fl == {(False, True)} and all(m["fetched_at"] == old_at for m in ms) and not lk,
+         "200 有 %d 条 · (stale, refreshing)=%s · 泄漏 %s" % (len(ms), fl, lk))
+    done = settle(slot)
+    rs = burst(port, 100, "GET", "/api/chart?symbol=ZECUSDT&tf=4h")
+    ms, fl = flags(rs)
+    cell("   ⑥ 后台失败后：回上次结果（stale=T refreshing=F）、旧 fetched_at",
+         done and len(ms) == 100 and fl == {(True, False)} and all(m["fetched_at"] == old_at for m in ms),
+         "收尾=%s (stale, refreshing)=%s" % (done, fl))
+    cell("   ⑥ 两轮并发 200 次只试 1 次（失败退避）", calls["n"] == 1, "试=%d" % calls["n"])
 
     # ⑦：一格从没成功过
     slot7 = server.SLOTS[("AAPLUSDT", "15m")]
+    lk7 = slot7.lock
     slot7.__init__()
+    slot7.lock = lk7
     calls["n"] = 0
     rs = burst(port, 100, "GET", "/api/chart?symbol=AAPLUSDT&tf=15m")
     lk = sorted({w for _, b in rs for w in leaks(b)})
@@ -199,10 +225,46 @@ def main():
     slot.tried_at -= server.RETRY_S + 1
     time.sleep(1.1)                                      # fetched_at 精确到秒：保证换了一秒再比
     code, body = req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=4h")
-    m = json.loads(body)
-    cell("⑧ 币安恢复：过了重试间隔回到 stale=false", code == 200 and m["stale"] is False and m["fetched_at"] > old_at,
-         "stale=%s fetched_at %s → %s" % (m["stale"], old_at, m["fetched_at"]))
+    m1 = json.loads(body)
+    done = settle(slot)
+    code2, body2 = req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=4h")
+    m = json.loads(body2)
+    cell("⑧ 币安恢复：重试那下先回旧的（stale=T refreshing=T），收尾后 stale=F refreshing=F、新 fetched_at",
+         code == code2 == 200 and (m1["stale"], m1["refreshing"]) == (True, True) and done
+         and (m["stale"], m["refreshing"]) == (False, False) and m["fetched_at"] > old_at,
+         "重试那下 %s → 收尾后 %s · fetched_at %s → %s" % ((m1["stale"], m1["refreshing"]),
+                                                       (m["stale"], m["refreshing"]), old_at, m["fetched_at"]))
 
+    # ⑨：币安慢 5 秒，过期请求仍然立刻回旧缓存、币安只被调一次
+    calls["delay"], calls["n"] = 5.0, 0
+    old9 = m["fetched_at"]
+    slot.tried_at -= server.REFRESH_S + 1
+    time.sleep(1.1)
+
+    def timed(_):
+        t = time.time()
+        c, b = req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=4h")
+        return time.time() - t, c, b
+    with cf.ThreadPoolExecutor(max_workers=50) as ex:
+        rs9 = list(ex.map(timed, range(50)))
+    worst = max(t for t, _, _ in rs9)
+    ms9 = [json.loads(b) for _, c, b in rs9 if c == 200]
+    fl9 = {(x["stale"], x["refreshing"]) for x in ms9}
+    cell("⑨ 币安慢 5 秒：过期请求 50 个最慢 <100ms、回旧缓存（stale=F refreshing=T）",
+         len(ms9) == 50 and worst < 0.1 and fl9 == {(False, True)} and all(x["fetched_at"] == old9 for x in ms9),
+         "最慢 %.0f ms · (stale, refreshing)=%s" % (worst * 1000, fl9))
+    done = settle(slot, 10)
+    m9 = json.loads(req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=4h")[1])
+    cell("   ⑨ 币安只被调 1 次；收尾后 refreshing=F、新 fetched_at",
+         calls["n"] == 1 and done and (m9["stale"], m9["refreshing"]) == (False, False) and m9["fetched_at"] > old9,
+         "调=%d 收尾=%s %s → %s" % (calls["n"], done, old9, m9["fetched_at"]))
+    calls["delay"] = 0.3
+
+    # 收尾：等每一格的后台刷新都落地再返回。不等的话，上一条变异臂留下的后台线程（⑨ 里睡 5 秒的那种）
+    # 会在下一条臂的 ⓪ 里继续调假币安、把计数和峰值打脏 —— 自测里「错误回堆栈」那臂 ⓪ 莫名变红就是它。
+    calls["delay"] = 0.0
+    for sl in server.SLOTS.values():
+        settle(sl, 20)
     srv.shutdown()
     srv.server_close()
     print("%d 格不过" % len(bad) if bad else "全部通过")
@@ -218,7 +280,7 @@ class _NoLock:
 
 
 def self_test():
-    """把服务改坏五种，main() 必须各自 rc≠0：没有单飞锁 ／ 没有刷新节流 ／ 报错把堆栈回给前端 ／ 静态放行源码 ／ 预热并发。"""
+    """把服务改坏六种，main() 必须各自 rc≠0：没有单飞锁 ／ 没有刷新节流 ／ 报错把堆栈回给前端 ／ 静态放行源码 ／ 预热并发 ／ 刷新挂在请求上。"""
     import importlib
     import io
     import contextlib as cl
@@ -246,12 +308,16 @@ def self_test():
             [t.join() for t in ths]
         server.prewarm = pw
 
+    def sync_refresh():
+        server.start_refresh = lambda sl, sy, tf: server._bg_refresh(sl, sy, tf)
+
     def serve_source():
         server.STATIC_EXT[".py"] = "text/plain; charset=utf-8"
 
     miss = 0
     for name, f in [("拿掉单飞锁", no_lock), ("拿掉刷新节流", no_throttle), ("错误回堆栈", leaky),
-                    ("静态放行 .py", serve_source), ("预热改成并发", parallel_prewarm)]:
+                    ("静态放行 .py", serve_source), ("预热改成并发", parallel_prewarm),
+                    ("刷新挂在请求上", sync_refresh)]:
         importlib.reload(server)
         f()
         buf = io.StringIO()

@@ -8,14 +8,15 @@
   · 只绑回环地址 —— 默认 127.0.0.1，传了非回环地址直接拒绝起服务；
   · 完全只读：只有 GET / HEAD，没有任何写文件、跑命令、改配置的接口；
   · 品种 × 周期白名单（SYMBOLS × TFS），白名单外 400；不接受任意参数去拉币安；
-  · 每个（品种, 周期）最多每 REFRESH_S 秒拉一次币安，同一时刻只有一个线程在拉（其余等它的结果）；
-    拉失败就回上一次的结果，并标 stale=true + 那份数据的拉取时间 fetched_at；
+  · 每个（品种, 周期）最多每 REFRESH_S 秒拉一次币安，同一时刻只有一个线程在拉；有缓存时过期刷新放后台、
+    请求立刻回旧缓存（标 refreshing=true）；拉失败就回上一次的结果，并标 stale=true + 那份数据的拉取时间 fetched_at；
   · 前端只看得到固定措辞的错误，**不出本机路径、密钥、堆栈**（详细原因只进 stderr）。
 
 接口：
   GET /api/chart?symbol=ZECUSDT&tf=15m
       → tools/make_web_fixture.shape() 的那一份（形状只在那里定义一处，前端离线样本也是它烤的），
-        顶上再加 fetched_at（拉币安的时间，UTC …Z，与 updated 同一写法）/ stale（这次拉失败、回的是上一次的结果）。
+        顶上再加 fetched_at（拉币安的时间，UTC …Z，与 updated 同一写法）/ stale（上一次拉取失败、回的是之前的结果）/
+        refreshing（缓存已过期、后台正在拉，这次先回旧的）。
         结构直接是 core.analyze / core.signals 的输出，不另写算法。
   GET /api/meta            → 白名单（前端拿来做下拉）
   GET /  /<静态文件>       → web/ 下的前端文件（只送 STATIC_EXT 里的类型，.py / .md / 点文件一律 404）
@@ -85,13 +86,15 @@ def build_payload(bars, symbol, tf):
 
 class Slot:
     def __init__(self):
-        self.lock = threading.Lock()     # 同一时刻只有一个线程在拉 / 算这一格
+        # RLock：后台刷新线程收尾时也要拿它；自测里把「后台刷新」换成就地同步跑（变异臂）时不能自锁死
+        self.lock = threading.RLock()
         self.bars = None                 # 上一次成功拉到的 K 线
-        self.body = None                 # 上一次成功的 JSON（已编码，原文 + gzip）
-        self.gz = None
+        self.body = None                 # 上一次成功的 JSON（头上 stale=false, refreshing=false）
+        self.variants = {}               # (stale, refreshing) → (json, gzip)：每种组合只压一次
         self.data_at = 0.0               # body 对应的数据是什么时候拉到的（epoch 秒）
         self.tried_at = 0.0              # 上一次碰币安的时间（成功失败都算）
-        self.failed = False              # 上一次碰币安是不是失败了
+        self.failed = False              # 上一次碰币安是不是失败了 ⇒ 响应里 stale
+        self.refreshing = False          # 后台正在拉这一格 ⇒ 响应里 refreshing；也是后台刷新的单飞旗
 
 
 SLOTS = {(s, t): Slot() for s in SYMBOLS for t in TFS}
@@ -99,7 +102,8 @@ FETCHES = {"n": 0}                       # 自计数：压测脚本拿来核「�
 
 
 def _refresh(slot, symbol, tf):
-    """在 slot.lock 里调用。增量：已有 K 线时只从最后一根（可能未收盘）往后拉，再截回 DAYS 窗口。"""
+    """拉 + 算，不动 slot。增量：已有 K 线时只从最后一根（可能未收盘）往后拉，再截回 DAYS 窗口。
+    调用方保证同一格同一时刻只有一个在跑：冷启动那条持 slot.lock，后台那条靠 slot.refreshing。"""
     now_ms = int(time.time() * 1000)
     start = now_ms - DAYS * 86400_000
     if slot.bars:
@@ -112,35 +116,79 @@ def _refresh(slot, symbol, tf):
     merged.update({b["t"]: b for b in new})              # 最后一根未收盘的那根用新值覆盖
     lo = now_ms - DAYS * 86400_000
     bars = [merged[t] for t in sorted(merged) if t >= lo]
-    payload = build_payload(bars, symbol, tf)
-    return bars, payload
+    # fetched_at / stale / refreshing 放最前：两个旗只在响应时替换这一处，不重算结构
+    body = json.dumps(dict(fetched_at=iso(now_ms), stale=False, refreshing=False, **build_payload(bars, symbol, tf)),
+                      ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return bars, body
+
+
+def _refresh_into(slot, symbol, tf):
+    """拉一次并把结果（或失败）记进 slot。成功失败都在 slot.lock 里落账。"""
+    try:
+        bars, body = _refresh(slot, symbol, tf)
+    except Exception:
+        log("refresh failed", symbol, tf, traceback.format_exc().replace("\n", " | "))
+        with slot.lock:
+            slot.failed = True
+            slot.variants = {}
+        return
+    with slot.lock:
+        slot.bars, slot.body, slot.data_at, slot.failed = bars, body, time.time(), False
+        slot.variants = {}
+
+
+def _bg_refresh(slot, symbol, tf):
+    try:
+        _refresh_into(slot, symbol, tf)
+    finally:
+        with slot.lock:
+            slot.refreshing = False
+            slot.variants = {}
+
+
+def start_refresh(slot, symbol, tf):
+    """在 slot.lock 里调用，slot.refreshing 已置 True。后台线程去拉，请求不等它。
+    （自测的「刷新挂在请求上」变异就是把这个函数换成就地跑 _bg_refresh。）"""
+    threading.Thread(target=_bg_refresh, args=(slot, symbol, tf), daemon=True).start()
+
+
+def _variant(slot):
+    """在 slot.lock 里调用 → (json, gzip)，头上两个旗按当下状态如实标。"""
+    key = (slot.failed, slot.refreshing)
+    v = slot.variants.get(key)
+    if v is None:
+        body = slot.body
+        if slot.failed:
+            body = body.replace(b'"stale":false', b'"stale":true', 1)
+        if slot.refreshing:
+            body = body.replace(b'"refreshing":false', b'"refreshing":true', 1)
+        v = slot.variants[key] = (body, gzip.compress(body, 6))
+    return v
 
 
 def get_chart(symbol, tf):
-    """→ (json bytes, gzip bytes) 或 None（一次都没拉成功过）。"""
+    """→ (json bytes, gzip bytes) 或 None（一次都没拉成功过）。
+
+    · 冷（还没有缓存）：同步拉，持锁 ⇒ 并发进来的都等这一次，不回空；
+    · 有缓存、过期了（成功后 REFRESH_S / 失败后 RETRY_S）：起**一个**后台刷新，立刻回旧缓存
+      （stale-while-revalidate；币安一抖不会挂到用户请求上）；
+    · 旗：stale = 上一次拉取失败；refreshing = 这次回的是旧缓存、后台正在拉。"""
     slot = SLOTS[(symbol, tf)]
     with slot.lock:
         now = time.time()
-        wait = RETRY_S if slot.failed else REFRESH_S
-        if now - slot.tried_at >= wait:
-            slot.tried_at = now
-            try:
-                bars, payload = _refresh(slot, symbol, tf)
-                # fetched_at / stale 放最前：失败时只替换这一处，不重算结构
-                body = json.dumps(dict(fetched_at=iso(now * 1000), stale=False, **payload), ensure_ascii=False,
-                                  separators=(",", ":"), allow_nan=False).encode("utf-8")
-                slot.bars, slot.body, slot.gz, slot.data_at, slot.failed = bars, body, gzip.compress(body, 6), now, False
-                return slot.body, slot.gz
-            except Exception:
-                slot.failed = True
-                log("refresh failed", symbol, tf, traceback.format_exc().replace("\n", " | "))
+        due = now - slot.tried_at >= (RETRY_S if slot.failed else REFRESH_S)
         if slot.body is None:
-            return None
-        if not slot.failed:
-            return slot.body, slot.gz
-        # 失败：回上一次的结果，stale 翻成 true；fetched_at 仍是那份数据的拉取时间
-        body = slot.body.replace(b'"stale":false', b'"stale":true', 1)
-        return body, gzip.compress(body, 6)
+            if due:
+                slot.tried_at = now
+                _refresh_into(slot, symbol, tf)
+            if slot.body is None:
+                return None
+        elif due and not slot.refreshing:
+            slot.tried_at = now
+            slot.refreshing = True
+            slot.variants = {}
+            start_refresh(slot, symbol, tf)
+        return _variant(slot)
 
 
 def prewarm():
