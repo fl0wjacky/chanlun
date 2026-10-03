@@ -193,6 +193,10 @@ def find_centers_by_segment(pens, segs):
     『与前一个中枢的关系』和『可信度档』最后全局重算（关系是「两个中枢之间」的，
     可信度档看的是整份数据的末尾，都不是中枢本身跨段）。
 
+    起笔（L64:31 / L64:35-36）：线段的首笔是与段同向的进入笔，类中枢要从第一根
+    **反向**笔起找（下跌段里是「上下上」，首笔反向）—— 所以每段切片跳过第 0 笔
+    （base 取 PI0+1），否则起笔方向就错了。
+
     已完成线段里 find_centers 会把它最后那个中枢标成「仍在延续」（live=True）—— 那是
     **被段分界截断**（切片到头了，后面再没有笔可看），不是真的后面还有事（第 22 课
     三种运动里没有「段到头」这一种）。所以已完成线段的 live 一律改 False、终结原因写
@@ -200,7 +204,7 @@ def find_centers_by_segment(pens, segs):
     """
     out = []
     for s in segs:
-        base = s["PI0"]
+        base = s["PI0"] + 1                     # 跳过与段同向的进入笔，从第一根反向笔起（L64:31 / L64:35-36）
         seg_live = s.get("live", False)
         for z in find_centers(pens[base:s["PI1"] + 1]):
             z["PI0"] += base

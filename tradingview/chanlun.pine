@@ -838,13 +838,15 @@ findCenters(array<Unit> U) =>
 // 类中枢改段内算：按线段把笔切开，每段内各自 findCenters —— 类中枢不跨线段（L65:145-146 / L57:21）。
 // 每条线段（含未完成那条 live）里的笔单独跑，PI0/PI1 是段内下标，加回段起点 rebase 成全局笔下标；
 // 段与段之间不接续、不合并。「与前一个中枢的关系」最后全局重算（关系是两中枢之间的，不是中枢本身跨段）。
+// 起笔（L64:31 / L64:35-36）：段首笔是与段同向的进入笔，类中枢从第一根反向笔起（下跌段里是上下上）——
+// 所以每段跳过第 0 笔（base = PI0 + 1），否则起笔方向就错了。
 // 已完成线段里 findCenters 会把最后那个中枢标成 live（切片到头了）—— 那是被段分界截断，
 // 一律改 live=false、term=5（所在线段结束）；只有最后那条未完成线段才保留 findCenters 给的 live。
 findCentersBySegment(array<Unit> pens, array<Unit> segs) =>
     zs = array.new<Ctr>()
     for s in segs
-        base = s.PI0
-        cs = findCenters(pens.slice(s.PI0, s.PI1 + 1))
+        base = s.PI0 + 1
+        cs = findCenters(pens.slice(base, s.PI1 + 1))
         if cs.size() > 0
             for ci = 0 to cs.size() - 1
                 z = cs.get(ci)

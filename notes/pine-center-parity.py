@@ -101,7 +101,7 @@ def pine_find_centers_by_segment(pens, segs):
     """pine 的 findCentersBySegment() 逐行翻译（含空段守卫 + 已完成线段 live 改法）。"""
     zs = []
     for s in segs:
-        base = s["PI0"]
+        base = s["PI0"] + 1                                # pine: base = s.PI0 + 1（跳过与段同向的进入笔）
         cs = pine_find_centers(pens[base:s["PI1"] + 1])
         if len(cs) > 0:                                   # pine: if cs.size() > 0
             for z in cs:
@@ -115,10 +115,10 @@ def pine_find_centers_by_segment(pens, segs):
 
 
 def check_pine_anchors():
-    """空段守卫 + live 改法那两行必须在 pine 里各命中一次（静态锚，不拿行号当输入）。"""
+    """空段守卫 + live 改法 + 跳过首笔那三行必须在 pine 里各命中一次（静态锚，不拿行号当输入）。"""
     src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "tradingview", "chanlun.pine"), encoding="utf-8").read()
-    want = ["if cs.size() > 0", "if z.live and not s.live"]
+    want = ["if cs.size() > 0", "if z.live and not s.live", "base = s.PI0 + 1"]
     bad = [(w, src.count(w)) for w in want if src.count(w) != 1]
     return bad
 
