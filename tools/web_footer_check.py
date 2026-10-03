@@ -26,9 +26,17 @@
     44 字 ≈357px（放得下）；实测「六种全齐＋待确认」那种 49 字整句＝356px —— 只差 6px 就换行，
     所以 44 这条线会把那种边缘情形叫红。**知道它偏保守，是保守，不是准。**
 
+第二件（2026-10-03 线上逮到之后加的）：图脚**末尾那格「数据源」不许是空的**。
+  `web/app.js` 的模板印 `${state.source}`，而 `state.source` 从声明（`''`）起**从没被赋过值** ——
+  `load()` 把出处挂在**返回对象**上（`'api'` ／ `'样本 x.json'`），`draw()` 只存了 `state.data`。
+  真源和离线两条路都印不出出处 ⇒ 线上图脚末尾常年挂着一个光杆「｜ 数据源」。
+  ★ 这格当时是**绿着漏过去的**：本尺子上一条判据量的是「标签＋列表」的宽度，**空字段不在判据里**。
+  ★ 所以这一格不读代码、**真跑**：把 `RENDER_META` 模板 ＋ `SOURCE_WIRE` 那一行抠出来，配一个假 DOM
+    调一次 `renderMeta`，看它写进 `#meta` 的那句话里「｜ 数据源」后面到底是什么。接线一摘就红（探针⑦）。
+
 跑法：
-  python3 tools/web_footer_check.py            # 主跑：拿实时规模的样本量
-  python3 tools/web_footer_check.py --selftest # 探针：六格都得变红（尺子自己先证明会红）
+  python3 tools/web_footer_check.py            # 主跑：拿实时规模的样本量 ＋ 数据源那格
+  python3 tools/web_footer_check.py --selftest # 探针：八格都得变红（尺子自己先证明会红）
 """
 import json
 import os
@@ -43,6 +51,10 @@ FIX = os.path.join(ROOT, "web", "fixtures", "signals_zec15m_live.json")
 
 BEGIN = "// >>> SIG_TIER_TEXT"
 END = "// <<< SIG_TIER_TEXT"
+# 图脚末尾那格「数据源」：模板 ＋ 给它赋值的那一行，两处都抠出来真跑（2026-10-03 线上逮到的洞）
+MBEGIN, MEND = "// >>> RENDER_META", "// <<< RENDER_META"
+WBEGIN, WEND = "// >>> SOURCE_WIRE", "// <<< SOURCE_WIRE"
+SRC_RE = re.compile(r"｜\s*数据源\s*(.*)$")
 
 LINE_PX = 362.0        # 390px 视口下图脚那格的 clientWidth（量出来的）
 PX_PER_CHAR = 8.11     # 实测最费的每字宽（见文件头）
@@ -52,14 +64,14 @@ BUDGET = int(LINE_PX // PX_PER_CHAR)   # 44 —— 对「标签＋列表」整�
 LABEL_RE = re.compile(r"([^\s`|+]{2,8}层\s*)\$\{sigTierText\(")
 
 
-def block(path=JS):
+def block(path=JS, begin=BEGIN, end=END):
     """把带标记的那一段从 app.js 里抠出来。抠不到 ⇒ 直接报错，不许静默跳过。"""
     src = open(path, encoding="utf-8").read()
-    a = src.find(BEGIN)
-    b = src.find(END)
+    a = src.find(begin)
+    b = src.find(end)
     if a < 0 or b < 0 or b < a:
         raise SystemExit("✗ 在 %s 里找不到 %s / %s 标记 —— 抠不到被测量，尺子不猜" %
-                         (os.path.relpath(path, ROOT), BEGIN, END))
+                         (os.path.relpath(path, ROOT), begin, end))
     # 从标记**那一行的行尾**开始切：标记行后面还跟着说明文字，带上它会变成 JS 语法错
     return src[src.index("\n", a) + 1:b]
 
@@ -132,6 +144,66 @@ def measure(path=JS, fixture=FIX, quiet=False):
         print("  %s：%s" % (lab, line))
     print()
     return rows, not bad
+
+
+# 「数据源」那格的最小载荷：只喂 renderMeta 真的会读到的字段
+# （别的字段它不读 —— 喂多了反而看不见「读了却没接线」这种事）
+PAYLOAD = {
+    "symbol": "ZECUSDT", "name": "ZEC/USDT 永续", "tf": "15m", "nbars": 20160,
+    "pens": [{"i0": 0, "p0": 1, "i1": 1, "p1": 2}],
+    "centers": [{"ZD": 1, "ZG": 2}], "seg_centers": [{"ZD": 1, "ZG": 2}],
+    "segs": [{"live": False}, {"live": False}, {"live": True}],
+    "meta": {"tick": 0.01, "pen_rule": "old"},
+    "signals": {"seg": [{"kind": "三买", "confirmed": True}],
+                "pen": [{"kind": "一买", "confirmed": True}]},
+    "source": "api",
+}
+
+
+def footer_text(payload, wire=True, path=JS):
+    """把 SIG_TIER_TEXT ＋ RENDER_META ＋ SOURCE_WIRE 三块拼成一个小模块，配**假 DOM** 真跑一遍
+    `renderMeta`，收它写进 `#meta` 的那整句话。`wire=False` 时故意不拼 SOURCE_WIRE —— 那是探针。"""
+    js = (block(path) + "\n" + block(path, MBEGIN, MEND) + """
+const out = {};
+const el = (id) => ({ set textContent(v) { out[id] = v; }, get textContent() { return out[id] || ''; },
+                      set className(v) {}, set title(v) {} });
+const state = { source: '' };
+const d = JSON.parse(process.argv[2]);
+""")
+    if wire:
+        js += block(path, WBEGIN, WEND) + "\n"
+    js += "\nrenderMeta(d);\nprocess.stdout.write(JSON.stringify({ meta: out.meta }));\n"
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
+        f.write(js)
+        tmp = f.name
+    try:
+        p = subprocess.run(["node", tmp, json.dumps(payload)], capture_output=True, text=True, timeout=60)
+    finally:
+        os.unlink(tmp)
+    if p.returncode != 0:
+        raise SystemExit("✗ 「数据源」那格跑不起来：\n" + p.stderr.strip())
+    return json.loads(p.stdout)["meta"]
+
+
+def source_of(meta):
+    """从整句图脚里切出「｜ 数据源」后面那截。切不到 ⇒ 报错，不许当成空字符串糊过去。"""
+    m = SRC_RE.search(meta)
+    if not m:
+        raise SystemExit("✗ 图脚里找不到「｜ 数据源」那一段 —— 模板改了就得改这把尺子")
+    return m.group(1).strip()
+
+
+def data_source_check(quiet=False):
+    """判据：图脚末尾那格**必须印出真实的出处** —— 真源走 'api'、离线样本走 '样本 x.json'。
+    2026-10-03 线上逮到的洞正是这一格：模板印 `${state.source}`，而 `state.source` 从声明起
+    从没被赋过值（`load()` 把出处挂返回对象上，`draw()` 只存了 `state.data`）⇒ 常年空着，
+    而当时的尺②全绿 —— 它量的是「标签＋列表」的宽度，空字段不在判据里。"""
+    live = source_of(footer_text(PAYLOAD))
+    off = source_of(footer_text(dict(PAYLOAD, source="样本 zec_15m.json")))
+    ok = live == "api" and off == "样本 zec_15m.json"
+    if not quiet:
+        print("  数据源那格：真源 ⇒ %r ／ 离线样本 ⇒ %r（要 'api' ／ '样本 zec_15m.json'）" % (live, off))
+    return (live, off), ok
 
 
 def node_eval(js):
@@ -246,6 +318,27 @@ process.stdout.write(JSON.stringify({t: sigTierText([
     finally:
         os.unlink(tmp)
 
+    # ⑦ ★ 2026-10-03 线上那个洞本身：把 SOURCE_WIRE 那一行摘掉（＝接线没接上）⇒ 数据源必须印成空的
+    #    ⇒ 尺子的新判据必须红。这一格就是拿**真发生过的那个 bug** 打的。
+    try:
+        bad = source_of(footer_text(PAYLOAD, wire=False))
+        cases.append(("⑦ 接线摘掉（draw 里不赋 state.source）⇒ 数据源印成 %r，必须红" % bad, bad == ""))
+    except SystemExit:
+        cases.append(("⑦ 接线摘掉 ⇒ 数据源印成空的、必须红", False))
+
+    # ⑧ SOURCE_WIRE 标记被删 ⇒ 必须报错（不许静默跳过被测量，跟 ② 同一条规矩）
+    src = open(JS, encoding="utf-8").read().replace(WBEGIN, "// (marker removed)")
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
+        f.write(src)
+        tmp = f.name
+    try:
+        block(tmp, WBEGIN, WEND)
+        cases.append(("⑧ 接线标记被删掉 ⇒ 报错", False))
+    except SystemExit:
+        cases.append(("⑧ 接线标记被删掉 ⇒ 报错", True))
+    finally:
+        os.unlink(tmp)
+
     print("探针（每一格都必须红）：")
     for name, red in cases:
         print("  %s %s" % ("✓" if red else "✗ 没红", name))
@@ -260,11 +353,15 @@ if __name__ == "__main__":
     print("图脚「买卖点」段的宽度尺（390px 视口，量「标签＋列表」整句）\n")
     try:
         _, ok = measure()
+        _ds, ds_ok = data_source_check()
     except SystemExit as e:
         print(str(e))
         sys.exit(1)
-    if ok:
-        print("✓ 两个层级都在一行内（%s）" % os.path.relpath(JS, ROOT))
+    if ok and ds_ok:
+        print("✓ 两个层级都在一行内，且「数据源」那格印得出真实的出处（%s）" % os.path.relpath(JS, ROOT))
         sys.exit(0)
-    print("✗ 有一段放不下一行 —— 图脚在手机上是几行糊在一起的字（见上面的 ≈px）")
+    if not ok:
+        print("✗ 有一段放不下一行 —— 图脚在手机上是几行糊在一起的字（见上面的 ≈px）")
+    if not ds_ok:
+        print("✗ 「数据源」那格印出来是空的 —— 图脚末尾挂着一个光杆「｜ 数据源」")
     sys.exit(1)

@@ -115,6 +115,12 @@ async function load(symbol, tf) {
 // ---------------------------------------------------------------- 画一张
 function draw(d) {
   state.data = d;
+  // >>> SOURCE_WIRE  （tools/web_footer_check.py 抠这一行真跑：量「图脚那格印出来的数据源」）
+  // ★ 2026-10-03 线上逮到的：`load()` 把出处挂在**返回对象**上（'api' ／ '样本 x.json'），
+  //   这里原先只存了 `state.data`，`state.source` 就一直停在声明时的 `''` ⇒ 图脚末尾常年是
+  //   「｜ 数据源」后面空着（尺②当时全绿：它量的是「标签＋列表」的宽度，空字段不在判据里）。
+  state.source = d.source || '';      // 缺就留空 —— 不知道的事不编
+  // <<< SOURCE_WIRE
   const bars = d.bars.map((b) => ({ time: b.t / 1000, open: b.o, high: b.h, low: b.l, close: b.c }));
   candle.applyOptions({ priceFormat: priceFormat(d.meta?.tick) });
   candle.setData(bars);
@@ -289,6 +295,7 @@ function sigTierText(s) {
 }
 // <<< SIG_TIER_TEXT
 
+// >>> RENDER_META  （tools/web_footer_check.py 抠出来配假 DOM 真跑，量图脚整句）
 function renderMeta(d) {
   const done = d.segs.filter((s) => !s.live).length;
   el('meta').textContent =
@@ -298,6 +305,7 @@ function renderMeta(d) {
     + ` ｜ 买卖点 线段中枢层 ${sigTierText(d.signals?.seg || [])} · 类中枢层 ${sigTierText(d.signals?.pen || [])}`
     + ` ｜ 数据源 ${state.source}`;
 }
+// <<< RENDER_META
 
 // ---------------------------------------------------------------- 角上的时间
 // ★ 2026-10-03 真机反馈（小栋，iPhone / BTC 4h）改的口径：原来角上写
