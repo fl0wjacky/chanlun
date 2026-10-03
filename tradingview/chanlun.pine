@@ -1057,8 +1057,25 @@ int CTR_LB_CAP  = LB_BUDGET - SIG_LB_CAP               // 198
 int PC_LB_SHARE = CTR_LB_CAP / 2                       //  99：类中枢（价签 + 高一级别标签）
 int SC_LB_SHARE = CTR_LB_CAP - PC_LB_SHARE             //  99：线段中枢（价签 + 高一级别标签）
 
-// 画图的 x：TradingView 只允许往回画 10000 根以内（xloc.bar_index），更早的夹到界线上
-xc(int x) => math.max(x, bar_index - 9990)
+// 画图的 x：一律夹到**画图窗口左沿** xL = bar_index - drawBars（drawBars ≤ 9000）。
+//   原来按 9990 夹（「往回最多 10000 根」）—— 但真机上历史缓冲的上限不是 10000：小栋 10-03 ZECUSDT 15m
+//   报 'offset 9271 > 9270'（bar 20785，画线段那行）。起点早于缓冲、终点在窗口里的线一画就炸。
+//   窗口左沿本来就是「早于此的结构不画」那条线（x0Draw = n - 1 - drawBars - off ⇔ base + x0Draw == xL），
+//   所以夹到它上面不丢任何该画的东西；math.min 防 bar_index < drawBars 时夹出负数。
+xL() => bar_index - math.min(drawBars, bar_index)
+xc(int x) => math.max(x, xL())
+// 线被夹时**不许变形**：夹过的端点的价格按原线两端点线性插值（框直接截左边，不用插）。
+//   (y1 - y0) 是 float，先乘后除 ⇒ 不走整数除法。
+yAt(int x0, float y0, int x1, float y1, int x) =>
+    x1 == x0 ? y0 : y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+// 画一条可能伸出窗口左沿的线：两端都夹到窗口里、价格沿原线插值；整条都在窗口左边就不画（返回 na）。
+clipLine(int x0, float y0, int x1, float y1, color col, int w, string st) =>
+    line ln = na
+    if math.max(x0, x1) >= xL()
+        a = xc(x0)
+        b = xc(x1)
+        ln := line.new(a, yAt(x0, y0, x1, y1, a), b, yAt(x0, y0, x1, y1, b), color = col, width = w, style = st)
+    ln
 
 clearAll() =>
     for l in gLines
@@ -1226,8 +1243,8 @@ if barstate.islast
                 if nPenDrawn >= PEN_LINE_CAP
                     break
                 nPenDrawn += 1
-                gLines.push(line.new(xc(base + p.i0), p.p0, xc(base + p.i1), p.p1, color = penCol, width = penW,
-                     style = t == np - 1 ? line.style_dashed : line.style_solid))
+                gLines.push(clipLine(base + p.i0, p.p0, base + p.i1, p.p1, penCol, penW,
+                     t == np - 1 ? line.style_dashed : line.style_solid))
     if showSeg and segs.size() > 0
         for si = segs.size() - 1 to 0
             s = segs.get(si)
@@ -1244,8 +1261,8 @@ if barstate.islast
                         if pens.get(t).p1 == ye
                             xe := pens.get(t).i1
                         t += 1
-                gLines.push(line.new(xc(base + s.i0), s.p0, xc(base + xe), ye, color = segCol, width = segW,
-                     style = s.live ? line.style_dashed : line.style_solid))
+                gLines.push(clipLine(base + s.i0, s.p0, base + xe, ye, segCol, segW,
+                     s.live ? line.style_dashed : line.style_solid))
 
     segLevel = sigLevel == "线段中枢"
     // 前提③ 的『上一层』：笔层 = 线段中枢；线段层 = 线段中枢自己再扩展合成一级
