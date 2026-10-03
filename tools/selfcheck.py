@@ -156,6 +156,19 @@ else:
     Zc = copy.deepcopy(R["ZEC 15m"]["centers"])
     Zc[k9]["up"][0]["ZG"] += 0.01
     count("算错的升级区间未被发现", 0 if check_centers(Zc, R["ZEC 15m"]["pens"], stops=_stops15) else 1)
+# 段内截断的 live 改法：把一个「所在线段结束」的中枢翻回 live=True（复现被审出的那条 bug），校验器必须报错。
+# 这一格守的是 check_centers 里「bound < len(units) ⇒ 必须 live=False 且 term='所在线段结束'」那条 ——
+# 没有它，段内算又把中间段的中枢标成「仍在延续」，selfcheck 会静默放过（Nova 审 8f61ece 抓的就是这个）。
+_cut = next((k for k, z in enumerate(R["ZEC 15m"]["centers"]) if z["term"] == "所在线段结束"), None)
+if _cut is None:
+    skip("段内截断标成 live 未被发现", "没有任何『所在线段结束』的中枢，夹具造不出")
+else:
+    Zm = copy.deepcopy(R["ZEC 15m"]["centers"])
+    Zm[_cut]["live"] = True
+    Zm[_cut]["term"] = "仍在延续"
+    Zm[_cut]["status"] = "暂定"
+    Zm[_cut]["status_note"] = "仍在延续"
+    count("段内截断标成 live 未被发现", 0 if check_centers(Zm, R["ZEC 15m"]["pens"], stops=_stops15) else 1)
 # 买卖点：把一个三买挪到离开段的终点、把一个一买挪到没创新低的位置，复核必须报错
 Rz = R["ZEC 15m"]
 S = signals(Rz, "pen")

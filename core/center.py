@@ -192,13 +192,22 @@ def find_centers_by_segment(pens, segs):
     加回段起点 rebase 成全局笔下标；段与段之间的分界处不接续、不合并。
     『与前一个中枢的关系』和『可信度档』最后全局重算（关系是「两个中枢之间」的，
     可信度档看的是整份数据的末尾，都不是中枢本身跨段）。
+
+    已完成线段里 find_centers 会把它最后那个中枢标成「仍在延续」（live=True）—— 那是
+    **被段分界截断**（切片到头了，后面再没有笔可看），不是真的后面还有事（第 22 课
+    三种运动里没有「段到头」这一种）。所以已完成线段的 live 一律改 False、终结原因写
+    『所在线段结束』；只有最后那条未完成线段里的才保留 find_centers 给的 live。
     """
     out = []
     for s in segs:
         base = s["PI0"]
+        seg_live = s.get("live", False)
         for z in find_centers(pens[base:s["PI1"] + 1]):
             z["PI0"] += base
             z["PI1"] += base
+            if z["live"] and not seg_live:
+                z["live"] = False
+                z["term"] = "所在线段结束"
             out.append(z)
     return classify_relations(out)
 
@@ -210,7 +219,9 @@ def check_centers(zs, units, stops=None):
     units : 构成中枢的那一层（笔列表，或已完成的线段列表）
     stops : 可选，段内算时的「硬分界」笔下标（每条线段末笔下标 +1）。给了它，
             终结方式的扫描只看本段内（到下一个分界为止），分界之后的走势不算
-            —— 段内算里「仍在延续」是**被分界截断**，不是真的后面还有事。
+            —— 段内算里「仍在延续」是**被分界截断**，不是真的后面还有事：
+            段内截断（本段不是末尾那条）⇒ 中枢必须 live=False 且 term='所在线段结束'；
+            只有末尾那条（bound == len(units)）才允许 live=True。
     """
     bound_of = (lambda i: next((s for s in stops if s > i), len(units))) if stops else (lambda i: len(units))
 
@@ -259,7 +270,10 @@ def check_centers(zs, units, stops=None):
                 if d:
                     ev = ("三买" if d > 0 else "三卖", q - 1, q + 1); break
         if ev is None:
-            if not z["live"]:
+            if bound < len(units):                # 段内截断（本段不是末尾）：无事件却算到段尾 = 被分界截断
+                if z["live"] or z["term"] != "所在线段结束":
+                    bad.append(("被段分界截断，应 live=False 且 term='所在线段结束'", k))
+            elif not z["live"]:                    # 真·末尾（未完成段）：无事件却标已终结才是错
                 bad.append(("标为已终结，但其后既无第三类买卖点也无离开的 Z 段", k))
         else:
             if z["live"] or z["term"] != ev[0]:

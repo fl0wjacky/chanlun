@@ -125,7 +125,7 @@ type Ctr
     float DD
     float GG
     bool  live
-    int   term     // 0 仍在延续 / 1 三买 / 2 三卖 / 3 Z 段向上离开 / 4 Z 段向下离开
+    int   term     // 0 仍在延续 / 1 三买 / 2 三卖 / 3 Z 段向上离开 / 4 Z 段向下离开 / 5 所在线段结束
     int   rel      // 0 无 / 1 下跌延续 / 2 上涨延续 / 3 扩展·向下 / 4 扩展·向上 / 5 区间重叠
     array<float> upZD
     array<float> upZG
@@ -838,16 +838,22 @@ findCenters(array<Unit> U) =>
 // 类中枢改段内算：按线段把笔切开，每段内各自 findCenters —— 类中枢不跨线段（L65:145-146 / L57:21）。
 // 每条线段（含未完成那条 live）里的笔单独跑，PI0/PI1 是段内下标，加回段起点 rebase 成全局笔下标；
 // 段与段之间不接续、不合并。「与前一个中枢的关系」最后全局重算（关系是两中枢之间的，不是中枢本身跨段）。
+// 已完成线段里 findCenters 会把最后那个中枢标成 live（切片到头了）—— 那是被段分界截断，
+// 一律改 live=false、term=5（所在线段结束）；只有最后那条未完成线段才保留 findCenters 给的 live。
 findCentersBySegment(array<Unit> pens, array<Unit> segs) =>
     zs = array.new<Ctr>()
     for s in segs
         base = s.PI0
         cs = findCenters(pens.slice(s.PI0, s.PI1 + 1))
-        for ci = 0 to cs.size() - 1
-            z = cs.get(ci)
-            z.PI0 := z.PI0 + base
-            z.PI1 := z.PI1 + base
-            zs.push(z)
+        if cs.size() > 0
+            for ci = 0 to cs.size() - 1
+                z = cs.get(ci)
+                z.PI0 := z.PI0 + base
+                z.PI1 := z.PI1 + base
+                if z.live and not s.live
+                    z.live := false
+                    z.term := 5
+                zs.push(z)
     if zs.size() > 1
         for k = 1 to zs.size() - 1
             z = zs.get(k)
