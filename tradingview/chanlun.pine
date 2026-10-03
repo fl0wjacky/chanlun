@@ -768,11 +768,17 @@ segsSame(array<Unit> A, array<Unit> B) =>
 relOf(Ctr A, Ctr B) =>
     B.GG < A.DD ? 1 : B.DD > A.GG ? 2 : (B.ZG < A.ZD and B.GG >= A.DD) ? 3 : (B.ZD > A.ZG and B.DD <= A.GG) ? 4 : 5
 
-findCenters(array<Unit> U) =>
+findCenters(array<Unit> U, int startDir) =>
+    // startDir：首笔方向约束（只给类中枢段内算用，L64:31/L64:35-36 首笔反向）。
+    //   0 = 不约束（线段中枢 / 独立调用）· 1 = 首笔须向上 · -1 = 首笔须向下。
+    //   笔方向严格交替，所以候选起笔方向不对就挪一格（一格即反向）。
     zs = array.new<Ctr>()
     N = U.size()
     i = 0
     while i + 2 < N
+        if startDir != 0 and (isUp(U.get(i)) ? 1 : -1) != startDir
+            i += 1
+            continue
         a = U.get(i), b = U.get(i + 1), c = U.get(i + 2)
         ZG = math.min(a.hi, math.min(b.hi, c.hi))
         ZD = math.max(a.lo, math.max(b.lo, c.lo))
@@ -838,13 +844,17 @@ findCenters(array<Unit> U) =>
 // 类中枢改段内算：按线段把笔切开，每段内各自 findCenters —— 类中枢不跨线段（L65:145-146 / L57:21）。
 // 每条线段（含未完成那条 live）里的笔单独跑，PI0/PI1 是段内下标，加回段起点 rebase 成全局笔下标；
 // 段与段之间不接续、不合并。「与前一个中枢的关系」最后全局重算（关系是两中枢之间的，不是中枢本身跨段）。
+// 起笔（L64:31 / L64:35-36）：段首笔是与段同向的进入笔，类中枢从第一根反向笔起（下跌段里是上下上），
+// 而且每个中枢的首笔都得反向、不只第一个 —— 不重叠时 findCenters 挪到下一根（同向）笔，终结后 nxt 也可能
+// 落在同向笔上。所以每段跳过第 0 笔（base = PI0 + 1），再把段方向的反向传给 findCenters（首笔方向约束）。
 // 已完成线段里 findCenters 会把最后那个中枢标成 live（切片到头了）—— 那是被段分界截断，
 // 一律改 live=false、term=5（所在线段结束）；只有最后那条未完成线段才保留 findCenters 给的 live。
 findCentersBySegment(array<Unit> pens, array<Unit> segs) =>
     zs = array.new<Ctr>()
     for s in segs
-        base = s.PI0
-        cs = findCenters(pens.slice(s.PI0, s.PI1 + 1))
+        base = s.PI0 + 1
+        int sdir = isUp(s) ? 1 : -1
+        cs = findCenters(pens.slice(base, s.PI1 + 1), -sdir)
         if cs.size() > 0
             for ci = 0 to cs.size() - 1
                 z = cs.get(ci)
@@ -1131,7 +1141,7 @@ if barstate.islast
         if not s.live
             done.push(s)
     pcs = findCentersBySegment(pens, segs)
-    scs = findCenters(done)
+    scs = findCenters(done, 0)
     // ③ 逐根自检：把增量 (zPens, zSegs) 跟整段重算对一遍（A 模式才做；B 本来就整段）
     if segCheck and not featModeB
         pensRef = zUnits(zFx, zSeq)

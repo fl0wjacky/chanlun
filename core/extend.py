@@ -109,8 +109,10 @@ def check_hierarchy(big, zs, pens):
                 bad.append(("接进来的成员已整段离开区间", n))
         if b["level"] != A.get("level", 1) + 1:
             bad.append(("级别不是成员级别 + 1", n))
-        if (b["PI0"], b["PI1"]) != (A["PI0"], ms[-1]["PI1"]) or b["DD"] != min(m["DD"] for m in ms) \
-                or b["GG"] != max(m["GG"] for m in ms):
+        lo, hi = min(m["DD"] for m in ms), max(m["GG"] for m in ms)
+        if conn:                                  # 波动范围把连接段也算进去（merge_extended 的第 2 段）
+            lo, hi = min(lo, spans[1][0]), max(hi, spans[1][1])
+        if (b["PI0"], b["PI1"]) != (A["PI0"], ms[-1]["PI1"]) or b["DD"] != lo or b["GG"] != hi:
             bad.append(("覆盖范围 / 波动范围与成员不符", n))
         nxt = next((z for z in zs if z["PI0"] > ms[-1]["PI1"]), None)
         if nxt is not None and b["valid"] and not ms[-1].get("live") and \

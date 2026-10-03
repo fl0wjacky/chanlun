@@ -57,13 +57,17 @@ def isUp(u):                          # pine:479  isUp(Unit u) => u.p1 > u.p0
     return u["p1"] > u["p0"]
 
 
-def pine_find_centers(U):
-    """pine 的 findCenters(array<Unit> U) 逐行翻译。只保留对账要用的 PI0/PI1/live/term；
-    DD/GG、9 段升级那两段不参与对账，不抄（它们不影响这四样）。"""
+def pine_find_centers(U, start_dir=0):
+    """pine 的 findCenters(array<Unit> U, int startDir) 逐行翻译。只保留对账要用的 PI0/PI1/live/term；
+    DD/GG、9 段升级那两段不参与对账，不抄（它们不影响这四样）。
+    start_dir：0 不约束 · 1 首笔向上 · -1 首笔向下（类中枢段内算首笔反向，见 L64:31/L64:35-36）。"""
     zs = []
     N = len(U)
     i = 0
     while i + 2 < N:
+        if start_dir != 0 and (1 if isUp(U[i]) else -1) != start_dir:
+            i += 1
+            continue
         a, b, c = U[i], U[i + 1], U[i + 2]
         ZG = min(a["hi"], b["hi"], c["hi"])
         ZD = max(a["lo"], b["lo"], c["lo"])
@@ -98,11 +102,12 @@ def pine_find_centers(U):
 
 
 def pine_find_centers_by_segment(pens, segs):
-    """pine 的 findCentersBySegment() 逐行翻译（含空段守卫 + 已完成线段 live 改法）。"""
+    """pine 的 findCentersBySegment() 逐行翻译（含空段守卫 + 已完成线段 live 改法 + 首笔反向）。"""
     zs = []
     for s in segs:
-        base = s["PI0"]
-        cs = pine_find_centers(pens[base:s["PI1"] + 1])
+        base = s["PI0"] + 1                                # pine: base = s.PI0 + 1（跳过与段同向的进入笔）
+        sdir = 1 if isUp(s) else -1                        # pine: int sdir = isUp(s) ? 1 : -1（段方向）
+        cs = pine_find_centers(pens[base:s["PI1"] + 1], -sdir)   # pine: findCenters(..., -sdir)（首笔反向）
         if len(cs) > 0:                                   # pine: if cs.size() > 0
             for z in cs:
                 z["PI0"] += base
@@ -115,10 +120,13 @@ def pine_find_centers_by_segment(pens, segs):
 
 
 def check_pine_anchors():
-    """空段守卫 + live 改法那两行必须在 pine 里各命中一次（静态锚，不拿行号当输入）。"""
+    """空段守卫 + live 改法 + 跳过首笔 + 首笔方向约束那几行必须在 pine 里各命中一次（静态锚，不拿行号当输入）。"""
     src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                             "tradingview", "chanlun.pine"), encoding="utf-8").read()
-    want = ["if cs.size() > 0", "if z.live and not s.live"]
+    want = ["if cs.size() > 0", "if z.live and not s.live", "base = s.PI0 + 1",
+            "findCenters(array<Unit> U, int startDir)",
+            "if startDir != 0 and (isUp(U.get(i)) ? 1 : -1) != startDir",
+            "cs = findCenters(pens.slice(base, s.PI1 + 1), -sdir)"]
     bad = [(w, src.count(w)) for w in want if src.count(w) != 1]
     return bad
 

@@ -111,15 +111,27 @@ def upgrades(units, PI0, PI1):
     return out
 
 
-def find_centers(pens):
+def find_centers(pens, start_dir=None):
     """pens: build_pens() 输出的笔列表。
 
     每个中枢返回区间 [ZD, ZG]、波动范围 [DD, GG]、覆盖的笔序号，
     以及它与**前一个**中枢的关系（趋势 / 扩展 / 同一中枢）。
+
+    start_dir（只给类中枢段内算用）：要求每个中枢的**首笔**都是这个方向
+    （L64:31 / L64:35-36，下跌段里类中枢是「上下上」，首笔反向）。笔方向严格交替，
+    所以只要首笔落到反向、后面每个候选起笔照着这个方向筛即可。给 'up' 表首笔向上
+    （下跌段）、'down' 表首笔向下（上涨段）；None = 不约束（线段中枢、独立调用）。
     """
     zs, i = [], 0
     N = len(pens)
+
+    def pdir(k):                                   # 笔方向：p1>p0 向上，否则向下
+        return "up" if pens[k]["p1"] > pens[k]["p0"] else "down"
+
     while i + 2 < N:
+        if start_dir is not None and pdir(i) != start_dir:
+            i += 1                                 # 候选起笔不是反向笔 → 挪一格（严格交替，一格即反向）
+            continue
         a, b, c = pens[i], pens[i + 1], pens[i + 2]
         ZG = min(a["hi"], b["hi"], c["hi"])
         ZD = max(a["lo"], b["lo"], c["lo"])
@@ -193,6 +205,12 @@ def find_centers_by_segment(pens, segs):
     『与前一个中枢的关系』和『可信度档』最后全局重算（关系是「两个中枢之间」的，
     可信度档看的是整份数据的末尾，都不是中枢本身跨段）。
 
+    起笔（L64:31 / L64:35-36）：线段的首笔是与段同向的进入笔，类中枢要从第一根
+    **反向**笔起找（下跌段里是「上下上」，首笔反向），而且**每个**中枢的首笔都得是
+    反向笔、不只第一个 —— 不重叠时 find_centers 会挪到下一根（同向）笔，中枢终结后
+    `nxt` 也可能落在同向笔上。所以每段切片跳过第 0 笔（base 取 PI0+1）之外，还把
+    段方向的**反向**传给 find_centers，让它只从反向笔起（首笔方向被约束住）。
+
     已完成线段里 find_centers 会把它最后那个中枢标成「仍在延续」（live=True）—— 那是
     **被段分界截断**（切片到头了，后面再没有笔可看），不是真的后面还有事（第 22 课
     三种运动里没有「段到头」这一种）。所以已完成线段的 live 一律改 False、终结原因写
@@ -200,9 +218,10 @@ def find_centers_by_segment(pens, segs):
     """
     out = []
     for s in segs:
-        base = s["PI0"]
+        base = s["PI0"] + 1                     # 跳过与段同向的进入笔，从第一根反向笔起（L64:31 / L64:35-36）
+        reverse = "down" if s["dir"] == "up" else "up"   # 首笔必须反向（下跌段里是「上下上」）
         seg_live = s.get("live", False)
-        for z in find_centers(pens[base:s["PI1"] + 1]):
+        for z in find_centers(pens[base:s["PI1"] + 1], start_dir=reverse):
             z["PI0"] += base
             z["PI1"] += base
             if z["live"] and not seg_live:
