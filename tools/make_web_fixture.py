@@ -12,7 +12,8 @@
     python3 tools/make_web_fixture.py btc_4h.json            # → web/fixtures/btc_4h.json
     python3 tools/make_web_fixture.py zec_1h.json --symbol ZECUSDT --tf 1h
 
-★ 只搬前端要用的字段，`std` / `fx` / `big` / `seq` 不进去（前端一个都不画，白白让样本胖三倍）。
+★ 只搬前端要用的字段，`std` / `fx` / `seq` 不进去（前端一个都不画，白白让样本胖三倍）；
+  `big` 带上（后台卡点名要「高一级中枢」，members 只留 PI0）。
 ★ 买卖点**在这里算好写进样本**（`core.signals` 两层各一份）—— 前端不许自己判信号：
   判断只在引擎一处，前端画两处会分家（后台卡「直接用 core.analyze / core.signals 的输出，不另写一套算法」同一条）。
 """
@@ -45,15 +46,24 @@ def guess(fn):
     raise SystemExit("认不出标的（文件名要以 %s 开头）：%s" % ("/".join(SYMBOL), fn))
 
 
-def build(fn, symbol=None, tf=None, updated=None, stale=False):
-    symbol = symbol or guess(fn)[0]
-    tf = tf or guess(fn)[1]
+def shape(bars, tick, symbol, tf, now_ms=None):
+    """K 线 → 前端吃的那一份 JSON（dict）。**后台 web/server.py 也调这一个**：形状只在这里定义一处。
+
+    now_ms：判「最后一根收没收盘」用的当前时间（毫秒）；None = 现在。
+    fetched_at / stale 不在这里：那是「拉取」那一层的事，见 build(stale=…) 与 web/server.py。
+    """
     if tf not in STEP_MS:
         raise SystemExit("周期要在 %s 里：%s" % ("/".join(STEP_MS), tf))
-    r = analyze(json.load(open(data(fn), encoding="utf-8")), tick=tick_of(fn))
+    r = analyze(bars, tick=tick)
     nd = len(r["bars"])
-    closed = r["bars"][-1]["t"] + STEP_MS[tf] <= (updated or datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000)
-    d = dict(
+    closed = r["bars"][-1]["t"] + STEP_MS[tf] <= (now_ms or datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000)
+    big = []
+    for b in r["big"]:
+        b = dict(b)
+        if "members" in b:                              # 成员就是 centers 里那几个，带 PI0 就对得上
+            b["members"] = [m["PI0"] for m in b["members"]]
+        big.append(b)
+    return dict(
         symbol=symbol, tf=tf, name=NAME.get(symbol, symbol),
         updated=datetime.datetime.fromtimestamp(r["bars"][-1]["t"] / 1000, datetime.timezone.utc)
                          .strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -64,18 +74,29 @@ def build(fn, symbol=None, tf=None, updated=None, stale=False):
         segs=r["segs"],
         centers=r["centers"],
         seg_centers=r["seg_centers"],
+        # 扩展合成出来的高一级类中枢（build_hierarchy）。前端现在不画；后台卡点名要给，带上不碍事
+        big=big,
         # 两层各一份：前端只按 tier 取，不自己判（判据在 core/signals.py 一处）
         signals={"seg": signals(r, "seg", "macd"), "pen": signals(r, "pen", "macd")},
         # 口径只读展示：这两项是**这次分析用的参数**，前端不做成开关（改了它就得整段重算，那是后台的事）
         meta=dict(tick=r["tick"], pen_rule=r["pen_rule"], min_gap=r["min_gap"]),
     )
+
+
+def iso(ms):
+    """毫秒 → 'YYYY-MM-DDTHH:MM:SSZ'（updated / fetched_at 同一个写法）。"""
+    return datetime.datetime.fromtimestamp(ms / 1000, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def build(fn, symbol=None, tf=None, updated=None, stale=False):
+    symbol = symbol or guess(fn)[0]
+    tf = tf or guess(fn)[1]
+    d = shape(json.load(open(data(fn), encoding="utf-8")), tick_of(fn), symbol, tf, updated)
     # fetched_at / stale 是**后台那层**才有的两个字段（拉币安的时刻；这轮没拉到、回的是上一次的结果）。
     # 样本是从 data/ 的文件烤的，谈不上「拉取」，所以默认不写 —— 前端把「没有 / 为假」都当成不是旧数据，
     # 两条路都走得通（这里 --stale 能烤一份假的，专门用来看角上那格说没说真话）。
     if stale:
-        d["fetched_at"] = datetime.datetime.fromtimestamp(
-            r["bars"][-1]["t"] / 1000 + STEP_MS[tf] * 3 / 1000, datetime.timezone.utc
-        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        d["fetched_at"] = iso(d["bars"][-1]["t"] + STEP_MS[tf] * 3)
         d["stale"] = True
     return d
 
