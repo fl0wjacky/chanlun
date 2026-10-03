@@ -5,6 +5,7 @@
     python3 web/check_abuse.py        # rc=0 才算过；不碰真币安（fetch 换成计数的假货，带 0.3 秒延迟）
 
 逐格：
+  ⓪ 预热按顺序每格拉 1 次（同时在拉的峰值 = 1），预热后访问不再拉；
   ① 绑定地址是 127.0.0.1（不是 0.0.0.0）；
   ② 同一（品种, 周期）并发 100 次 ⇒ 全 200、拉币安 1 次；
   ③ 15 个（品种, 周期）各并发 10 次 ⇒ 拉 15 次（每格 1 次，不多不少）；
@@ -33,14 +34,20 @@ ROOT = os.path.dirname(HERE)
 LEAKS = [ROOT, os.path.expanduser("~"), "Traceback", 'File "', "/Users/", "/home/", ".py"]
 
 BARS = json.load(open(os.path.join(ROOT, "data", "zec_4h.json"), encoding="utf-8"))
-calls = {"n": 0, "down": False}
+calls = {"n": 0, "down": False, "inflight": 0, "peak": 0}
 lock = threading.Lock()
 
 
 def fake_fetch(symbol, tf, a, b):
     with lock:
         calls["n"] += 1
-    time.sleep(0.3)                                      # 模拟慢的币安，让并发真的撞在一起
+        calls["inflight"] += 1
+        calls["peak"] = max(calls["peak"], calls["inflight"])
+    try:
+        time.sleep(0.3)                                  # 模拟慢的币安，让并发真的撞在一起
+    finally:
+        with lock:
+            calls["inflight"] -= 1
     if calls["down"]:
         raise OSError("connect refused (假币安挂了) /secret/path")
     step = server.TFS[tf]
@@ -94,6 +101,20 @@ def main():
         refused = True
     cell("① 默认绑回环、给 0.0.0.0 拒绝起服务", srv.server_address[0] == "127.0.0.1" and refused,
          "%s · 0.0.0.0 %s" % (srv.server_address, "被拒" if refused else "**起来了**"))
+
+    # ⓪ 预热：每格拉 1 次、同一时刻最多 1 个在拉（顺序，不并发）；预热完再访问任一格拉 0 次
+    calls["n"] = calls["peak"] = 0
+    server.prewarm()
+    pre_n, pre_peak = calls["n"], calls["peak"]
+    calls["n"] = 0
+    burst(port, 30, "GET", "/api/chart?symbol=AAPLUSDT&tf=30m")
+    cell("⓪ 预热：每格 1 次、顺序拉、预热后访问拉 0 次",
+         pre_n == len(server.SLOTS) and pre_peak == 1 and calls["n"] == 0,
+         "预热拉=%d（应 %d）同时在拉峰值=%d 之后拉=%d" % (pre_n, len(server.SLOTS), pre_peak, calls["n"]))
+    for sl in server.SLOTS.values():                     # 清回冷态，后面各格照原样量 ——
+        lk = sl.lock                                     # ★ 锁留原物：__init__ 会换回真锁，把「拿掉单飞锁」那条变异悄悄修好
+        sl.__init__()
+        sl.lock = lk
 
     # ②
     calls["n"] = 0
@@ -183,6 +204,7 @@ def main():
          "stale=%s fetched_at %s → %s" % (m["stale"], old_at, m["fetched_at"]))
 
     srv.shutdown()
+    srv.server_close()
     print("%d 格不过" % len(bad) if bad else "全部通过")
     return 1 if bad else 0
 
@@ -196,7 +218,7 @@ class _NoLock:
 
 
 def self_test():
-    """把服务改坏四种，main() 必须各自 rc≠0：没有单飞锁 ／ 没有刷新节流 ／ 报错把堆栈回给前端 ／ 静态放行源码。"""
+    """把服务改坏五种，main() 必须各自 rc≠0：没有单飞锁 ／ 没有刷新节流 ／ 报错把堆栈回给前端 ／ 静态放行源码 ／ 预热并发。"""
     import importlib
     import io
     import contextlib as cl
@@ -217,12 +239,19 @@ def self_test():
         server.Handler._err = err
         return orig
 
+    def parallel_prewarm():
+        def pw():
+            ths = [threading.Thread(target=server.get_chart, args=k) for k in server.SLOTS]
+            [t.start() for t in ths]
+            [t.join() for t in ths]
+        server.prewarm = pw
+
     def serve_source():
         server.STATIC_EXT[".py"] = "text/plain; charset=utf-8"
 
     miss = 0
     for name, f in [("拿掉单飞锁", no_lock), ("拿掉刷新节流", no_throttle), ("错误回堆栈", leaky),
-                    ("静态放行 .py", serve_source)]:
+                    ("静态放行 .py", serve_source), ("预热改成并发", parallel_prewarm)]:
         importlib.reload(server)
         f()
         buf = io.StringIO()

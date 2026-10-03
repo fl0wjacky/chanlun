@@ -143,6 +143,18 @@ def get_chart(symbol, tf):
         return body, gzip.compress(body, 6)
 
 
+def prewarm():
+    """起服务时把白名单里每一格按顺序拉一遍：**一格一格来，不并发**（Nova 10-03 定），
+    免得冷启动一下打币安十几页 × 15。走的是 get_chart 同一条路（同一把锁、同一套节流），
+    有人在预热途中访问某格，要么等这格的锁、要么直接吃已有缓存，不会多拉。"""
+    t0 = time.time()
+    ok = 0
+    for symbol, tf in SLOTS:
+        if get_chart(symbol, tf) is not None:
+            ok += 1
+    log("prewarm %d/%d in %.1fs" % (ok, len(SLOTS), time.time() - t0))
+
+
 # ───────────────────────── HTTP ─────────────────────────
 
 ERR = {400: "bad request", 404: "not found", 405: "method not allowed", 503: "data not available yet"}
@@ -230,6 +242,9 @@ class Handler(BaseHTTPRequestHandler):
 class Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False          # 端口被别人占着就直接起不来，不抢
+    # listen 队列：socketserver 默认 5。并发一上来（压测 150 个连接同时进）macOS 直接丢 SYN，
+    # 客户端重试到超时（实测 Errno 60）。128 = macOS 的 somaxconn 默认值。
+    request_queue_size = 128
 
     def server_bind(self):
         # HTTPServer.server_bind 会调 socket.getfqdn(host) 反查主机名 —— 这台机器上实测 35.00 秒
@@ -248,9 +263,12 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="只读 API + 前端静态页（只绑回环）")
     ap.add_argument("--port", type=int, required=True, help="监听端口（必填）")
     ap.add_argument("--host", default=HOST, help="回环地址，默认 %(default)s；非回环直接拒绝")
+    ap.add_argument("--no-prewarm", action="store_true", help="起服务时不预热（默认按顺序把每格拉一遍）")
     a = ap.parse_args()
     srv = make_server(a.port, a.host)
     log("listening on %s:%d" % srv.server_address[:2])
+    if not a.no_prewarm:                         # 先 listen 再预热：预热期间页面照常能开
+        threading.Thread(target=prewarm, daemon=True).start()
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
