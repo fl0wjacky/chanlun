@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>冲浪者 · 缠论走图</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">冲浪者 · 缠论<span class="sub">chanlun.surfers.cc</span></div>
+  <div class="picks">
+    <label class="pick"><span>品种</span><select id="symbol" aria-label="品种"></select></label>
+    <label class="pick"><span>周期</span><select id="tf" aria-label="周期"></select></label>
+  </div>
+  <div class="badges">
+    <span id="last" class="badge"></span>
+    <span id="state" class="badge">取数…</span>
+    <span id="updated" class="badge" title="最后一根 K 线的开盘时间（UTC）">—</span>
+  </div>
+</header>
+
+<main>
+  <div id="chart" role="img" aria-label="缠论结构图：K线、笔、线段、中枢、买卖点"></div>
+  <aside id="panel" class="panel" aria-label="图层开关"></aside>
+</main>
+
+<div id="legend" class="legend" aria-label="图例"></div>
+
+<footer class="foot">
+  <span id="meta" class="meta"></span>
+  <span class="sign">约定：未完成的笔 / 线段一律虚线；中枢框拆两截，前三实线、延续虚线 ｜ 冲浪者 · <b id="today"></b></span>
+</footer>
+
+<script src="vendor/lightweight-charts/lightweight-charts.standalone.production.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>
