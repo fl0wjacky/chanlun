@@ -49,6 +49,20 @@ def skip(label, why):
     print("  %-26s: 未执行  ← 判据没跑，别读成通过  （%s）" % (label, why))
 
 
+def same_dir_starts(centers, pens, segs):
+    """类中枢首笔必须与段反向（L64:31 / L64:35-36 下跌段里是上下上）—— 数有多少个中枢
+    首笔仍是与段同向的（应为 0）。"""
+    seg_dir = {}
+    for s in segs:
+        for k in range(s["PI0"], s["PI1"] + 1):
+            seg_dir[k] = s["dir"]
+
+    def pdir(p):
+        return "up" if p["p1"] > p["p0"] else "down"
+
+    return sum(1 for z in centers if pdir(pens[z["PI0"]]) == seg_dir.get(z["PI0"]))
+
+
 for tag, r in R.items():
     m = r["std"]
     print("=" * 72)
@@ -77,6 +91,8 @@ for tag, r in R.items():
           "　｜ 诊断：终点非段内极值 %d（原文未要求，只报数）" % len(nonextreme_endpoints(S)))
     # 中枢层
     count("类中枢不变量违规", len(check_centers(r["centers"], P, stops=[s["PI1"] + 1 for s in S])))
+    count("类中枢起笔与段同向", same_dir_starts(r["centers"], P, S),
+          "　← L64:31/L64:35-36 首笔必须反向（下跌段里是上下上）")
     count("类中枢扩展合成违规", len(check_hierarchy(r["big"], r["centers"], P)))
     count("买卖点复核违规", sum(len(check_signals(signals(r, lv, m), r, lv, m)) for lv in ("seg", "pen") for m in ("macd", "slope")))
     # 「B 段回抽 0 轴附近」那条必要条件 —— **默认不接进买卖点判定**（2026-09-30 拍板）。
@@ -169,6 +185,16 @@ else:
     Zm[_cut]["status"] = "暂定"
     Zm[_cut]["status_note"] = "仍在延续"
     count("段内截断标成 live 未被发现", 0 if check_centers(Zm, R["ZEC 15m"]["pens"], stops=_stops15) else 1)
+# 类中枢首笔方向：把一个中枢的 PI0 往前挪一格（笔严格交替 ⇒ PI0-1 必是同向笔），复核必须报错。
+# 这一格守的是 same_dir_starts —— 没有它，把首笔改回与段同向 selfcheck 会静默放过（Nova 审 44d61a8 抓的就是这个）。
+_ds = next((k for k, z in enumerate(R["ZEC 15m"]["centers"]) if z["PI0"] > 0), None)
+if _ds is None:
+    skip("起笔与段同向未被发现", "没有任何 PI0 > 0 的类中枢，夹具造不出")
+else:
+    Zd = copy.deepcopy(R["ZEC 15m"]["centers"])
+    Zd[_ds]["PI0"] -= 1
+    count("起笔与段同向未被发现",
+          0 if same_dir_starts(Zd, R["ZEC 15m"]["pens"], R["ZEC 15m"]["segs"]) else 1)
 # 买卖点：把一个三买挪到离开段的终点、把一个一买挪到没创新低的位置，复核必须报错
 Rz = R["ZEC 15m"]
 S = signals(Rz, "pen")
