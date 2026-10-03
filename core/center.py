@@ -160,7 +160,11 @@ def find_centers(pens):
         else:
             i += 1
 
-    # 给每个中枢补上『与前一个中枢的关系』和『可信度档』
+    return classify_relations(zs)
+
+
+def classify_relations(zs):
+    """给中枢列表补上『与前一个中枢的关系』（趋势 / 扩展 / 同一中枢）和『可信度档』。"""
     n = len(zs)
     for k, z in enumerate(zs):
         if k == 0:
@@ -179,12 +183,37 @@ def find_centers(pens):
     return zs
 
 
-def check_centers(zs, units):
+def find_centers_by_segment(pens, segs):
+    """类中枢改段内算：按线段把笔切开，每段内各自 find_centers —— 类中枢不跨线段。
+
+    依据（L65:145-146 / L57:21）：类中枢用来「确认笔与线段的结束」，每一条线段就是
+    次级别走势类型，跨段的重叠归线段中枢，所以类中枢不该横跨线段分界。
+    每条线段（含未完成那条 live）里的笔单独跑 find_centers，得到的 PI0/PI1 是段内下标，
+    加回段起点 rebase 成全局笔下标；段与段之间的分界处不接续、不合并。
+    『与前一个中枢的关系』和『可信度档』最后全局重算（关系是「两个中枢之间」的，
+    可信度档看的是整份数据的末尾，都不是中枢本身跨段）。
+    """
+    out = []
+    for s in segs:
+        base = s["PI0"]
+        for z in find_centers(pens[base:s["PI1"] + 1]):
+            z["PI0"] += base
+            z["PI1"] += base
+            out.append(z)
+    return classify_relations(out)
+
+
+def check_centers(zs, units, stops=None):
     """自检中枢（类中枢、线段中枢通用），不调用 find_centers 的逻辑，按定义逐条重验。返回违规列表（应为空）。
 
     zs    : find_centers() 的输出
     units : 构成中枢的那一层（笔列表，或已完成的线段列表）
+    stops : 可选，段内算时的「硬分界」笔下标（每条线段末笔下标 +1）。给了它，
+            终结方式的扫描只看本段内（到下一个分界为止），分界之后的走势不算
+            —— 段内算里「仍在延续」是**被分界截断**，不是真的后面还有事。
     """
+    bound_of = (lambda i: next((s for s in stops if s > i), len(units))) if stops else (lambda i: len(units))
+
     def outside(u, z):                           # 整段在区间外：+1 上方 / -1 下方 / 0 有重叠
         return 1 if u["lo"] > z["ZG"] else (-1 if u["hi"] < z["ZD"] else 0)
 
@@ -220,13 +249,15 @@ def check_centers(zs, units):
         if any(outside(units[q], z) for q in range(i, j + 1, 2)):
             bad.append(("中枢内有 Z 段已整段在区间外（中心定理一）", k))
         # 终结方式：从 i+3 起按段看，第一个事件必须就是标注的那个
+        bound = bound_of(i)
         ev = None
-        for q in range(i + 3, len(units)):
+        for q in range(i + 3, bound):
             if (q - i) % 2 == 0 and outside(units[q], z):
                 ev = ("Z 段向上离开" if outside(units[q], z) > 0 else "Z 段向下离开", q - 2, q); break
-            d = leave3(q, z)
-            if d:
-                ev = ("三买" if d > 0 else "三卖", q - 1, q + 1); break
+            if q + 1 < bound:                        # 三买/三卖：离开段和回试段都得在本段内
+                d = leave3(q, z)
+                if d:
+                    ev = ("三买" if d > 0 else "三卖", q - 1, q + 1); break
         if ev is None:
             if not z["live"]:
                 bad.append(("标为已终结，但其后既无第三类买卖点也无离开的 Z 段", k))
