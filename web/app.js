@@ -211,6 +211,25 @@ function buildChips() {
   add('买卖点', 'sig', CHART.buy);
   for (const k of ['一买', '二买', '三买', '一卖', '二卖', '三卖']) add(k, `sig:${k}`, k.endsWith('买') ? CHART.buy : CHART.sell);
   add('待确认', 'sigPend', CHART.sell);
+  watchOverflow(box);
+}
+
+// ★ 图层那一行在手机上装不下（13 个 chip，`scrollWidth` 953 / `clientWidth` 390）——2026-10-03 真机反馈：
+//   右边被切掉，看着像"还有一个按钮看不到"。它**本来就能横滑**（style.css 的 `overflow-x: auto`），
+//   缺的是**提示**。这里只挂两个类，渐隐由 CSS 画：右边还有内容才 `fade-r`、左边还有才 `fade-l`，
+//   滑到头就不淡 —— 不然"滑到头了还在淡"本身又是一句假话。
+//   只在窄屏那档 CSS 里生效（桌面是换行排的，没有横滑这件事）。
+function watchOverflow(box) {
+  const hint = () => {
+    const max = box.scrollWidth - box.clientWidth;
+    box.classList.toggle('fade-l', max > 1 && box.scrollLeft > 1);
+    box.classList.toggle('fade-r', max > 1 && box.scrollLeft < max - 1);
+    box.classList.toggle('fade-lr', max > 1 && box.scrollLeft > 1 && box.scrollLeft < max - 1);
+  };
+  box.addEventListener('scroll', hint, { passive: true });
+  addEventListener('resize', hint);
+  addEventListener('orientationchange', hint);
+  hint();                                 // 验收工装要重算，`dispatchEvent(new Event('resize'))` 即可
 }
 
 function renderLegend() {
@@ -222,10 +241,15 @@ function renderLegend() {
   if (opts.up) items.push(['box', CHART.up_pen, 2, '高一级：类中枢升的'], ['box', CHART.up_seg, 4, '高一级：线段中枢升的']);
   items.push(['tag', CHART.pen, 0, '价签：实底 ＋ 黑字']);
   if (opts.sig) items.push(['tri-fill', CHART.buy, 0, '买卖点（线段中枢层）'], ['tri-hollow', CHART.sell, 0, '空心「·笔」＝类中枢层，「?」＝待确认']);
+  // ★ 价签那一格**不能用定宽 SVG**（2026-10-03 真机反馈：`[ZD,ZG]` 缺了右括号）。
+  //   原来样例是 `<svg width="30">` ＋ 里面 `<text font-size="9">`：那串字**实测 35.23px**、起点 x=3
+  //   ⇒ 越界 8.23px。注意这跟「真机太窄」无关 —— SVG 定宽 30，**桌面宽度下一样缺右括号**。
+  //   改成 HTML 一格：宽由浏览器按字量出来，写死的那一头就没了（同一类账：图脚那把尺的 44 字预算）。
+  //   样例文字与 Python 的图例一字不差（`full_common.py:270` 画的就是 `[ZD, ZG]`，带空格）。
   el('legend').innerHTML = items.map(([kind, col, w, name]) => {
     const dash = kind === 'line-dash';
     const svg = kind === 'tag'
-      ? `<svg width="30" height="14"><rect x="0" y="1" width="30" height="12" rx="3" fill="${col}"/><text x="3" y="10" font-size="9" fill="${CHART.tag_ink}">[ZD,ZG]</text></svg>`
+      ? `<span class="tagsw" style="background:${col};color:${CHART.tag_ink}">[ZD, ZG]</span>`
       : kind === 'tri-fill'
         ? `<svg width="30" height="14"><polygon points="15,1 6,13 24,13" fill="${col}"/></svg>`
         : kind === 'tri-hollow'
@@ -276,18 +300,30 @@ function renderMeta(d) {
 }
 
 // ---------------------------------------------------------------- 角上的时间
+// ★ 2026-10-03 真机反馈（小栋，iPhone / BTC 4h）改的口径：原来角上写
+//   「数据 2026-10-03 12:00 UTC ｜ 3 小时前」—— 12:00 是**最后一根 K 线的开盘时间**，
+//   **不是数据有多旧**（价格是实时的，旁边还写着「未收盘」）。用户读到的是「数据 3 小时前」。
+//   现在两件事各自带名字，谁也别冒充谁：
+//     本根 = 最后一根 K 线的开盘时间（"本根 12:00 开盘"）
+//     数据 = 后台从币安取数的时间（payload 里的 fetched_at，"数据 14:50 刷新"）
+//   fetched_at 缺（离线样本、旧后台）就**只说本根** —— 不知道的事不编。
 function stamp(d) {
   const t = d.updated ? new Date(d.updated) : null;
-  const base = t && !isNaN(t)
-    ? `数据 ${shortUtc(d.updated)} UTC ｜ ${ago(t)}`      // 秒在角上只是噪音：K 线本来就是整点/整刻
-    : '数据时间未知';
-  // 后台这轮没拉到币安、回的是上一次的结果时会带 stale=true：那这格的「N 分钟前」说的是**上一次**，
+  const f = d.fetched_at ? new Date(d.fetched_at) : null;
+  const bar = t && !isNaN(t) ? `本根 ${shortUtc(d.updated)} 开盘` : '数据时间未知';
+  const fresh = f && !isNaN(f) ? ` ｜ 数据 ${shortUtc(d.fetched_at)} 刷新` : '';   // 秒在角上只是噪音
+  // 后台这轮没拉到币安、回的是上一次的结果时会带 stale=true：那这格的取数时间说的是**上一次**，
   // 不标出来它就是一句假话 —— 角上必须自己承认。字段没有 / 为 false 就照常。
   const st = !!d.stale;
+  const base = bar + fresh;
   el('updated').textContent = st ? `${base} ｜ ★ 旧数据（本轮拉取失败）` : base;
   el('updated').className = 'badge' + (st ? ' warn' : '');
-  el('updated').title = st ? '这是上一次的结果：本轮拉取没成功（后台 stale=true）'
-                           : '最后一根 K 线的开盘时间（UTC）';
+  // 相对时间（"3 小时前"）只放 title：角上那格宽度有限，而且相对时间依赖**客户端时钟**，
+  // 钟不准就会说错话 —— 绝对时间不会。相对值在这里仍有用（一眼看出多旧），所以不删。
+  const rel = f && !isNaN(f) ? `（${ago(f)}）` : '';
+  el('updated').title = st
+    ? `这是上一次的结果：本轮拉取没成功（后台 stale=true）；「数据 … 刷新」说的是那一次的取数时间（UTC）${rel}`
+    : `本根＝最后一根 K 线的开盘时间（UTC）；数据＝后台从币安取数的时间（UTC）${rel}，价格随它更新`;
 }
 /** "2026-09-29T00:00:00Z" → "2026-09-29 00:00"；形状不是 ISO（后台换了格式）就原样返回，不猜 */
 const shortUtc = (s) => {

@@ -217,13 +217,13 @@ export function makeAnnotPrimitive(state) {
                 for (const bx of boxes(data, tier)) {
                   const x = vp.xOfBar(bx.i0), y = vp.yOfPrice(bx.z.ZG);
                   if (!onScreen(x, W, 8) || y === null) continue;   // 框滚出去了，价签也跟着走
-                  tag(ctx, placed, x + 8, y - 8, `[${fmt(bx.z.ZD)}, ${fmt(bx.z.ZG)}]`, col, W);
+                  tag(ctx, placed, x + 8, y - 8, `[${fmtG(bx.z.ZD)}, ${fmtG(bx.z.ZG)}]`, col, W);
                   if (opts.up && bx.z.up) {
                     for (const u of bx.z.up) {
                       const uy = vp.yOfPrice(u.ZG);
                       if (uy === null) continue;
                       const ucol = tier === 'seg' ? CHART.up_seg : CHART.up_pen;
-                      tag(ctx, placed, x + 8, uy - 8, `↑高${'一两三四'[u.up - 1]}级 [${fmt(u.ZD)}, ${fmt(u.ZG)}]`, ucol, W);
+                      tag(ctx, placed, x + 8, uy - 8, `↑高${'一两三四'[u.up - 1]}级 [${fmtG(u.ZD)}, ${fmtG(u.ZG)}]`, ucol, W);
                     }
                   }
                 }
@@ -259,7 +259,46 @@ export function makeAnnotPrimitive(state) {
   };
 }
 
-function fmt(v) { return Math.abs(v) >= 1000 ? String(Math.round(v)) : String(Math.round(v * 100) / 100); }
+// >>> FMT_G —— tools/web_fmt_check.py 把这一段抠出来单跑，逐值与 Python 的 `"%g" % round(v, 2)`
+//     对账（抠不到就报红）。★ 判据只许有一处：格式的定义在 Python 那边，这边是它的同构实现。
+/** 与 Python 的 `"%g" % round(z["ZD"], 2)` 逐字对齐 —— 中枢上下沿是判三买三卖的价
+ *  （1681.99 显示成 1682 看起来像「破了」，其实没破），所以这里不是审美问题，是**读数**问题。
+ *  语义照抄 C 的 `%g`（默认 6 位有效数字）：先两位小数，再去尾零；指数在 ≥1e6 或 <1e-4 时出现。
+ *  ★ 不能写成 `String(Math.round(v))`：那是网页原来那版，1000 以上一律取整。
+ *  ★ 取整那一步**不能交给 `toFixed` / `toPrecision`**：它俩的规则是「正好一半就进位」，
+ *    而 Python 的 `round()` / `%g` 是「一半取偶」。实测 100000.5 两边差 1（Python `100000`、
+ *    toFixed `100001`），123456.5 同理（`123456` 对 `123457`）—— 跟上面是**同一个病**：
+ *    读数差 1 看着就像破了。所以这里把数字摊成 20 位有效数字的字符，第 7 位起自己判
+ *    「是不是正好一半」，再按取偶走。这条由 `tools/web_fmt_check.py` 的值表＋探针钉住。
+ *  ★ 已知且**碰不到**的差异：`-0.0`（Python 给 `-0`，这里给 `0`）—— 要走到得先有 −0.0 的价，
+ *    那是数据出问题，不是格式问题；另见 web_fmt_check.py 头部关于「>2 位小数且卡在半位」那条。 */
+export function fmtG(v) {
+  if (!Number.isFinite(v)) return String(v);
+  let x = Math.round(v * 100) / 100;                        // Python: round(v, 2)
+  if (x === 0) return '0';
+  const sign = x < 0 ? '-' : '';
+  x = Math.abs(x);
+  const str = x.toExponential(19);                          // 20 位有效数字（double 17 位就摊平，留 3 位余量）
+  const E = Number(str.slice(str.indexOf('e') + 1));        // 首位数字的权 ⇒ x ≈ d[0].d[1…] × 10^E
+  const dg = str.slice(0, str.indexOf('e')).replace('.', '');
+  let head = Number(dg.slice(0, 6));                        // 6 位有效数字（整数 100000…999999）
+  const tail = dg.slice(6);                                 // 第 7 位起 ⇒ 判「有没有过半」
+  if (tail[0] > '5' || (tail[0] === '5' && (/[1-9]/.test(tail.slice(1)) || head % 2 === 1))) head += 1;
+  let e = E;
+  if (head === 1000000) { head = 100000; e += 1; }          // 进位跨过阈值：999999.5 → 1e+06
+  if (e >= 6 || e < -4) {                                   // %g 的指数那一支
+    const m = String(head).replace(/0+$/, '');
+    return sign + (m.length > 1 ? m[0] + '.' + m.slice(1) : m) + 'e' + (e < 0 ? '-' : '+') + String(Math.abs(e)).padStart(2, '0');
+  }
+  let out = String(head);                                   // 十进制那一支：小数位 = 5 − e
+  const pad = 5 - e;
+  if (pad < 0) out += '0'.repeat(-pad);                     // e > 5：整数后面补零
+  else if (pad > 5) out = '0.' + '0'.repeat(pad - 6) + out;  // 值 < 1：前面补零（0.0001 这种）
+  else if (pad > 0) out = out.slice(0, 6 - pad) + '.' + out.slice(6 - pad);
+  if (out.indexOf('.') >= 0) out = out.replace(/0+$/, '').replace(/\.$/, '');   // 去尾零（Python 的 %g 同）
+  return sign + out;
+}
+// <<< FMT_G
 
 /** 线段的终点：未完成的画到**迄今的极值**（向上段最高、向下段最低），full_common 同一条 */
 function segEnd(data, s) {
@@ -270,22 +309,47 @@ function segEnd(data, s) {
   return { i: data.pens[k].i1, p: ext };
 }
 
+const NUDGE = 19;                    // 往上挪一行的步长（原 tag() 的 h+4：15 + 4）
+const TAG_H = 15;                    // 价签框高（**没动**，2026-10-02 那版就是这个数）
+// 买卖点文字框：基线上 11、基线下 4 ⇒ 高 15 ＝ **价签那一档**（横向同为 ±5）。
+// 固定值，不按字量 —— 理由见下面 `drawSignalText` 的注释（含浏览器按字给不同字体框的实测）。
+const SIG_UP = 11;
+const SIG_DN = 4;
+
+/** ★ 文字落框的**唯一**一份（价签和买卖点文字共用 —— 原先各写一遍，改一处漏一处）：
+ *  ① **框的上沿不得 < 0**：网页是个视口，没有 Python 整幅图顶上那 `T = 300` 的边距，
+ *     最高的那个卖点本来就贴着顶边 ⇒ 照搬「往上挪」会把它整条推出画布（390px 实测过：y 挪到 −12/−31）。
+ *     越界就**整框往下压到 0**，压完照样走下面的避让。
+ *  ② 避让跟 `draw_labels` 同一条：与已登记的框重叠就往上挪一行（`font.size + 12` 的网页档＝19），
+ *     最多 12 行；上沿顶到 0 就停在那儿（再挪就出画布 —— 那比重叠更糟：是看不见）。
+ *  ③ 返回的框**就是**调用方要画的那个框：画的框和 `placed.push` 的框**同一个变量**
+ *     （两处各写一遍式子就是「判据有两处」的老毛病）。
+ *  ★ 坐标系（照抄 Python 的数字会差一个字高）：Python `draw_labels` 的 (x, y) 是**左锚 + 字顶**、
+ *    框 = (x−6, y−2, x+tw+6, y+size+8)；网页 x 是**居中**（价签是左锚）、y 是 **alphabetic 基线**。
+ *    所以这里只搬**判式**，框由各自的锚现算。 */
+function fitBox(box, placed) {
+  let out = box;
+  if (out[1] < 0) out = [out[0], 0, out[2], out[3] - out[1]];        // ① 上沿夹进画布（整框下移，不改高）
+  for (let n = 0; n < 12; n++) {                                      // ② 跟 draw_labels 一样：最多 12 行
+    if (!placed.some((q) => out[0] < q[2] && q[0] < out[2] && out[1] < q[3] && q[1] < out[3])) break;
+    if (out[1] - NUDGE < 0) break;                                    // 再挪一步就出画布 ⇒ 停在原地
+    out = [out[0], out[1] - NUDGE, out[2], out[3] - NUDGE];
+  }
+  return out;
+}
+
 function tag(ctx, placed, x, y, text, col, W) {   // placed 由调用方传：模块级函数看不见 primitive 的闭包
   ctx.font = FONT_SM;
-  const w = ctx.measureText(text).width + 10, h = 15;
-  for (let n = 0; n < 12; n++) {                       // 跟 draw_labels 一样：最多往上挪 12 行
-    const box = [x, y - h, x + w, y];
-    const hit = placed.some((q) => box[0] < q[2] && q[0] < box[2] && box[1] < q[3] && q[1] < box[3]);
-    if (!hit) break;
-    y -= h + 4;
-  }
-  if (x + w > W - 2) x = W - 2 - w;
+  const tw = ctx.measureText(text).width;
+  let box = [x, y - TAG_H, x + tw + 10, y];            // 几何没动：左锚，字从 x+5 起、右留 5
+  box = fitBox(box, placed);                           // ★ 守卫（跟买卖点文字同一个）
+  if (box[2] > W - 2) box = [W - 2 - (box[2] - box[0]), box[1], W - 2, box[3]];   // 右边界（原有行为）
   ctx.fillStyle = rgba(col, CHART.tag_fill);           // 实底
-  ctx.fillRect(x, y - h, w, h);
+  ctx.fillRect(box[0], box[1], box[2] - box[0], box[3] - box[1]);
   ctx.fillStyle = CHART.tag_ink;                       // 黑字（两底都过 AA，见 style.py）
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-  ctx.fillText(text, x + 5, y - h / 2 + 0.5);
-  placed.push([x, y - h, x + w, y]);
+  ctx.fillText(text, box[0] + 5, (box[1] + box[3]) / 2 + 0.5);
+  placed.push(box);                                    // ★ 与 fillRect 同一个 box
 }
 
 /** 买卖点的**三角**（只画形状）。文字拆到 `drawSignalText` —— 拆开是为了让三角先落地、
@@ -304,34 +368,41 @@ function drawSignalGlyph(ctx, x, y, s, tier) {
   return y0;                                                             // 文字要挂在三角的底边
 }
 
-/** 买卖点的**文字**：无底色的那种标签，但**照样登记进 `placed`** ——
- *  Python 那边它走的是 `draw_labels()` 的默认背景那一支（`bg = BG + (215,)`），
- *  所以「登记」这件事它本来就有，只是网页当初没搬。避让节奏跟 `tag()` 用同一档（往上挪一行 19px），
- *  这样价签和文字挪在同一个网格上，不会一个挪 19、一个挪 36。 */
+/** 买卖点的**文字**：底色跟 Python 的默认那支一样是 `BG + (215,)` ——
+ *  Python 那边它走 `draw_labels()` 的**默认背景**（`full_common.py:212`：不给第四项就 `bg = BG + (215,)`），
+ *  网页当初**只搬了「登记」、没搬「底色」**，所以字直接压在 K 线上。
+ *  ★ 补底色不是装饰：登记的框就是判据量的那个框 —— 裸字时那圈留白是看不见的，
+ *    有了底色，**画的框 = 登记的框**，判据和被量的东西才是同一个东西（Nova 2026-10-03 拍板，第 7 项）。
+ *  框：横向 ±5、纵向**固定 11/4**（高 15）—— 两轴都是**价签那一档**（`tag()` 就是 ±5 / 15），
+ *  一个标签类型一套留白，不再按字量。
+ *  ★ 为什么不按字量（Nova 2026-10-03 拍板）：这台浏览器的 `fontBoundingBoxAscent/Descent`
+ *    **帧内按字给不同的值** —— 同一个 ctx、同一个 font 字符串、同一帧里量，「一卖」给 8.05/7.95、
+ *    后面几条给 12/4（两者和都是 16）。和相同 ⇒ 框高看不出问题，但**基线在框里的位置差 4px**，
+ *    那一格的字会明显偏上。这条**不在本支里追**，记在卡上当发现；本支改成固定框，
+ *    框是「壳」，留白不该由里面写的是哪两个字决定。
+ *  ★ 这里**有意不照字面搬** Python 的框高，账写在这儿（复核时按这行看）：
+ *    Python `f_n = F(24)`、PIL `ascent 26 / descent 7`，框 = `[字顶−2, 字顶+size+8]` ⇒ 高 **size+10 = 34 = 1.42em**
+ *    （ink 外留白 8 上 / 3 下）。那个 `+10` 是**绝对像素**、给 24px 字号调的；照字面搬到网页 11px
+ *    ⇒ 高 21 = **1.91em**，形状就变了。网页这一版当初搬 `tag()` 时用的就是**固定档**
+ *    （11px 配 15 高的价签框 = 1.36em）；这里同样取 15 —— Python 那边两种标签**本来就同高**
+ *    （同一个框式子），同构的是这个。
+ *  `ty = 框底 − 4` 是 alphabetic 基线 —— 没被夹/没被挪时它就等于原来的锚点（**字位不许漂**）；
+ *  被夹顶边时字**跟着框一起下来**（否则框进了画布、字还是被切，第 1 项就白做了）。
+ *  避让/夹边都走 `fitBox()`，跟价签同一个守卫（原先这里另写了一份，两处各一套就是老毛病）。 */
 function drawSignalText(ctx, placed, x, y0, s, tier) {
   const buy = s.kind.endsWith('买');
   const base = buy ? CHART.buy : CHART.sell;
   const txt = s.kind + (s.weak ? SIG.weakText : '') + (tier === 'pen' ? '·笔' : '') + (s.confirmed ? '' : SIG.pendingMark);
   ctx.font = FONT_SM;
   const tw = ctx.measureText(txt).width;
-  const h = 15;                                                          // 与 tag() 同高
   const anchor = y0 + (buy ? 13 : -6);                                   // 原来的字位，不许漂
-  // ★ 挪动**只许在画布里**（2026-10-03）：Python 那张整幅图都在画布上、顶上还留着 `T = 300`
-  //   的边距，所以「往上挪 12 行」怎么挪都还在图里；网页是个**视口**，最高的那个卖点本来就
-  //   贴着顶边，照搬 12 行会把这个位置的标签**整条挪出画布** —— 不是被压住，是根本看不见
-  //   （390px 实测：两个文字框 y 挪到 -12 和 -31，后者整框在画布外，图上什么都没了）。
-  //   所以：候选位只接受**整框都在画布内**的；一个都不接受就退回锚点位、照实重叠 ——
-  //   那正是没接 placed 之前的样子，不会比修前更差。
-  let ty = anchor;
-  for (let n = 0; n < 12; n++) {                                         // 同 draw_labels：最多挪 12 行
-    const bx = [x - tw / 2 - 5, ty - h, x + tw / 2 + 5, ty + 4];
-    if (!placed.some((q) => bx[0] < q[2] && q[0] < bx[2] && bx[1] < q[3] && q[1] < bx[3])) break;
-    if (ty - h - (h + 4) < 0) { ty = anchor; break; }                    // 再挪一步就出画布 ⇒ 回锚点
-    ty -= h + 4;                                                         // 12 行都占着 ⇒ 停在第 12 行（同 Python）
-  }
+  const box = fitBox([x - tw / 2 - 5, anchor - SIG_UP, x + tw / 2 + 5, anchor + SIG_DN], placed);
+  const ty = box[3] - SIG_DN;                                            // 基线由框反推 ⇒ 画的框就是登记的框
+  ctx.fillStyle = rgba(PAGE.bg, 215);                                    // Python: draw_labels 默认 bg = BG+(215,)
+  ctx.fillRect(box[0], box[1], box[2] - box[0], box[3] - box[1]);
   ctx.fillStyle = s.confirmed ? base : rgba(base, 180);
   ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
   ctx.fillText(txt, x, ty);
   ctx.textAlign = 'left';
-  placed.push([x - tw / 2 - 5, ty - h, x + tw / 2 + 5, ty + 4]);
+  placed.push(box);                                                      // ★ 与 fillRect 同一个 box
 }
