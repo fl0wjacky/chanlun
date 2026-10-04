@@ -92,10 +92,23 @@ def collect(d, items_key, idx, vals, depth=0):
 
 
 def bars_diff(old, new):
-    """同一根 K 线（按时间对齐）的开高低收必须一样 —— 补更早的数据不该**改写**已有的 K 线。"""
+    """同一根 K 线（按时间对齐）的开高低收必须一样 —— 补更早的数据不该**改写**已有的 K 线。
+
+    ★ 例外：**还在走的那一根**。两份响应是前后两次请求拿的，中间隔着几秒，最后那根的收盘自己在动
+      （第一次跑就撞上了：ZEC 4h 最后一根 c 1319.73 → 1319.57，一分钟之内的事）—— 那不是改写，
+      是行情在走。契约里 `closed: false` 说的就是它，所以照它跳过，并且**说出来**跳了哪一根，
+      不许静默放过（不然这条判据会被一根永远在动的 K 线变成永远的红，红久了就没人看了）。
+    """
+    live = set()
+    for d in (old, new):
+        if not d.get("closed", True) and d.get("bars"):
+            live.add(d["bars"][-1]["t"])
     by_t = {b["t"]: b for b in new["bars"]}
-    bad = []
+    bad, skipped = [], []
     for b in old["bars"]:
+        if b["t"] in live:
+            skipped.append(b["t"])
+            continue
         n = by_t.get(b["t"])
         if n is None:
             bad.append((b["t"], "新的一份里没有这根"))
@@ -104,11 +117,11 @@ def bars_diff(old, new):
             if _num(b[f]) != _num(n.get(f)):
                 bad.append((b["t"], "%s %s → %s" % (f, b[f], n.get(f))))
                 break
-    return bad
+    return bad, skipped
 
 
 def compare(old, new):
-    """→ (判据行, 每层的明细)。判据行里第一项是判据名，方便红在对的地方。"""
+    """→ (每层明细, 判据行, 跳过的活 K 线)。判据行里第一项是判据名，方便红在对的地方。"""
     to, tn = times_of(old), times_of(new)
     if not to or not tn:
         raise SystemExit("✗ 有一份没有 bars")
@@ -146,16 +159,19 @@ def compare(old, new):
     if sright:
         bad.append(("②结构", "买卖点在右半段变了", "%d 个" % len(sright), "一个都不许动",
                     "屏幕上那一排三角是用户照着做决定的"))
-    for t, why in bars_diff(old, new):
+    bad_bars, skipped = bars_diff(old, new)
+    for t, why in bad_bars:
         where = "右半段" if t >= mid else "左半段"
         bad.append(("①数据", "同一根 K 线对不上（%s）" % where, "%s：%s" % (_iso(t), why),
                     "按时间对齐后完全一样", "补更早的数据不该改写已有的 K 线"))
-    return rows, bad
+    return rows, bad, skipped
 
 
 def _iso(ms):
     import datetime
-    return datetime.datetime.utcfromtimestamp(ms / 1000).strftime("%Y-%m-%d %H:%M")
+    # 币安的 t 是 UTC 毫秒：显式带 tz 再格式化，别用 utcfromtimestamp（3.12 起弃用，跑起来还往 stderr
+    # 吐一行 DeprecationWarning —— 这工具的输出是给人看的，混一行警告进去就是噪声）。
+    return datetime.datetime.fromtimestamp(ms / 1000, datetime.timezone.utc).strftime("%Y-%m-%d %H:%M")
 
 
 def fetch(base, symbol, tf, span):
@@ -180,7 +196,7 @@ def fetch(base, symbol, tf, span):
 
 
 def report(old, new, label=""):
-    rows, bad = compare(old, new)
+    rows, bad, skipped = compare(old, new)
     print("重叠区间结构对账%s：老 %s 根（%s → %s）／新 %s 根（%s → …）"
           % (label, len(old["bars"]), _iso(old["bars"][0]["t"]), _iso(old["bars"][-1]["t"]),
              len(new["bars"]), _iso(new["bars"][0]["t"])))
@@ -193,12 +209,15 @@ def report(old, new, label=""):
         print("   %s %-8s 老 %4d 条 · 差异 %3d 条 · 右边未动 %6s · 右半段 %d 条%s"
               % (mark, r["层"], r["条数(老)"], r["差异"], dep, r["右半段的差异"],
                  "" if not r["差异"] else "（最早一处 %s）" % _iso(r["最早一处"])))
+    if skipped:
+        print("   %s（跳过还在走的那根 %s：两份是前后两次请求，它在自己动）%s"
+              % (DIM, "、".join(_iso(t) for t in skipped), OFF))
     if bad:
         print("\n%s✗ %d 处不对：%s" % (RED, len(bad), OFF))
         for j, case, g, w, why in bad:
             print("   %s✗%s [%s] %s：实际 %s ≠ 期望 %s ← %s" % (RED, OFF, j, case, g, w, why))
         return 1
-    print("\n%s✓%s 重叠区间里右半段结构逐条一致（差异只在最左边那一截，「右边未动」那一列见上）"
+    print("\n%s✓%s 重叠区间里的**后半段**结构逐条一致（差异只在最左边那一截，「右边未动」那一列见上）"
           % (GREEN, OFF))
     return 0
 
@@ -263,7 +282,7 @@ def selftest():
 
     def run(name, fn, want_red):
         old, new = fabricate(perturb=fn)
-        _, bad = compare(old, new)
+        _, bad, _ = compare(old, new)
         red = bool(bad)
         cases.append((name, red == want_red, "%d 处红" % len(bad), "红" if want_red else "绿"))
 
@@ -280,6 +299,20 @@ def selftest():
         lambda o, n, c: n["segs"][len(n["segs"]) - 2].__setitem__("dir", "down"), True)
     run("右半段某根 K 线的收盘被改写 ⇒ 必须红",
         lambda o, n, c: n["bars"][len(n["bars"]) - 50].__setitem__("c", n["bars"][len(n["bars"]) - 50]["c"] * 1.02), True)
+
+    # ★ 这一对是**活 K 线**那条豁免的两端：正在走的那根（`closed: false`）两份对不上是**正常**的
+    #   （两次请求隔了几秒，它自己在动），要是照样红，这条判据就变成「永远的红」—— 红久了没人看。
+    #   反过来，`closed: true` 的最后一根被改写就是真事，必须红。
+    def live_last(o, n, c):
+        o["closed"] = n["closed"] = False
+        n["bars"][-1]["c"] = n["bars"][-1]["c"] * 1.02
+        o["bars"][-1]["c"] = o["bars"][-1]["c"] * 1.01
+
+    def closed_last(o, n, c):
+        n["bars"][-1]["c"] = n["bars"][-1]["c"] * 1.02
+
+    run("正在走的那根（closed=false）两份不一样 ⇒ 必须**绿**（跳过它）", live_last, False)
+    run("已收盘的最后一根被改写（closed=true）⇒ 必须红", closed_last, True)
     # ★ 这条是**反向**的：最左边那一截本来就该变（补进来的老 K 线自己会长出结构）
     #   工具要是「看见差异就红」，它量的是「有没有差异」而不是「右半段动没动」。
     run("只有最左边一截变了（老那份的头几条笔）⇒ 必须**绿**",
