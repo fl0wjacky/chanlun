@@ -446,14 +446,16 @@ def scan_file(path, root):
 
 def git_py_files(root):
     """分母取法：**仓认的文件**，不用 find（find 会跟着工作区走，多扫少扫都没人知道）。"""
+    # -z：路径原样、以 NUL 分隔。不加的话 git 默认 core.quotepath 会把非 ASCII 路径印成
+    # "\347\273…" 这种带引号的八进制转义（selfcheck 永远 exit=1 就是它：那 4 个中文文件名打不开），
+    # 而 .split() 还会把带空格的路径劈成两半。
     try:
-        out = subprocess.run(["git", "-C", root, "ls-files", "*.py"],
-                             capture_output=True, text=True)
+        out = subprocess.run(["git", "-C", root, "ls-files", "-z", "*.py"], capture_output=True)
     except OSError as e:
         return None, "%s: %s" % (type(e).__name__, e)
     if out.returncode != 0:
-        return None, (out.stderr or "").strip()
-    return [os.path.join(root, p) for p in out.stdout.split() if p], None
+        return None, out.stderr.decode("utf-8", "replace").strip()
+    return [os.path.join(root, p) for p in out.stdout.decode("utf-8").split("\0") if p], None
 
 
 def scan_paths(root, files):
@@ -610,6 +612,31 @@ def selftest_paired(verbose=False):
     return 0 if ok else 1
 
 
+def selftest_paths():
+    """门槛 ⑧：分母取法认得「怪名字」—— 临时仓里放 2 个探针：中文文件名、带空格的文件名，
+    各写一个未定义名。git_py_files 必须原样拿到这两条路径，扫出来正好是这两个名字、0 个没扫成。
+    （修之前：中文名被 git 转义成 "\347…" 打不开、空格名被 split 劈开 ⇒ 这一格红。）"""
+    d = tempfile.mkdtemp(prefix="undef_paths_")
+    names = {"探针_中文名.py": "foo_cn", "with space.py": "bar_sp"}
+    for fn, nm in names.items():
+        with open(os.path.join(d, fn), "w", encoding="utf-8") as fh:
+            fh.write("%s()\n" % nm)
+    q = dict(capture_output=True)
+    subprocess.run(["git", "-C", d, "init", "-q"], **q)
+    subprocess.run(["git", "-C", d, "add", "."], **q)
+    files, err = git_py_files(d)
+    if files is None:
+        print("  ✗ 不过 怪名字分母：临时仓取不到（%s）" % err)
+        return 1
+    hits, skipped = scan_paths(d, files)
+    got = sorted(h[3] for h in hits)
+    ok = sorted(os.path.basename(f) for f in files) == sorted(names) and got == sorted(names.values()) \
+        and not skipped
+    print("  %s 怪名字分母（中文 / 空格文件名）：拿到 %d 条路径、扫出 %s、没扫成 %d 个"
+          % ("✓" if ok else "✗ 不过", len(files), got, len(skipped)))
+    return 0 if ok else 1
+
+
 def repo_root():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -621,11 +648,12 @@ def main(argv):
         bad = run(verbose=bool(raw))
         print("-" * 72)
         bad += selftest_paired()
+        bad += selftest_paths()
         print("=" * 72)
         if bad:
             print("[判据前提] undef_scan 自测：**%d 格不过** ⇒ 这格子那份「0 处」不可读" % bad)
             return 1
-        print("[判据前提] undef_scan 自测通过（%d 个探针 + 1 对成对读数）" % len(PROBES))
+        print("[判据前提] undef_scan 自测通过（%d 个探针 + 1 对成对读数 + 怪名字分母）" % len(PROBES))
         return 0
 
     if len(argv) >= 2 and not argv[1].startswith("-"):
