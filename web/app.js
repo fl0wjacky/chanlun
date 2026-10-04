@@ -922,8 +922,17 @@ function setFold(open) {
   document.body.classList.toggle('m-fold', !open);
   el('fold').setAttribute('aria-expanded', String(open));
   el('fold-tx').textContent = open ? '收起' : '图例 · 数据 · 约定';
+  reserveFold();
+}
+// 图层条右端给开关留的那一格有多宽：**量开关自己**，写进 CSS 变量（style.css 的 `.panel` padding-right）。
+// 不在那里抄一个数：抄的数跟开关的字对不上，条子滑到头就会有一两颗 chip **停在开关底下** —— 看得见、点不到。
+// 开关的字会变（「图例 · 数据 · 约定」／「收起」），所以每次改完口都重量；换窗口宽也可能换字号，resize 也重量。
+function reserveFold() {
+  const b = el('fold');
+  if (b) cssVar('--fold-w', `${Math.ceil(b.getBoundingClientRect().width) + 8}px`);
 }
 el('fold').addEventListener('click', () => setFold(document.body.classList.contains('m-fold')));
+addEventListener('resize', reserveFold);
 setFold(false);
 
 // ---------------------------------------------------------------- 背驰看法那一组（卡 card-84091d2d-c97）
