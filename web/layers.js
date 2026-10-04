@@ -218,15 +218,17 @@ export function makeAnnotPrimitive(state) {
               //      画出来 ⇒ ① 文字最后画、**压在三角上面**；② 买卖点文字和中枢价签**共用一个 placed**、互相避让。
               //      网页原来把「三角 ＋ 文字」一起放在价签**之后**画 ⇒ 三角压在价签上，价签数字被盖掉
               //      （390px 实测：倒三角把 `[1004, 1682]` 中间两位整个吃掉）。搬的时候丢了「文字走同一个注册表」这半。
+              // ★★ 这一层**不许**再包一层 `if (sh.sig)`：`shownOf()` 只给 `sigAt`，大开关就在它里面。
+              //    2026-10-04 我在这儿写过一次 —— 那个键根本不存在 ⇒ 恒为假 ⇒ 买卖点**整层一颗不画**，
+              //    而工装里「切看法后屏幕的像素变了」照样绿（量到的是买卖点的**文字**，是替身）。
+              //    判据一处就够：每颗点过一遍 `sigAt`。
               const sigs = [];
-              if (sh.sig) {
-                for (const tier of ['seg', 'pen']) {
-                  for (const s of data.signals?.[tier] || []) {
-                    if (!sh.sigAt(s)) continue;   // 大开关 ＋ kind chip ＋ 待确认，全在 shownOf 里
-                    const x = vp.xOfBar(s.bar), y = vp.yOfPrice(s.price);
-                    if (!onScreen(x, W, 40) || y === null) continue;
-                    sigs.push({ x, y0: drawSignalGlyph(ctx, x, y, s, tier), s, tier });
-                  }
+              for (const tier of ['seg', 'pen']) {
+                for (const s of data.signals?.[tier] || []) {
+                  if (!sh.sigAt(s)) continue;   // 大开关 ＋ kind chip ＋ 待确认，全在 shownOf 里
+                  const x = vp.xOfBar(s.bar), y = vp.yOfPrice(s.price);
+                  if (!onScreen(x, W, 40) || y === null) continue;
+                  sigs.push({ x, y0: drawSignalGlyph(ctx, x, y, s, tier), s, tier });
                 }
               }
 
