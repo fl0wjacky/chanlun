@@ -22,6 +22,9 @@
 //   ⑭ **鼠标只在图上悬停、一个键都不按** ⇒ 一个请求都不许发（Atlas 2026-10-04 多跑逮到的那格）
 //   ⑯⑰⑱ 手机上「图例 · 数据 · 约定」的收起开关（card-b9792318-91d）：收起来图占屏高 ≥80%（改前 64%）、
 //      收起的两块在屏幕上真没有；点一下真展开、再点真收回；桌面 1280 上这颗开关**不出现**、那两块照旧
+//   ⑲⑳㉑㉒ 副图：成交量 ＋ MACD（card-68704ee6-a5a）：画上去的柱子**逐根＝响应里的 hist**
+//      （假后台故意回 (dif−dea)×2 ⇒ 前端自己减一遍就会红）、窗格与主图高度比、关掉⇒窗格收回且
+//      一个请求都不再发、换档时两个口**同一个 span**且换完仍逐根对齐、手机上默认两个开关都关⇒零请求
 //
 // 假后台：拿仓里 zec_1h.json 的真 bars/结构当 1 档，往前补 n 段**编出来的**老 K 线（时间戳按样本
 // 自己的步长往前推，价格贴着数据头），结构整体**平移**到新的下标上。★ 这么造的意思是：两档之间
@@ -68,8 +71,10 @@ const PER = 2016;                    // 一档 ≈ 现在线上那 210 天（1h 
 // 工装里两处断言都引这一个常量 —— 抄两份的话，改文案时改一处漏一处，红的是「另一处」。
 const NOTICE_COPY = '已接上更早的K线，左侧的笔、线段、中枢和买卖点按新的起点重算';
 
+const { macdOf } = require('./fake_macd.js');            // 假副图（⑲ 靠它那份「故意算错」的柱子）
 const T0 = Date.now();               // 日志带相对时刻：时序那一族光看「收到 span=2」看不出早晚
 let requests = [], inflight = 0, maxInflight = 0;
+let macdCalls = [];                  // 副图那个口收到的 span（⑳㉑㉒ 数它：关着就得是 0）
 // ★★ 每份响应**是按哪个模式供出去的**，逐份记下来（⑬ 三格要用它证明「场景是干净的」）。
 //   踩过的坑（m4 变异逮到的）：⑬ 第三格 `mk13` 建页时，上一格留下的 `winmode='in'` 还没清，
 //   于是这一页的**首屏那份**也被人动过 ⇒ 换档后拿「被动的首屏」比「只在中枢上动的第二份」，
@@ -86,7 +91,10 @@ const servedFirst = new Set();        // 哪个页名已经供过第一份了（
 //   ⇒ 改成：所有开关放进 SCEN，**每格开页之前调一次 `scen({...})`**（先回默认，再盖这一格要的），
 //     并且把「开页那一刻声明要的场景」记下来，跟后台**实际用的那份**逐字对 —— 对不上就红。
 //   新增开关请加进 DEFAULT_SCEN，别在外面另起 `let`：漏进去的那一个，这条自检也看不见。
-const DEFAULT_SCEN = { winmode: null, pageWin: null, earliestFlag: false, badNext: false, spanMax: 8, delay: 0 };
+// withVol：给每根 K 线挂一个 `v`（造出来的，只跟这根的时间有关 ⇒ 两个口回的是同一份）。
+//   仓里的样本**一根 v 都没有**，而线上有 —— 成交量那一格要量「有点、且根数对得上」，就得先把 v 造出来；
+//   不造的那几格专门用来看「没有 v 的时候那颗开关是不是按灰的」（不知道的事不许编）。
+const DEFAULT_SCEN = { winmode: null, pageWin: null, earliestFlag: false, badNext: false, spanMax: 8, delay: 0, withVol: false };
 const SCEN = Object.assign({}, DEFAULT_SCEN);
 const scenKeys = Object.keys(DEFAULT_SCEN).sort();
 const scenSnap = () => scenKeys.map((k) => k + '=' + JSON.stringify(SCEN[k] === null ? null : SCEN[k])).join(',');
@@ -112,7 +120,14 @@ let holdRelease = null;
 const holdNext = () => { let open; const pr = new Promise((r) => { open = r; }); holdRelease = pr;
                          return () => { if (holdRelease === pr) holdRelease = null; open(); }; };
 
-function payload(span) {
+// 成交量那一列（SCEN.withVol 才挂）：**只跟这根自己的时间有关**，所以 /api/chart 和 /api/macd
+// 两次调用造出来的是同一份（`t` 一样 ⇒ v 一样）。用两个不同周期的正弦，不做出周期性的假图案。
+const vOf = (t) => Math.round(400 + 900 * Math.abs(Math.sin(t / STEP / 13.7)) + 300 * Math.abs(Math.sin(t / STEP / 3.1)));
+
+// ★ 造 bars 单独一个函数：/api/chart 和 /api/macd 必须是**同一份** bars（副图按时间对齐，靠的就是这个）。
+//   原先这段在 payload() 里 —— 那个函数**会消耗场景开关**（badNext 用过就翻掉），
+//   副图那条路再调一次就会把开关提前吃掉（主线那份反而变回好的）。两个口都从这里取，就不存在这回事。
+function barsFor(span) {
   const extra = (span - 1) * PER, head = FULL.bars[0], older = [];
   // ★ 编出来的老 K 线**不许等距重复**：早先每根都是头一根的复制，图上就是一条等宽的红板子 ——
   //   那种地方「整屏平移一格」跟「没动」画出来一模一样，逐像素比也看不出来（假绿）。
@@ -123,7 +138,16 @@ function payload(span) {
     const c = head.c * (1 + w), o = head.o * (1 + w * 0.93);
     older.push({ t: head.t - i * STEP, o, h: Math.max(o, c) * 1.0009, l: Math.min(o, c) * 0.9991, c });
   }
-  const bars = older.concat(FULL.bars);
+  // ★ 样本那一段**要复制**再挂 v：直接改 FULL.bars 会把这层共享的引用改脏（下一格跟着变），
+  //   而且「这一格造了 v」会漏到别的格上 —— 那正是 ⑮ 那条跨格守卫要抓的形状。
+  const tail = SCEN.withVol ? FULL.bars.map((b) => Object.assign({}, b, { v: vOf(b.t) })) : FULL.bars;
+  if (SCEN.withVol) for (const b of older) b.v = vOf(b.t);
+  return older.concat(tail);
+}
+
+function payload(span) {
+  const extra = (span - 1) * PER;
+  const bars = barsFor(span);
   const shift = (a) => (a || []).map((o) => Object.assign({}, o, { i0: o.i0 + extra, i1: o.i1 + extra }));
   const barsOf = (a) => (a || []).map((o) => Object.assign({}, o, { bar: o.bar + extra }));
   const d = Object.assign({}, FULL, {
@@ -199,6 +223,26 @@ async function serve(ctx) {
       if (holdRelease) await holdRelease;                 // ★ 工装扣住的那一趟：等它说放行
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload(span)) });
     } finally { inflight--; }
+  });
+  // 副图那个口（card-68704ee6-a5a）：**桌面**打开的页面默认就会要它（手机上默认关着，见 app.js 的 SUB_DEF）
+  //   ⇒ 不铺这条路由，桌面那几页会撞到静态服务的 404，页面上写着「MACD 取不到」——
+  //   那是工装的错，不是页面的错（跟 ⑱ 那条一样：先让页面处在**正常**的状态里，再量它）。
+  // ★ hist 故意给成 (dif − dea) × 2（见 tools/fake_macd.js 的注释）：⑲ 就是拿它当判据的。
+  await ctx.route('**/api/macd*', async (route) => {
+    const u = new URL(route.request().url());
+    const span = Number(u.searchParams.get('span') || 1);
+    // ★ 工装自己为了逐根对账发的那几趟（`&probe=1`）**不算页面发的**：混进来会让
+    //   「关着不取数」那两格（⑳㉒）永远多一次 —— 量的是工装自己的手，不是页面的行为。
+    if (!u.searchParams.has('probe')) {
+      macdCalls.push(span);
+      let who = '?';
+      try { who = PAGENAMES.get(route.request().frame().page()) || '?'; } catch (e) { who = '已关'; }
+      console.log('      · 后台收到副图 span=' + span + ' 来自第 ' + who + ' 号页');
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(Object.assign({
+      symbol: u.searchParams.get('symbol'), tf: u.searchParams.get('tf'),
+      span, earliest: !!SCEN.earliestFlag, span_max: SCEN.spanMax,
+    }, macdOf(barsFor(span), true))) });
   });
   await ctx.route('**/fixtures/**', (r) => r.fulfill({ status: 404, body: '' }));   // 逼它只能走后台那条路
 }
@@ -926,6 +970,115 @@ const snap = (p) => p.evaluate(() => {
       FD.fold === 0 && FD.legend > 0 && FD.foot > 0 && sharePct(FD) >= 80,
       `开关 ${FD.fold}px；图例 ${FD.legend}px、页脚 ${FD.foot}px；图 ${Math.round(FD.chart)}/${FD.vh} = ${sharePct(FD)}%`);
     await p16.close();
+
+    // ⑲⑳㉑㉒ 副图：成交量 ＋ MACD（card-68704ee6-a5a）。
+    //   卡片写的验收是「MACD 数值跟 Python 引擎逐根相同（前端只画不自己减）／换档后副图一起换／
+    //   手机上不挤掉主图／图层开关能关、关着不取数」。逐条落在下面四格上。
+    //   ★ 「前端不自己减」这一条**只能靠假后台撒谎来证**：真后台回的 hist 恰好等于 dif−dea，
+    //     前端自己减一遍画出来一模一样 —— 那种情况下无论怎么写都恒绿（空转）。
+    //     所以假后台回的 hist 是 (dif−dea)×2，口径字段照旧写 'dif-dea'：
+    //     页面上必须看到那份 ×2 的柱子；看到 dif−dea ⇒ 它自己算了 ⇒ 红。
+    const subProbe = async (page, span) => page.evaluate(async (span) => {
+      const { chart, sub, state, opts } = window.__app;
+      const panes = chart.panes().map((q) => q.getHeight());
+      const D = (s) => (s && s.data ? s.data() : []);
+      const head = document.getElementById('subhead');
+      const volChip = document.querySelector('.chip[data-key="vol"]');
+      const volS = chart.panes()[0].getSeries().filter((q) => q.options && q.options().priceScaleId === 'vol');
+      const bars = state.data ? state.data.bars : [];
+      // 跟后台再要一份，逐根对：画上去的必须**就是响应里的那一列**
+      let raw = null, bad = 0, lieBars = 0, n = 0;
+      try {
+        raw = await (await fetch(`/api/macd?symbol=ZECUSDT&tf=1h&span=${span}&probe=1`)).json();
+        const at = new Map(raw.t.map((t, j) => [t, j]));
+        const hist = D(sub.series && sub.series.hist), dif = D(sub.series && sub.series.dif), dea = D(sub.series && sub.series.dea);
+        for (let i = 0; i < bars.length; i++) {
+          const j = at.get(bars[i].t); if (j == null) continue;
+          n++;
+          if (Math.abs(hist[i].value - raw.hist[j]) > 1e-9) bad++;
+          // 这一根上「hist 跟 dif−dea 差多远」：差得远才说明这一格不是空转（假后台真的撒了谎）
+          if (Math.abs(raw.hist[j] - (raw.dif[j] - raw.dea[j])) > 1e-9) lieBars++;
+        }
+      } catch (e) { raw = { err: String(e) }; }
+      return { panes, n: panes.length, main: panes[0], total: panes.reduce((a, b) => a + b, 0),
+               opts: { macd: opts.macd, vol: opts.vol }, has: !!sub.data, err: sub.err,
+               bars: bars.length, checked: n, bad, lieBars,
+               pts: [D(sub.series && sub.series.hist).length, D(sub.series && sub.series.dif).length,
+                     D(sub.series && sub.series.dea).length],
+               head: head ? head.textContent : null, headOn: head ? head.classList.contains('on') : false,
+               volDisabled: volChip ? volChip.disabled : null,
+               volPts: volS.length ? volS[0].data().length : -1 };
+    }, span);
+
+    // ⑲ 桌面 + 数据里带 v：窗格、逐根对齐、**画的必须是响应里那份（×2）**、成交量有点
+    scen({ spanMax: 16, withVol: true });
+    const p17 = await openPage('17');
+    await p17.setViewportSize({ width: 1280, height: 860 });
+    await p17.goto(PAGE + '?symbol=ZECUSDT&tf=1h', { waitUntil: 'domcontentloaded' });
+    await p17.waitForFunction(() => window.__app && window.__app.sub && window.__app.sub.data, null, { timeout: 30000 }).catch(() => {});
+    await p17.waitForTimeout(800);
+    const SA = await subProbe(p17, 1);
+    t('⑲ 桌面：副图建出第二个窗格、主图仍拿大头；画上去的柱子**逐根＝响应里的 hist**（假后台故意回 ×2 的），成交量有点',
+      SA.n === 2 && SA.main / SA.total >= 0.7 && SA.has && SA.err === ''
+      && SA.checked > 100 && SA.bad === 0 && SA.lieBars > 100          // lieBars>100 ⇒ 这一格不是空转
+      && SA.pts.every((x) => x === SA.bars) && SA.headOn && /柱=DIF−DEA/.test(SA.head || '')
+      && SA.volDisabled === false && SA.volPts === SA.bars,
+      `${SA.n} 格 ${SA.panes.join(':')}（主图 ${Math.round(100 * SA.main / SA.total)}%）；逐根比 ${SA.checked} 根差 ${SA.bad} 处；`
+      + `其中 ${SA.lieBars} 根上 hist≠dif−dea（假后台确实撒了谎 ⇒ 不是空转）；点数 ${SA.pts.join('/')} vs ${SA.bars} 根；`
+      + `头「${SA.head}」；成交量 ${SA.volPts} 点、开关 disabled=${SA.volDisabled}`);
+
+    // ⑳ 关掉 MACD：窗格收回去、**一个副图请求都不再发**；再打开 ⇒ 重新要一份（正好多一次）
+    const macd0 = macdCalls.length;
+    await p17.click('.chip[data-key="macd"]');
+    await p17.waitForTimeout(1500);
+    const SB = await subProbe(p17, 1);
+    const afterOff = macdCalls.length;
+    await p17.click('.chip[data-key="macd"]');
+    await p17.waitForTimeout(1500);
+    const SC = await subProbe(p17, 1);
+    t('⑳ 关掉 MACD ⇒ 窗格收回去、那一格的头不在屏幕上、**一个副图请求都不再发**；再打开 ⇒ 窗格回来并重新要一份',
+      SB.n === 1 && !SB.headOn && afterOff === macd0 && SC.n === 2 && SC.headOn && macdCalls.length === afterOff + 1,
+      `关掉后 ${SB.n} 格、头发 ~${SB.headOn}；开关这段时间副图请求 ${afterOff - macd0} 次；`
+      + `再打开 ${SC.n} 格、请求累计 ${macdCalls.length - macd0} 次`);
+
+    // ㉑ 往左拖换档：副图必须**跟主图同一个 span** 一起换、换完还是逐根对齐
+    const reqBefore = requests.length, macdBefore = macdCalls.length;
+    const box17 = await p17.evaluate(() => { const r = document.getElementById('chart').getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+    for (let k = 0; k < 6; k++) {                     // 真拖（脚本摆视口不算用户动作）
+      await p17.mouse.move(box17.x + box17.w * 0.2, box17.y + box17.h * 0.4);
+      await p17.mouse.down();
+      await p17.mouse.move(box17.x + box17.w * 0.85, box17.y + box17.h * 0.4, { steps: 10 });
+      await p17.mouse.up();
+      await p17.waitForTimeout(250);
+    }
+    await p17.waitForTimeout(3000);
+    const spans17 = requests.slice(reqBefore), mspans17 = macdCalls.slice(macdBefore);
+    const SD = await subProbe(p17, spans17.at(-1) || 1);
+    t('㉑ 换档：往左拖出 span=2 ⇒ 副图跟着要**同一个 span**，换完之后仍然逐根对齐（点数＝主图根数）',
+      spans17.length > 0 && mspans17.length > 0 && mspans17.at(-1) === spans17.at(-1)
+      && SD.bad === 0 && SD.pts.every((x) => x === SD.bars),
+      `主图要了 ${JSON.stringify(spans17)}、副图要了 ${JSON.stringify(mspans17)}；`
+      + `换完 ${SD.bars} 根、副图 ${SD.pts.join('/')} 点、逐根差 ${SD.bad} 处`);
+    await p17.close();
+
+    // ㉒ 手机 390×844：默认**一个副图请求都不发**；关着的时候那颗成交量开关在**没有 v 的样本**上按灰
+    scen({ spanMax: 16 });                            // ★ 这一格不造 v：量"没有 v 的时候不该能点"
+    const m0 = macdCalls.length;
+    const p18 = await openPage('18');
+    await p18.goto(PAGE + '?symbol=ZECUSDT&tf=1h', { waitUntil: 'domcontentloaded' });
+    await p18.waitForFunction(() => window.__app && window.__app.state.data, null, { timeout: 30000 }).catch(() => {});
+    await p18.waitForTimeout(1200);
+    const SE = await subProbe(p18, 1);
+    const box18 = await p18.evaluate(() => {
+      const c = document.getElementById('chart').getBoundingClientRect();
+      return { chart: Math.round(c.height), vh: window.innerHeight };
+    });
+    t('㉒ 手机 390×844：副图两个开关默认都关 ⇒ 窗格只有一个、**一个副图请求都不发**（关着不付）；'
+      + '数据里没有 v 时成交量那颗开关按灰（不知道的事不编）',
+      macdCalls.length === m0 && SE.n === 1 && !SE.has && SE.volDisabled === true && !SE.opts.macd && !SE.opts.vol,
+      `副图请求 ${macdCalls.length - m0} 次；${SE.n} 格、图 ${box18.chart}/${box18.vh}`
+      + `（${Math.round(100 * box18.chart / box18.vh)}%）；成交量开关 disabled=${SE.volDisabled}`);
+    await p18.close();
   } catch (e) {
     bad.push('工装半路炸了：' + String(e.message || e).split('\n')[0]);
   }

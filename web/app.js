@@ -3,7 +3,7 @@
 // 数据只认一个形状（`tools/make_web_fixture.py` 就是它的可执行定义，后台卡 card-29a45ab6-0ac 照着吐）：
 //   {symbol, tf, name, updated, closed, bars[], pens[], segs[], centers[], seg_centers[], signals{seg,pen}, meta{tick,pen_rule}}
 // 取不到后台就退回 `fixtures/`（离线也能看、也能截图对账）；两边都没有就老实说取不到，不画半张图。
-import { CHART, PAGE, CANDLE, WIDTH } from './theme.js';
+import { CHART, PAGE, CANDLE, WIDTH, SUB } from './theme.js';
 import { makeBoxPrimitive, makeAnnotPrimitive, shownOf } from './layers.js';
 
 const LWC = window.LightweightCharts;
@@ -16,6 +16,9 @@ for (const [k, v] of Object.entries(PAGE)) document.documentElement.style.setPro
 const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
 const mix = (a, b, k) => '#' + rgb(a).map((c, i) => Math.round(c * k + rgb(b)[i] * (1 - k))
   .toString(16).padStart(2, '0')).join('');                     // mix(a,b,k) = k·a + (1−k)·b
+// 给 theme.js 的色**加一个透明度**（不新造色）：成交量的柱子压在结构底下，实心太重。
+// 写法跟图上中枢框一致（layers.js 里是 `rgba(col, fill)`，fill 是 0-255）—— 色仍只有 theme.js 一个出处。
+const hexA = (h, a) => `rgba(${rgb(h).join(',')},${a})`;
 const cssVar = (n, v) => document.documentElement.style.setProperty(n, v);
 cssVar('--am', CANDLE.open);                                  // 未收盘 / 旧数据：琥珀（style.py AM）
 cssVar('--rd', CHART.sell);                                   // 出错：红（style.py CHART.sell）
@@ -40,8 +43,23 @@ const DEFAULTS = {
   sigKinds: { 一买: true, 二买: true, 三买: true, 一卖: true, 二卖: true, 三卖: true },
 };
 
+// 副图那两个开关（成交量／MACD，卡 card-68704ee6-a5a）的初值：**桌面开、手机关**。
+// ★ 它们**不进 DEFAULTS**：那个对象记的是「TradingView 的默认值」（那一组是卡面点名的，不许顺手改），
+//   而这两颗跟 pine 的默认值无关，跟**屏宽**有关 —— 两套理由别挤在一个对象里。
+//   手机上关的理由跟 card-b9792318-91d 是同一条（小栋 2026-10-04 05:00Z：手机上让图占满）：
+//   MACD 那一格要吃掉主图三成高度，手机上没那么多地方可给。
+//   ★ 760 这个数**不是这里发明的** —— style.css 那一档窄屏断点就是它（同一件事的另一半，改一起改）。
+// ★ 地址栏 `?vol=0|1` / `?macd=0|1` 可以指名（可分享、可截图复现，工装也拿它把两种状态都摆出来）；
+//   不写就是这一屏的默认。默认值与"写不写进地址栏"比的是**同一个数**（SUB_DEF，加载时定死的那一份）。
+const NARROW = () => matchMedia('(max-width:760px)').matches;
+const SUB_Q = new URLSearchParams(location.search);
+const SUB_DEF = !NARROW();
+const subParam = (k) => (SUB_Q.get(k) === '1' ? true : SUB_Q.get(k) === '0' ? false : SUB_DEF);
+
 const el = (id) => document.getElementById(id);
 const opts = { ...DEFAULTS, sigKinds: { ...DEFAULTS.sigKinds } };
+opts.vol = subParam('vol');
+opts.macd = subParam('macd');
 const state = { data: null, opts, candleSeries: null };
 const primitives = [];
 // 往左拖那套状态：span＝现在手上是第几档，spanMax＝后台给的封顶，earliest＝币安真没有了。
@@ -88,9 +106,23 @@ const candle = chart.addSeries(LWC.CandlestickSeries, {
   wickUpColor: CANDLE.up, wickDownColor: CANDLE.dn,
   priceLineVisible: false,
 });
-const line = (o) => chart.addSeries(LWC.LineSeries, {
-  priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, ...o,
+// 成交量（卡 card-68704ee6-a5a）：**叠在主图窗格的下沿**（自己一根价格轴 'vol'），不另占一格高度 ——
+// 手机上这一条很重要：主图的高度就是用户的全部视野（card-b9792318-91d 刚把图拉满）。
+// ★ 建在 K 线之后、笔/线段**之前**：这个库里**建系列的次序就是画的次序**（下面 overlay 那条注释讲的是同一件事）
+//   ⇒ 成交量画在笔/线段/中枢的底下，不去挡结构（DIF/DEA 那两条线单独一格，跟这个无关）。
+const VOL_ALPHA = 0.5;
+const volSeries = chart.addSeries(LWC.HistogramSeries, {
+  priceScaleId: 'vol', priceFormat: { type: 'volume' },
+  lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false,
 });
+// 压在下面 18%：top=0.82 是那一格里的**位置**（0 是顶、1 是底），跟主图的对数价轴互不干涉（它自己一根轴）。
+volSeries.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+
+// pane 缺省（undefined）＝第 0 格（主图）；副图那两条线传 1（见 buildSub）。
+// 副图那两条线也走这个 helper：它们的「不画价格线 / 不画末值 / 不画十字线光标」跟主图的线是同一条账。
+const line = (o, pane) => chart.addSeries(LWC.LineSeries, {
+  priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, ...o,
+}, pane);
 const penSolid = line({ color: CHART.pen, lineWidth: WIDTH.pen });
 const penDash = line({ color: CHART.pen, lineWidth: WIDTH.pen, lineStyle: LWC.LineStyle.Dashed });
 const segSolid = line({ color: CHART.seg, lineWidth: WIDTH.seg });
@@ -297,6 +329,21 @@ function windowOf(bars, range) {
 }
 // <<< EARLIER_PAGING
 
+// 成交量（卡 card-68704ee6-a5a）：一根一根照着 bars[].v 画，**没有 v 就不画那一根**。
+// ★ 绝不拿 0 顶上去 —— 画一根 0 高的柱子等于说「这一根的成交量是 0」，那是句假话。
+//   （仓里那份冻结样本就是这种：zec_1h.json 5040 根一根 v 都没有，而后台那份有。所以这颗开关
+//    在没有 v 的样本页上是**按灰**的，见 applyToggles —— 跟「买卖点关着时那六个 chip」同一个写法。）
+// 颜色：K 线那一对涨跌色（收 ≥ 开 为阳）—— 跟 K 线读起来是同一件事，而且色仍只有 theme.js 一个出处。
+function paintVol(d) {
+  const pts = [];
+  for (const b of d.bars || []) {
+    if (typeof b.v !== 'number' || !isFinite(b.v)) continue;
+    pts.push({ time: b.t / 1000, value: b.v, color: hexA(b.c >= b.o ? SUB.up : SUB.dn, VOL_ALPHA) });
+  }
+  sub.hasVol = pts.length > 0;       // 有成交量的那份数据才让这颗开关能点（applyToggles 读它）
+  volSeries.setData(pts);
+}
+
 // ---------------------------------------------------------------- 画一张
 // ★ 画（paint）和**摆视口**（draw 里那一段）分开了：往左补数据之后重画，**不能**再走「摆视口」
 //   那一段（它要么 fitContent 缩成一团、要么按 ?last/?at 跳走）—— 补数据时视口由 place() 按**时间**放回原位。
@@ -333,6 +380,8 @@ function paint(d) {
   } else segDash.setData([]);
 
   overlay.setData(bars.length ? [{ time: bars.at(-1).time, value: bars.at(-1).close }] : []);
+  paintVol(d);
+  syncSub();                 // 副图跟着主图一起换（同一份 K 线、同一个档位）；关着就一个请求都不发
   applyToggles();
   renderMeta(d);
   const last = bars.at(-1);
@@ -574,7 +623,186 @@ chart.subscribeCrosshairMove((param) => {
   // 指针离开图 / 十字线收起来时，LWC 给的是 time == null —— 那就是「读不到了」，读数跟着收。
   const b = param && param.time != null ? readAt(param) : null;
   if (b) showRead(b); else hideRead();
+  // 副图那一格跟主图**共用同一条十字线**，所以**不另订阅一次**：就在这条回调里记下"停在哪一根"。
+  // （同一个时刻的数据本来就一起到：2026-10-04 实测，指针停在哪一格，param.seriesData 里都带着
+  //   同一时刻**所有窗格**的系列 —— 这是这个库自带的行为，不是我们拼的。）
+  setSubHover(param && param.time != null ? param.time : null);
 });
+
+// ---------------------------------------------------------------- 副图：MACD（卡 card-68704ee6-a5a）
+// 后端那一半（`/api/macd`，卡 card-ed2bbcf6-ffd）已经在 main 上，Nova 外测过。前端在这一块里只做三件事：
+//   ① 要数 —— **懒取**：开关关着一个请求都不发；换品种/周期/档位就跟着主图一起换（同一份 K 线、同一个 span）
+//   ② 画 —— 主图**下面单独一个窗格**（lightweight-charts 5.2.1 的 pane），高度按 stretchFactor 分，主图拿大头
+//   ③ 念 —— 窗格那一格的头（#subhead）：口径照响应念，悬停时跟上那一根的三个数
+// ★★ 前端**一步算术都不做**：柱子就是响应里的 hist，标题里的口径就是响应里的 hist_def。
+//   前端自己再减一遍 DIF−DEA 的话，后台哪天换了柱子的定义，屏幕跟引擎就分家了 ——
+//   而且**没有一处会红**（后端那一轮被 Atlas 逮到的正是这个形状：hist 在两个地方各减了一遍）。
+//   工装里那一格就是拿这个当判据：假后台故意回一份 hist ≠ dif−dea 的（乘 2），画出来必须还是它。
+const MACD_DEC = 2;                 // 副图价格轴的精度。★ 轴和读数**必须同一个数**（跟主图 tick 是同一条账）
+const MACD_MIN = Number((10 ** -MACD_DEC).toFixed(MACD_DEC));   // 0.01：价轴的最小步进，由精度推出来，别另写一个
+const HIST_DEF = { 'dif-dea': 'DIF−DEA' };   // 认得的柱子定义翻成人话；认不得的**原样印**（不吞，跟看法那张表同一条）
+const SUB_H = { desk: 3, mob: 4 };  // 主图 : 副图 的高度比。手机给主图留得更多（4:1 ⇒ 主图拿八成）
+let subHover = null;                // 光标停在哪一根（**秒**，跟 param.time 同一个单位）；null ＝ 光标不在图上
+const sub = { series: null, data: null, at: null, slot: null, err: '', reqId: 0, hasVol: false };
+
+// 那一格的头：**口径照响应念**（params ／ hist_def），前端不写死「12,26,9」也不写死「DIF−DEA」。
+// 写死了，后台哪天改了参数或改了柱子的定义，屏幕上还写着老话，而且没有一处会红 —— 跟图脚那一格同一条账。
+function subTitle(m) {
+  const p = Array.isArray(m.params) && m.params.length ? `(${m.params.join(',')})` : '';
+  const d = typeof m.hist_def === 'string' && m.hist_def ? HIST_DEF[m.hist_def] || m.hist_def : '';
+  return `MACD${p}${d ? ` 柱=${d}` : ''}`;
+}
+// 头里的三格：光标那一根（光标不在图上 ⇒ 拿**最后一根**，跟读数块的收放同一条）。
+// ★ 对不上的那一格写「—」**不写 0**：0 是个数，"这一根没有副图的数"是另一回事。
+const subBox = el('subhead');
+const subDom = subBox ? (() => {
+  const title = document.createElement('span');
+  title.className = 't';
+  const cells = ['DIF', 'DEA', '柱'].map((k) => {
+    const cell = document.createElement('span');
+    cell.className = 'cell';
+    const i = document.createElement('i'); i.textContent = k;
+    const b = document.createElement('b'); b.textContent = '—';
+    cell.append(i, ' ', b); subBox.append(cell);
+    return b;
+  });
+  subBox.prepend(title);            // 口径在最前，三个数跟在后面
+  return { title, cells };
+})() : null;
+
+function refreshSubVals() {
+  if (!subDom) return;
+  const m = sub.data;
+  const bars = (state.data && state.data.bars) || [];
+  const t = subHover != null ? subHover * 1000 : (bars.length ? bars.at(-1).t : null);
+  const j = m && sub.at && t != null ? sub.at.get(t) : null;
+  const f = (v) => (typeof v === 'number' && isFinite(v) ? v.toFixed(MACD_DEC) : '—');
+  const vals = j == null ? ['—', '—', '—'] : [f(m.dif[j]), f(m.dea[j]), f(m.hist[j])];
+  subDom.cells.forEach((b, i) => { b.textContent = vals[i]; });
+}
+function renderSubHead() {
+  if (!subDom) return;
+  subDom.title.textContent = sub.err ? `MACD 取不到：${sub.err}` : sub.data ? subTitle(sub.data) : 'MACD 取数…';
+  subDom.title.classList.toggle('err', !!sub.err);
+  refreshSubVals();
+}
+function setSubHover(t) {
+  if (t === subHover) return;
+  subHover = t;
+  if (opts.macd) refreshSubVals();     // 关着的时候一个字都不用改
+}
+
+// 建／拆窗格。**幂等**：在不在以 `sub.series` 为准，不另记一个布尔（两个状态迟早对不上）。
+// ★ 5.2.1 实测（2026-10-04，`_scratch/sub_probe*.js`）：把某个窗格的系列全 removeSeries 掉，那个窗格
+//   **自己收回去**（窗格数回到 1）⇒ 关副图不会在下面留一条空白带；而 addSeries(…, 1) 会自动把窗格建出来。
+function buildSub() {
+  if (sub.series) return;
+  const fmt = { type: 'price', precision: MACD_DEC, minMove: MACD_MIN };
+  // 三条都用**自己那一格的 'right' 轴**（pane 1 的右轴）：一格一根刻度，跟主图那根互不干涉，
+  // ★ 而且刻度**看得见** —— 用别的名字（overlay 轴）就没刻度：副图那一格会空着右半边，
+  //   读者只能从头上那三个数猜量级（刻度是"一眼看出波动多大"的那把尺）。
+  //   代价是要盯住一件事：两格的作图区宽度必须还是同一个（见工装里"十字线在两格里同一个 x"那一格）。
+  sub.series = {
+    hist: chart.addSeries(LWC.HistogramSeries, { priceFormat: fmt, base: 0,
+                                                 lastValueVisible: false, priceLineVisible: false }, 1),
+    // ★ 线宽要**写出来**：不写就是这个库的缺省 3（跟主图那几条比粗一倍，而且两条一样粗——
+    //   "黄白线"就只剩下一坨黄盖住白）。1 跟笔同宽：它们是同一种东西（一条细线），不是线段那一档。
+    dif: line({ color: SUB.dif, lineWidth: 1, priceFormat: fmt }, 1),
+    dea: line({ color: SUB.dea, lineWidth: 1, priceFormat: fmt }, 1),
+  };
+  const ps = chart.panes();
+  if (ps.length > 1) { ps[0].setStretchFactor(NARROW() ? SUB_H.mob : SUB_H.desk); ps[1].setStretchFactor(1); }
+  // 窗格一分，主图那一栏的高度就变了 ⇒ 图例/读数/页脚都不用动，但那一格的头要重新贴一次（见 placeSubhead）
+}
+function teardownSub() {
+  if (!sub.series) return;
+  for (const s of Object.values(sub.series)) chart.removeSeries(s);   // 摘干净 ⇒ 窗格自己收回去
+  sub.series = null;
+  subHover = null;
+}
+// 副图的点**按时间取**，不按下标：换档是往数组头上插 K 线，同一个下标当场就指向另一根
+// （跟 anchorOf / timeIndex 是同一条账）。主图有哪几根，副图就画哪几根；响应里没有这一根 ⇒ **那根不画**。
+// 绝不拿邻点凑一个数出来 —— 凑出来的那根长得跟真的一模一样，谁也看不出来。
+// ★ 两边的 t 都是**毫秒**：/api/macd 的 t[] 就是这份 K 线的 t（server.py 里取的同一个数组）。
+function subPoints(bars, col, pick) {
+  const out = [];
+  for (const b of bars) {
+    const j = sub.at.get(b.t);
+    const v = j == null ? null : col[j];
+    if (typeof v === 'number' && isFinite(v)) out.push(pick(v, b.t / 1000));
+  }
+  return out;
+}
+// 把手上这一份灌上去（没数就空着）＋ 摆头。**幂等**，谁都可以随时叫一次。
+function paintSubData() {
+  if (!opts.macd || !sub.series) return;
+  const bars = (state.data && state.data.bars) || [];
+  const m = sub.data && sub.at ? sub.data : null;
+  const sign = (v) => (v >= 0 ? SUB.up : SUB.dn);     // 柱子用 K 线那一对涨跌色（theme.js 的 SUB）
+  sub.series.hist.setData(m ? subPoints(bars, m.hist, (v, t) => ({ time: t, value: v, color: sign(v) })) : []);
+  sub.series.dif.setData(m ? subPoints(bars, m.dif, (v, t) => ({ time: t, value: v })) : []);
+  sub.series.dea.setData(m ? subPoints(bars, m.dea, (v, t) => ({ time: t, value: v })) : []);
+  renderSubHead();
+  placeSubhead();
+}
+// 那一格的头**贴着副图窗格的上沿**：位置不是 CSS 摆的 —— 窗格高是 LWC 按 stretchFactor 排出来的，
+// CSS 算不出那个数（算得出来也会在换档、展开开关、转屏时过期）。所以每次布局变都重算一次。
+function placeSubhead() {
+  if (!subBox) return;
+  const on = !!opts.macd && !!sub.series;
+  subBox.classList.toggle('on', on);
+  if (!on) return;
+  const pane = chart.panes()[1];
+  const chartBox = el('chart').getBoundingClientRect();
+  const tsH = chart.timeScale().height();          // 时间轴是**共用**的一条，压在整栏的最下面
+  // top 是**相对 .overlays 那个盒子**算的（它就是 subBox 的定位祖先，自己离图顶有 10px，见 style.css）——
+  // 那个 10px 不在这里再抄一遍：从**两个盒子的实测距离**里减掉（CSS 改了这里也跟着对）。
+  const offset = subBox.parentElement.getBoundingClientRect().top - chartBox.top;
+  const top = chartBox.height - tsH - (pane ? pane.getHeight() : 0) + 4 - offset;
+  subBox.style.top = Math.max(0, Math.round(top)) + 'px';
+}
+if (subBox && 'ResizeObserver' in window) new ResizeObserver(() => placeSubhead()).observe(el('chart'));
+
+async function loadSub(symbol, tf, span) {
+  const r = await fetch(`/api/macd?${new URLSearchParams({ symbol, tf, span: String(span) })}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return await r.json();
+}
+// 把副图**对上现在这一格**（品种|周期|档位）。三件事按这个次序：
+//   ① 手上这份先画上（换档途中不留上一格的数：宁可空一格，也不给一份对不上主图的旧数）
+//   ② 这一格没处理过才发请求（`sub.slot` 就是"处理过"那一个记号：成功、失败、在飞，都算处理过 ——
+//      失败不重敲，等换格自然重来，跟 paging 的失败退避同一条账）
+//   ③ 到手的数按时间对齐再画（见 subPoints）
+function syncSub() {
+  if (!opts.macd) {                                 // ★ 关着不付：窗格拆干净、一个请求都不发（卡面点名的验收之一）
+    teardownSub();
+    if (subBox) subBox.classList.remove('on');
+    return;
+  }
+  buildSub();                                       // 窗格在这儿建（幂等）—— 首屏第一趟 paint 就走到这里
+  paintSubData();
+  if (!state.data) return;
+  const symbol = el('symbol').value, tf = el('tf').value;
+  const want = `${symbol}|${tf}|${paging.span}`;
+  if (sub.slot === want) return;
+  sub.slot = want;
+  sub.data = null; sub.at = null; sub.err = '';
+  paintSubData();
+  const id = ++sub.reqId;                           // 换格 ⇒ 在飞的那一份作废（跟 paging.reqId 同一个写法）
+  loadSub(symbol, tf, paging.span).then((m) => {
+    if (id !== sub.reqId || !opts.macd) return;
+    sub.data = m;
+    sub.at = new Map((m.t || []).map((t, j) => [t, j]));
+    paintSubData();
+  }).catch((e) => {
+    if (id !== sub.reqId || !opts.macd) return;
+    sub.err = String((e && e.message) || e);        // 取不到就说取不到（那一格的头里写着），不静默画一条空窗格
+    paintSubData();
+  });
+}
+// 开关动过之后走这一条：建/拆窗格、该取的取 —— 都是 syncSub 自己的事（它认得 `opts.macd`），
+// 这里只多补一件：地址栏跟着改（图层那几颗不进地址栏，这两颗进）。
+function syncSubView() { syncSub(); setUrl(); }
 
 // ---------------------------------------------------------------- 开关
 function applyToggles() {
@@ -582,6 +810,9 @@ function applyToggles() {
   penDash.applyOptions({ visible: opts.pen });
   segSolid.applyOptions({ visible: opts.seg });
   segDash.applyOptions({ visible: opts.seg });
+  // 成交量：开关说着开、数据里也确实有 v —— 两条都成立才画（样本没有 v ⇒ 开着也画不出来，
+  // 那就把开关按灰并说出来，别让用户点了没反应还不知道为什么）。
+  volSeries.applyOptions({ visible: !!opts.vol && sub.hasVol });
   repaint();
   renderLegend();
   // ★ 只扫**图层那排**（带 data-key 的）。底下「背驰看法」那一组也长着 .chip 的皮（同一个药丸尺寸），
@@ -591,7 +822,9 @@ function applyToggles() {
     const k = b.dataset.key;
     const on = k === 'sigPend' ? opts.sigPend : k.startsWith('sig:') ? opts.sigKinds[k.slice(4)] : opts[k];
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
-    b.disabled = k.startsWith('sig:') || k === 'sigPend' ? !opts.sig : false;
+    const sigChip = k.startsWith('sig:') || k === 'sigPend';
+    // 成交量那颗在**没有 v 的数据上**按灰（仓里的样本就是）：能点却画不出东西的开关是骗人的。
+    b.disabled = sigChip ? !opts.sig : k === 'vol' ? !sub.hasVol : false;
   }
 }
 
@@ -604,7 +837,11 @@ function buildChips() {
     b.onclick = () => {
       if (key.startsWith('sig:')) opts.sigKinds[key.slice(4)] = !opts.sigKinds[key.slice(4)];
       else opts[key] = !opts[key];
+      // 副图那两颗关掉再打开 ⇒ **重新要一份**：关着的那段时间数据可能已经旧了/后台换过了。
+      // （不这样，`sub.slot` 还是老值 ⇒ syncSub 认为"这一格处理过了"，窗格会空着不取数。）
+      if (key === 'macd' && opts.macd) { sub.slot = null; sub.err = ''; }
       applyToggles();
+      if (key === 'vol' || key === 'macd') syncSubView();
     };
     box.appendChild(b);
   };
@@ -616,6 +853,12 @@ function buildChips() {
   add('买卖点', 'sig', CHART.buy);
   for (const k of ['一买', '二买', '三买', '一卖', '二卖', '三卖']) add(k, `sig:${k}`, k.endsWith('买') ? CHART.buy : CHART.sell);
   add('待确认', 'sigPend', CHART.sell);
+  // 副图那两颗（卡 card-68704ee6-a5a）**排在最末尾**：上面那几颗管的是「主图上画什么」，
+  // 这两颗管的是**另外两格**（主图下沿那条成交量、下面那一格 MACD）—— 中间隔着一个"买卖点"组，
+  // 正好把"叠层"和"另起一格"分开，眼睛一扫就知道它们不是一类。
+  // 点取 theme.js 的 SUB：成交量用 K 线那一对涨跌色（取阳色），MACD 取黄白线里的黄（原文的叫法）。
+  add('成交量', 'vol', CANDLE.up);
+  add('MACD', 'macd', SUB.dea);
   watchOverflow(box);
 }
 
@@ -893,6 +1136,11 @@ function setUrl() {
   // 看法同理：写着缺省（面积）是噪音，抹掉；只有真换了才写上去（可分享、可截图复现）。
   if (measures.list.length && paging.measure !== DEFAULT_MEASURE) q.set('measure', paging.measure);
   else q.delete('measure');
+  // 副图那两颗同理：跟**这一屏的默认**（桌面开、手机关，见 SUB_DEF）不一样才写上去。
+  // 这样地址栏永远只写"这一屏再从零打开会不一样的东西"—— 写着默认值是噪音，换屏时还得记得抹掉。
+  for (const k of ['vol', 'macd']) {
+    if (opts[k] === SUB_DEF) q.delete(k); else q.set(k, opts[k] ? '1' : '0');
+  }
   history.replaceState(null, '', `?${q}`);            // 可分享、可截图复现
 }
 
@@ -939,4 +1187,4 @@ const metaReady = loadMeasures();
 // 给验收工装一个**只读**入口：并排截图要把网页这一格切到跟 Python 出图同一段 K 线、同一价格带，
 // 那就得问图自己「第 i 根在哪个 x、这个价在哪个 y」（timeToCoordinate / priceToCoordinate）。
 // 不是功能开关，页面上没有任何东西读它；去掉它，验收那两张图就没法对齐。
-window.__app = { chart, state, opts, paging, measures };
+window.__app = { chart, state, opts, paging, measures, sub };
