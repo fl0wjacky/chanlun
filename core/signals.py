@@ -121,6 +121,8 @@ def _units(r, level):
 # 力度比较的四种看法（单选；docs/spec/背驰.md 第六节，Nova 2026-10-04 定）：
 #   macd  柱子面积（默认）· slope 斜率 · lines 黄白线不创新高低 · peak 柱子一波峰值
 MEASURES = ("macd", "slope", "lines", "peak")
+# 哪几种是 108 课原文给的判法（小栋 10-04 ①A）：斜率（价差÷根数）是早期自己加的，原文没有，留着但要标明。
+MEASURE_ORIG = {"macd": True, "slope": False, "lines": True, "peak": True}
 
 
 def series_for(bars, measure, fast=12, slow=26, sig=9):
