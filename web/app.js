@@ -717,6 +717,13 @@ function buildSub() {
   };
   const ps = chart.panes();
   if (ps.length > 1) { ps[0].setStretchFactor(NARROW() ? SUB_H.mob : SUB_H.desk); ps[1].setStretchFactor(1); }
+  // ★ 副图那一格的右轴必须**掰回线性**。建图时那句 `rightPriceScale: { mode: Logarithmic }` 铺的是**每一格**的
+  //   right 轴（5.2.1 实测：`panes[0].priceScale('right')` 与 `panes[1].priceScale('right')` 是两根不同对象，
+  //   但 `mode` 都是 1＝对数）。主图那根对数轴是**故意的**（对齐 chart_full_smooth.py 的 Y=log）；
+  //   可 MACD 的值跨 0、还有负数，对数轴对这些点没有意义 —— 量过：0→1000 走 67px、1000→2000 只走 3px，
+  //   轴上的刻度就成了 0.00 / -20000.00 这种跟数据无关的数，柱子也按错的比例尺画（Nova 外测那两张截图）。
+  //   这一格的量法是线性：`Normal` 之后轴自己按**可见窗口**收，±3586 罩住 dif 的 -2497～3477（工装 web_macd_axis.js）。
+  ps[1].priceScale('right').applyOptions({ mode: LWC.PriceScaleMode.Normal });
   // 窗格一分，主图那一栏的高度就变了 ⇒ 图例/读数/页脚都不用动，但那一格的头要重新贴一次（见 placeSubhead）
 }
 function teardownSub() {
