@@ -55,7 +55,12 @@ def replay(bars, level, measure, warm=50):
                 events.append(dict(kind=g["kind"], t_extreme=key[1], bar=g["bar"], confirm_i=t, weak=g.get("weak")))
     final = {(g["kind"], bars[g["bar"]]["t"]) for g in ENG.signals(analyze(bars), level, measure) if g["confirmed"]}
     gone = sum(1 for k in first if k not in final)
-    return events, dict(confirmed_ever=len(first), gone_by_end=gone)
+    # 近邻对：同 kind、极值那根相距 ≤2 根的两个「不同点」—— 键按时间戳算是两个，可能其实是同一个点漂了。
+    # 先只计数，判法等规则页（Atlas 10-04）。
+    pos = {b["t"]: i for i, b in enumerate(bars)}
+    keys = sorted(first, key=lambda k: (k[0], k[1]))
+    near = sum(1 for x, y in zip(keys, keys[1:]) if x[0] == y[0] and abs(pos[y[1]] - pos[x[1]]) <= 2)
+    return events, dict(confirmed_ever=len(first), gone_by_end=gone, near_pairs=near)
 
 
 def peek_events(bars, level, measure):
@@ -164,8 +169,8 @@ def main():
         r = run_one(fn, a.level, a.measure, a.fee_bps, a.slip_bps)
         out.append(r)
         s = r["summary"]
-        print("%-14s %5d 根 确认事件 %3d（之后被改掉 %d）笔数 %3d 胜率 %s 盈亏 %+.2f%% 最大回撤 %.2f%%%s"
-              % (fn, r["bars"], r["events"], r["repaint"]["gone_by_end"], s["n"],
+        print("%-14s %5d 根 确认事件 %3d（之后被改掉 %d，近邻对 %d）笔数 %3d 胜率 %s 盈亏 %+.2f%% 最大回撤 %.2f%%%s"
+              % (fn, r["bars"], r["events"], r["repaint"]["gone_by_end"], r["repaint"]["near_pairs"], s["n"],
                  "-" if s["win_rate"] is None else "%.0f%%" % (100 * s["win_rate"]), 100 * s["pnl"],
                  100 * s["max_dd"], "" if s["open"] is None else " · 未平 %+.2f%%" % (100 * s["open"])))
     if a.out:
