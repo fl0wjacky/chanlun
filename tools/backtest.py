@@ -1,29 +1,26 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""最小回测：拿历史 K 线检验买卖点（card-41383e15-d8f，小栋 10-04 ③A）。**骨架**，口径以 Atlas 的规则页为准。
+"""最小回测：拿历史 K 线检验买卖点事后的表现（card-41383e15-d8f，小栋 10-04 ③A）。口径＝docs/spec/回测.md。
 
-    python3 tools/backtest.py [--data zec_4h.json,...] [--level seg|pen] [--measure macd]
-                              [--fee-bps 4] [--slip-bps 2] [--out 表.json]
-    python3 tools/backtest.py --probe     # 偷看探针：改成「按 bar 成交」结果必须变
+    python3 tools/backtest.py [--data a.json,b.json] [--level pen|seg] [--measure macd]
+                              [--fee-bps 4] [--slip-bps 2] [--out 报表.json] [--trades]
+    python3 tools/backtest.py --probe     # 四个探针（spec 第五节），每个都必须让结果变
 
-卡上四条硬规则在这里怎么落：
-  ① 下一根开盘成交：信号在第 t 根确认 ⇒ 第 t+1 根的开盘价成交，不按信号那根。
-  ② 手续费、滑点是显式参数（单边，基点），报表头原样列出。买价 ×(1+滑点)、卖价 ×(1−滑点)，每边再扣手续费。
-  ③ 不偷看未来：引擎的买卖点只有 bar（极值那根）和 confirmed 布尔，没有「哪一根确认的」。所以**逐根重放**：
-     对每个 t 只喂 bars[:t+1] 跑 analyze + signals，某个点（键 = kind + 极值那根的时间戳）**第一次以
-     confirmed=True 出现**的那个 t 就是确认时刻。之后它在更长的数据里被改掉 / 消失，照实记进 repaint 计数，
-     已成交的不撤。
-  ④ 只用已收盘的 K 线：data/ 里的都是历史收盘线；重放时第 t 步只看到 bars[:t+1]（第 t 根当作刚收盘）。
+规则页四条硬规则在这里的落点：
+  ① 确认之后下一根开盘成交 —— trade()：事件在第 t 根确认 ⇒ 第 t+1 根开盘；t+1 不存在 ⇒「数据末尾未成交」。
+  ② 费用显式 —— --fee-bps / --slip-bps，每边；买价 ×(1+slip)、卖价 ×(1−slip)，每边再扣 fee；报表第一行原样印。
+  ③ 不偷看 —— replay()：逐根重放，只喂 bars[:t+1]，点第一次以 confirmed=True 出现的 t 就是确认时刻。
+     键 = (kind, level, 极值那根的时间戳)；漂一根也算新点（严格），另报近邻对（同 kind、相距 ≤2 根）。
+  ④ 只用已收盘 —— data/ 下都是历史收盘线；第 t 步只看得见 bars[:t+1]。
 
-交易模型（暂定，等规则页）：只做多。买点（一买/二买/三买，含 weak）空仓时开多；卖点（一卖/二卖/三卖）持仓时平仓。
-数据走完还持仓 ⇒ 按最后一根收盘价记一笔「未平」，单列。权益按每根收盘逐根盯市算最大回撤。
-
-偷看探针（--probe）：同一份数据，改成「用全量数据的终版信号、在极值那根收盘成交」。这是偷看（一类点的极值那根
-当时根本不知道是极值）。两种跑法的交易明细必须不同 —— 相同就说明重放没起作用，探针红。
+交易模型（spec 第三节）：只做多；一二三类买点（含 weak）空仓开多，一二三类卖点持仓平仓；重复信号忽略；
+走完还持仓 ⇒ 最后一根收盘盯市，单列「未平」，不计入笔数和胜率。
 """
 import argparse
+import hashlib
 import json
 import os
+import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -34,147 +31,216 @@ import core.signals                                           # noqa: E402,F401
 ENG = sys.modules["core.signals"]                             # core/__init__ 把 signals 导成了函数，拿模块要这样
 
 BUY, SELL = ("一买", "二买", "三买"), ("一卖", "二卖", "三卖")
-DEFAULT_DATA = ("zec_4h.json", "zec_2h.json", "zec_1h.json", "btc_4h.json")
+DATA = ("aaplusdt_4h.json", "aaplusdt_2h.json", "aaplusdt_1h.json", "aaplusdt_30m.json", "btc_4h.json",
+        "zec_4h.json", "zec_2h.json", "zec_1h.json", "zec15.json")       # spec 第四节：正式报表 9 份
+SMALL = 30                                                                # 样本量护栏
+WARN = "样本太小，这些数字不能拿来判断买卖点好坏"
 
 
 def load(fn):
-    return json.load(open(os.path.join(ROOT, "data", fn), encoding="utf-8"))
+    raw = open(os.path.join(ROOT, "data", fn), "rb").read()
+    return json.loads(raw), hashlib.sha1(raw).hexdigest()
 
 
+def engine_commit():
+    try:
+        return subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"], capture_output=True,
+                              text=True, check=True).stdout.strip()
+    except Exception:
+        return "?"
+
+
+# ---------------------------------------------------------------- 信号来源
 def replay(bars, level, measure, warm=50):
-    """逐根重放 → 确认事件列表 [dict(kind, t_extreme, confirm_i)]，按确认先后；外加 repaint 统计。"""
+    """逐根重放 → (确认事件 [dict(kind, t_extreme, bar, confirm_i, weak, gone)] 按确认先后, 重放统计)。"""
     first, events = {}, []
     for t in range(warm, len(bars)):
-        r = analyze(bars[:t + 1])
-        for g in ENG.signals(r, level, measure):
+        for g in ENG.signals(analyze(bars[:t + 1]), level, measure):
             if not g["confirmed"]:
                 continue
-            key = (g["kind"], bars[g["bar"]]["t"])
+            key = (g["kind"], level, bars[g["bar"]]["t"])
             if key not in first:
                 first[key] = t
-                events.append(dict(kind=g["kind"], t_extreme=key[1], bar=g["bar"], confirm_i=t, weak=g.get("weak")))
-    final = {(g["kind"], bars[g["bar"]]["t"]) for g in ENG.signals(analyze(bars), level, measure) if g["confirmed"]}
-    gone = sum(1 for k in first if k not in final)
-    # 近邻对：同 kind、极值那根相距 ≤2 根的两个「不同点」—— 键按时间戳算是两个，可能其实是同一个点漂了。
-    # 先只计数，判法等规则页（Atlas 10-04）。
+                events.append(dict(kind=g["kind"], t_extreme=key[2], bar=g["bar"], confirm_i=t,
+                                   weak=bool(g.get("weak"))))
+    final = {(g["kind"], level, bars[g["bar"]]["t"])
+             for g in ENG.signals(analyze(bars), level, measure) if g["confirmed"]}
+    for e in events:
+        e["gone"] = (e["kind"], level, e["t_extreme"]) not in final
     pos = {b["t"]: i for i, b in enumerate(bars)}
-    keys = sorted(first, key=lambda k: (k[0], k[1]))
-    near = sum(1 for x, y in zip(keys, keys[1:]) if x[0] == y[0] and abs(pos[y[1]] - pos[x[1]]) <= 2)
-    return events, dict(confirmed_ever=len(first), gone_by_end=gone, near_pairs=near)
+    ks = sorted(first, key=lambda k: (k[0], pos[k[2]]))
+    near = [(x, y) for x, y in zip(ks, ks[1:]) if x[0] == y[0] and abs(pos[y[2]] - pos[x[2]]) <= 2]
+    return events, dict(confirmed=len(events), gone=sum(e["gone"] for e in events), near_pairs=len(near))
 
 
-def peek_events(bars, level, measure):
-    """偷看版：全量数据的终版已确认信号，当作在极值那根就知道了。"""
+def merge_near(events, bars):
+    """近邻合并对照（spec 二）：同 kind、极值相距 ≤2 根的，只留先确认的那个。主结果不用它。"""
+    pos = {b["t"]: i for i, b in enumerate(bars)}
     out = []
-    for g in ENG.signals(analyze(bars), level, measure):
-        if g["confirmed"]:
-            out.append(dict(kind=g["kind"], t_extreme=bars[g["bar"]]["t"], bar=g["bar"], confirm_i=g["bar"],
-                            weak=g.get("weak")))
-    return sorted(out, key=lambda e: e["confirm_i"])
+    for e in events:
+        if any(o["kind"] == e["kind"] and abs(pos[o["t_extreme"]] - pos[e["t_extreme"]]) <= 2 for o in out):
+            continue
+        out.append(e)
+    return out
 
 
+def final_events(bars, level, measure):
+    """终版信号（全量数据跑一遍），当作在极值那根就知道了 —— 只给探针 A / B 用。"""
+    return sorted((dict(kind=g["kind"], t_extreme=bars[g["bar"]]["t"], bar=g["bar"], confirm_i=g["bar"],
+                        weak=bool(g.get("weak")), gone=False)
+                   for g in ENG.signals(analyze(bars), level, measure) if g["confirmed"]),
+                  key=lambda e: e["confirm_i"])
+
+
+# ---------------------------------------------------------------- 成交与统计
 def trade(bars, events, fee_bps, slip_bps, fill="next_open"):
-    """events → 交易明细 + 逐根权益。fill=next_open：第 confirm_i+1 根开盘；fill=bar_close：第 confirm_i 根收盘（只给探针用）。"""
+    """events → (已平明细, 未平, 逐根权益, 末尾未成交数, 被改掉的点里触发了成交的数)。
+    fill=next_open（正式）：第 confirm_i+1 根开盘；fill=confirm_close（探针 D）：确认那根收盘；
+    fill=bar_close（探针 A）：极值那根收盘（终版信号的 confirm_i 就是 bar）。"""
     fee, slip = fee_bps / 1e4, slip_bps / 1e4
-    by_i = {}
+    by_i, unfilled = {}, 0
     for e in events:
         i = e["confirm_i"] + 1 if fill == "next_open" else e["confirm_i"]
-        if i < len(bars):
-            by_i.setdefault(i, []).append(e)
-    trades, pos, eq, curve = [], None, 1.0, []
+        if i >= len(bars):
+            unfilled += 1
+            continue
+        by_i.setdefault(i, []).append(e)
+    trades, pos, eq, curve, gone_hit = [], None, 1.0, [], 0
     for i, b in enumerate(bars):
         px = b["o"] if fill == "next_open" else b["c"]
         for e in by_i.get(i, []):
             if pos is None and e["kind"] in BUY:
-                pos = dict(entry_i=i, entry_t=b["t"], entry_px=px * (1 + slip), kind_in=e["kind"],
-                           signal_t=e["t_extreme"], confirm_i=e["confirm_i"])
+                pos = dict(open_confirm_i=e["confirm_i"], open_i=i, open_t=b["t"], open_raw=px,
+                           open_px=px * (1 + slip), open_kind=e["kind"], open_extreme_t=e["t_extreme"],
+                           weak=e["weak"])
+                gone_hit += e["gone"]
             elif pos is not None and e["kind"] in SELL:
                 out_px = px * (1 - slip)
-                ret = (out_px / pos["entry_px"]) * (1 - fee) ** 2 - 1
-                eq *= 1 + ret
-                trades.append(dict(pos, exit_i=i, exit_t=b["t"], exit_px=out_px, kind_out=e["kind"], ret=ret))
+                trades.append(dict(pos, close_confirm_i=e["confirm_i"], close_i=i, close_t=b["t"], close_raw=px,
+                                   close_px=out_px, close_kind=e["kind"], gross=px / pos["open_raw"] - 1,
+                                   net=(out_px / pos["open_px"]) * (1 - fee) ** 2 - 1))
+                gone_hit += e["gone"]
+                eq *= 1 + trades[-1]["net"]
                 pos = None
-        mtm = eq * (b["c"] * (1 - slip) / pos["entry_px"] * (1 - fee) ** 2) if pos else eq
-        curve.append(mtm)
+        curve.append(eq * (b["c"] * (1 - slip) / pos["open_px"]) * (1 - fee) ** 2 if pos else eq)
     open_pos = None
     if pos:
-        last = bars[-1]
-        ret = (last["c"] * (1 - slip) / pos["entry_px"]) * (1 - fee) ** 2 - 1
-        open_pos = dict(pos, exit_i=len(bars) - 1, exit_t=last["t"], exit_px=last["c"], kind_out="未平", ret=ret)
-    return trades, open_pos, curve
+        c = bars[-1]["c"]
+        open_pos = dict(pos, close_i=len(bars) - 1, close_t=bars[-1]["t"], close_raw=c, close_kind="未平",
+                        gross=c / pos["open_raw"] - 1, net=(c * (1 - slip) / pos["open_px"]) * (1 - fee) ** 2 - 1)
+    return trades, open_pos, curve, unfilled, gone_hit
 
 
 def summary(trades, open_pos, curve):
-    wins = sum(1 for x in trades if x["ret"] > 0)
-    pnl = 1.0
+    comp, peak, mdd = 1.0, 0.0, 0.0
     for x in trades:
-        pnl *= 1 + x["ret"]
-    peak, mdd = 0.0, 0.0
+        comp *= 1 + x["net"]
     for v in curve:
         peak = max(peak, v)
-        mdd = max(mdd, 1 - v / peak if peak else 0)
-    return dict(n=len(trades), win_rate=round(wins / len(trades), 4) if trades else None,
-                pnl=round(pnl - 1, 6), max_dd=round(mdd, 6),
-                open=round(open_pos["ret"], 6) if open_pos else None)
+        mdd = max(mdd, 1 - v / peak)
+    weak = [x for x in trades if x["weak"]]
+    wcomp = 1.0
+    for x in weak:
+        wcomp *= 1 + x["net"]
+    n = len(trades)
+    return dict(n=n, win_rate=round(sum(x["net"] > 0 for x in trades) / n, 4) if n else None,
+                pnl_comp=round(comp - 1, 6), pnl_sum=round(sum(x["net"] for x in trades), 6),
+                max_dd=round(mdd, 6), weak_n=len(weak), weak_pnl_comp=round(wcomp - 1, 6),
+                open_net=round(open_pos["net"], 6) if open_pos else None, small=n < SMALL)
 
 
 def run_one(fn, level, measure, fee_bps, slip_bps):
-    bars = load(fn)
+    bars, sha = load(fn)
     events, rp = replay(bars, level, measure)
-    trades, open_pos, curve = trade(bars, events, fee_bps, slip_bps)
-    return dict(data=fn, bars=len(bars), level=level, measure=measure, events=len(events), repaint=rp,
-                summary=summary(trades, open_pos, curve), trades=trades, open=open_pos)
+    trades, open_pos, curve, unfilled, gone_hit = trade(bars, events, fee_bps, slip_bps)
+    rp.update(gone_traded=gone_hit, unfilled_at_end=unfilled)
+    res = dict(data=fn, sha1=sha, bars=len(bars), level=level, measure=measure, replay=rp,
+               hold=round(bars[-1]["c"] / bars[0]["o"] - 1, 6),
+               summary=summary(trades, open_pos, curve), trades=trades, open=open_pos)
+    if rp["near_pairs"]:                                         # 近邻对不为 0 ⇒ 另出一份合并对照
+        t2 = trade(bars, merge_near(events, bars), fee_bps, slip_bps)
+        res["near_merged"] = summary(*t2[:3])
+    return res
 
 
+# ---------------------------------------------------------------- 探针（spec 第五节）
 def probe(fn, level, measure, fee_bps, slip_bps):
-    """偷看探针，两条各自必须「变」：
-      A 按 bar 成交：终版信号、极值那根收盘成交（卡上点名的那种偷看）；
-      B 只换信号来源：终版信号当作极值那根就知道，成交照样下一根开盘 —— 单独量「重放」这一步有没有起作用
-        （只比 A 的话，重放被换成终版信号也照样会因为成交价不同而「变」，那就成了替身）。"""
-    bars = load(fn)
-    honest, _ = replay(bars, level, measure)
-    peek = peek_events(bars, level, measure)
-    key = lambda ts: [(x["entry_t"], round(x["entry_px"], 8), x["exit_t"]) for x in ts[0]]
-    h = trade(bars, honest, fee_bps, slip_bps)
-    a = trade(bars, peek, fee_bps, slip_bps, fill="bar_close")
-    b = trade(bars, peek, fee_bps, slip_bps)
-    return key(h) != key(a), key(h) != key(b), summary(*h), summary(*a), summary(*b)
+    """四个探针各自跟正式结果比交易明细（开仓时间、开仓价、平仓时间、净收益，含未平），返回 {名字: (变了没有, 笔数)}。"""
+    bars, _ = load(fn)
+    events, _ = replay(bars, level, measure)
+    fin = final_events(bars, level, measure)
+
+    def key(r):
+        rows = [(x["open_t"], round(x["open_px"], 8), x["close_t"], round(x["net"], 10)) for x in r[0]]
+        return rows + ([("未平", r[1]["open_t"], round(r[1]["net"], 10))] if r[1] else [])
+    base = key(trade(bars, events, fee_bps, slip_bps))
+    arms = {"A 偷看：终版信号、极值那根收盘": trade(bars, fin, fee_bps, slip_bps, fill="bar_close"),
+            "B 终版信号、照样下一根开盘": trade(bars, fin, fee_bps, slip_bps),
+            "C 零成本": trade(bars, events, 0, 0),
+            "D 确认那根收盘成交": trade(bars, events, fee_bps, slip_bps, fill="confirm_close")}
+    return {k: (key(v) != base, len(v[0]) + bool(v[1])) for k, v in arms.items()}, len(base)
+
+
+# ---------------------------------------------------------------- 打印
+def pct(x):
+    return "-" if x is None else "%+.2f%%" % (100 * x)
+
+
+def print_report(r, fee, slip, commit, show_trades):
+    s, rp = r["summary"], r["replay"]
+    print("— %s  sha1 %s  引擎 %s  level=%s  看法=%s  fee=%.2fbp/边  slip=%.2fbp/边  %d 根"
+          % (r["data"], r["sha1"][:12], commit, r["level"], r["measure"], fee, slip, r["bars"]))
+    if s["small"]:
+        print("  ⚠ %s（笔数 %d < %d）" % (WARN, s["n"], SMALL))
+    print("  笔数 %d  胜率 %s  盈亏 复利 %s / 加总 %s  最大回撤 %.2f%%  weak 开的 %d 笔 %s  未平 %s  ｜ 持有不动 %s"
+          % (s["n"], "-" if s["win_rate"] is None else "%.0f%%" % (100 * s["win_rate"]), pct(s["pnl_comp"]),
+             pct(s["pnl_sum"]), 100 * s["max_dd"], s["weak_n"], pct(s["weak_pnl_comp"]), pct(s["open_net"]),
+             pct(r["hold"])))
+    print("  重放：确认事件 %d · 之后被改掉 %d（其中触发了成交 %d）· 近邻对 %d · 末尾未成交 %d"
+          % (rp["confirmed"], rp["gone"], rp["gone_traded"], rp["near_pairs"], rp["unfilled_at_end"]))
+    if "near_merged" in r:
+        m = r["near_merged"]
+        print("  近邻合并对照：笔数 %d 盈亏 %s 最大回撤 %.2f%%" % (m["n"], pct(m["pnl_comp"]), 100 * m["max_dd"]))
+    if show_trades:
+        for x in r["trades"] + ([r["open"]] if r["open"] else []):
+            print("    确认 %5d → 开 %5d @%.6g  %s%s(%d)  ‖ 确认 %s → 平 %5d @%.6g %s  毛 %s 净 %s"
+                  % (x["open_confirm_i"], x["open_i"], x["open_px"], x["open_kind"], "·weak" if x["weak"] else "",
+                     x["open_extreme_t"], x.get("close_confirm_i", "-"), x["close_i"], x["close_raw"],
+                     x["close_kind"], pct(x["gross"]), pct(x["net"])))
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default=",".join(DEFAULT_DATA))
+    ap.add_argument("--data", default=",".join(DATA))
     ap.add_argument("--level", default="pen", choices=("seg", "pen"))
     ap.add_argument("--measure", default="macd", choices=ENG.MEASURES)
-    ap.add_argument("--fee-bps", type=float, default=4.0, help="单边手续费，基点")
-    ap.add_argument("--slip-bps", type=float, default=2.0, help="单边滑点，基点")
+    ap.add_argument("--fee-bps", type=float, default=4.0, help="每边手续费，基点")
+    ap.add_argument("--slip-bps", type=float, default=2.0, help="每边滑点，基点")
     ap.add_argument("--probe", action="store_true")
+    ap.add_argument("--trades", action="store_true", help="逐笔明细也印出来")
     ap.add_argument("--out")
     a = ap.parse_args()
-    files = a.data.split(",")
-    print("参数：level=%s measure=%s 手续费 %.2f bp/边 滑点 %.2f bp/边 · 下一根开盘成交 · 只做多"
-          % (a.level, a.measure, a.fee_bps, a.slip_bps))
+    files, commit = a.data.split(","), engine_commit()
+    print("参数：fee_bps=%.2f slip_bps=%.2f（每边）· level=%s · 看法=%s · 确认后下一根开盘成交 · 只做多 · 引擎 %s"
+          % (a.fee_bps, a.slip_bps, a.level, a.measure, commit))
     if a.probe:
-        bad = 0
+        idle = 0
         for fn in files:
-            ca, cb, h, pa, pb = probe(fn, a.level, a.measure, a.fee_bps, a.slip_bps)
-            bad += (not ca) + (not cb)
-            print("%-14s 重放 %s" % (fn, h))
-            print("  %s A 按 bar 成交        %s" % ("✓ 变了" if ca else "✗ 没变", pa))
-            print("  %s B 终版信号、下一根开盘 %s" % ("✓ 变了" if cb else "✗ 没变", pb))
-        print("偷看探针：%s" % ("全部抓到" if not bad else "%d 份没变（重放没起作用）" % bad))
-        return 1 if bad else 0
+            got, nbase = probe(fn, a.level, a.measure, a.fee_bps, a.slip_bps)
+            print("— %s（正式 %d 笔，含未平）" % (fn, nbase))
+            for k, (changed, n) in got.items():
+                idle += not changed
+                print("  %s %s（%d 笔）" % ("✓ 变了" if changed else "· 这份上空转", k, n))
+        print("探针：%s" % ("每份每条都变了" if not idle else "%d 处空转（见上，空转的那份要写明）" % idle))
+        return 0
     out = []
     for fn in files:
         r = run_one(fn, a.level, a.measure, a.fee_bps, a.slip_bps)
         out.append(r)
-        s = r["summary"]
-        print("%-14s %5d 根 确认事件 %3d（之后被改掉 %d，近邻对 %d）笔数 %3d 胜率 %s 盈亏 %+.2f%% 最大回撤 %.2f%%%s"
-              % (fn, r["bars"], r["events"], r["repaint"]["gone_by_end"], r["repaint"]["near_pairs"], s["n"],
-                 "-" if s["win_rate"] is None else "%.0f%%" % (100 * s["win_rate"]), 100 * s["pnl"],
-                 100 * s["max_dd"], "" if s["open"] is None else " · 未平 %+.2f%%" % (100 * s["open"])))
+        print_report(r, a.fee_bps, a.slip_bps, commit, a.trades)
     if a.out:
-        json.dump(dict(params=vars(a), results=out), open(a.out, "w"), ensure_ascii=False, indent=1)
+        json.dump(dict(params=dict(fee_bps=a.fee_bps, slip_bps=a.slip_bps, level=a.level, measure=a.measure,
+                                   engine=commit), results=out), open(a.out, "w"), ensure_ascii=False, indent=1)
     return 0
 
 
