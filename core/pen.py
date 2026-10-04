@@ -46,6 +46,68 @@ nonextreme_pens() 会把它们报出来（v2 实测：5 组数据合计个位数
 """
 
 
+class RangeExt:
+    """std 上的区间最高 h / 最低 l，线段树，单次 O(log n)。
+
+    语义与切片 `max(x["h"] for x in std[k0:k1 + 1])` 一致：k1 越界截到末尾；空区间（含 k0<0、k0>k1）
+    报 ValueError。selfcheck 拿它在随机数组的**所有** (k0, k1) 上跟切片直接比（Atlas 10-04：只比 build_pens
+    的输出证不了它对 —— 漏掉右端点的写错版本也能过，因为调用方的右端从来不是最值）。"""
+
+    def __init__(self, std):
+        self.n = len(std)
+        size = 1
+        while size < max(self.n, 1):
+            size *= 2
+        self.size = size
+        self.tmax = [float("-inf")] * (2 * size)
+        self.tmin = [float("inf")] * (2 * size)
+        for i, x in enumerate(std):
+            self.tmax[size + i], self.tmin[size + i] = x["h"], x["l"]
+        for i in range(size - 1, 0, -1):
+            self.tmax[i] = max(self.tmax[2 * i], self.tmax[2 * i + 1])
+            self.tmin[i] = min(self.tmin[2 * i], self.tmin[2 * i + 1])
+
+    def ext(self, k0, k1, top):
+        k1 = min(k1, self.n - 1)
+        if k0 < 0 or k0 > k1:
+            raise ValueError("区间为空：[%d, %d]" % (k0, k1))
+        t, best = (self.tmax, float("-inf")) if top else (self.tmin, float("inf"))
+        pick = max if top else min
+        lo, hi = k0 + self.size, k1 + self.size + 1       # 半开区间 [lo, hi)：右端点 k1 要算进去
+        while lo < hi:
+            if lo & 1:
+                best = pick(best, t[lo])
+                lo += 1
+            if hi & 1:
+                hi -= 1
+                best = pick(best, t[hi])
+            lo >>= 1
+            hi >>= 1
+        return best
+
+
+def check_range_ext(cls=None, seeds=range(40)):
+    """RangeExt 跟切片 max/min 在所有 (k0, k1) 上逐个比 → 不一致处数（0 才对）。
+    数组长度 1..65 各种（含 2 的幂边界），价格窄带整数（故意多平价）。"""
+    import random
+    cls = cls or RangeExt
+    bad = 0
+    for seed in seeds:
+        rnd = random.Random(seed)
+        n = 1 + seed % 65
+        std = [dict(h=rnd.randint(0, 5), l=0) for _ in range(n)]
+        for x in std:
+            x["l"] = x["h"] - rnd.randint(0, 3)
+        r = cls(std)
+        for k0 in range(n):
+            for k1 in range(k0, n + 2):                  # 含越界的 k1（切片会截断）
+                span = std[k0:k1 + 1]
+                if r.ext(k0, k1, True) != max(x["h"] for x in span) or \
+                        r.ext(k0, k1, False) != min(x["l"] for x in span):
+                    bad += 1
+    return bad
+
+
 def build_pens(fx, std, rule="old", min_gap=4):
     """fx: fractals() 的输出；std: standardize() 的输出。返回 (笔列表, 笔端点序列)。"""
     if rule not in ("old", "new"):
@@ -59,43 +121,14 @@ def build_pens(fx, std, rule="old", min_gap=4):
     def beyond(f, g):                        # 同类分型：f 比 g 更极端
         return f["price"] > g["price"] if f["type"] == "top" else f["price"] < g["price"]
 
-    # 区间最高 / 最低：线段树，单次 O(log n)。原来是每次切片现扫 max/min —— fix_start 往回找端点时
-    # 每一步都扫 [e.k, g.k]，修不成的时候一路扫到头 ⇒ 整体平方级（ZEC 15m：2 万根 0.25s、4 万根 1.2s）。
+    # 区间最高 / 最低：线段树，单次 O(log n)（见模块级 RangeExt）。原来是每次切片现扫 max/min ——
+    # fix_start 往回找端点时每一步都扫 [e.k, g.k]，修不成就一路扫到头 ⇒ 整体平方级。
     # 判据一字不改：仍是「f 的价 ≥ 区间最高 h」/「≤ 区间最低 l」，只是区间最值换了算法。
-    n_std = len(std)
-    size = 1
-    while size < max(n_std, 1):
-        size *= 2
-    tmax = [float("-inf")] * (2 * size)
-    tmin = [float("inf")] * (2 * size)
-    for i, x in enumerate(std):
-        tmax[size + i], tmin[size + i] = x["h"], x["l"]
-    for i in range(size - 1, 0, -1):
-        tmax[i] = max(tmax[2 * i], tmax[2 * i + 1])
-        tmin[i] = min(tmin[2 * i], tmin[2 * i + 1])
-
-    def span_ext(k0, k1, top):
-        """std[k0:k1+1] 的最高 h（top）/ 最低 l。切片语义照旧：k1 越界就截到末尾，空区间照旧报 ValueError。"""
-        k1 = min(k1, n_std - 1)
-        if k0 < 0 or k0 > k1:
-            raise ValueError("区间为空：[%d, %d]" % (k0, k1))
-        t, best = (tmax, float("-inf")) if top else (tmin, float("inf"))
-        pick = max if top else min
-        lo, hi = k0 + size, k1 + size + 1
-        while lo < hi:
-            if lo & 1:
-                best = pick(best, t[lo])
-                lo += 1
-            if hi & 1:
-                hi -= 1
-                best = pick(best, t[hi])
-            lo >>= 1
-            hi >>= 1
-        return best
+    rng = RangeExt(std)
 
     def extreme(f, k0, k1):                  # f 是不是标准化序列 [k0, k1] 上的最高（顶）/ 最低（底）
-        return f["price"] >= span_ext(k0, k1, True) if f["type"] == "top" \
-            else f["price"] <= span_ext(k0, k1, False)
+        return f["price"] >= rng.ext(k0, k1, True) if f["type"] == "top" \
+            else f["price"] <= rng.ext(k0, k1, False)
 
     seq, pend = [], None
     fx_by_k = [None] * len(std)
