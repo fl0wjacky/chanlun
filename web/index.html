@@ -63,16 +63,18 @@
   <!-- 往左拖要更早 K 线时的话（加载中 / 已到最早）。挂在图上、不塞顶栏：用户在图左边做动作，话就说在他眼睛在的地方 -->
   <div id="more" class="more" role="status" aria-live="polite"></div>
   <aside id="panel" class="panel" aria-label="图层开关"></aside>
+  <!-- 手机上的「图例 / 数据 / 约定」收起开关（卡 card-b9792318-91d，小栋 2026-10-04 定 ②B）。
+       桌面**不显示这一颗**（style.css 里 display:none，那两条 CSS 只在窄屏那一档里认 body.m-fold）。
+       ★ 2026-10-04 挪进 main（卡 card-c7f19e45-022）：原先它排在 main 后面，是 body 的一格，
+         **自己占一整行 29.5px** —— 那一行是从图上抠的（844 的屏，图那栏只有 660）。挪进来挂在
+         main 里、窄屏那一档把它**钉在图层条右端**（不是插进 13 颗 chip 里跟着横滑），
+         图那栏就把这 29.5px 拿回来了；徽标一个字没动。
+       为什么是"收起"而不是"挪走"：图例（学一次）和约定（读一次）是**参考**，元信息是**诊断** ——
+       三者都不是看盘时要盯的东西，但也不能删（小栋 05:00Z 的原话是「默认收起，点一下展开」）。 -->
+  <button id="fold" class="fold" type="button" aria-expanded="false">
+    <span id="fold-tx">图例 · 数据 · 约定</span><span class="chev" aria-hidden="true">▾</span>
+  </button>
 </main>
-
-<!-- 手机上的「图例 / 数据 / 约定」收起开关（卡 card-b9792318-91d，小栋 2026-10-04 定 ②B）。
-     桌面**不显示这一颗**（style.css 里 display:none，那两条 CSS 只在窄屏那一档里认 body.m-fold）。
-     排在 main 后面、图例前面：展开时那两块**就在开关下面**长出来，顺序跟读的顺序一样。
-     为什么是"收起"而不是"挪走"：图例（学一次）和约定（读一次）是**参考**，元信息是**诊断** ——
-     三者都不是看盘时要盯的东西，但也不能删（小栋 05:00Z 的原话是「默认收起，点一下展开」）。 -->
-<button id="fold" class="fold" type="button" aria-expanded="false">
-  <span id="fold-tx">图例 · 数据 · 约定</span><span class="chev" aria-hidden="true">▾</span>
-</button>
 
 <div id="legend" class="legend" aria-label="图例"></div>
 
