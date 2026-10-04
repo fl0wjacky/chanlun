@@ -1,0 +1,1277 @@
+{
+ "upstream": "https://github.com/chan2zen/rust-chan",
+ "commit": "1d1cc067be6b636df8c78f89e71fe91ad7a3e220",
+ "file": "src/tests/forest_tests.rs",
+ "file_sha256": "a33a10409a57c53c2175de62e50c987cddde09f29ec954198780d540e19751da",
+ "skipped_upstream": [
+  "go_reverse_nostandard_fenxing"
+ ],
+ "cases": [
+  {
+   "name": "go_none",
+   "poles": [
+    1.0,
+    3.0,
+    2.0
+   ],
+   "upstream_state": "None",
+   "upstream_segmented": [],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_none_2",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    2.5
+   ],
+   "upstream_state": "None",
+   "upstream_segmented": [],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_0",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0
+   ],
+   "upstream_state": "S0",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_0_1",
+   "poles": [
+    6.0,
+    1.0,
+    3.0,
+    2.0,
+    5.0
+   ],
+   "upstream_state": "S0",
+   "upstream_segmented": [
+    1,
+    4
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_0_2",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    2.8,
+    2.5,
+    5.0
+   ],
+   "upstream_state": "S0",
+   "upstream_segmented": [
+    2,
+    5
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_1",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0
+   ],
+   "upstream_state": "S1",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_2",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    2.5
+   ],
+   "upstream_state": "S2",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_11",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    6.0
+   ],
+   "upstream_state": "S0",
+   "upstream_segmented": [
+    0,
+    5
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_12",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5
+   ],
+   "upstream_state": "S12",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_21",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    2.5,
+    6.0
+   ],
+   "upstream_state": "S0",
+   "upstream_segmented": [
+    0,
+    5
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_22",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    2.5,
+    4.5
+   ],
+   "upstream_state": "S22",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_121",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    4.2
+   ],
+   "upstream_state": "S1",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_122",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.5
+   ],
+   "upstream_state": "S122",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_123",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    2.5
+   ],
+   "upstream_state": "S123",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_124",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    0.5
+   ],
+   "upstream_state": "S0",
+   "upstream_segmented": [
+    0,
+    3,
+    6
+   ],
+   "rust_confirmed": [
+    0,
+    3
+   ],
+   "ours_confirmed": [],
+   "verdict": "caliber",
+   "kind": "backward",
+   "why": "上游 Forest::backward() 以「反向跌破段起点」终结线段；原文里跌破起点是延续、不是终结",
+   "cite": [
+    "L067:31-33 第二种情况：须从顶分型高点开始的反向序列出现底分型，才在该高点结束",
+    "L071:26-28 先破第一笔的开始位置 ⇒ 旧线段只被一笔破坏、依然延续",
+    "L078:39-41 没形成第二特征序列的分型又直接新高或新低 ⇒ A、B、C 加起来只算一个线段"
+   ]
+  },
+  {
+   "name": "go_221",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    2.5,
+    4.5,
+    4.2
+   ],
+   "upstream_state": "S1",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_222",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    2.5,
+    4.5,
+    2.8
+   ],
+   "upstream_state": "S2",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_223",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    2.5,
+    4.5,
+    2.2
+   ],
+   "upstream_state": "S0",
+   "upstream_segmented": [
+    0,
+    3,
+    6
+   ],
+   "rust_confirmed": [
+    0,
+    3
+   ],
+   "ours_confirmed": [
+    0,
+    3
+   ],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_1221",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.5,
+    3.8
+   ],
+   "upstream_state": "S1221",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_1222",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.8,
+    4.2
+   ],
+   "upstream_state": "S1222",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_1223",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.5,
+    4.6
+   ],
+   "upstream_state": "S12",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_1224",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.5,
+    6.0
+   ],
+   "upstream_state": "S0",
+   "upstream_segmented": [
+    0,
+    7
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_1231",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    2.5,
+    3.8
+   ],
+   "upstream_state": "S1231",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_1232",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    2.5,
+    4.2
+   ],
+   "upstream_state": "S1232",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_1233",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    2.5,
+    4.8
+   ],
+   "upstream_state": "S22",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_1234",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    2.5,
+    6.0
+   ],
+   "upstream_state": "S0",
+   "upstream_segmented": [
+    0,
+    7
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_12211",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.5,
+    3.8,
+    3.6
+   ],
+   "upstream_state": "S12211",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_12212",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.5,
+    3.8,
+    3.4
+   ],
+   "upstream_state": "S122",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_12213",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.5,
+    3.8,
+    2.9
+   ],
+   "upstream_state": "S123",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_12214",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.5,
+    3.8,
+    0.9
+   ],
+   "upstream_state": "S0",
+   "upstream_segmented": [
+    0,
+    3,
+    8
+   ],
+   "rust_confirmed": [
+    0,
+    3
+   ],
+   "ours_confirmed": [],
+   "verdict": "caliber",
+   "kind": "backward",
+   "why": "上游 Forest::backward() 以「反向跌破段起点」终结线段；原文里跌破起点是延续、不是终结",
+   "cite": [
+    "L067:31-33 第二种情况：须从顶分型高点开始的反向序列出现底分型，才在该高点结束",
+    "L071:26-28 先破第一笔的开始位置 ⇒ 旧线段只被一笔破坏、依然延续",
+    "L078:39-41 没形成第二特征序列的分型又直接新高或新低 ⇒ A、B、C 加起来只算一个线段"
+   ]
+  },
+  {
+   "name": "go_12221",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.8,
+    4.2,
+    3.9
+   ],
+   "upstream_state": "S12221",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_12222",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.8,
+    4.2,
+    3.2
+   ],
+   "upstream_state": "S122",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_12223",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.8,
+    4.2,
+    2.9
+   ],
+   "upstream_state": "S123",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_12224",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.8,
+    4.2,
+    0.9
+   ],
+   "upstream_state": "S0",
+   "upstream_segmented": [
+    0,
+    3,
+    8
+   ],
+   "rust_confirmed": [
+    0,
+    3
+   ],
+   "ours_confirmed": [],
+   "verdict": "caliber",
+   "kind": "backward",
+   "why": "上游 Forest::backward() 以「反向跌破段起点」终结线段；原文里跌破起点是延续、不是终结",
+   "cite": [
+    "L067:31-33 第二种情况：须从顶分型高点开始的反向序列出现底分型，才在该高点结束",
+    "L071:26-28 先破第一笔的开始位置 ⇒ 旧线段只被一笔破坏、依然延续",
+    "L078:39-41 没形成第二特征序列的分型又直接新高或新低 ⇒ A、B、C 加起来只算一个线段"
+   ]
+  },
+  {
+   "name": "go_12311",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    2.5,
+    3.8,
+    1.8
+   ],
+   "upstream_state": "S0",
+   "upstream_segmented": [
+    0,
+    3,
+    8
+   ],
+   "rust_confirmed": [
+    0,
+    3
+   ],
+   "ours_confirmed": [],
+   "verdict": "caliber",
+   "kind": "unconverged",
+   "why": "上游在反向序列还没走出底分型（未收敛 / 直接新高）时就切段；原文要线段破坏、要分型",
+   "cite": [
+    "L067:31-33 第二种情况：须从顶分型高点开始的反向序列出现底分型，才在该高点结束",
+    "L078:39-41 没形成第二特征序列的分型又直接新高或新低 ⇒ A、B、C 加起来只算一个线段",
+    "L077:71-74 线段必须被线段所破坏才能确定其完成"
+   ]
+  },
+  {
+   "name": "go_12312",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    2.5,
+    3.8,
+    3.2
+   ],
+   "upstream_state": "S12312",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_12321",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    2.5,
+    4.2,
+    2.0
+   ],
+   "upstream_state": "S0",
+   "upstream_segmented": [
+    0,
+    3,
+    8
+   ],
+   "rust_confirmed": [
+    0,
+    3
+   ],
+   "ours_confirmed": [],
+   "verdict": "caliber",
+   "kind": "unconverged",
+   "why": "上游在反向序列还没走出底分型（未收敛 / 直接新高）时就切段；原文要线段破坏、要分型",
+   "cite": [
+    "L067:31-33 第二种情况：须从顶分型高点开始的反向序列出现底分型，才在该高点结束",
+    "L078:39-41 没形成第二特征序列的分型又直接新高或新低 ⇒ A、B、C 加起来只算一个线段",
+    "L077:71-74 线段必须被线段所破坏才能确定其完成"
+   ]
+  },
+  {
+   "name": "go_12322",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    2.5,
+    4.2,
+    3.5
+   ],
+   "upstream_state": "S12322",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_122111",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.5,
+    3.8,
+    3.6,
+    3.7
+   ],
+   "upstream_state": "S1221",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_122112",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.5,
+    3.8,
+    3.6,
+    3.9
+   ],
+   "upstream_state": "S122",
+   "upstream_segmented": [
+    0,
+    3,
+    6
+   ],
+   "rust_confirmed": [
+    0,
+    3
+   ],
+   "ours_confirmed": [
+    0,
+    3
+   ],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_122113",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.5,
+    3.8,
+    3.6,
+    4.3
+   ],
+   "upstream_state": "S123",
+   "upstream_segmented": [
+    0,
+    3,
+    6
+   ],
+   "rust_confirmed": [
+    0,
+    3
+   ],
+   "ours_confirmed": [
+    0,
+    3
+   ],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_122114",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.5,
+    3.8,
+    3.6,
+    6.0
+   ],
+   "upstream_state": "S0",
+   "upstream_segmented": [
+    0,
+    3,
+    6,
+    9
+   ],
+   "rust_confirmed": [
+    0,
+    3,
+    6
+   ],
+   "ours_confirmed": [],
+   "verdict": "caliber",
+   "kind": "unconverged",
+   "why": "上游在反向序列还没走出底分型（未收敛 / 直接新高）时就切段；原文要线段破坏、要分型",
+   "cite": [
+    "L067:31-33 第二种情况：须从顶分型高点开始的反向序列出现底分型，才在该高点结束",
+    "L078:39-41 没形成第二特征序列的分型又直接新高或新低 ⇒ A、B、C 加起来只算一个线段",
+    "L077:71-74 线段必须被线段所破坏才能确定其完成"
+   ]
+  },
+  {
+   "name": "go_122211",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.8,
+    4.2,
+    3.9,
+    3.95
+   ],
+   "upstream_state": "S1221",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_122212",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.8,
+    4.2,
+    3.9,
+    4.1
+   ],
+   "upstream_state": "S1222",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_122213",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    3.8,
+    4.2,
+    3.9,
+    4.6
+   ],
+   "upstream_state": "S0",
+   "upstream_segmented": [
+    0,
+    3,
+    6,
+    9
+   ],
+   "rust_confirmed": [
+    0,
+    3,
+    6
+   ],
+   "ours_confirmed": [
+    0,
+    3,
+    6
+   ],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_123121",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    2.5,
+    3.8,
+    3.2,
+    3.6
+   ],
+   "upstream_state": "S1231",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_123122",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    2.5,
+    3.8,
+    3.2,
+    3.9
+   ],
+   "upstream_state": "S122",
+   "upstream_segmented": [
+    0,
+    3,
+    6
+   ],
+   "rust_confirmed": [
+    0,
+    3
+   ],
+   "ours_confirmed": [
+    0,
+    3
+   ],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_123123",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    2.5,
+    3.8,
+    3.2,
+    4.8
+   ],
+   "upstream_state": "S123",
+   "upstream_segmented": [
+    0,
+    3,
+    6
+   ],
+   "rust_confirmed": [
+    0,
+    3
+   ],
+   "ours_confirmed": [
+    0,
+    3
+   ],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_123124",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    2.5,
+    3.8,
+    3.2,
+    6.0
+   ],
+   "upstream_state": "S0",
+   "upstream_segmented": [
+    0,
+    3,
+    6,
+    9
+   ],
+   "rust_confirmed": [
+    0,
+    3,
+    6
+   ],
+   "ours_confirmed": [],
+   "verdict": "caliber",
+   "kind": "unconverged",
+   "why": "上游在反向序列还没走出底分型（未收敛 / 直接新高）时就切段；原文要线段破坏、要分型",
+   "cite": [
+    "L067:31-33 第二种情况：须从顶分型高点开始的反向序列出现底分型，才在该高点结束",
+    "L078:39-41 没形成第二特征序列的分型又直接新高或新低 ⇒ A、B、C 加起来只算一个线段",
+    "L077:71-74 线段必须被线段所破坏才能确定其完成"
+   ]
+  },
+  {
+   "name": "go_123221",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    2.5,
+    4.2,
+    3.5,
+    3.8
+   ],
+   "upstream_state": "S1231",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_123222",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    2.5,
+    4.2,
+    3.5,
+    4.1
+   ],
+   "upstream_state": "S1232",
+   "upstream_segmented": [
+    0,
+    3
+   ],
+   "rust_confirmed": [],
+   "ours_confirmed": [],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_123223",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    4.5,
+    2.5,
+    4.2,
+    3.5,
+    4.6
+   ],
+   "upstream_state": "S0",
+   "upstream_segmented": [
+    0,
+    3,
+    6,
+    9
+   ],
+   "rust_confirmed": [
+    0,
+    3,
+    6
+   ],
+   "ours_confirmed": [
+    0,
+    3,
+    6
+   ],
+   "verdict": "identical"
+  },
+  {
+   "name": "go_origin_sample",
+   "poles": [
+    1.0,
+    3.0,
+    2.0,
+    5.0,
+    4.0,
+    6.0,
+    4.5,
+    5.5,
+    3.2,
+    4.8,
+    1.5,
+    6.2,
+    1.2,
+    3.5,
+    0.5,
+    1.3,
+    0.8,
+    5.6,
+    3.0,
+    7.0
+   ],
+   "upstream_state": "S0",
+   "upstream_segmented": [
+    0,
+    5,
+    14,
+    19
+   ],
+   "rust_confirmed": [
+    0,
+    5,
+    14
+   ],
+   "ours_confirmed": [
+    0,
+    5,
+    14
+   ],
+   "verdict": "identical"
+  }
+ ]
+}

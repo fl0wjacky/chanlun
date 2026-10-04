@@ -122,6 +122,24 @@ for tag, r in R.items():
         "　← " + "、".join("%s @%d r=%.3f" % (x["kind"], x["bar"], x["r"]) for x in _off) if _off else ""))
     count("线段中枢不变量违规", len(check_centers(r["seg_centers"], [s for s in S if not s.get("live")])))
 
+# ---- rust-chan 53 例（小栋 10-03 定 ③A）：上游线段划分例子逐个对，口径不同的必须带原文出处 ----
+import rustchan_cases                                            # noqa: E402  （tools/ 已在 sys.path）
+from core.segment import build_segments as _bs                   # noqa: E402
+print("=" * 72)
+_rc = rustchan_cases.load()["cases"]
+print("[rust-chan 53 例] 逐位相同 %d · 口径不同（有原文出处）%d"
+      % (sum(c["verdict"] == "identical" for c in _rc), sum(c["verdict"] == "caliber" for c in _rc)))
+_rcb = rustchan_cases.check(_bs)
+count("rust-chan 例子对不上", len(_rcb), ("　← " + " ｜ ".join(_rcb[:3])) if _rcb else "")
+# 探针：两条必须红 —— ① 引擎把没走完的段也当已确认（live 全抹掉）；② 把一个「口径不同」的例子改标成「逐位相同」
+_rp1 = rustchan_cases.check(lambda pens: [dict(x, live=False) for x in _bs(pens)])
+_rc2 = [dict(c) for c in _rc]
+_k = next(i for i, c in enumerate(_rc2) if c["verdict"] == "caliber")
+_rc2[_k]["verdict"] = "identical"
+_rp2 = rustchan_cases.check(_bs, _rc2)
+count("rust-chan 探针（live 抹掉）没红", 0 if _rp1 else 1, "　｜ 抓到 %d 处" % len(_rp1))
+count("rust-chan 探针（口径改标相同）没红", 0 if _rp2 else 1, "　｜ 抓到 %d 处" % len(_rp2))
+
 # ---- 变异测试：校验器必须能抓住故意做错的输入 ----
 print("=" * 72)
 print("[变异测试] 校验器对故意做错的输入必须报错")
