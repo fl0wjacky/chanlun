@@ -20,6 +20,8 @@
 //   ④ **不虚胖**：轴跨 ≤ 2.5 × 窗口里数据的跨（防「拿了整份范围」）。
 //   ⑤ **缩放跟着缩**：把可见窗口收到最近 200 根 ⇒ 轴跨要明显变小，且在新窗口上照样罩得住。
 //   ⑥ 没误伤：主图那一格**仍然是对数**（mode=1）。
+//   ⑦ **重建也管用**：点一次「MACD」那颗 chip（关 ⇒ 窗格收回去；开 ⇒ 重新建格、重新要数据），
+//      回来之后 ①②③④ 必须照样绿 —— 修法长在 `buildSub()` 里，这条防的是「只在第一次打开生效」。
 //   ⇒ 轴上刻度是从这根比例尺生成的，所以「轴的范围」就是「刻度的范围」：
 //      ① 红＝刻度不是正经刻度，② 红＝刻度对不上数据的最大最小（Atlas 的原话）。
 //
@@ -28,6 +30,11 @@
 //   2) NODE_PATH=<playwright 的 node_modules> node tools/web_macd_axis.js [页面地址] [--mut=nofix|freeze]
 //   不给 --mut ⇒ 只跑原样。--mut=nofix 摘掉那行修（＝复现外测那张图）；
 //   --mut=freeze 换成「轴钉死在全量范围上」（＝Bram 猜的那条，用来证明 ⑤ 有牙）。
+//
+// ★ ⑦ **没有自己的变异**（不是忘了写）：试过「修法只在第一次建格时生效」，它照样绿 —— 关掉再打开时
+//   LWC **复用** pane 1 那根 right 轴，mode 留在 Normal 上（拆了重建丢不掉）。所以 ⑦ 是**记录性**的一格：
+//   它证明「关掉再打开 ⇒ 窗格回来、数据回来、轴还是对的」这条路径没坏，不是一条独立判据
+//   （它只在 nofix 那种全局坏掉时跟着红）。假牙齿留着比没有更坏，所以那条变异删了。
 //   退出码：0＝全绿；1＝有格红（把红的那条印出来）；2＝环境没搭好。
 const path = require('path');
 let chromium;
@@ -112,6 +119,7 @@ async function judge(page, tag) {
   const ctx = await b.newContext({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: 2 });
   const c = await ctx.newPage();
   const site = SITES[MUT];
+  if (MUT !== 'none' && !site) { console.error(`✗ 没有这个变异：${MUT}（有 none/${Object.keys(SITES).join('/')}）`); process.exit(2); }
   if (site) {
     await c.route('**/app.js*', async (route) => {
       const r = await route.fetch();
@@ -141,6 +149,27 @@ async function judge(page, tag) {
   const shrunk = after.轴跨 < before.轴跨 * 0.9;
   ok('⑤ 缩放跟着缩', `收到最近 ${ZOOM_N} 根后轴跨明显变小（<0.9×）`, shrunk,
      `${before.轴跨} → ${after.轴跨}（窗口数据跨 ${before.窗口.跨} → ${after.窗口.跨}）`);
+
+  // ⑦ 重建：点一次 MACD 那颗 chip（真用户路径：关掉 ⇒ 窗格收回去；打开 ⇒ 重新建格、重新要数据）
+  const clickChip = () => c.evaluate(() => {
+    const b = document.querySelector('button.chip[data-key="macd"]');
+    if (!b) return false; b.click(); return true;
+  });
+  if (!(await clickChip())) { ok('⑦ 重建', '关掉再打开 MACD ⇒ 窗格照旧是对的', false, '找不到 MACD 那颗 chip'); }
+  else {
+    await sleep(1200);
+    await clickChip();
+    let back = false, data = false;
+    try {
+      await c.waitForFunction(() => !!(window.__app.sub.series && window.__app.chart.panes().length > 1), null, { timeout: 20000 });
+      back = true;
+      await c.waitForFunction(() => !!(window.__app.sub.series && window.__app.sub.series.hist.data().length > 100), null, { timeout: 20000 });
+      data = true;
+    } catch (e) { /* back/data 保持 false，下面按实情报 */ }
+    ok('⑦ 重建', '关掉再打开 MACD ⇒ 窗格回来、数据回来', back && data,
+       back ? (data ? '窗格与数据都回来了' : '窗格回来了，20s 内没等到数据') : '20s 内窗格没回来');
+    if (back && data) { await sleep(800); await judge(c, '重建后'); }
+  }
 
   const red = CELLS.filter((x) => !x.pass);
   for (const x of CELLS) console.log(`${x.pass ? '✓' : '✗'} ${x.id} ${x.name} —— ${x.detail}`);
