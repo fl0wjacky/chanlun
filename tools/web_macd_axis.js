@@ -20,6 +20,28 @@
 //   ④ **不虚胖**：轴跨 ≤ 2.5 × 窗口里数据的跨（防「拿了整份范围」）。
 //   ⑤ **缩放跟着缩**：把可见窗口收到最近 200 根 ⇒ 轴跨要明显变小，且在新窗口上照样罩得住。
 //   ⑥ 没误伤：主图那一格**仍然是对数**（mode=1）。
+//   ⑧ **像素上的形状**（Nova 加的那条）：在**画出来的像素**上量三根柱子的高度，高度比要跟数据比一致
+//      （±1.5px），而且符号对（正的在零线上边、负的在下边）。① 量的是比例尺、⑧ 量的是比例尺**画出来的结果**
+//      —— 光有 ① 的话，「比例尺对了但柱子按别的比例画」这种还是能溜过去。
+//   ★ ⑧ **只在缩放之后再量**（Atlas 2026-10-04 复核 d481554 时抓到的：首屏 1280px 宽、整份数据铺满
+//     ⇒ barSpacing 0.5px，**一个像素列里挤着两根柱子**，`timeToCoordinate` 给的那一列量到的可能是邻居；
+//     修后代码没变异的干净树上，1h 红了 3 格、15m 红 1 格 —— 是量具的错，不是页面的错）。
+//     现在它自己挑一屏**柱距 ≥ 2px** 的窗口（挑「够大 × 拉得开」得分最高的那一段：比值拉不开这格没牙、
+//     柱子太小量出来是噪声），量完把**原来的可见区间放回去**（后面 ⑤ 的 before/after 与那张截图都不受影响），
+//     并且**跳过页头那块浮层（#subhead）盖住的柱尖**（它压在副图上沿，柱子最尖那几个像素是被它画掉的）。
+//     判据一个字没动，动的只是「在哪一屏、量哪一根」。
+//   ★ ⑧ 的**诚实记录**（都是量具自己的账，不是页面的）：
+//     1. 页头那条闸**第一版是死的**：对象里写 `bot:`、判据里念 `band.bottom` ⇒ 那个键不存在 ⇒
+//        `108 <= undefined + 2` 恒 false ⇒「盖住」永远是 0。手工把带子撑大（x 拉到全宽、y 拉高 120px）
+//        才当场逮到 —— 跟 readout 那次 ⑯ 的死条件同一个形状：**量不出来的闸，看着绿其实是没跑**。
+//     2. 修好之后，这三次跑（4h/1h/15m）「盖住」仍然是 0：真页头那块只占 y 6～27、x 10～338（贴左上角），
+//        而三根候选柱子的柱尖落在 y 53～156、x 460 往上 —— 够不到它。**这条闸是防着的，不是量出来的**
+//        （柱子够不到最上面那 10%：副图那格的轴是 DIF/DEA/hist 一起撑的，DIF 通常比柱子大）。
+//     3. 轴被钉死在全量范围上时（--mut=freeze），柱子会缩到 3～5px ⇒ 三根凑不齐 / 比例拉不开 ⇒
+//        ⑧ 报**量不出来**（名字里就写着「不是画错了」），不是形状的判决：那种情况下形状其实还是对的，
+//        该红的是 ⑤/④。这一支只在变异跑里出现，干净树上不会。
+//     4. 第一屏量不出来时（凑不齐三根／拉不开）会自动换「柱子最大的那一屏」再试一次，两次都量不出来
+//        才认「量不出来」；用的哪一屏、两次各量到几根、各多高，都印在那一行里。
 //   ⑦ **重建也管用**：点一次「MACD」那颗 chip（关 ⇒ 窗格收回去；开 ⇒ 重新建格、重新要数据），
 //      回来之后 ①②③④ 必须照样绿 —— 修法长在 `buildSub()` 里，这条防的是「只在第一次打开生效」。
 //   ⇒ 轴上刻度是从这根比例尺生成的，所以「轴的范围」就是「刻度的范围」：
@@ -101,6 +123,180 @@ async function readAxis(page) {
   }, ZOOM_N);
 }
 
+// ⑧ 拿**像素**量柱子。三步：① 自己挑一屏（柱距够开、幅度比够宽）→ ② 缩放过去量 → ③ 把可见区间放回去。
+// ★ 为什么非要在缩放之后量：首屏 barSpacing 0.5px ＝ 一列里两根柱子，「这一列的柱尖」可能是邻居那根。
+//   量柱子这件事**只在这一屏分得开的时候才有意义** —— 分不开不是页面的毛病，是这一屏不适合量。
+const PX_N_PER_3PX = 3;             // 一屏放多少根，按「每根 3px」算（1280px 宽 ⇒ ≈ 420 根）
+const PX_SEP = 2;                   // 两根柱子至少要隔这么多像素才敢说「量到的是它自己」
+
+async function readPixels(page) {
+  // ① 挑窗口，挑**两屏**备着：
+  //   `spread`＝「够大 × 拉得开」得分最高的那一段（⑧ 要比两个量级的高度：拉不开 ⇒ 这格自己没牙；
+  //   柱子太小 ⇒ 量出来的是噪声）；
+  //   `big`＝整份数据里柱子最大的那一段（万一第一屏量不出来 —— 比如轴被钉死在全量范围上、
+  //   柱子缩成三个像素 —— 退到这一屏再试一次。两个都量不出来才认「量不出来」）。
+  //   窗口从**整份数据**里挑，跟当前显示在哪一段无关。
+  const plan = await page.evaluate(({ per3 }) => {
+    const A = window.__app, S = A.sub.series, pane = A.chart.panes()[1].getHTMLElement();
+    const d = S.hist.data();
+    const W = pane.getBoundingClientRect().width;
+    const N = Math.max(40, Math.min(d.length, Math.floor(W / per3)));
+    const r2 = (v) => Math.round(v * 100) / 100;
+    let 全局最大 = 0;
+    for (const q of d) { const v = Math.abs(q.value == null ? 0 : q.value); if (v > 全局最大) 全局最大 = v; }
+    let best = null, 最大的一屏 = null;
+    const step = Math.max(1, Math.floor(N / 4));
+    for (let i0 = 0; i0 + N <= d.length; i0 += step) {
+      let mx = 0, mn = Infinity;
+      for (let i = i0; i < i0 + N; i++) {
+        const v = Math.abs(d[i].value == null ? 0 : d[i].value);
+        if (v > mx) mx = v;
+        // 只认「过零那几根以外的」小柱子：macd 在 0 附近是浮点噪声（1e-14 这种），
+        //   拿它当分母 ⇒ 比变成 5e11，看着唬人、跟「这屏量不量得开」没关系
+        if (v > 0) { if (!(v > mx * 1e-3)) continue; if (v < mn) mn = v; }
+      }
+      // 两个因子都要：① 这屏的柱子**够大**（够大才量得准 —— 轴被钉死在全量范围上时，
+      //   小柱子会缩到 3px 那种，量出来的偏差是「量不准」不是「画错了」，别拿它当红）；
+      //   ② 这屏的幅度**拉得开**（拉不开就比不出高度比，这格自己没牙）。只取①会挑到「大而齐」的一屏。
+      const big = 全局最大 > 0 ? mx / 全局最大 : 0;
+      const score = mn === Infinity ? 0 : big * (mx / mn);
+      if (!best || score > best.score) best = { i0, score, mx, mn: mn === Infinity ? 0 : mn, big: r2(big) };
+      if (!最大的一屏 || mx > 最大的一屏.mx) 最大的一屏 = { i0, mx, mn: mn === Infinity ? 0 : mn, big: 1 };
+    }
+    if (!best) return null;
+    const vis = A.chart.timeScale().getVisibleLogicalRange();
+    const win = (b) => ({ from: b.i0 - 0.5, to: b.i0 + N - 0.5,
+                          极值: r2(b.mx), 最小: r2(b.mn), 大柱子占比: b.big, 得分: r2(b.score || 0) });
+    return { N, 原区间: { from: vis.from, to: vis.to }, windows: { spread: win(best), big: win(最大的一屏) } };
+  }, { per3: PX_N_PER_3PX }).catch(() => null);
+  if (!plan) return { picks: [], meta: { err: '挑不出窗口（hist 是空的？）' } };
+
+  // ② 量。挑三根：最大那根 ＋ 各**贴近 max/2、max/4** 的两根。
+  // ★ 不能按名次挑（1st/3rd/8th）：hist 的头几名挤在一起（833/810/716），比值接近 1，量不出东西 ——
+  //   第一版就是这么写的，绿不了不是数错，是**这一格自己没牙**。按目标量级挑，比值才拉得开（2×、4×）。
+  // 两根柱子隔得太近（< 2px）⇒ 这一列量的可能不是它 ⇒ 换下一根（这就是首屏那次红的病根）。
+  // 柱尖落在页头浮层盖住的那一段 ⇒ 换下一根（浮层把柱子最尖那几个像素画掉了，量出来的是被切过的柱）。
+  const measure = () => page.evaluate(({ SEP }) => {
+    const A = window.__app, S = A.sub.series, pane = A.chart.panes()[1].getHTMLElement();
+    const d = S.hist.data(); const ts = A.chart.timeScale();
+    const vis = ts.getVisibleLogicalRange();
+    const i0 = Math.max(0, Math.ceil(vis.from)), i1 = Math.min(d.length - 1, Math.floor(vis.to));
+    const win = d.slice(i0, i1 + 1);
+    if (win.length < 10) return { picks: [], meta: { err: `这一屏只有 ${win.length} 根` } };
+    const pr = pane.getBoundingClientRect();
+    const 柱距 = Math.abs(ts.timeToCoordinate(win[Math.min(1, win.length - 1)].time) - ts.timeToCoordinate(win[0].time));
+    // 页头那块浮层（压在副图上沿）：柱尖落进这个盒子就算被它画掉了
+    const sh = document.getElementById('subhead');
+    const on = sh && sh.classList.contains('on');
+    const shb = on ? sh.getBoundingClientRect() : null;
+    const band = shb ? { top: shb.top - pr.top, bot: shb.bottom - pr.top, left: shb.left - pr.left, right: shb.right - pr.left } : null;
+    const hex = (c) => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
+    // 判「这一像素算不算这根柱子」：**它是不是落在「柱子色 ↔ 背景色」这条线段上**（α 从 1 到 0）。
+    //   走过两条弯路，都写在下面（都是**量错**，不是画错）：
+    //   · 硬阈值（跟柱子色 ±6）⇒ 柱子顶端那几像素是跟背景**混**出来的，整条漏掉 ⇒ 矮柱子量矮 2.2px
+    //   · 「调色板里离谁最近」⇒ 白线那一列的抗锯齿**灰尾**（87,90,96）离柱子色比离背景还近 ⇒ 被算成柱子（25px vs 真值 11px）
+    //   灰尾不在那条线段上（它是「白线↔背景」那条线上的），落在线段外就判出去 —— 一句话把两种病一起治。
+    const bgPal = [16, 18, 24];
+    const onSegment = (px, q, bg) => {
+      let best = Infinity;
+      for (let a = 1; a >= 0.30; a -= 0.05) {
+        const r = Math.abs(px[0] - (a * q[0] + (1 - a) * bg[0]))
+                + Math.abs(px[1] - (a * q[1] + (1 - a) * bg[1]))
+                + Math.abs(px[2] - (a * q[2] + (1 - a) * bg[2]));
+        if (r < best) best = r;
+      }
+      return best <= 36;                 // 贴合那条线段（抗锯齿、以及跟网格线的轻微混合都容得下）
+    };
+    const canvases = [...pane.querySelectorAll('canvas')];
+    const 零线y = Math.round(S.dif.priceToCoordinate(0) * 10) / 10;
+    const ranked = win.slice().sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+    const mx = ranked[0];
+    // 按「离目标量级多近」排，逐个试到能用为止
+    const byNear = (base, f) => ranked.slice().sort((a, b) =>
+      Math.abs(Math.abs(a.value) - Math.abs(base.value) * f) - Math.abs(Math.abs(b.value) - Math.abs(base.value) * f));
+    const taken = []; const 跳过 = { 太挤: 0, 盖住: 0, 量不到: 0 };
+    // 三个目标量级是相对**第一根真量到的那根**算的，不是死对 mx：最大那根要是被页头盖住/太挤被跳过，
+    //   后面两根还按 mx 的 1/2、1/4 找，就会出现「第一根比第二根还小」—— 判据里的「拉得开」当场假红。
+    let base = null;
+    for (const f of [1, 0.5, 0.25]) {
+      let got = null;
+      for (const pt of byNear(base || mx, f)) {
+        if (got) break;
+        if (Math.abs(pt.value) === 0) { 跳过.量不到++; continue; }
+        const x = ts.timeToCoordinate(pt.time);
+        if (!isFinite(x)) { 跳过.量不到++; continue; }
+        if (taken.some((p) => Math.abs(p.x - x) < SEP)) { 跳过.太挤++; continue; }
+        const rgb = hex(pt.color || '#26a69a');
+        let best = { px: 0, top: null, bot: null };
+        for (const cv of canvases) {
+          const cr = cv.getBoundingClientRect();
+          if (!cv.width || !cr.width) continue;
+          const s = cv.width / cr.width;
+          const cx = Math.round((x + (cr.left - pr.left)) * s);      // 画布不在窗格左沿时也要对上（坐标平移量算进去）
+          if (cx < 0 || cx >= cv.width) continue;
+          const col = cv.getContext('2d').getImageData(cx, 0, 1, cv.height).data;
+          const ys = [];
+          for (let y = 0; y < cv.height; y++) {
+            const px = [col[y * 4], col[y * 4 + 1], col[y * 4 + 2]];
+            if (onSegment(px, rgb, bgPal)) ys.push(y / s);
+          }
+          // ★ 量的是**柱尖**，不是「数了多少像素」：黄白线画在柱子**上头**，穿过那一列时会把柱子**切断**，
+          //   断成几截之后「数像素」就少算了（矮柱子 5.2px 量成 3px）。柱尖是那一列上柱子色**最远**的那一个像素，
+          //   断不断都取得到；柱高 = 柱尖到零线的距离（hist 的 base 就是 0 —— 这也是 ③ 那一格在管的事）。
+          if (ys.length > best.px) best = { px: ys.length, top: Math.min(...ys), bot: Math.max(...ys) };
+        }
+        if (best.px === 0) { 跳过.量不到++; continue; }
+        // 正柱看顶、负柱看底 —— 那一个才是柱尖
+        const 柱尖 = Math.round((pt.value >= 0 ? best.top : best.bot) * 10) / 10;
+        // ★ 这里的字段名要跟上面那个对象**一模一样**（`bot`，不是 `bottom`）：第一版写成 `band.bottom`，
+        //   对象里没这个键 ⇒ `108 <= undefined + 2` ⇒ **恒 false** —— 这条闸一直是死的（量出来永远
+        //   「盖住 0」）。手工把带子撑大才逮到：跟 readout 那次 ⑯ 的死条件同一个形状。
+        if (band && x >= band.left - 2 && x <= band.right + 2 && 柱尖 >= band.top - 2 && 柱尖 <= band.bot + 2) {
+          跳过.盖住++; continue;                                     // 被页头那块浮层画掉了
+        }
+        got = { time: pt.time, value: pt.value, color: pt.color, x: Math.round(x * 10) / 10, 柱尖,
+                高: Math.round(Math.abs(零线y - 柱尖) * 10) / 10, 零线y };
+      }
+      if (got) { taken.push(got); if (!base) base = got; }
+    }
+    // 这格有没有牙，看的是**三根柱子的数据比**（判据要求 ≥2），不是整屏的极值比
+    const 牙 = taken.length === 3 ? Math.round(Math.abs(taken[0].value) / Math.abs(taken[2].value) * 100) / 100 : null;
+    return { picks: taken.map(({ x, ...q }) => q), meta: {
+      柱距: Math.round(柱距 * 100) / 100, 屏内根数: win.length, 零线y, 三根数据比: 牙,
+      跳过, 页头盖住的一段: band ? { y: [Math.round(band.top), Math.round(band.bot)], x: [Math.round(band.left), Math.round(band.right)] } : null } };
+  }, { SEP: PX_SEP });
+  // 「这一屏量得开吗」＝ 判据里那三件事（三根都有、像素起步够高、数据比够宽）。
+  // ★ 这是**量具的前提**，不是判据本身：判据一个字没动，动的是「在哪一屏上量」。
+  const 量得开 = (q) => q.picks.length === 3 && q.picks[0].高 >= 8 && q.picks[2].高 >= 5
+    && Math.abs(q.picks[0].value) / Math.abs(q.picks[1].value) >= 1.5
+    && Math.abs(q.picks[0].value) / Math.abs(q.picks[2].value) >= 2.0;
+
+  let m = null, 用的哪一屏 = null; const 试了 = [];
+  for (const which of ['spread', 'big']) {
+    const w = plan.windows[which];
+    if (!w) continue;
+    await page.evaluate((p) => window.__app.chart.timeScale().setVisibleLogicalRange({ from: p.from, to: p.to }), w);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    await sleep(300);
+    const got = await measure();
+    const readable = 量得开(got);
+    试了.push({ 屏: which, 根数: got.picks.length, 高: got.picks.map((q) => q.高), 量得开: readable });
+    if (!m || readable) { m = got; 用的哪一屏 = which; }
+    if (readable) break;
+  }
+
+  // ③ 放回去（⑤ 的 before/after 与那张截图都在原来的区间上）
+  await page.evaluate((o) => window.__app.chart.timeScale().setVisibleLogicalRange(o), plan.原区间);
+  await sleep(150);
+  const back = await page.evaluate((o) => {
+    const v = window.__app.chart.timeScale().getVisibleLogicalRange();
+    return { from: Math.round(v.from * 100) / 100, to: Math.round(v.to * 100) / 100, 一样: Math.abs(v.from - o.from) < 0.51 && Math.abs(v.to - o.to) < 0.51 };
+  }, plan.原区间);
+
+  return { picks: m.picks, meta: { ...m.meta, 用的哪一屏, 试了,
+           挑的窗口: [plan.windows[用的哪一屏].from, plan.windows[用的哪一屏].to], 还回去了: back } };
+}
+
 async function judge(page, tag) {
   const a = await readAxis(page);
   const span = a.轴跨, wspan = a.窗口.跨;
@@ -111,6 +307,38 @@ async function judge(page, tag) {
   ok(`${tag}③ 零线`, '0 在轴里', a.零线y >= 0 && a.零线y <= a.H, `0 的 y=${a.零线y}，格高 ${a.H}`);
   ok(`${tag}④ 不虚胖`, '轴跨 ≤ 2.5 × 窗口数据跨', span <= 2.5 * wspan, `轴跨 ${span} vs 数据跨 ${wspan}（${r2(span / wspan)}×）`);
   ok(`${tag}⑥ 没误伤`, '主图那一格仍是对数（mode=1）', a.modes[0] === 1, `两格 mode=${JSON.stringify(a.modes)}（[0]=主图，[1]=副图）`);
+  // ⑧ 像素：三根柱子的**画出来**的高度比 vs 数据比。
+  // ★ 只在标签非空时量 ＝ **缩放之后**才量（首屏 barSpacing 0.5px，一列两根柱子，量到的是邻居）。
+  //   它自己挑一屏、量完放回原区间 —— 所以这一次调用里 ⑤ 读到的 before/after 不受影响。
+  if (tag) {
+    const P = await readPixels(page);
+    const px = P.picks, meta = P.meta || {};
+    const 量具前提 = meta.柱距 >= PX_SEP * 0.9;          // 每根柱子得有自己的一列（首屏 0.5px 就是这么红的）
+    if (px.length < 3 || !量具前提) {
+      // ★ 这一支是**量不出来**（不是画错了）：柱距不够／凑不齐三根。写在名字里，别让复核的人把它读成形状的判决。
+      ok(`${tag}⑧ 像素形状`, '**量不出来**（柱距不够／凑不齐三根，不是画错了）；判据本身不降级', false,
+         (px.length < 3 ? `只量到 ${px.length} 根` : `柱距只有 ${meta.柱距}px（< ${PX_SEP}）—— 一列里挤着不止一根，量不准`)
+         + `；${JSON.stringify(meta)}`);
+    } else {
+      const k = px[0].高 / Math.abs(px[0].value);        // 拿最大那根定比例尺（px / 单位）
+      const 偏差 = px.map((q) => Math.round(Math.abs(q.高 - k * Math.abs(q.value)) * 10) / 10);
+      const 符号对 = px.every((q) => (q.value >= 0 ? q.柱尖 <= q.零线y + 2 : q.柱尖 >= q.零线y - 2));
+      const 比值 = px.map((q) => Math.round(q.高 / Math.abs(q.value) * 1e6) / 1e6);
+      // 「拉得开」按**数据**判（数据比 2× / 4× 才谈得上比高度比），像素上是 8px 起步才量得准
+      const d0 = Math.abs(px[0].value);
+      const 缩得开 = px[0].高 >= 8 && px[2].高 >= 5 && d0 / Math.abs(px[1].value) >= 1.5 && d0 / Math.abs(px[2].value) >= 2.0;
+      ok(`${tag}⑧ 像素形状`, '三根柱子的高度比＝数据比（±1.5px）、符号对、且比例拉得开',
+         量具前提 && 符号对 && 缩得开 && 偏差.every((x) => x <= 1.5),
+         (缩得开 ? '' : '★ 这一屏的柱子太小／拉不开 ⇒ **这一格量不出来**（不是画错了）；')
+         + (符号对 ? '' : '★ 符号错了（正柱跑到零线下边／负柱跑到上边）；')
+         + px.map((q, i) => `值 ${Math.round(q.value)}→柱尖 ${q.柱尖}（零线 ${q.零线y}，高 ${q.高}px，偏差 ${偏差[i]}px）`).join('；')
+         + `；px/单位 ${比值.join('/')}`
+         + `｜量在哪一屏：${meta.用的哪一屏}（试了 ${JSON.stringify(meta.试了)}）、柱距 ${meta.柱距}px、屏内 ${meta.屏内根数} 根、三根数据比 ${meta.三根数据比}`
+         + `｜跳过 太挤 ${meta.跳过.太挤}/盖住 ${meta.跳过.盖住}/量不到 ${meta.跳过.量不到}`
+         + `｜页头盖住 y=${JSON.stringify((meta.页头盖住的一段 || {}).y)}`
+         + `｜原区间还回去了：${meta.还回去了 && meta.还回去了.一样 ? '是' : `否（${JSON.stringify(meta.还回去了)}）`}`);
+    }
+  }
   return a;
 }
 
