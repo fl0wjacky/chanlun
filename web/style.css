@@ -252,7 +252,11 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
     flex-wrap: nowrap; overflow-x: auto; padding: 8px 10px;
     -webkit-overflow-scrolling: touch;
     /* 右边**留出收起开关那一格**（它钉在这一行的右端）：不留的话，条子滑到头时最后几颗
-       chip 正好停在开关底下 —— 看得见、点不到（开关是不透明的，会盖住它们）。 */
+       chip 正好停在开关底下 —— 看得见、点不到（开关是不透明的，会盖住它们）。
+       ★ 那个 `150px` 是**脚本跑起来之前的占位**（不是"开关有多宽"的说法）：真值由 app.js 的 reserveFold()
+         量开关自己写进 `--fold-w`（加载完、改字号、转屏各重量一次）。它比开关实宽大 ⇒ 兜个偏保守的数，
+         宁可我这边空一格，也不许 chip 在 JS 到位前那一瞬间停在开关底下。
+         Atlas 复核时记过一条：把 reserveFold() 摘掉全尺还是绿的 —— 就是这个兜底在顶（等价变异，不挡）。 */
     padding-right: calc(10px + var(--fold-w, 150px));
   }
   /* **收起**（body 上有 m-fold）的时候这一行就是屏幕最下面那一行 ⇒ 底下那条安全区（iPhone 的横条）
