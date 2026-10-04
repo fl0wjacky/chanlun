@@ -826,6 +826,8 @@ function applyToggles() {
     // 成交量那颗在**没有 v 的数据上**按灰（仓里的样本就是）：能点却画不出东西的开关是骗人的。
     b.disabled = sigChip ? !opts.sig : k === 'vol' ? !sub.hasVol : false;
   }
+  // 「关着的层不许有能点的开关」这条账，看法那组也算：买卖点一关，它就得跟着灰（或反过来亮回来）。
+  renderMeasures();
 }
 
 function buildChips() {
@@ -938,9 +940,20 @@ function buildMeasures() {
 }
 
 // 亮哪一颗**看回显**（paging.measure 是 adopt() 从响应里认来的），不看用户刚点的那一颗。
+// ★ 买卖点那层关着 ⇒ 这一组**置灰不可点**：这四颗只换买卖点的画法，层关着的时候换看法，
+//   屏幕上**什么都不会变** —— 点了没反应会被当成坏了（判据只有 opts.sig 一处，跟别的开关同一条账）。
+//   ★ 手机上没有 hover，所以「为什么是灰的」不能只写在 title 里，标题那行也得说。
 function renderMeasures() {
   const g = el('mgroup'); if (!g) return;
-  for (const b of g.querySelectorAll('.mchip')) b.setAttribute('aria-checked', b.dataset.measure === paging.measure ? 'true' : 'false');
+  const on = !!opts.sig;
+  for (const b of g.querySelectorAll('.mchip')) {
+    b.setAttribute('aria-checked', b.dataset.measure === paging.measure ? 'true' : 'false');
+    b.disabled = !on;
+  }
+  const cap = g.querySelector('.mcap');
+  if (cap) cap.textContent = on ? '背驰看法' : '背驰看法 · 买卖点那层关着';
+  if (on) g.removeAttribute('title');
+  else g.title = '买卖点那一层关着 —— 这四颗只换买卖点的画法，先把它打开';
 }
 
 async function setMeasure(id) {
