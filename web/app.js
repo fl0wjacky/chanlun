@@ -351,6 +351,11 @@ function paint(d) {
   state.data = d;
   // 手上换了**另一份**数据（换档/换品种/换看法）⇒ 读数收起：十字线没动，但它底下那一根已经不是
   // 刚才那一根了，留着就是一行**过期的数**（光标一动它自己会回来）。手机上抬着手看的时候尤其要收。
+  // ★★ 2026-10-04 实测（tools/web_readout_swap_probe.js）：**光这一句在这个位置量不出来** ——
+  //   LWC 在 setData 之后会自己重发一次十字线，读数当场就用**新那份**重读了（换完之后原样／摘掉这句
+  //   逐条读数一模一样）。真正盖住「换的那一刻」的是 go() 里那一句：数据还在飞的整段时间里，
+  //   屏幕上还是旧图、读数写的却是上一份的数 —— 那一段就在这里之前，这一句够不到。
+  //   留着是给**不走 go()** 的那些入口当保险（往前补数据 / 以后新加的换法）。
   hideRead();
   const bars = d.bars.map((b) => ({ time: b.t / 1000, open: b.o, high: b.h, low: b.l, close: b.c }));
   candle.applyOptions({ priceFormat: priceFormat(d.meta?.tick) });
@@ -1163,6 +1168,11 @@ async function go(span = 1) {
   setUrl();
   const id = paging.reqId;                            // 连点两次品种：先发的那份回来时已经不是它了，别画
   paging.loading = true;        // 这一份还在飞（换品种时旧图还挂在屏上）⇒ 别在这中间再插一个「更早」的请求
+  // ★ 读数在**换的这一刻**就收，不等新数据回来。数据没到的这整段时间里屏上还是旧图，十字线也没动，
+  //   但读数要是留着，写的就是**上一份数据的数**（屏上那份图跟它已经不是一回事了）。
+  //   放这儿而不是 paint() 里：paint() 跑在新数据到了之后，**那一段它够不到**（实测见 paint() 那段注释）。
+  //   收掉不会让它回不来：新数据画上之后 LWC 会重发一次十字线，读数自己就用新那份回来了（工装 ⑮⑯ 量着）。
+  hideRead();
   el('state').textContent = '取数…'; el('state').className = 'badge';
   try {
     const d = await load(symbol, tf, paging.span, paging.measure);
