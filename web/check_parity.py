@@ -14,6 +14,7 @@ tuple 当 list 比、浮点逐位相等，big 的 members 按 PI0 列表比。
 """
 import contextlib
 import glob
+import time
 import gzip
 import json
 import os
@@ -25,6 +26,7 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), "tools"))
 
 import server                                           # noqa: E402
 import make_web_fixture as mwf                          # noqa: E402  （server 已把 tools/ 放上 sys.path）
@@ -81,11 +83,12 @@ def flat(got):
 @contextlib.contextmanager
 def running(bars_by_key):
     """起一个临时服务；fetch 换成查表（只认白名单里的 key），DAYS 放大到不截任何一根。"""
-    saved = (server.fetch, server.DAYS)
+    saved = (server.fetch, server.DAYS, server.start_prefetch)
     server.fetch = lambda s, t, a, b: list(bars_by_key[(s, t)])
     server.DAYS = 100000
+    server.start_prefetch = lambda *a: None             # 对账只看被请求的那一档
     for slot in server.SLOTS.values():
-        slot.__init__()
+        slot.reset()
     srv = server.make_server(0)
     th = threading.Thread(target=srv.serve_forever, daemon=True)
     th.start()
@@ -94,11 +97,12 @@ def running(bars_by_key):
     finally:
         srv.shutdown()
         srv.server_close()
-        server.fetch, server.DAYS = saved
+        server.fetch, server.DAYS, server.start_prefetch = saved
 
 
-def get(port, symbol, tf):
-    req = urllib.request.Request("http://127.0.0.1:%d/api/chart?symbol=%s&tf=%s" % (port, symbol, tf),
+def get(port, symbol, tf, span=None):
+    req = urllib.request.Request("http://127.0.0.1:%d/api/chart?symbol=%s&tf=%s%s"
+                                 % (port, symbol, tf, "&span=%d" % span if span else ""),
                                  headers={"Accept-Encoding": "gzip"})
     with urllib.request.urlopen(req, timeout=60) as r:
         body = r.read()
@@ -164,6 +168,70 @@ def run(quiet=False):
     return (1 if bad else 0), bad
 
 
+VIEW = 160                                               # 默认可视窗口（Nova 10-04：最近 160 根里结构必须逐项相同）
+
+
+def run_span(quiet=False):
+    """扩展档：每份数据往前接一份（时间前挪、价格缩 0.7）当「更长的历史」，假币安按请求的 [a, b] 截。
+    ① span=2 对账：服务吐的结构 ≡ 引擎在**服务吐出来的那段 K 线**上整段重算的结构（证「整段重算、不拼接」）；
+    ② span=1 对 span=2：最近 VIEW 根里结构逐项相同（span_measure.diff_pair，含买卖点），最右差异离右端 ≥ VIEW。"""
+    from span_measure import diff_pair
+    files = sorted(os.path.basename(p) for p in glob.glob(data("*.json")))
+    cases = [(fn, dataset(fn)) for fn in files if dataset(fn)]
+    longer = {}
+    for fn, key in cases:
+        b = json.load(open(data(fn), encoding="utf-8"))
+        n, step = len(b), server.TFS[key[1]]
+        longer[key] = [dict(x, t=x["t"] - n * step, o=x["o"] * .7, h=x["h"] * .7, l=x["l"] * .7, c=x["c"] * .7)
+                       for x in b] + b
+    saved = (server.fetch, server.start_prefetch)
+
+    def fake(sym, tf, a, b_):
+        src = longer[(sym, tf)]
+        step = server.TFS[tf]
+        shift = (int(time.time() * 1000) // step) * step - src[-1]["t"]
+        return [dict(x, t=x["t"] + shift) for x in src if a <= x["t"] + shift <= b_]
+    server.fetch, server.start_prefetch = fake, (lambda *a: None)
+    for slot in server.SLOTS.values():
+        slot.reset()
+    srv = server.make_server(0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port, bad, near = srv.server_address[1], 0, []
+    try:
+        for fn, (sym, tf) in cases:
+            d1, d2 = get(port, sym, tf, 1), get(port, sym, tf, 2)
+            ref = reference([dict(t=x["t"], o=x["o"], h=x["h"], l=x["l"], c=x["c"]) for x in d2["bars"]], fn)
+            diffs = compare(ref, flat(d2))
+            if d1.get("earliest"):
+                # span=1 已经到最早（AAPL 这几份只有约 60 天）：span=2 必须是同一份、也标 earliest
+                if not d2.get("earliest") or len(d2["bars"]) != len(d1["bars"]):
+                    diffs.append("span=1 已 earliest，span=2 却不同（earliest=%s，%d vs %d 根）"
+                                 % (d2.get("earliest"), len(d2["bars"]), len(d1["bars"])))
+            elif len(d2["bars"]) <= len(d1["bars"]):
+                diffs.append("span=2 没比 span=1 多出 K 线（%d vs %d），span=1 也没标 earliest"
+                             % (len(d2["bars"]), len(d1["bars"])))
+            p = diff_pair(d1, d2)
+            r = p["rightmost_from_end"]
+            if r is not None and r < VIEW:
+                diffs.append("最近 %d 根里结构变了：最右一处离右端 %d 根 %s" % (VIEW, r, p["per_cat"]))
+            near.append(r)
+            bad += bool(diffs)
+            if not quiet:
+                print("%s %-18s %s %-3s span 1→2 根数 %5d→%5d%s · 对账%s · 最右差异离右端 %s 根%s"
+                      % ("✗" if diffs else "✓", fn, sym, tf, len(d1["bars"]), len(d2["bars"]),
+                         "（earliest）" if d1.get("earliest") else "",
+                         "不一致" if any("对账" not in x and "最近" not in x and "多出" not in x for x in diffs) else "一致",
+                         r, "  ← " + " ｜ ".join(diffs[:3]) if diffs else ""))
+    finally:
+        srv.shutdown()
+        srv.server_close()
+        server.fetch, server.start_prefetch = saved
+    if not quiet:
+        print("扩展档 %d 份：不过 %d 份 · 最右差异离右端最近 %s 根（门槛 %d）"
+              % (len(cases), bad, min([x for x in near if x is not None], default=None), VIEW))
+    return bad
+
+
 def self_test():
     """服务侧三种「看起来能跑、其实算错」：精度错、背驰度量错、一个类中枢的 ZG 差一跳 —— 对账必须各自红。"""
     arms = []
@@ -202,6 +270,22 @@ def self_test():
             mwf.analyze = real
     arms.append(("最后一个类中枢 ZG 差一跳", arm_drop))
 
+    def arm_span_tail():
+        """扩展档那一档动了最右的结构（最后一笔终点挪一跳）—— 对账和「最近 160 根相同」都必须红。"""
+        real = server.build_payload
+
+        def tail(bars, symbol, tf):
+            d = real(bars, symbol, tf)
+            if len(bars) > 5000 and d["pens"]:            # 只动 span=2 那份（假历史翻倍后才过 5000 根）
+                d["pens"][-1]["p1"] += 1
+            return d
+        server.build_payload = tail
+        try:
+            return run_span(quiet=True)
+        finally:
+            server.build_payload = real
+    arms.append(("扩展档最右一笔被改", arm_span_tail))
+
     miss = 0
     for name, f in arms:
         n = f()
@@ -214,4 +298,6 @@ def self_test():
 if __name__ == "__main__":
     if "--self-test" in sys.argv:
         sys.exit(self_test())
-    sys.exit(run()[0])
+    rc = run()[0]
+    rc = rc or (1 if run_span() else 0)
+    sys.exit(rc)
