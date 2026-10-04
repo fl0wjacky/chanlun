@@ -52,6 +52,12 @@
              不用两套 DOM。 -->
         <span class="pct" id="ro-pct"></span>
       </div>
+      <!-- 副图那一格的头（卡 card-68704ee6-a5a）：口径照 /api/macd 回的那份念（params ＋ hist_def），
+           悬停时后面跟上那一根的三个数 —— 跟主图的读数**同一个十字线**、同一条回调。
+           跟读数块放同一个盒子里：它也是浮在画布上的（pointer-events:none 同一个账），
+           位置由 app.js 按副图窗格的高度算（窗格高度是 LWC 排的，不是 CSS 摆的）。
+           ★ 为什么自己摆 DOM 而不让 LWC 画：series 的 title 在 5.2.1 里**根本不画**（2026-10-04 实拍验过）。 -->
+      <div id="subhead" class="subhead"></div>
     </div>
   </div>
   <!-- 往左拖要更早 K 线时的话（加载中 / 已到最早）。挂在图上、不塞顶栏：用户在图左边做动作，话就说在他眼睛在的地方 -->

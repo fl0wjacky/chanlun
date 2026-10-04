@@ -146,6 +146,32 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
 .readout .rv b { font-weight: 600; color: var(--tx); }
 /* 涨跌幅：实底＋黑字，跟图上价签同一种写法（不是新发明的一种"标色"） */
 .readout .pct { padding: 0 5px; border-radius: 999px; font-weight: 600; }
+
+/* 副图那一格的头（卡 card-68704ee6-a5a）：口径（MACD(12,26,9) 柱=DIF−DEA）＋ 光标那一根的三个数。
+   ★ 它是 .overlays 的孩子，但**不排在那条 flex 竖列里**（那样它会跟在读数块下面，
+     而它要贴的是**副图窗格的上沿** —— 副图在图的下面半截）。所以绝对定位、top 由 app.js 按窗格高算：
+     窗格高是 LWC 按 stretchFactor 排出来的，CSS 算不出那个数（算得出来也会在换档/展开开关时过期）。
+     left 不写 = 取 auto ⇒ 落在 .overlays 的左边那条（跟读数块同一个左沿，两块的左边界对齐）。
+   ★ 色只用变量（尺 ①）；数字 tabular-nums 跟读数块同一条：光标扫过去位宽不许抖。 */
+.subhead {
+  position: absolute; left: 0; top: 0;
+  display: none;                             /* 不开副图 ⇒ 一个字都不占、也不参与命中 */
+  padding: 2px 7px; border-radius: 8px;
+  background: var(--panel); border: 1px solid var(--line);
+  box-shadow: 0 0 0 3px var(--panel-hi);
+  font-size: 10px; line-height: 1.5; color: var(--mu);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;                      /* 它压在副图画布上：不许把拖拽/缩放吃掉（跟同盒那两块一条账） */
+  max-width: 100%;                           /* 手机上整句排不下 ⇒ 换行（一行一字也不许立出去） */
+}
+.subhead.on { display: block; }
+.subhead .t { color: var(--dim); letter-spacing: .02em; }  /* 口径那句退到背景里：它是"这一格是什么"，不是数 */
+/* 每个「标签 ＋ 数」整块不拆（换行只许发生在两格之间）—— 拆开就成了"DEA"在上一行、数在下一行 */
+.subhead .cell { margin-left: 10px; white-space: nowrap; }
+.subhead .cell i { font-style: normal; color: var(--dim); }
+.subhead .cell b { font-weight: 600; color: var(--tx); }
+.subhead .err { color: var(--rd); }        /* 取不到数的原因：跟顶栏那颗 warn 一个红 */
+
 .panel {
   border-left: 1px solid var(--line); background: var(--panel);
   padding: 10px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; overflow: auto;

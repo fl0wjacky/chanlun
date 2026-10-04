@@ -40,6 +40,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { macdOf } = require('./fake_macd.js');    // 假副图（见上面 /api/macd 那条路由）
 let chromium;
 try {
   ({ chromium } = require('playwright'));
@@ -139,6 +140,18 @@ const rgbOf = (hex) => 'rgb(' + [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2
     // 而这一套把"页面报错"也算红 —— 报错清单里混进假警报，真出问题时就没人看了）
     await ctx.route('**/api/meta', (r) => r.fulfill({ status: 200, contentType: 'application/json',
       body: JSON.stringify({ measures: ['macd', 'slope', 'lines', 'peak'] }) }));
+    // 副图那个口（card-68704ee6-a5a）：**桌面**打开的页面默认就要它（手机上默认关着）。
+    // 不铺这条路由，页面会去静态服务拿到 404、副图那格写着「MACD 取不到」——
+    // 那是工装的错不是页面的错（这一套还要看控制台报错，假警报混进去就没人看真警报了）。
+    // 数值用 tools/fake_macd.js 那份假 MACD（double=false：这一套不管"谁说了算"，
+    // 那条判据归 web_more_e2e ⑲）。
+    await ctx.route('**/api/macd*', (r) => {
+      const span = Number(new URL(r.request().url()).searchParams.get('span') || 1);
+      const d = payload(span);
+      return r.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify(Object.assign({ span, span_max: 4, earliest: false,
+          symbol: 'ZECUSDT', tf: '1h' }, macdOf(d.bars, false))) });
+    });
     await ctx.route('**/fixtures/**', (r) => r.fulfill({ status: 404, body: '' }));
     return ctx;
   };

@@ -62,6 +62,20 @@ export const DASH = {
   liveBox: [5, 3],       // 未收盘那根的虚线框（Python dashed_rect 6/4）
 };
 
+// 副图（成交量 ＋ MACD，卡 card-68704ee6-a5a）。
+// ★ 这里的每一支都是**从上面那三块借过来的**，一个十六进制字面量都没新造 ——
+//   造了就没人能跟 render/style.py 对账（ruler ① 的名单管的是 CHART 那一组逐键比对，
+//   这一组不在它名单里，但同一条账照旧：色只有一处出处）。
+//   柱子用 K 线那对涨跌色（同一个红绿），两条线按原文的叫法「黄白线」：
+//   core/signals.py 的 MEASURES 里那一项就叫「黄白线不创新高低」——
+//   白线 ＝ DIF（用正文的近白），黄线 ＝ DEA（用 K 线那支琥珀，也就是未收盘那根用的色）。
+export const SUB = {
+  dif: PAGE.tx,          // 白线（DIF）
+  dea: CANDLE.open,      // 黄线（DEA）＝ style.py AM，也就是未收盘那根用的琥珀
+  up: CANDLE.up,         // 柱子（正）
+  dn: CANDLE.dn,         // 柱子（负）
+};
+
 // 买卖点的几何：full_common.draw_signals 原样搬（sz / 上下偏移 / 待确认的淡化系数）
 export const SIG = {
   penSize: 9,            // 类中枢层（空心，标「·笔」）
