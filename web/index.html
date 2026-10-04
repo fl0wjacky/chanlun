@@ -9,10 +9,16 @@
 </head>
 <body>
 <header class="bar">
-  <div class="brand">冲浪者 · 缠论<span class="sub">chanlun.surfers.cc</span></div>
-  <div class="picks">
-    <label class="pick"><span>品种</span><select id="symbol" aria-label="品种"></select></label>
-    <label class="pick"><span>周期</span><select id="tf" aria-label="周期"></select></label>
+  <!-- 牌子跟两个下拉装**一行**里（.bline）。为什么不直接让 .bar 自己排：.bar 是 wrap 的，
+       换行**先于**收缩发生 —— 只要两样的基准宽加起来过不去，第二个就整块折到下一行，
+       再怎么 min-width:0 也不会回同一行。包一层 nowrap，它们才真的会**一起被压窄**。
+       手机上去掉牌子后半句域名之后（见 style.css），390 上本来就同得下，360 上也压得下。 -->
+  <div class="bline">
+    <div class="brand">冲浪者 · 缠论<span class="sub">chanlun.surfers.cc</span></div>
+    <div class="picks">
+      <label class="pick"><span>品种</span><select id="symbol" aria-label="品种"></select></label>
+      <label class="pick"><span>周期</span><select id="tf" aria-label="周期"></select></label>
+    </div>
   </div>
   <div class="badges">
     <span id="last" class="badge"></span>
@@ -23,15 +29,44 @@
 
 <main>
   <div id="chart" role="img" aria-label="缠论结构图：K线、笔、线段、中枢、买卖点">
-    <!-- 换档之后那句话（可视窗口里的结构真变了才出，3 秒自己淡掉）。
-         放在 #chart **里面**：#chart 是 position:relative，这句话就永远只横跨图那一栏 ——
+    <!-- 图上那两块浮层装**一个竖排盒子**里（card-4cdf628c-c84 加的读数块排在后面）：
+         ① 两块同时在的时候不许叠 —— 谁也不用去量谁多高，盒子自己就排开了；
+         ② 盒子整体 pointer-events:none：浮层不许把拖拽/缩放吃掉（跟 .more 同一条账）。
+         盒子放在 #chart **里面**：#chart 是 position:relative，它就永远只横跨图那一栏 ——
          放到 main 下面的话，桌面端的 right:10px 会越过图层栏去（190px 那个数就得再抄一遍）。 -->
-    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+    <div class="overlays">
+      <!-- 换档之后那句话（可视窗口里的结构真变了才出，3 秒自己淡掉） -->
+      <div id="notice" class="notice" role="status" aria-live="polite"></div>
+      <!-- 光标读数：十字线停在哪一根，就把那一根摊开（开高低收 ＋ 涨跌幅）。
+           时刻／数字／精度都不是这儿算的 —— 图上那一刻怎么念、价怎么印，各有**一处**出处（app.js 里那一节）。 -->
+      <div id="readout" class="readout">
+        <div class="rt" id="ro-time"></div>
+        <div class="ro">
+          <span class="rv"><i>开</i><b id="ro-open"></b></span>
+          <span class="rv"><i>高</i><b id="ro-high"></b></span>
+          <span class="rv"><i>低</i><b id="ro-low"></b></span>
+          <span class="rv"><i>收</i><b id="ro-close"></b></span>
+        </div>
+        <!-- 药丸**单独一个孩子**（不在 .ro 里）：宽屏上它排在四个数后面（读作"收…涨跌幅…"），
+             窄屏上挪到时刻那一行（那边空着，见 style.css 窄屏那档）—— 一个元素两种排法，
+             不用两套 DOM。 -->
+        <span class="pct" id="ro-pct"></span>
+      </div>
+    </div>
   </div>
   <!-- 往左拖要更早 K 线时的话（加载中 / 已到最早）。挂在图上、不塞顶栏：用户在图左边做动作，话就说在他眼睛在的地方 -->
   <div id="more" class="more" role="status" aria-live="polite"></div>
   <aside id="panel" class="panel" aria-label="图层开关"></aside>
 </main>
+
+<!-- 手机上的「图例 / 数据 / 约定」收起开关（卡 card-b9792318-91d，小栋 2026-10-04 定 ②B）。
+     桌面**不显示这一颗**（style.css 里 display:none，那两条 CSS 只在窄屏那一档里认 body.m-fold）。
+     排在 main 后面、图例前面：展开时那两块**就在开关下面**长出来，顺序跟读的顺序一样。
+     为什么是"收起"而不是"挪走"：图例（学一次）和约定（读一次）是**参考**，元信息是**诊断** ——
+     三者都不是看盘时要盯的东西，但也不能删（小栋 05:00Z 的原话是「默认收起，点一下展开」）。 -->
+<button id="fold" class="fold" type="button" aria-expanded="false">
+  <span id="fold-tx">图例 · 数据 · 约定</span><span class="chev" aria-hidden="true">▾</span>
+</button>
 
 <div id="legend" class="legend" aria-label="图例"></div>
 

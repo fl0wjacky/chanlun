@@ -38,8 +38,12 @@ body {
 }
 .brand { font-size: 15px; font-weight: 600; letter-spacing: .02em; white-space: nowrap; }
 .brand .sub { margin-left: 8px; font-size: 11px; font-weight: 400; color: var(--dim); letter-spacing: .04em; }
+/* 牌子 ＋ 两个下拉 ＝ **一行**（手机上这一行要压到 360 宽还不断）。 */
+.bline { display: flex; align-items: center; gap: 14px; flex: 1 1 auto; min-width: 0; }
 .picks { display: flex; gap: 10px; }
-.pick { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--mu); }
+/* ★ 标签**永远不折行**（`nowrap`）：手机上下拉被压窄时，该被压的是 select 里那条品种名，
+   不是把「品种」竖成「品／种」—— 360 宽上真出过这个（挤窄的时候字先倒）。 */
+.pick { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--mu); white-space: nowrap; }
 .pick select {
   appearance: none; -webkit-appearance: none;
   background: var(--panel); color: var(--tx);
@@ -87,6 +91,18 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
 .more.on { opacity: 1; visibility: visible; }
 .more.end { color: var(--mu); }   /* 「已到最早」这类是收尾的话，比加载中弱一档 */
 
+/* ---- 图上那两块浮层共用的一竖排（换档那句话 ＋ 光标读数）----
+   为什么要一个盒子：两块都在左上角，**同时在的时候不许互相压住**。排进同一个 flex 竖列，
+   这件事就是结构保证的 —— 不用 JS 去量对方多高（量出来的数会在换行/字号变化时过期）。
+   ★ `visibility:hidden` **照样占位**（这是关键：那句话不显示时，它那一格仍然把读数块顶在下面，
+     于是读数块的位置**不会因为那句话出来/收掉而上下跳**）。
+   ★ 整盒 `pointer-events:none`：它横跨图的上沿，不这样就是一块透明的膏药 —— 在那一条上拖图会拖不动。 */
+.overlays {
+  position: absolute; left: 10px; right: 10px; top: 10px; z-index: 3;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  pointer-events: none;
+}
+
 /* 换档后那句话：贴在图的**上沿**、横贯图那一栏，3 秒自己淡掉。
    ★ 为什么不跟 #more 挤一颗药丸：那颗答的是「你手上这一下」（还要不要更早的数据），
      这颗答的是「刚才那一下把这一屏重算了一遍」—— 两件事、两个时刻，挤在一个位置会被读成同一件事。
@@ -94,7 +110,7 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
    ★ 不吃点击（pointer-events:none）：它是通知，不是按钮；淡出比 #more 慢一点（.25s）——
      它是「说明」，不是「状态」，别一晃而过。 */
 .notice {
-  position: absolute; left: 10px; right: 10px; top: 10px; z-index: 3;
+  align-self: stretch;                       /* 横贯图那一栏（定位归外面的 .overlays） */
   padding: 6px 10px; border-radius: 10px; text-align: center;
   font-size: 11px; line-height: 1.45; color: var(--tx);
   background: var(--panel); border: 1px solid var(--line);
@@ -103,6 +119,33 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
   pointer-events: none;
 }
 .notice.on { opacity: 1; visibility: visible; }
+
+/* 光标读数（card-4cdf628c-c84）：十字线停在哪一根，就把那一根摊开。
+   数字用 `tabular-nums`：**光标一路扫过去，数字的位宽不许抖** —— 读数块是"扫一眼"的东西，
+   每换一根就缩一下宽、抖一下行，眼睛根本读不住。
+   色只用变量（尺 ①：:root 之外一个裸色值都不许写）；涨跌幅那颗药丸的底色由 app.js 从
+   CANDLE.up / CANDLE.dn 灌进来（跟 chip 的点同一个写法：色只有一个出处 theme.js）。 */
+.readout {
+  padding: 6px 9px; border-radius: 10px;
+  background: var(--panel); border: 1px solid var(--line);
+  box-shadow: 0 0 0 3px var(--panel-hi);
+  font-size: 11px; line-height: 1.5; color: var(--mu);
+  font-variant-numeric: tabular-nums;
+  /* 三样东西（时刻／四个数／涨跌幅药丸）装成一个可换行的 flex：宽屏上时刻自己一行、
+     四个数＋药丸第二行；窄屏上药丸挪到时刻那行（见下面 @media 那档）。
+     ★ 药丸是 `.ro` 的**兄弟**、不是它的孩子 —— 就为了窄屏能把它挪上去。 */
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px;
+  opacity: 0; visibility: hidden; transition: opacity .12s;   /* 比那句话快：它跟手 */
+  pointer-events: none;
+}
+.readout.on { opacity: 1; visibility: visible; }
+.readout .rt { flex: 1 0 100%; color: var(--dim); font-size: 10px; letter-spacing: .02em; }
+.readout .ro { display: flex; flex-wrap: wrap; align-items: baseline; gap: 1px 10px; }
+.readout .rv { display: inline-flex; gap: 4px; }
+.readout .rv i { font-style: normal; color: var(--dim); }     /* 开/高/低/收 四个字退到背景里 */
+.readout .rv b { font-weight: 600; color: var(--tx); }
+/* 涨跌幅：实底＋黑字，跟图上价签同一种写法（不是新发明的一种"标色"） */
+.readout .pct { padding: 0 5px; border-radius: 999px; font-weight: 600; }
 .panel {
   border-left: 1px solid var(--line); background: var(--panel);
   padding: 10px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; overflow: auto;
@@ -160,9 +203,14 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
 .foot .sign { margin-left: auto; white-space: nowrap; }
 .foot b { color: var(--mu); font-weight: 500; }
 
+/* 手机上那颗「图例 · 数据 · 约定」收起开关：**桌面不显示**（只有下面窄屏那一档才 display:flex）。
+   桌面本来就放得下（图占 84%），没道理让桌面也多点一下。 */
+.fold { display: none; }
+
 /* ---- 手机 ---- */
 @media (max-width: 760px) {
-  .bar { gap: 8px 10px; padding: 8px 10px; }
+  /* 手机顶栏的密度：上下 6px、行间距 6px（原来是 8/8）。图占比那笔账里，这 6px 是给 360 宽留的。 */
+  .bar { gap: 6px 10px; padding: 6px 10px; }
   .brand { font-size: 14px; flex: 1 1 auto; }
   .badges { margin-left: 0; width: 100%; order: 3; }
   main { grid-template-columns: minmax(0, 1fr); }
@@ -196,6 +244,43 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
     -webkit-mask-image: var(--fade);                  /* Safari 15.4 之前只认带前缀的 */
     mask-image: var(--fade);
   }
+  /* 读数块在手机上：把涨跌幅药丸挪到**时刻那一行**（那边空着 ~200px），四个数独占一行。
+     实测（77,087.6 这种 5 位数）：不挪的话 390 宽差 6px、360 宽差 46px —— 药丸被挤到第三行，
+     整块 370×63、横贯整幅图，右边孤零零挂一颗药丸。挪上去之后 360 也宽松。
+     （这就是药丸在 HTML 里跟 .ro 平级的原因。） */
+  .readout { gap: 1px 8px; padding: 5px 8px; }
+  .readout .rt { flex: 0 0 auto; }
+  .readout .ro { flex: 0 0 100%; order: 2; }
+  .readout .pct { order: 1; }
+  /* ---- 让图占满（卡 card-b9792318-91d，小栋 05:00Z 定 ②B）----
+     改之前 390×844 的账（量出来的）：顶栏 109 ＋ 图 538（**64%**）＋ 图层栏 49 ＋ 图例 47 ＋ 页脚 102。
+     要 ≥80%（675px）就得让出 137px。让的两处，都不是把东西删掉：
+       ① 顶栏：手机上去掉牌子后面那半句域名（`.brand .sub`，105px 宽）—— 牌子跟两个下拉就挤进
+          同一行了，顶栏 109 → 71。域名在页脚那句「冲浪者 · 日期」里还在，手机上看盘也不需要它。
+          另外给两个下拉 min-width:0：品种名再长也只会**把下拉自己压窄**，不会把顶栏撑回两行
+          （撑回去就等于这一让白让，而且换品种时图会跳一下）。
+       ② 图例（学一次）＋ 页脚（元信息是诊断、约定是读一次）收进一颗开关：默认收起。
+          这两块**不是看盘要盯的东西**，但也不能删 —— 小栋的原话是「默认收起，点一下展开」。
+     ★ 图层栏那一排 **不动**：手机上它是天天要点的（笔/中枢/买卖点），
+       而且 web_more_e2e 那一套（61 条）就是在 390×844 上**真点 chip** 的 ——
+       收起来既要多点一下，又会把那套工装整个弄红。也不值得为 49px 那么干。 */
+  .brand .sub { display: none; }
+  .bline { gap: 8px; }
+  .picks { flex: 0 1 auto; min-width: 0; }
+  .pick { min-width: 0; gap: 4px; }
+  /* 下拉被压窄时先吃**右边的内边距**（那是给箭头留的空，不是字）：字最后才被切。
+     padding-right 26 → 22 是为 360 那种宽留的余量，箭头画在 right 12px，22 照样放得下。 */
+  .pick select { min-width: 0; padding-right: 22px; }
+  .fold {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    width: 100%; padding: 6px 12px; text-align: left; cursor: pointer;
+    background: var(--panel); color: var(--mu); font: inherit; font-size: 11px;
+    border: 0; border-top: 1px solid var(--line);
+  }
+  .fold .chev { color: var(--dim); transition: transform .15s; }
+  body:not(.m-fold) .fold .chev { transform: rotate(180deg); }   /* 展开着 ⇒ 箭头朝上（点它＝收起） */
+  body.m-fold .fold { padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)); }
+  body.m-fold #legend, body.m-fold .foot { display: none; }
   .legend { font-size: 10px; gap: 4px 10px; padding: 6px 10px; }
   .foot { font-size: 10px; }
   /* 手机上这一句必须能折行：它 nowrap 时 min-content ≈ 450px，比视口还宽（见上面 body > * 那条） */

@@ -65,6 +65,10 @@ let viewSet = null;
 let settleTimer = 0;
 const SETTLE_MS = 40;      // 「自己摆视口」的认回声窗口，见 holdView()
 
+// 图上那一刻怎么念 —— **只此一份**：时间轴上的刻度、光标读数里的时刻，念的是同一句。
+// （抄两份的话，同一根 K 线在两个地方会有两种写法，那时候"读数"就是在跟时间轴打架。）
+const timeLabel = (t) => new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+
 const chart = LWC.createChart(el('chart'), {
   autoSize: true,
   layout: { background: { type: 'solid', color: PAGE.bg }, textColor: PAGE.mu, panes: { separatorColor: PAGE.line } },
@@ -76,10 +80,7 @@ const chart = LWC.createChart(el('chart'), {
   },
   timeScale: { borderColor: PAGE.line, timeVisible: true, secondsVisible: false, rightOffset: 3, barSpacing: 6 },
   crosshair: { mode: LWC.CrosshairMode.Normal },
-  localization: {
-    locale: 'zh-CN',
-    timeFormatter: (t) => new Date(t * 1000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC',
-  },
+  localization: { locale: 'zh-CN', timeFormatter: timeLabel },
 });
 
 const candle = chart.addSeries(LWC.CandlestickSeries, {
@@ -301,6 +302,9 @@ function windowOf(bars, range) {
 //   那一段（它要么 fitContent 缩成一团、要么按 ?last/?at 跳走）—— 补数据时视口由 place() 按**时间**放回原位。
 function paint(d) {
   state.data = d;
+  // 手上换了**另一份**数据（换档/换品种/换看法）⇒ 读数收起：十字线没动，但它底下那一根已经不是
+  // 刚才那一根了，留着就是一行**过期的数**（光标一动它自己会回来）。手机上抬着手看的时候尤其要收。
+  hideRead();
   const bars = d.bars.map((b) => ({ time: b.t / 1000, open: b.o, high: b.h, low: b.l, close: b.c }));
   candle.applyOptions({ priceFormat: priceFormat(d.meta?.tick) });
   candle.setData(bars);
@@ -512,6 +516,66 @@ const decimals = (tick) => {
 };
 const priceFormat = (tick) => ({ type: 'price', precision: decimals(tick), minMove: Number(tick) || 0.01 });
 
+// ---------------------------------------------------------------- 光标读数（card-4cdf628c-c84）
+// 「十字线停在哪一根，就把那一根摊开」：时刻 ＋ 开/高/低/收 ＋ 涨跌幅（对前一根的收）。
+// ★ 这里一个新算法都不许有，三件事各有**一处**出处：
+//   ① 数据：OHLC 取 `param.seriesData` —— 那是这一根**画在图上的**那份（刻度念的也是它）；
+//      前收取 `state.data.bars`（喂给图的是**同一个数组**），按**时间**找回下标（timeIndex）。
+//   ② 精度：`fmtPrice(v, tick)` —— 跟页头「最新 …」同一个函数、同一个 tick；价格轴的刻度走
+//      `priceFormat(tick)`，precision ＝ `decimals(tick)`，跟这两个是同一个数。
+//   ③ 时刻：`timeLabel` —— 跟时间轴上的刻度同一个函数（见 createChart 那几行）。
+// ★ 触摸**不另写一套**：lightweight-charts 5.2.1 自己接长按（2026-10-04 实测：按住 ~500ms
+//   出十字线，之后横向拖是**读数在走、视口不动**，抬手十字线不消失 ⇒ 抬着手也读得到）。
+//   鼠标和手指走的是**同一条回调**，不留两份会各自漂的行为。
+// ★ 「不挡图、不吃拖拽」写在 CSS（pointer-events:none），但量它的**真身**是工装里那两格：
+//   「读数块正中心的 elementFromPoint 是画布」＋「从读数块上按下往左拖，视口照样动」。
+//   只读 computedStyle 是替身 —— `.more` 那次就是位置对、字对、`visibility` 也对，整块被画布盖住。
+const PCT_DASH = '—';            // 没有前一根（最左边那根）＝ 不编一个数给它，写「不知道」
+let readShown = false;
+
+function readAt(param) {
+  const s = param.seriesData && param.seriesData.get(candle);
+  if (param.time == null || !s) return null;
+  const bars = (state.data && state.data.bars) || [];
+  const i = timeIndex(bars, param.time * 1000);        // ★ 按时间找（换档是往数组头上插，下标会错位）
+  const prev = i != null && i > 0 ? bars[i - 1] : null;
+  return { t: param.time, o: s.open, h: s.high, l: s.low, c: s.close,
+           tick: state.data.meta && state.data.meta.tick,
+           pct: prev && prev.c ? (s.close - prev.c) / prev.c * 100 : null };
+}
+// 涨跌幅那一格：符号 ＋ 两位小数。★ `-0.00%` 不许出现（-0.001 会印成它）—— 那是句假话：
+// 四舍五入到 0 就直接写 `0.00%`，而且**药丸的颜色跟着印出来的字走**（不是跟着没印出来的小数走）。
+function pctText(p) {
+  if (p == null || !Number.isFinite(p)) return PCT_DASH;
+  const r = Math.round(p * 100) / 100;
+  return (r > 0 ? '+' : r < 0 ? '-' : '') + Math.abs(r).toFixed(2) + '%';
+}
+function showRead(b) {
+  const dir = Math.sign(Math.round(b.pct == null ? 0 : b.pct * 100));   // 印出来的那个数的方向
+  const pct = el('ro-pct');
+  el('ro-time').textContent = timeLabel(b.t);
+  el('ro-open').textContent = fmtPrice(b.o, b.tick);
+  el('ro-high').textContent = fmtPrice(b.h, b.tick);
+  el('ro-low').textContent = fmtPrice(b.l, b.tick);
+  el('ro-close').textContent = fmtPrice(b.c, b.tick);
+  pct.textContent = pctText(b.pct);
+  // 实底 ＋ 黑字，跟图上价签**同一种写法**（不新发明一种"标色"）；涨跌色只有 theme.js 一个出处。
+  pct.style.background = dir > 0 ? CANDLE.up : dir < 0 ? CANDLE.dn : 'transparent';
+  pct.style.color = dir === 0 ? PAGE.mu : CHART.tag_ink;
+  el('readout').classList.add('on');
+  readShown = true;
+}
+function hideRead() {
+  if (!readShown) return;
+  readShown = false;
+  el('readout').classList.remove('on');
+}
+chart.subscribeCrosshairMove((param) => {
+  // 指针离开图 / 十字线收起来时，LWC 给的是 time == null —— 那就是「读不到了」，读数跟着收。
+  const b = param && param.time != null ? readAt(param) : null;
+  if (b) showRead(b); else hideRead();
+});
+
 // ---------------------------------------------------------------- 开关
 function applyToggles() {
   penSolid.applyOptions({ visible: opts.pen });
@@ -572,6 +636,20 @@ function watchOverflow(box) {
   addEventListener('orientationchange', hint);
   hint();                                 // 验收工装要重算，`dispatchEvent(new Event('resize'))` 即可
 }
+
+// ---------------------------------------------------------------- 手机上：图例/数据/约定 收起（卡 card-b9792318-91d）
+// 默认**收起**（小栋 2026-10-04 05:00Z 定 ②B：手机上让图占满）。收的是「学一次（图例）／读一次（约定）／
+// 诊断（元信息）」这三块 —— 图层那一排（天天要点）**不动**，账写在 style.css 窄屏那一档里。
+// ★ 开关不自己藏一个布尔：`aria-expanded` 就是那个状态，收起/展开两句话由它推出来，
+//   点一下只走 setFold 一条路（各自记一个的话，迟早在某处对不上，屏幕上就会出现"箭头说收起、其实没收起"）。
+// ★ 桌面这一颗在 CSS 里就是 display:none（桌面放得下，图占 84%）：这里照挂类，桌面那两条规则不认它。
+function setFold(open) {
+  document.body.classList.toggle('m-fold', !open);
+  el('fold').setAttribute('aria-expanded', String(open));
+  el('fold-tx').textContent = open ? '收起' : '图例 · 数据 · 约定';
+}
+el('fold').addEventListener('click', () => setFold(document.body.classList.contains('m-fold')));
+setFold(false);
 
 // ---------------------------------------------------------------- 背驰看法那一组（卡 card-84091d2d-c97）
 // 放在图层那一排**前面**：它决定的是「买卖点按哪种力度比较算出来」（算什么），比「画哪几层」还靠上一步。
