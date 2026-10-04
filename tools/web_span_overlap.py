@@ -19,7 +19,9 @@
     python3 tools/web_span_overlap.py --url https://<站> --symbol BTCUSDT --tf 1h --span 1 --span2 2
     # 2) 手上有一对响应（离线对账 / 别人贴过来的）
     python3 tools/web_span_overlap.py --pair old.json new.json
-    # 3) 自检：拿仓里真样本编一对，验「该绿的绿、该红的红」
+    # 3) 两种量法（card-84091d2d-c97）：同一份数据、两种量法各一份响应
+    python3 tools/web_span_overlap.py --measures macd.json slope.json
+    # 4) 自检：拿仓里真样本编一对，验「该绿的绿、该红的红」
     python3 tools/web_span_overlap.py --selftest
 
 ★ 它**不是第七把尺**：尺子是「抠出仓里的纯函数、谁跑都一样」；这一支要一对真响应，仓里没有这样的对子。
@@ -165,6 +167,99 @@ def compare(old, new):
         bad.append(("①数据", "同一根 K 线对不上（%s）" % where, "%s：%s" % (_iso(t), why),
                     "按时间对齐后完全一样", "补更早的数据不该改写已有的 K 线"))
     return rows, bad, skipped
+
+
+def deep_diff(a, b, skip=("signals", "measure"), path="", out=None):
+    """逐键深比两份响应 → [(路径, 老, 新)]。**跳过 signals 和 measure**（那两处本来就该不同）。
+
+    ★ 为什么不用「按层比对那份清单」：清单是人写的，后台哪天**多出一层**，清单没跟上就静默漏掉
+      （「空着看不出来」那一族）。逐键比是拿**这一份响应自己的键**当清单 —— 多的、少的都跑不掉。
+    ★ 数按 _num 比（浮点尾巴不算差异），不是数的（`dir: 'up'`、`kind: '三买'`）原样比。
+    """
+    out = [] if out is None else out
+    if isinstance(a, dict) and isinstance(b, dict):
+        for k in sorted(set(a) | set(b)):
+            if path == "" and k in skip:
+                continue
+            sub = "%s.%s" % (path, k) if path else k
+            if k not in a:
+                out.append((sub, "<缺>", b[k]))
+            elif k not in b:
+                out.append((sub, a[k], "<缺>"))
+            else:
+                deep_diff(a[k], b[k], skip, sub, out)
+    elif isinstance(a, list) and isinstance(b, list):
+        if len(a) != len(b):
+            out.append(("%s 的条数" % path, len(a), len(b)))
+        for i in range(min(len(a), len(b))):
+            deep_diff(a[i], b[i], skip, "%s[%d]" % (path, i), out)
+    else:
+        if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+            if _num(a) != _num(b):
+                out.append((path, a, b))
+        elif a != b:
+            out.append((path, a, b))
+    return out
+
+
+def measures(old, new, quiet=False):
+    """两种量法：**除买卖点那一层外，全层必须逐条一致**（卡 card-84091d2d-c97 第 4 条）。
+
+    这一支量的是「切量法只换了买卖点」：K 线、笔、线段、中枢跟量法无关（Bram 2026-10-04 定的实现
+    是「结构只算一份，买卖点按 measure 分开懒算」）—— 所以那几层要是动了，就是切量法顺手把别的也算了一遍，
+    用户看到的是整张图重画。
+
+    ★ 买卖点**不**判「两种量法必须不同」：量法不同，结果完全可以碰巧一样（Atlas 2026-10-04 在
+      aaplusdt_2h 上量到过：六种量法并集 1 个、交集 0 个）。断言「必须不同」要么误红、要么逼人挑格子。
+      分不开的时候老实印「未执行」，不报绿 —— 跟 Bram 那格 check_abuse 同一个口径。
+    ★ 买卖点各自跟**引擎独立重算**的结果对账是另一件事（parity 那一路），不在这支里冒充。
+    """
+    mo, mn = old.get("measure"), new.get("measure")
+    if mo is None or mn is None:
+        raise SystemExit("✗ 响应里没有 measure 字段 —— 后台还没接这个参数，这一趟量不了，"
+                         "**别当绿也别当红**（跟当初 span 那条一样）")
+    bad = []
+    if mo == mn:
+        raise SystemExit("✗ 两份的量法回显一样（都是 %r）—— 这不是「两种量法」的对子，量不出东西" % mo)
+    # ① 前提：两份是同一份数据（同 symbol/tf/span 的两种量法）。K 线对不上就别谈「只换了买卖点」。
+    bo, bn = old.get("bars") or [], new.get("bars") or []
+    if [b["t"] for b in bo] != [b["t"] for b in bn]:
+        bad.append(("①前提", "两份的 K 线不是同一批（按时间）", "%d 根 ↔ %d 根" % (len(bo), len(bn)),
+                    "逐根同一批", "不是同一份数据上的两种量法 ⇒ 后面几条都不成立"))
+    else:
+        loose = deep_diff(bo, bn, skip=(), path="bars")
+        for path, x, y in loose:
+            bad.append(("①前提", "K 线对不上：%s" % path, x, y, "逐根一模一样 ← 切量法不该动 K 线"))
+    # ② 除买卖点外全层一致
+    diffs = deep_diff(old, new)
+    for path, x, y in diffs[:8]:
+        bad.append(("②结构", "除买卖点外也有东西变了：%s" % path, x, y,
+                    "逐条一模一样 ← 切量法只该换买卖点那一层"))
+    if len(diffs) > 8:
+        bad.append(("②结构", "除买卖点外还有更多差异", "另有 %d 处" % (len(diffs) - 8), "0 处", "同上"))
+    # ③ 买卖点：如实报，不判「必须不同」
+    so, sn = collect(old, SIG[0], SIG[1], SIG[2]), collect(new, SIG[0], SIG[1], SIG[2])
+    keys = set(so) | set(sn)
+    diff_sig = [k for k in keys if so.get(k, 0) != sn.get(k, 0)]
+    rows = {"老": sum(so.values()), "新": sum(sn.values()), "不同": len(diff_sig)}
+    if not quiet:
+        print("两种量法对账：%s ↔ %s" % (mo, mn))
+        print("  ① 同一份数据：%s（%d 根 K 线，%s → %s）"
+              % ("✓" if not [b for b in bad if b[0] == "①前提"] else "✗", len(bo),
+                 _iso(bo[0]["t"]) if bo else "?", _iso(bo[-1]["t"]) if bo else "?"))
+        print("  ② 除买卖点外全层逐条一致：%s（%d 处差异）"
+              % ("✓" if not diffs else "✗", len(diffs)))
+        print("  ③ 买卖点：老 %d 个／新 %d 个，其中 %d 个对不上" % (rows["老"], rows["新"], rows["不同"]))
+        if not rows["不同"]:
+            print("     %s未执行（这份数据上两种量法的买卖点完全相同 —— 分不开量法，不报绿）%s" % (DIM, OFF))
+    if bad:
+        print("\n%s✗ %d 处不对：%s" % (RED, len(bad), OFF))
+        for j, case, g, w, why in bad:
+            print("   %s✗%s [%s] %s：实际 %s ≠ 期望 %s ← %s" % (RED, OFF, j, case, g, w, why))
+        return 1
+    if not quiet:
+        print("\n%s✓%s 切量法只换了买卖点那一层（结构/K 线逐条一致）" % (GREEN, OFF))
+    return 0
 
 
 def _iso(ms):
@@ -317,11 +412,56 @@ def selftest():
     #   工具要是「看见差异就红」，它量的是「有没有差异」而不是「右半段动没动」。
     run("只有最左边一截变了（老那份的头几条笔）⇒ 必须**绿**",
         lambda o, n, c: n["pens"][0].__setitem__("p1", n["pens"][0]["p1"] * 1.01), False)
+    # ---- 两种量法那一支（card-84091d2d-c97）：拿仓里真样本编一对 ----
+    # ★ 编的规矩：两份**同一批 K 线、同一批结构**，只有 signals 按量法换过。
+    #   这样「该绿的绿」有东西证明（只换买卖点必须绿），「该红的红」也有东西证明（结构动一条必须红）。
+    def mk_pair(mo="macd", mn="slope", tweak=None, same_sig=False):
+        d = json.load(open(FIXTURE, encoding="utf-8"))
+        a = json.loads(json.dumps(d))
+        b = json.loads(json.dumps(d))
+        a["measure"], b["measure"] = mo, mn
+        if not same_sig:
+            # 两种量法的买卖点：换掉一批（只动 signals 层）
+            b["signals"] = {"seg": [dict(s, price=s["price"] * 1.001) for s in d["signals"]["seg"][:1]],
+                            "pen": [dict(s, price=s["price"] * 1.002) for s in d["signals"]["pen"][:2]]}
+        if tweak:
+            tweak(b)
+        return a, b
+
+    def run_m(name, want, pair, want_msg=None):
+        rc = measures(*pair, quiet=True)
+        hit = (rc != 0) == want
+        cases.append((name, hit, "红" if rc else "绿", "红" if want else "绿"))
+
+    run_m("两种量法：只换买卖点那一层 ⇒ 必须绿", False, mk_pair())
+    run_m("两种量法：顺手改了一条笔的价 ⇒ 必须红", True,
+          mk_pair(tweak=lambda b: b["pens"][5].__setitem__("p1", b["pens"][5]["p1"] * 1.01)))
+    run_m("两种量法：顺手改了一个中枢的上沿 ⇒ 必须红", True,
+          mk_pair(tweak=lambda b: b["centers"][1].__setitem__("ZG", b["centers"][1]["ZG"] * 1.01)))
+    run_m("两种量法：顺手改写了一根已收盘 K 线的收盘 ⇒ 必须红", True,
+          mk_pair(tweak=lambda b: b["bars"][100].__setitem__("c", b["bars"][100]["c"] * 1.01)))
+    run_m("两种量法：后台多长出一条笔（没别的差别）⇒ 必须红", True,
+          mk_pair(tweak=lambda b: b["pens"].append(dict(b["pens"][-1]))))
+    # ★ 这一条是**反着**的：measure 字段本身不同、两份的买卖点碰巧一样 ⇒ 不许红
+    #   （「必须不同」那个断言会在这里误红，Atlas 2026-10-04 点过）
+    run_m("两种量法：买卖点碰巧完全一样 ⇒ 不许红（印「未执行」）", False, mk_pair(same_sig=True))
+
+    # 量法分不开 / 不是两种量法：这两条是**场景错**，必须当场抛（不是红不是绿）
+    for name, pair in [("两份的回显一样 ⇒ 抛（不是「两种量法」）", mk_pair(mo="macd", mn="macd")),
+                       ("响应里没有 measure ⇒ 抛（后台还没接）", mk_pair())]:
+        if name.startswith("响应"):
+            pair[1].pop("measure")
+        try:
+            measures(*pair, quiet=True)
+            cases.append((name, False, "没抛", "抛"))
+        except SystemExit:
+            cases.append((name, True, "抛了", "抛"))
+
     ok = True
     for name, hit, why, _ in cases:
         ok &= hit
         print("%s 自检「%s」：%s" % (GREEN + "✓" + OFF if hit else RED + "✗" + OFF, name, why))
-    print("%s 自检：%d/%d 格（含一条反向：最小值那截该变就得让它变）"
+    print("%s 自检：%d/%d 格（含两条反向：最小值那截该变就得让它变、买卖点碰巧一样不许红）"
           % (GREEN + "✓" + OFF if ok else RED + "✗" + OFF, sum(1 for c in cases if c[1]), len(cases)))
     return 0 if ok else 1
 
@@ -334,10 +474,15 @@ def main():
     ap.add_argument("--span", type=int, default=1)
     ap.add_argument("--span2", type=int, default=2)
     ap.add_argument("--pair", nargs=2, metavar=("OLD", "NEW"), help="两份响应文件（离线对账）")
+    ap.add_argument("--measures", nargs=2, metavar=("A", "B"),
+                    help="同一份数据、两种量法的两份响应：除买卖点外全层必须逐条一致")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         raise SystemExit(selftest())
+    if a.measures:
+        raise SystemExit(measures(json.load(open(a.measures[0], encoding="utf-8")),
+                                  json.load(open(a.measures[1], encoding="utf-8"))))
     if a.pair:
         old = json.load(open(a.pair[0], encoding="utf-8"))
         new = json.load(open(a.pair[1], encoding="utf-8"))
@@ -347,7 +492,7 @@ def main():
         old = fetch(a.url, a.symbol, a.tf, a.span)
         new = fetch(a.url, a.symbol, a.tf, a.span2)
         raise SystemExit(report(old, new, "（span=%s ↔ span=%s）" % (old.get("span"), new.get("span"))))
-    ap.error("要 --url ＋ --span/--span2，或 --pair，或 --selftest")
+    ap.error("要 --url ＋ --span/--span2，或 --pair，或 --measures，或 --selftest")
 
 
 if __name__ == "__main__":
