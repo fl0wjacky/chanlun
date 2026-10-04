@@ -85,7 +85,9 @@ const FULL = JSON.parse(fs.readFileSync(path.join(WEB, 'fixtures/zec_1h.json'), 
 //   symShift：⑮ 用 —— 换成 BTCUSDT 之后那份把价整体乘 1.5。
 //          ★ 不乘的话两份一模一样，「换了数据之后读数该不该收」这件事在屏幕上**分不出来**
 //            （指针底下还是同一根），那一格就是空转。
-//   hold   ：⑮ 用 —— 这趟请求**扣住**多少毫秒再回（holdSym 是扣哪一趟，默认 BTCUSDT）。
+//   hold   ：⑮⑰⑱ 用 —— 这趟请求**扣住**多少毫秒再回（holdSym 是扣哪一趟，默认 BTCUSDT）。
+//          ★ 这一段里 ⑮ 读一眼、⑰⑱ 还要**连动三下鼠标**，窗口得撑得住这三下（现在是 6000ms；
+//            2500 那次真跑红了 ⑰：第三下落在窗口外面，量到的是新图上的读数）。
 //          ★ 不扣住就没有「新数据还在飞」那一段可量：静态假后台回得太快，
 //            ⑮ 量的那一眼会落在数据到了之后 —— 那正是**量不出来**的位置（见下面 ⑮ 那段注释）。
 //   failSym：⑳ 用 —— **只让点名那一趟** 503（`fail` 是整页都失败，那样首屏起不来，⑳ 摆不出来）。
@@ -498,7 +500,10 @@ const rgbOf = (hex) => 'rgb(' + [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2
   // ★★ 换的时候**不许让指针离开图**。去点 chip、或挪到别的控件上，指针一走 LWC 发 `time==null`，
   //    读数自己就收了 —— 那样量到的是「鼠标移开」不是「换了数据」，又是一格替身。
   //    所以这里用 select 换品种：只改 selection，指针原地不动、十字线也不动。
-  scen({ tick: 0.1, symShift: true, hold: 2500 });
+  // ★ 扣 6000ms（原来 2500）：这一段里要连做三件事 —— ⑮ 那一眼、⑰⑱ 连动三下、然后等新图上来。
+  //   2500 撑不住：真跑过一轮 19/20，第三下鼠标落在窗口**外面**（那一眼读数是「亮着 2,283.8」、
+  //   状态已经是「已收盘」）—— ⑰ 当场报红而不是假绿，但那是**量具的窗口太短**，不是页面的毛病。
+  scen({ tick: 0.1, symShift: true, hold: 6000 });
   const sctx = await newCtx({ viewport: { width: 1280, height: 800 } });
   const sp = await open(sctx, '?symbol=ZECUSDT&tf=1h&last=300');
   const sbox = await boxOf(sp);
@@ -511,7 +516,7 @@ const rgbOf = (hex) => 'rgb(' + [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2
   const t0 = Date.now();
   await sp.evaluate(() => { const s = document.getElementById('symbol');
     s.value = 'BTCUSDT'; s.dispatchEvent(new Event('change', { bubbles: true })); });
-  await sleep(Math.max(0, 700 - (Date.now() - t0)));           // 那一趟还扣在手里（扣 2500ms）
+  await sleep(Math.max(0, 700 - (Date.now() - t0)));           // 那一趟还扣在手里（扣 6000ms）
   const rMid = await shown(sp);
   const midState = await sp.evaluate(() => ((document.getElementById('state') || {}).textContent || ''));
   t('⑮ 换数据**那一刻**读数就收（新数据还在飞：屏上还是旧图，读数不许留着上一份的数）',
