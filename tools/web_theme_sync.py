@@ -119,8 +119,19 @@ def check_css(b, bad, css_path):
                 bad.append((f"CSS.{k}", root[k], exp, "跟 app.js 现算的值对不上（公式或取值动了）"))
     # :root 之外一个裸色值都不许有
     body = src.replace(re.search(r":root\s*\{.*?\}", src, re.S).group(0), "")
+    body = re.sub(r"/\*.*?\*/", "", body, flags=re.S)      # ★ 注释里的色值不算色值（说明里就得能写 rgb(...) 举例）
+    # ★ 只认 `#hex` 是不够的：`rgb(0 0 0 / .35)` 这种写法当时**整条溜过去**（2026-10-04 往左加载那支的
+    #   `.more` 阴影就是这么写进去的，尺子是绿的 —— 尺子量的判据是「有没有裸色值」，认的却只有十六进制）。
+    #   现在两种都认。命名色只列**没有歧义**的那几个，两头都加 `(?<![-\w]) / (?![-\w])`：
+    #   `white-space: nowrap` 里的那个 white 不是色值（踩过），而 `transparent` / `currentColor` 合法，
+    #   遮罩那条就靠 transparent —— 别把它们算进来。
+    NAKED = re.compile(r"#[0-9a-fA-F]{3,8}\b"
+                       r"|(?<![-\w])(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\s*\("
+                       r"|(?<![-\w])(?:white|black|silver|gray|grey|maroon|red|purple|fuchsia|green|lime"
+                       r"|olive|yellow|navy|blue|teal|aqua|orange|pink|brown|gold|cyan|magenta|beige|ivory)(?![-\w])",
+                       re.I)
     for n, line in enumerate(body.split("\n"), 1):
-        for h in re.findall(r"#[0-9a-fA-F]{3,8}\b", line):
+        for h in NAKED.findall(line):
             bad.append((f"CSS:裸色值", h, "var(--…)", "style.css 里 :root 之外不许写死颜色（出处只有 theme.js）"))
 
 
@@ -212,7 +223,11 @@ def selftest():
              ("css: 兜底底色改错", CSS, css, "--bg: #101218;", "--bg: #101219;"),
              ("css: 徽标琥珀改错（差 2 那种）", CSS, css, "--am: #ffbe3c;", "--am: #ffbc3c;"),
              ("css: 在规则里写死一个色", CSS, css, "background: var(--panel-hi); }",
-              "background: #1c2029; }")]
+              "background: #1c2029; }"),
+             # ★ 这一格钉的是「尺子认不认得另一种写法」：十六进制那一格早就红了，
+             #   而 rgb()/hsl() 写成一样是裸色值，却曾经整条溜过去（我自己就这么写进去过）。
+             ("css: 裸色值换个写法（rgb()）", CSS, css, ".foot .meta { color: var(--mu); }",
+              ".foot .meta { color: rgba(142, 150, 168, .9); }")]
     ok = True
     for name, path, base, a, z in cases:
         with tempfile.NamedTemporaryFile("w", suffix=os.path.splitext(path)[1],
