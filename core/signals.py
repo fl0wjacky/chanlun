@@ -118,13 +118,50 @@ def _units(r, level):
     return r["pens"], r["pens"], r["centers"]
 
 
+# 力度比较的四种看法（单选；docs/spec/背驰.md 第六节，Nova 2026-10-04 定）：
+#   macd  柱子面积（默认）· slope 斜率 · lines 黄白线不创新高低 · peak 柱子一波峰值
+MEASURES = ("macd", "slope", "lines", "peak")
+
+
+def series_for(bars, measure, fast=12, slow=26, sig=9):
+    """力度那一步要读的序列：lines 读 (DIF, DEA) 两条线，其余读 MACD 柱（slope 不读，照旧给柱）。"""
+    if measure not in MEASURES:
+        raise ValueError("measure 只认 %s，给的是 %r" % ("/".join(MEASURES), measure))
+    return macd_lines(bars, fast, slow, sig) if measure == "lines" else macd_hist(bars, fast, slow, sig)
+
+
 def strength(u, hist, measure="macd"):
-    """一段走势的力度：MACD 柱面积（只算与该段同向的柱子），或斜率。"""
+    """一段走势的力度：MACD 柱面积（只算与该段同向的柱子）、斜率，或柱子峰值。
+
+    peak：段内与该段同向的柱子里绝对值最大的那根（＝段内最高的山顶；不管「一波」怎么切都一样，
+    见 spec 背驰.md 六.2(b)）。段内一根同向柱子都没有 ⇒ 0。
+    lines 不是一个数，不走这里（见 lines_extreme / _diverges）。"""
     up = u["p1"] > u["p0"]
     if measure == "slope":
         return abs(u["p1"] - u["p0"]) / max(1, u["i1"] - u["i0"])
     seg = hist[u["i0"]:u["i1"] + 1]
+    if measure == "peak":
+        return max([h for h in seg if h > 0], default=0) if up else -min([h for h in seg if h < 0], default=0)
     return sum(h for h in seg if h > 0) if up else -sum(h for h in seg if h < 0)
+
+
+def lines_extreme(u, lines):
+    """一段里两条线各自的极值：向下段取 (min DIF, min DEA)，向上段取 (max DIF, max DEA)。
+    窗口就是该段自己的 [i0, i1]，不往后延（spec 背驰.md 六.1(a)）。"""
+    dif, dea = lines
+    pick = max if u["p1"] > u["p0"] else min
+    return pick(dif[u["i0"]:u["i1"] + 1]), pick(dea[u["i0"]:u["i1"] + 1])
+
+
+def _diverges(A, C, want_down, data, measure, ratio):
+    """C 对 A 背驰没有（signals 用这一份）。
+    · macd / slope / peak：C 的力度 < A 的力度 × ratio（严格 <；macd/slope 就是原来那一行，默认逐位不变）；
+    · lines：两条线都不创新低（向下：C 的 min ≥ A 的 min，两条线都要）/ 不创新高（向上：≤）。
+      持平算「不创新」（spec 六.1(b)）。ratio 对 lines 不适用（它比的不是大小，是创不创新）。"""
+    if measure == "lines":
+        c, a = lines_extreme(C, data), lines_extreme(A, data)
+        return all((x >= y) if want_down else (x <= y) for x, y in zip(c, a))
+    return strength(C, data, measure) < strength(A, data, measure) * ratio
 
 
 def _higher_centers(r, level):
@@ -170,16 +207,18 @@ def check_premise3(higher, B, lo, hi, strict=True):
     return dict(hit=False, center=None, why="上一层没有中枢把 A、B、C 整段包住")
 
 
-def beichi(AU, Z, k, kind, strength_fn, hist, measure="macd", ratio=1.0,
+def beichi(AU, Z, k, kind, diverge_fn, hist, measure="macd", ratio=1.0,
            higher=(), premise3=True, p3_strict=True):
     """**背驰判法这一块**：取 A/B/C 段 → 判力度 → 判回拉 → 查前提③④。
 
     signals() 与 check_signals() 都调它 —— 这两处原先各写了一遍取段规则，改判法要改两处，
     改漏一处自检就会拿旧规则去核新判据。现在结构只有这一份。
 
-    力度由调用方**注入** strength_fn(u, hist, measure)：signals 传 strength()，
-    check_signals 传 _strength_by_definition() —— 『收成一块』收的是结构，力度那支的
-    独立性靠注入保住（见 _strength_by_definition 的说明）。
+    力度比较由调用方**注入** diverge_fn(A, C, want_down, hist, measure, ratio)：signals 传 _diverges()，
+    check_signals 传 _diverges_by_definition() —— 『收成一块』收的是结构，力度那支的
+    独立性靠注入保住（见 _strength_by_definition 的说明）。注入的是**整个比较**而不只是力度数：
+    lines 那种看法不是一个数，比较方向写在哪一份里，就只有那一份管得着它。
+    hist：力度要读的序列（series_for 给的；lines 是 (DIF, DEA)，其余是 MACD 柱）。
 
     返回 dict(emit, blocks, why, a, c, A, B, C, ok, p3, p4)：
       emit    True = 该发这个点
@@ -205,7 +244,7 @@ def beichi(AU, Z, k, kind, strength_fn, hist, measure="macd", ratio=1.0,
     blocks = []
     if not ((C["lo"] < B["DD"]) if want_down else (C["hi"] > B["GG"])):
         blocks.append("没创新低")                      # 没创新低（新高）：不是离开段
-    elif not strength_fn(C, hist, measure) < strength_fn(A, hist, measure) * ratio:
+    elif not diverge_fn(A, C, want_down, hist, measure, ratio):
         blocks.append("没背驰")
     if premise3 and p3["hit"]:
         blocks.append("前提③")
@@ -224,13 +263,14 @@ def beichi(AU, Z, k, kind, strength_fn, hist, measure="macd", ratio=1.0,
 
 def signals(r, level="seg", measure="macd", ratio=1.0, fast=12, slow=26, sig=9,
             premise3=True, p3_strict=True):
-    """level: "seg" 线段中枢（默认）/ "pen" 类中枢；measure: "macd" / "slope"；ratio: C < A × ratio 才算背驰。
+    """level: "seg" 线段中枢（默认）/ "pen" 类中枢；measure: MEASURES 四选一（默认 macd）；
+    ratio: C < A × ratio 才算背驰（lines 不用 ratio）。
 
     premise3：前提③ **默认开**（小栋 2026-10-02 拍板 ①A）—— 用 check_premise3 挡掉
     『A、B、C 其实同处一个更大级别中枢』的点。p3_strict：③ 用中枢区间（默认）还是波动范围。
     """
     AU, U, Z = _units(r, level)
-    hist = macd_hist(r["bars"], fast, slow, sig)
+    hist = series_for(r["bars"], measure, fast, slow, sig)
     n_done = len(U)                                  # U 里的单位下标与 AU 一致（已完成的在前）
     last_live = (level == "seg" and len(AU) > n_done) or level == "pen"
     done_idx = lambda q: q < len(AU) - (1 if last_live else 0)   # 这一段已经走完（后面又出了一段）
@@ -261,7 +301,7 @@ def signals(r, level="seg", measure="macd", ratio=1.0, fast=12, slow=26, sig=9,
         for want_down, rel, k1, k2 in ((True, "下跌延续", "一买", "二买"), (False, "上涨延续", "一卖", "二卖")):
             if B["rel"] != rel:
                 continue
-            blk = beichi(AU, Z, k, k1, strength, hist, measure, ratio,
+            blk = beichi(AU, Z, k, k1, _diverges, hist, measure, ratio,
                          higher, premise3, p3_strict)
             if not blk["emit"]:
                 continue
@@ -291,9 +331,31 @@ def _strength_by_definition(u, hist, measure):
         span = u["i1"] - u["i0"]
         return abs(u["p1"] - u["p0"]) / (span if span > 1 else 1)      # 同 max(1, span)，写法不同
     seg = hist[u["i0"]:u["i1"] + 1]
+    if measure == "peak":                                              # 同向柱子绝对值最大的一根，没有就 0
+        best = 0
+        for h in seg:
+            if (h > 0) if u["p1"] > u["p0"] else (h < 0):
+                best = max(best, abs(h))
+        return best
     if u["p1"] > u["p0"]:
         return sum(h for h in seg if h > 0)
     return -sum(h for h in seg if h < 0)
+
+
+def _diverges_by_definition(A, C, want_down, data, measure, ratio):
+    """_diverges 的**独立另写**（check_signals 用）：lines 的比较方向在这里另写一遍，
+    signals 那份写反了，复核才红得出来。"""
+    if measure == "lines":
+        dif, dea = data
+        for line in (dif, dea):
+            ca = sorted(line[C["i0"]:C["i1"] + 1])
+            aa = sorted(line[A["i0"]:A["i1"] + 1])
+            if want_down and ca[0] < aa[0]:                            # 向下：C 段这条线创了新低 ⇒ 不背驰
+                return False
+            if not want_down and ca[-1] > aa[-1]:                      # 向上：创了新高 ⇒ 不背驰
+                return False
+        return True
+    return _strength_by_definition(C, data, measure) < _strength_by_definition(A, data, measure) * ratio
 
 
 # beichi() 的挡下理由 → 自检报告的违规文字（两处措辞不必一样，但不许缺项）
@@ -324,7 +386,7 @@ def check_signals(sig, r, level="seg", measure="macd", ratio=1.0, check_zero_axi
     原文只给了"附近"两个字，而全库样本又少 ⇒ 先只当检查、不接进买卖点判定。口径见 ZA_* 常量。
     """
     AU, U, Z = _units(r, level)
-    hist = macd_hist(r["bars"]) if measure == "macd" else None
+    hist = series_for(r["bars"], measure) if measure != "slope" else None
     _za = ({(x["kind"], x["bar"]): x for x in zero_axis(sig, r, level, threshold=za_threshold)}
            if check_zero_axis else {})
     bad = []
@@ -349,7 +411,7 @@ def check_signals(sig, r, level="seg", measure="macd", ratio=1.0, check_zero_axi
                 bad.append(("一类买卖点的 C 段没创新低 / 新高", s["kind"], s["bar"]))
             # 取段 / 力度 / 回拉 / 前提③ 全部调 beichi() 这一块（与 signals() 同一份结构），
             # 但力度注入独立实现 _strength_by_definition —— 这一条是力度那一支唯一的守卫。
-            blk = beichi(AU, Z, s["center"] - 1, s["kind"], _strength_by_definition, hist,
+            blk = beichi(AU, Z, s["center"] - 1, s["kind"], _diverges_by_definition, hist,
                          measure, ratio, _higher_centers(r, level), premise3, p3_strict)
             for b in blk["blocks"]:
                 if b == "没创新低":

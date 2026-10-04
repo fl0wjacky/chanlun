@@ -140,6 +140,56 @@ _rp2 = rustchan_cases.check(_bs, _rc2)
 count("rust-chan 探针（live 抹掉）没红", 0 if _rp1 else 1, "　｜ 抓到 %d 处" % len(_rp1))
 count("rust-chan 探针（口径改标相同）没红", 0 if _rp2 else 1, "　｜ 抓到 %d 处" % len(_rp2))
 
+# ---- 背驰力度的四种看法（docs/spec/背驰.md 第六节）：新看法 signals 与独立复核一致 + 两个探针必须红 ----
+import sys as _sys                                               # noqa: E402
+_S = _sys.modules["core.signals"]                                # core/__init__ 把 signals 导成了函数，模块要从这里拿
+print("=" * 72)
+_bvi = sum(len(_S.check_signals(_S.signals(r_, lv_, m_), r_, lv_, m_))
+           for r_ in R.values() for lv_ in ("seg", "pen") for m_ in ("lines", "peak"))
+count("背驰新看法 signals≠独立复核", _bvi, "　← lines / peak 两种，两层")
+
+
+def _probe(measure, patch_name, fake):
+    """把 _S.<patch_name> 换成 fake 跑 measure：先看输出真变了没有（没变 ⇒ 探针空转，记「未执行」），
+    变了就要求 check_signals 抓到 ≥1 处。"""
+    base = {(t_, lv_): _S.signals(r_, lv_, measure) for t_, r_ in R.items() for lv_ in ("seg", "pen")}
+    real = getattr(_S, patch_name)
+    setattr(_S, patch_name, fake(real))
+    try:
+        moved = sum(_S.signals(r_, lv_, measure) != base[(t_, lv_)] for t_, r_ in R.items() for lv_ in ("seg", "pen"))
+        caught = sum(len(_S.check_signals(_S.signals(r_, lv_, measure), r_, lv_, measure))
+                     for r_ in R.values() for lv_ in ("seg", "pen"))
+    finally:
+        setattr(_S, patch_name, real)
+    return moved, caught
+
+
+def _rev_lines(real):
+    def f(A, C, want_down, data, measure, ratio):
+        if measure == "lines":
+            c_, a_ = _S.lines_extreme(C, data), _S.lines_extreme(A, data)
+            return all((x <= y) if want_down else (x >= y) for x, y in zip(c_, a_))   # 比较方向反过来
+        return real(A, C, want_down, data, measure, ratio)
+    return f
+
+
+def _mean_peak(real):
+    def f(u, hist, measure="macd"):
+        if measure == "peak":                                    # 峰值换成均值
+            v = [h for h in hist[u["i0"]:u["i1"] + 1] if (h > 0 if u["p1"] > u["p0"] else h < 0)]
+            return abs(sum(v) / len(v)) if v else 0
+        return real(u, hist, measure)
+    return f
+
+
+for _name, _m, _pn, _fk in (("黄白线比较方向反过来", "lines", "_diverges", _rev_lines),
+                            ("峰值换成均值", "peak", "strength", _mean_peak)):
+    _mv, _ct = _probe(_m, _pn, _fk)
+    if _mv == 0:
+        skip("背驰探针（%s）没红" % _name, "这几份数据上变异没改动任何输出，探针空转")
+    else:
+        count("背驰探针（%s）没红" % _name, 0 if _ct else 1, "　｜ 改动 %d 组输出、抓到 %d 处" % (_mv, _ct))
+
 # ---- 画笔的区间最值（core/pen.RangeExt）：直接跟切片 max/min 在所有 (k0, k1) 上比 ----
 # 只比 build_pens 的输出证不了它对：Atlas 10-04 把右端点漏掉（hi = k1+size），9 份数据 × 两种笔照样 0 不同。
 from core.pen import RangeExt, check_range_ext                   # noqa: E402
