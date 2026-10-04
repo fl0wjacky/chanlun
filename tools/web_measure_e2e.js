@@ -24,6 +24,16 @@
 //   ⑫ ?measure=lines 直接打开 ⇒ **第一趟**图表请求就带 lines，图脚写「黄白线」
 //   ⑬ ?measure=乱写 ⇒ 一个字都不发出去（名单外发出去是 400，整张图会白挂），页面照常画
 //   ⑭ 旧后台（/api/meta 没有 measures）⇒ 控件**不出现**、请求**不带** measure、图脚**不多**那一格
+//   ⑮ 买卖点那层**关着** ⇒ 看法这四颗**置灰点不动**（层关着时换看法，屏幕上一个像素都不会变 ⇒
+//      点了没反应会被当成坏了）；而且理由要写在**标题那行**上，不能只塞 title（手机没有 hover）
+//   ⑯ 把那层点开 ⇒ 那四颗又亮回来、标题回到「背驰看法」（⑮ 的防空洞：别修成一辈子灰着）
+//   ⑰ 切看法**真的落到那几个点上**（2026-10-04 我补的，替掉原来那格「整屏像素前后不等」）：
+//      只在那几个**差出来的点**盘踞的小块里、只认买卖点那两个颜色，两边各读一次，**看差**。
+//      ★ 原来那句「屏幕的像素前后不等」是**替身**：它绿的来源跟买卖点没关系。我量到过两次 ——
+//        (a) 最后一根的价签在跳（84936.4 → 84939.5），那一跳就够让它绿；
+//        (b) 把后台**冻住**之后，切看法那一下整块画布重绘了 57367 个像素（横贯全图），
+//            而同一次切法里**买卖点那层贡献的差是 0** —— 也就是说它绿得跟买卖点毫无关系。
+//        现在这一格跟 ⑦ 同一套读法（同一小块、同一组颜色、只看差），所以它绿一定是因为那几个点。
 //
 // 跑法：
 //   1) 真后台，**只绑回环**（部署纪律：不许绑全网卡）：
@@ -76,6 +86,7 @@ const ui = (p) => p.evaluate(() => {
     items: g ? [...g.querySelectorAll('.mchip')].map((b) => ({ id: b.dataset.measure, txt: b.textContent.trim(),
                                                               on: b.getAttribute('aria-checked'),
                                                               pressed: b.getAttribute('aria-pressed'),
+                                                              disabled: b.disabled,
                                                               role: b.getAttribute('role'), title: b.title })) : [],
     cap: g ? (g.querySelector('.mcap') || {}).textContent : null,
     meta: (document.getElementById('meta') || {}).textContent || '',
@@ -142,7 +153,7 @@ const shotChart = async (p, tag) => {
   }
 
   // ---- ①–⑨：普通那一页
-  console.log('①–⑪ 打开页面、点一下「黄白线」');
+  console.log('1–17 打开页面、点一下「黄白线」（含 5-7 那三格：层关着时那组该置灰）');
   const { c, p, reqs } = await open(QS);
   const u0 = await ui(p);
   ck('/api/meta 把四颗控件渲染出来了', u0.has && u0.items.length === 4, u0.items.map((i) => i.id).join('/'));
@@ -153,22 +164,37 @@ const shotChart = async (p, tag) => {
      u0.items.every((i) => i.role === 'radio' && i.pressed === null) && u0.items.filter((i) => i.on === 'true').length === 1
      && u0.items.find((i) => i.on === 'true').id === 'macd');
   ck('图脚写着当前用的那种（默认＝面积）', u0.meta.includes('背驰看法 面积'), u0.meta.slice(-40));
+  // ★ 买卖点默认是**关**的：这一组只换**买卖点**的画法 ⇒ 层关着的时候换看法，屏幕上**什么都不会变**，
+  //   那就得**点不动**（点了没反应，用户会当成坏了）。手机没有 hover，所以标题那行也得说。
+  ck('买卖点还关着 ⇒ 看法那组**点不动**（四颗都 disabled）',
+     u0.items.every((i) => i.disabled), u0.items.map((i) => i.disabled).join('/'));
+  ck('关着的时候标题那行也写了原因（不能只写在 title 里，手机没有 hover）',
+     (u0.cap || '').includes('买卖点'), `cap=${JSON.stringify(u0.cap)}`);
   // ★ 买卖点默认是**关**的：不打开它，切看法屏幕上什么也不会变（这一格得先把它打开，否则 ⑥⑦ 是空转）
   await p.locator('.chip[data-key="sig"]').click();
   await sleep(900);
+  const u0b = await ui(p);
+  ck('打开买卖点 ⇒ 那组又能点了、标题回到「背驰看法」',
+     u0b.items.every((i) => !i.disabled) && (u0b.cap || '') === '背驰看法',
+     `disabled=${u0b.items.map((i) => i.disabled).join('/')} ｜ cap=${JSON.stringify(u0b.cap)}`);
   // ★★ 拍像素之前先把视口**摆到两种看法真的不一样的地方**去。第一版直接拍当前这一屏 ⇒
   //    像素一模一样，看着像「切了看法屏幕没变」，其实是**那几处差异根本不在可视窗口里**
   //    （整段 20160 根、窗口在最后 300 根）。那是工装自己把两件事搞混了：图脚上的计数是**整段**的，
   //    像素只认**这一屏**。所以先问后台要两份、找出不一样的那几根，再摆过去。
-  const diffBars = await p.evaluate(async () => {
+  //    ⑰（下面那格）还要拿这几个点的**完整信息**（tier/kind/bar/price）去量「墨多没多」，
+  //    所以这里直接回对象，不只回 bar 号。
+  const diffSigs = await p.evaluate(async () => {
     const get = async (m) => (await (await fetch(`/api/chart?symbol=ZECUSDT&tf=15m&measure=${m}`)).json());
-    const key = (s) => s.bar + ':' + s.kind;
     const [a, b2] = [await get('macd'), await get('lines')];
-    const all = (d) => (d.signals.seg || []).concat(d.signals.pen || []).map(key);
-    const A = new Set(all(a)), B = new Set(all(b2));
-    return [...new Set([...A].filter((x) => !B.has(x)).concat([...B].filter((x) => !A.has(x))))
-      .values()].map((x) => Number(x.split(':')[0])).slice(0, 8);
+    const map = (d) => { const o = new Map();
+      for (const tier of ['seg', 'pen']) for (const s of (d.signals[tier] || [])) o.set(s.bar + ':' + s.kind, { ...s, tier });
+      return o; };
+    const A = map(a), B = map(b2), out = [];
+    for (const [k, s] of B) if (!A.has(k)) out.push({ ...s, only: 'lines' });   // 换成黄白线**多出来**的
+    for (const [k, s] of A) if (!B.has(k)) out.push({ ...s, only: 'macd' });    // 换成黄白线**没了**的
+    return out;
   });
+  const diffBars = diffSigs.map((s) => s.bar).slice(0, 8);
   if (diffBars.length) {
     const at = diffBars[Math.floor(diffBars.length / 2)];
     await p.evaluate((i) => window.__app.chart.timeScale().setVisibleLogicalRange({ from: i - 120, to: i + 120 }), at);
@@ -182,64 +208,28 @@ const shotChart = async (p, tag) => {
   //      原因是「两次观测」根本不保证在同一趟取数里。）
   //    两道闸：① 开跑**之前**等后台刚拉过 —— 把整个场景摆进一趟取数里（见上面那段 wait）
   //            ② 收尾时拿 fetched_at 对账：对不上就切回默认重跑一对（最多三对），三对都撞上才红
-  const sw = async (id) => {                    // 点一颗看法、等它真换过来；回这一趟发出的 measure
-    const kk = reqs.length;
-    await p.locator(`.mchip[data-measure="${id}"]`).click();
-    await p.waitForFunction((m) => window.__app.state.data && window.__app.state.data.measure === m, id, { timeout: 60000 });
-    await sleep(900);
-    return reqs.slice(kk).map((u) => new URL(u).searchParams.get('measure'));
-  };
-  let s0, s1, px0, px1, sent, redo = 0;
-  for (;;) {
-    s0 = await shape(p); px0 = await shotChart(p, 'before');
-    sent = await sw('lines');
-    s1 = await shape(p); px1 = await shotChart(p, 'after');
-    if (s0.fetched === s1.fetched || redo >= 2) break;
-    redo++;                                     // 这两份不是一趟取数 ⇒ 切回去、重来一对
-    await sw('macd');
-  }
-  const u1 = await ui(p);
-  ck('点的是「黄白线」⇒ 发出去的就是 lines', sent.length === 1 && sent[0] === 'lines', `发出的 measure=${JSON.stringify(sent)}`);
-  ck('图脚跟着**回显**换：背驰看法 黄白线', u1.meta.includes('背驰看法 黄白线'), u1.meta.slice(-40));
-  ck('亮着的那颗也跟着回显换', u1.items.find((i) => i.on === 'true').id === 'lines');
-  ck('结构逐字节不变（bars/pens/segs/centers/seg_centers）',
-     s0.fetched === s1.fetched && s0.struct === s1.struct && s0.nbars === s1.nbars,
-     s0.fetched === s1.fetched
-       ? `同一趟取数 ${s0.fetched}${redo ? `（撞上重拉、重跑了 ${redo} 遍）` : ''}`
-       : `★ 这两份不是同一趟取数：${s0.fetched} → ${s1.fetched}（后台重拉过，这一格量不准）`);
-  ck('买卖点真的变了（不然这一格是空转）', s0.sigs !== s1.sigs,
-     `段 ${JSON.parse(s0.sigs).seg.length}→${JSON.parse(s1.sigs).seg.length} 笔 ${JSON.parse(s0.sigs).pen.length}→${JSON.parse(s1.sigs).pen.length}`);
-
-  // ★★ 三角到底画出来了没有 —— 2026-10-04 补的一格（线上真出过：买卖点**整层一颗不画**，而下面
-  //    那格「屏幕真的变了」照样绿：它量到的像素差来自买卖点的**文字**，是替身）。
-  //    口径（Atlas 2026-10-04）：只取**三角盘踞的那一小块**、只认**买卖点那两个颜色**，不拿整屏比。
-  //    ★ 为什么是**关/开差分**而不是「开着得有、关掉得空」：那一小块正好落在波段顶/底上，
-  //      里面本来就躺着同色的东西 —— 线段端点的空心圈（也是 CHART.buy/sell，跟买卖点同一个色）
-  //      和挨着的阴线。所以两边都读一次、**看差**：差分里剩下的才是这一个开关管的那颗三角。
-  //      （第一版写「关掉必须为 0」，红得对但红错了地方：那些像素根本不归这个开关管。）
-  //    两问：① 点开买卖点 ⇒ 那块里多出来的买卖点色够一颗三角；② 这个读数是**稳的**（同一状态重拍一样）。
   const hex2rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
   const MARK = await p.evaluate(async () => {
     const m = await import('/theme.js');
     return { buy: m.CHART.buy, sell: m.CHART.sell, seg: m.SIG.segSize, pen: m.SIG.penSize, tip: m.SIG.tip };
   });
   const chartBox = await p.locator('#chart').boundingBox();
-  const triBoxes = await p.evaluate(([MARK, box]) => {
+  // 把一个买卖点的「三角盘踞的那一小块」算成屏幕像素框（⑦ 拿它量开关，⑰ 拿它量切看法）
+  const boxOf = (list) => p.evaluate(([list, MARK, box]) => {
     const ch = window.__app.chart, ts = ch.timeScale(), s0 = ch.panes()[0].getSeries()[0];
     const out = [];
-    for (const tier of ['seg', 'pen']) for (const s of (window.__app.state.data.signals[tier] || [])) {
-      if (!s.confirmed) continue;                       // 待确认默认不画，别拿它当样本
+    for (const s of list) {
       const x = ts.logicalToCoordinate(s.bar), y = s0.priceToCoordinate(s.price);
-      if (x === null || y === null || x < 60 || x > box.width - 60) continue;
-      const hh = (tier === 'seg' ? MARK.seg : MARK.pen) * 0.55;   // ＝ layers.js 那个 0.55
-      const d = s.kind.endsWith('买') ? 1 : -1;                   // 买点在点位下方、卖点在上方
+      if (x === null || y === null || x < 60 || x > box.width - 60) continue;   // 屏幕外的样本不量
+      const hh = (s.tier === 'seg' ? MARK.seg : MARK.pen) * 0.55;   // ＝ layers.js 那个 0.55
+      const d = s.kind.endsWith('买') ? 1 : -1;                     // 买点在点位下方、卖点在上方
       const yy = Math.min(y + d * MARK.tip * 0.6, y + d * (MARK.tip * 0.6 + 2 * hh));
-      out.push({ tier, kind: s.kind, bar: s.bar, buy: s.kind.endsWith('买'),
+      out.push({ tier: s.tier, kind: s.kind, bar: s.bar, only: s.only, buy: s.kind.endsWith('买'),
                  x: Math.round(box.x + x - hh - 2), y: Math.round(box.y + yy - 2),
                  w: Math.round(2 * hh + 5), h: Math.round(2 * hh + 5) });
     }
-    return out.sort((a, b) => (a.tier === b.tier ? 0 : a.tier === 'seg' ? -1 : 1)).slice(0, 3);
-  }, [MARK, chartBox]);
+    return out;
+  }, [list, MARK, chartBox]);
   const countMarks = (bs) => p.evaluate(([bs, buy, sell]) => {
     // ★ 颜色**只认这两个**（±8）：放太宽会把阴线 `#ef5350`（跟卖点 `#ff5656` 只差 (16,3,6)）算进来，
     //   那一格就变成「在数量 K 线」。已确认的点 alpha=255，三角内部是**纯色**，收紧也数得到。
@@ -261,13 +251,81 @@ const shotChart = async (p, tag) => {
       return { n };
     });
   }, [bs, hex2rgb(MARK.buy), hex2rgb(MARK.sell)]);
+  const need = (t) => (t === 'seg' ? 24 : 3);                  // 实心三角 ~136 格、空心笔层就几格描边
+
+  // ★★ ⑰ 的「切之前」这一读：视口刚摆到差异点上，此刻还是**面积**。
+  const diffBoxes = (await boxOf(diffSigs)).slice(0, 4);
+  const nBefore = await countMarks(diffBoxes);
+
+  // ★★ 等它换过来，但**超时不许把整支工装炸掉**（Atlas 2026-10-04 核的：变异「切的时候发旧看法」
+  //    原来在这行 Timeout 炸了、rc=2，一个字都没印出来）。**炸掉不等于红** ——
+  //    红要红在某一格上，并且说出它当时看到了什么（发出的是什么、回显是什么、图脚写的什么）。
+  //    所以超时收成一个返回值，让下面几格照实报。
+  const sw = async (id) => {                    // 点一颗看法、等它真换过来；回这一趟发出的 measure ＋ 当时的状态
+    const kk = reqs.length;
+    await p.locator(`.mchip[data-measure="${id}"]`).click();
+    let ok = true;
+    try {
+      await p.waitForFunction((m) => window.__app.state.data && window.__app.state.data.measure === m, id, { timeout: 30000 });
+    } catch (e) { ok = false; }
+    await sleep(900);
+    const got = await p.evaluate(() => ({
+      echo: window.__app.paging.measure,
+      drawn: window.__app.state.data && window.__app.state.data.measure,
+      footer: (document.getElementById('meta') || {}).textContent || '',
+    }));
+    return { ok, id, sent: reqs.slice(kk).map((u) => new URL(u).searchParams.get('measure')), got };
+  };
+  let s0, s1, px0, px1, sent, redo = 0;
+  for (;;) {
+    s0 = await shape(p); px0 = await shotChart(p, 'before');
+    sent = await sw('lines');
+    s1 = await shape(p); px1 = await shotChart(p, 'after');
+    if (!sent.ok || s0.fetched === s1.fetched || redo >= 2) break;
+    redo++;                                     // 这两份不是一趟取数 ⇒ 切回去、重来一对
+    const back = await sw('macd');
+    if (!back.ok) break;                        // 切回去都没换成 ⇒ 别再空转，让下面照实报
+  }
+  const u1 = await ui(p);
+  const nAfter = await countMarks(diffBoxes);      // ⑰ 的「切之后」这一读（此刻已经是黄白线）
+  const why = `发出的 measure=${JSON.stringify(sent.sent)}；回显=${JSON.stringify(sent.got.echo)}` +
+              `、画的是=${JSON.stringify(sent.got.drawn)}；图脚尾=…${sent.got.footer.slice(-28)}`;
+  ck('点的是「黄白线」⇒ 发出去的就是 lines', sent.ok && sent.sent.length === 1 && sent.sent[0] === 'lines', why);
+  ck('图脚跟着**回显**换：背驰看法 黄白线', u1.meta.includes('背驰看法 黄白线'), u1.meta.slice(-40));
+  ck('亮着的那颗也跟着回显换', u1.items.find((i) => i.on === 'true').id === 'lines');
+  ck('结构逐字节不变（bars/pens/segs/centers/seg_centers）',
+     s0.fetched === s1.fetched && s0.struct === s1.struct && s0.nbars === s1.nbars,
+     s0.fetched === s1.fetched
+       ? `同一趟取数 ${s0.fetched}${redo ? `（撞上重拉、重跑了 ${redo} 遍）` : ''}`
+       : `★ 这两份不是同一趟取数：${s0.fetched} → ${s1.fetched}（后台重拉过，这一格量不准）`);
+  ck('买卖点真的变了（不然这一格是空转）', s0.sigs !== s1.sigs,
+     `段 ${JSON.parse(s0.sigs).seg.length}→${JSON.parse(s1.sigs).seg.length} 笔 ${JSON.parse(s0.sigs).pen.length}→${JSON.parse(s1.sigs).pen.length}`);
+
+  // ★★ 三角到底画出来了没有 —— 2026-10-04 补的一格（线上真出过：买卖点**整层一颗不画**，而下面
+  //    那格「屏幕真的变了」照样绿：它量到的像素差来自买卖点的**文字**，是替身）。
+  //    口径（Atlas 2026-10-04）：只取**三角盘踞的那一小块**、只认**买卖点那两个颜色**，不拿整屏比。
+  //    ★ 为什么是**关/开差分**而不是「开着得有、关掉得空」：那一小块正好落在波段顶/底上，
+  //      里面本来就躺着同色的东西 —— 线段端点的空心圈（也是 CHART.buy/sell，跟买卖点同一个色）
+  //      和挨着的阴线。所以两边都读一次、**看差**：差分里剩下的才是这一个开关管的那颗三角。
+  //      （第一版写「关掉必须为 0」，红得对但红错了地方：那些像素根本不归这个开关管。）
+  //    两问：① 点开买卖点 ⇒ 那块里多出来的买卖点色够一颗三角；② 这个读数是**稳的**（同一状态重拍一样）。
+  //    （读法 boxOf/countMarks 挪到上面去了：⑰ 得在「切之前」就能读一次。）
+  const sigsNow = await p.evaluate(() => {
+    const out = [];
+    for (const tier of ['seg', 'pen']) for (const s of (window.__app.state.data.signals[tier] || []))
+      if (s.confirmed) out.push({ tier, kind: s.kind, bar: s.bar, price: s.price, only: null });  // 待确认默认不画，别拿它当样本
+    return out.sort((a, b) => (a.tier === b.tier ? 0 : a.tier === 'seg' ? -1 : 1));
+  });
+  // ★ 先按「在不在这一屏里」筛，**再**取前 3 个样本 —— 原来 `slice(0,3)` 在筛之前，样本会随行情飘：
+  //   屏幕上明明有 3 颗，取到的却是「全段前 3 颗」里两颗在屏幕外的（实测 x=-214），
+  //   这一格就白红了（读数其实一模一样）。红得对，但红错了地方。
+  const triBoxes = (await boxOf(sigsNow)).slice(0, 3);
   const on = await countMarks(triBoxes);                       // 这一页的买卖点**已经点开**（见上面那一行）
   await p.locator('.chip[data-key="sig"]').click(); await sleep(800);
   const off = await countMarks(triBoxes);
   await p.locator('.chip[data-key="sig"]').click(); await sleep(800);    // 点回来；后面那格用的就是这一次
   const again = await countMarks(triBoxes);
   const desc = (a) => a.map((o, i) => `${triBoxes[i].kind}@${triBoxes[i].bar}${o.miss ? '（' + o.miss + '）' : '=' + o.n}`).join(' ');
-  const need = (t) => (t === 'seg' ? 24 : 3);                  // 实心三角 ~136 格、空心笔层就几格描边
   const dlt = on.map((o, i) => o.n - (off[i] ? off[i].n : 0));
   ck('买卖点点开 ⇒ 三角那一块里**真多出一颗三角**（关/开同一块差分，只认买卖点那两个颜色）',
      triBoxes.length >= 2 && dlt.every((d, i) => d >= need(triBoxes[i].tier)),
@@ -275,9 +333,18 @@ const shotChart = async (p, tag) => {
   ck('同一状态重拍，读数一模一样（这一格量的是那个开关，不是抖动）',
      triBoxes.length >= 2 && again.every((o, i) => o.n === on[i].n),
      `两次都开着：${desc(on)} ／ ${desc(again)}`);
-  ck('屏幕真的变了（把视口摆到两种看法真的不一样的那几根上，图的像素前后不等）',
-     diffBars.length > 0 && !px0.equals(px1),
-     `${diffBars.length} 根上不一样，视口摆在 bar=${diffBars[Math.floor(diffBars.length / 2)]}`);
+  // ★★ ⑰ 切看法**真的落到那几个点上**（替掉原来那句「整屏像素前后不等」—— 那句是替身，见文件头上 ⑰ 的说明）。
+  //    只在「两种看法差出来的那个点」盘踞的小块里、只认买卖点那两个颜色，切之前读一次、切之后读一次，**看差**：
+  //    多出来的点必须**多出够一颗三角的墨**，少掉的点必须**少掉**那么多。（差分是必须的：那一小块落在
+  //    波段顶/底上，里面本来就躺着同色的线段端点空心圈 —— 这正是 ⑦ 踩过的那个坑。）
+  const oD = (a, tag) => a.map((o, i) => `${tag}${diffBoxes[i].kind}@${diffBoxes[i].bar}${o.miss ? '（' + o.miss + '）' : '=' + o.n}`).join(' ');
+  const sign = (t) => (t === 'lines' ? 1 : -1);                 // 黄白线多出来的点 ⇒ 墨该多；少掉的 ⇒ 墨该少
+  const dD = nBefore.map((o, i) => sign(diffBoxes[i].only) * ((nAfter[i] && nAfter[i].n ? nAfter[i].n : 0) - (o.n || 0)));
+  ck('切看法 ⇒ 那几个**差出来的点**上真的多／少了买卖点的墨（只认那两个颜色，看差）',
+     diffBoxes.length > 0 && sent.ok && dD.every((d, i) => d >= need(diffBoxes[i].tier)),
+     `${diffBoxes.length} 个差出来的点（${diffBoxes.map((b) => b.only).join('/')}）：${oD(nBefore, '切前')}｜${oD(nAfter, '切后')}` +
+     `｜差 ${JSON.stringify(dD)}（每个至少 ${diffBoxes.map((b) => need(b.tier)).join('/')}）` +
+     `｜顺带记一笔：整屏字节前后${px0.equals(px1) ? '相等' : '不等'}（这句只是旁注，不当判据 —— 它会因为最后一根价签在跳而变）`);
   const dr = (a, b2) => Math.max(Math.abs(a.from - b2.from), Math.abs(a.to - b2.to));
   ck('视口一动没动（切看法不换档）', dr(s0.range, s1.range) < 0.001,
      `${s0.range.from.toFixed(2)}..${s0.range.to.toFixed(2)} → ${s1.range.from.toFixed(2)}..${s1.range.to.toFixed(2)}`);
@@ -287,7 +354,7 @@ const shotChart = async (p, tag) => {
   await c.close();
 
   // ---- ⑩：?measure=lines 直接打开
-  console.log('⑫ ?measure=lines 直接打开');
+  console.log('18–19 ?measure=lines 直接打开');
   const d2 = await open(QS + '&measure=lines');
   const first = d2.reqs.length ? new URL(d2.reqs[0]).searchParams.get('measure') : null;
   const u2 = await ui(d2.p);
@@ -296,7 +363,7 @@ const shotChart = async (p, tag) => {
   await d2.c.close();
 
   // ---- ⑪：?measure=乱写
-  console.log('⑬ ?measure=乱写');
+  console.log('20–21 ?measure=乱写');
   const d3 = await open(QS + '&measure=bogus');
   const seen = d3.reqs.map((u) => new URL(u).searchParams.get('measure'));
   const u3 = await ui(d3.p);
@@ -305,7 +372,7 @@ const shotChart = async (p, tag) => {
   await d3.c.close();
 
   // ---- ⑫：旧后台（没有 measures）
-  console.log('⑭ 旧后台（/api/meta 没有 measures）');
+  console.log('22–24 旧后台（/api/meta 没有 measures）');
   const d4 = await open(QS, { oldBackend: true });
   const u4 = await ui(d4.p);
   ck('控件不出现（不知道的事不编）', !u4.has);
