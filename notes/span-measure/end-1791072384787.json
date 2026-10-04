@@ -1,5 +1,5 @@
 {
- "measured_at": 1791072501525,
+ "measured_at": 1791073966344,
  "end_arg": 1791072384787,
  "spans": [
   1,
@@ -19,7 +19,7 @@
      "bars": 20161,
      "first_t": 1772927100000,
      "last_t": 1791071100000,
-     "fetch_s": 7.72,
+     "fetch_s": 7.17,
      "fetch_new_bars": 20161,
      "compute_s": 0.06,
      "json_bytes": 1498138,
@@ -31,9 +31,9 @@
      "bars": 40321,
      "first_t": 1754783100000,
      "last_t": 1791071100000,
-     "fetch_s": 7.32,
+     "fetch_s": 7.34,
      "fetch_new_bars": 20160,
-     "compute_s": 0.15,
+     "compute_s": 0.16,
      "json_bytes": 2956093,
      "gzip_bytes": 686136,
      "earliest": false
@@ -43,7 +43,7 @@
      "bars": 80641,
      "first_t": 1718495100000,
      "last_t": 1791071100000,
-     "fetch_s": 13.91,
+     "fetch_s": 13.71,
      "fetch_new_bars": 40320,
      "compute_s": 0.48,
      "json_bytes": 5737810,
@@ -55,7 +55,7 @@
      "bars": 161281,
      "first_t": 1645919100000,
      "last_t": 1791071100000,
-     "fetch_s": 28.12,
+     "fetch_s": 28.02,
      "fetch_new_bars": 80640,
      "compute_s": 1.81,
      "json_bytes": 11324445,
@@ -67,9 +67,9 @@
      "bars": 233536,
      "first_t": 1580889600000,
      "last_t": 1791071100000,
-     "fetch_s": 23.54,
+     "fetch_s": 24.22,
      "fetch_new_bars": 72255,
-     "compute_s": 4.12,
+     "compute_s": 4.17,
      "json_bytes": 16518840,
      "gzip_bytes": 3371579,
      "earliest": false
@@ -81,9 +81,10 @@
       "笔端点": 1,
       "段端点": 3,
       "类中枢": 6,
-      "线段中枢": 5
+      "线段中枢": 5,
+      "买卖点": 7
      },
-     "total": 15,
+     "total": 22,
      "rightmost_from_end": 14598,
      "k": 1,
      "k2": 2
@@ -93,7 +94,8 @@
       "笔端点": 0,
       "段端点": 2,
       "类中枢": 2,
-      "线段中枢": 1
+      "线段中枢": 1,
+      "买卖点": 0
      },
      "total": 5,
      "rightmost_from_end": 39810,
@@ -105,9 +107,10 @@
       "笔端点": 0,
       "段端点": 1,
       "类中枢": 1,
-      "线段中枢": 2
+      "线段中枢": 2,
+      "买卖点": 3
      },
-     "total": 4,
+     "total": 7,
      "rightmost_from_end": 77947,
      "k": 4,
      "k2": 8
@@ -117,10 +120,11 @@
       "笔端点": 1,
       "段端点": 3,
       "类中枢": 1,
-      "线段中枢": 1
+      "线段中枢": 1,
+      "买卖点": 3
      },
-     "total": 6,
-     "rightmost_from_end": 160267,
+     "total": 9,
+     "rightmost_from_end": 144012,
      "k": 8,
      "k2": 16
     }
@@ -136,7 +140,7 @@
      "bars": 10081,
      "first_t": 1772926200000,
      "last_t": 1791070200000,
-     "fetch_s": 3.73,
+     "fetch_s": 3.47,
      "fetch_new_bars": 10081,
      "compute_s": 0.03,
      "json_bytes": 749480,
@@ -148,7 +152,7 @@
      "bars": 20161,
      "first_t": 1754782200000,
      "last_t": 1791070200000,
-     "fetch_s": 3.65,
+     "fetch_s": 3.78,
      "fetch_new_bars": 10080,
      "compute_s": 0.06,
      "json_bytes": 1465605,
@@ -160,7 +164,7 @@
      "bars": 40321,
      "first_t": 1718494200000,
      "last_t": 1791070200000,
-     "fetch_s": 8.39,
+     "fetch_s": 6.87,
      "fetch_new_bars": 20160,
      "compute_s": 0.14,
      "json_bytes": 2855346,
@@ -172,7 +176,7 @@
      "bars": 80641,
      "first_t": 1645918200000,
      "last_t": 1791070200000,
-     "fetch_s": 14.78,
+     "fetch_s": 13.61,
      "fetch_new_bars": 40320,
      "compute_s": 0.45,
      "json_bytes": 5640753,
@@ -184,7 +188,7 @@
      "bars": 116768,
      "first_t": 1580889600000,
      "last_t": 1791070200000,
-     "fetch_s": 13.86,
+     "fetch_s": 13.18,
      "fetch_new_bars": 36127,
      "compute_s": 0.92,
      "json_bytes": 8229164,
@@ -198,9 +202,10 @@
       "笔端点": 0,
       "段端点": 0,
       "类中枢": 0,
-      "线段中枢": 14
+      "线段中枢": 14,
+      "买卖点": 10
      },
-     "total": 14,
+     "total": 24,
      "rightmost_from_end": 3391,
      "k": 1,
      "k2": 2
@@ -210,7 +215,8 @@
       "笔端点": 0,
       "段端点": 2,
       "类中枢": 2,
-      "线段中枢": 2
+      "线段中枢": 2,
+      "买卖点": 0
      },
      "total": 6,
      "rightmost_from_end": 19988,
@@ -222,7 +228,8 @@
       "笔端点": 0,
       "段端点": 1,
       "类中枢": 1,
-      "线段中枢": 2
+      "线段中枢": 2,
+      "买卖点": 0
      },
      "total": 4,
      "rightmost_from_end": 39401,
@@ -234,10 +241,11 @@
       "笔端点": 1,
       "段端点": 3,
       "类中枢": 2,
-      "线段中枢": 2
+      "线段中枢": 2,
+      "买卖点": 4
      },
-     "total": 8,
-     "rightmost_from_end": 80133,
+     "total": 12,
+     "rightmost_from_end": 77591,
      "k": 8,
      "k2": 16
     }
@@ -253,9 +261,9 @@
      "bars": 5041,
      "first_t": 1772924400000,
      "last_t": 1791068400000,
-     "fetch_s": 1.9,
+     "fetch_s": 2.06,
      "fetch_new_bars": 5041,
-     "compute_s": 0.01,
+     "compute_s": 0.02,
      "json_bytes": 371048,
      "gzip_bytes": 92594,
      "earliest": false
@@ -265,9 +273,9 @@
      "bars": 10081,
      "first_t": 1754780400000,
      "last_t": 1791068400000,
-     "fetch_s": 2.08,
+     "fetch_s": 2.56,
      "fetch_new_bars": 5040,
-     "compute_s": 0.03,
+     "compute_s": 0.02,
      "json_bytes": 731037,
      "gzip_bytes": 178806,
      "earliest": false
@@ -277,7 +285,7 @@
      "bars": 20161,
      "first_t": 1718492400000,
      "last_t": 1791068400000,
-     "fetch_s": 3.48,
+     "fetch_s": 4.4,
      "fetch_new_bars": 10080,
      "compute_s": 0.06,
      "json_bytes": 1419918,
@@ -289,9 +297,9 @@
      "bars": 40321,
      "first_t": 1645916400000,
      "last_t": 1791068400000,
-     "fetch_s": 7.69,
+     "fetch_s": 8.36,
      "fetch_new_bars": 20160,
-     "compute_s": 0.15,
+     "compute_s": 0.16,
      "json_bytes": 2824722,
      "gzip_bytes": 616142,
      "earliest": false
@@ -301,9 +309,9 @@
      "bars": 58384,
      "first_t": 1580889600000,
      "last_t": 1791068400000,
-     "fetch_s": 6.85,
+     "fetch_s": 6.97,
      "fetch_new_bars": 18063,
-     "compute_s": 0.27,
+     "compute_s": 0.26,
      "json_bytes": 4111946,
      "gzip_bytes": 908380,
      "earliest": false
@@ -315,9 +323,10 @@
       "笔端点": 0,
       "段端点": 1,
       "类中枢": 1,
-      "线段中枢": 3
+      "线段中枢": 3,
+      "买卖点": 1
      },
-     "total": 5,
+     "total": 6,
      "rightmost_from_end": 3043,
      "k": 1,
      "k2": 2
@@ -327,9 +336,10 @@
       "笔端点": 1,
       "段端点": 2,
       "类中枢": 1,
-      "线段中枢": 4
+      "线段中枢": 4,
+      "买卖点": 2
      },
-     "total": 8,
+     "total": 10,
      "rightmost_from_end": 8700,
      "k": 2,
      "k2": 4
@@ -339,9 +349,10 @@
       "笔端点": 1,
       "段端点": 5,
       "类中枢": 3,
-      "线段中枢": 6
+      "线段中枢": 6,
+      "买卖点": 3
      },
-     "total": 15,
+     "total": 18,
      "rightmost_from_end": 14994,
      "k": 4,
      "k2": 8
@@ -351,9 +362,10 @@
       "笔端点": 0,
       "段端点": 2,
       "类中枢": 0,
-      "线段中枢": 9
+      "线段中枢": 9,
+      "买卖点": 4
      },
-     "total": 11,
+     "total": 15,
      "rightmost_from_end": 37934,
      "k": 8,
      "k2": 16
@@ -370,9 +382,9 @@
      "bars": 2521,
      "first_t": 1772920800000,
      "last_t": 1791064800000,
-     "fetch_s": 0.95,
+     "fetch_s": 1.25,
      "fetch_new_bars": 2521,
-     "compute_s": 0.01,
+     "compute_s": 0.0,
      "json_bytes": 183049,
      "gzip_bytes": 47787,
      "earliest": false
@@ -382,9 +394,9 @@
      "bars": 5041,
      "first_t": 1754776800000,
      "last_t": 1791064800000,
-     "fetch_s": 1.18,
+     "fetch_s": 1.02,
      "fetch_new_bars": 2520,
-     "compute_s": 0.03,
+     "compute_s": 0.09,
      "json_bytes": 360120,
      "gzip_bytes": 91683,
      "earliest": false
@@ -394,9 +406,9 @@
      "bars": 10081,
      "first_t": 1718488800000,
      "last_t": 1791064800000,
-     "fetch_s": 2.21,
+     "fetch_s": 2.33,
      "fetch_new_bars": 5040,
-     "compute_s": 0.03,
+     "compute_s": 0.02,
      "json_bytes": 704088,
      "gzip_bytes": 167804,
      "earliest": false
@@ -406,7 +418,7 @@
      "bars": 20161,
      "first_t": 1645912800000,
      "last_t": 1791064800000,
-     "fetch_s": 3.74,
+     "fetch_s": 4.16,
      "fetch_new_bars": 10080,
      "compute_s": 0.06,
      "json_bytes": 1401826,
@@ -418,7 +430,7 @@
      "bars": 29192,
      "first_t": 1580889600000,
      "last_t": 1791064800000,
-     "fetch_s": 3.87,
+     "fetch_s": 3.57,
      "fetch_new_bars": 9031,
      "compute_s": 0.1,
      "json_bytes": 2039208,
@@ -432,10 +444,11 @@
       "笔端点": 0,
       "段端点": 1,
       "类中枢": 1,
-      "线段中枢": 1
+      "线段中枢": 1,
+      "买卖点": 1
      },
-     "total": 3,
-     "rightmost_from_end": 2116,
+     "total": 4,
+     "rightmost_from_end": 2006,
      "k": 1,
      "k2": 2
     },
@@ -444,7 +457,8 @@
       "笔端点": 0,
       "段端点": 1,
       "类中枢": 0,
-      "线段中枢": 1
+      "线段中枢": 1,
+      "买卖点": 0
      },
      "total": 2,
      "rightmost_from_end": 4614,
@@ -456,9 +470,10 @@
       "笔端点": 1,
       "段端点": 1,
       "类中枢": 0,
-      "线段中枢": 1
+      "线段中枢": 1,
+      "买卖点": 1
      },
-     "total": 3,
+     "total": 4,
      "rightmost_from_end": 8613,
      "k": 4,
      "k2": 8
@@ -468,9 +483,10 @@
       "笔端点": 0,
       "段端点": 1,
       "类中枢": 0,
-      "线段中枢": 4
+      "线段中枢": 4,
+      "买卖点": 4
      },
-     "total": 5,
+     "total": 9,
      "rightmost_from_end": 17368,
      "k": 8,
      "k2": 16
@@ -487,7 +503,7 @@
      "bars": 1261,
      "first_t": 1772913600000,
      "last_t": 1791057600000,
-     "fetch_s": 0.63,
+     "fetch_s": 0.52,
      "fetch_new_bars": 1261,
      "compute_s": 0.01,
      "json_bytes": 93248,
@@ -499,7 +515,7 @@
      "bars": 2521,
      "first_t": 1754769600000,
      "last_t": 1791057600000,
-     "fetch_s": 0.76,
+     "fetch_s": 0.62,
      "fetch_new_bars": 1260,
      "compute_s": 0.02,
      "json_bytes": 184881,
@@ -511,9 +527,9 @@
      "bars": 5041,
      "first_t": 1718481600000,
      "last_t": 1791057600000,
-     "fetch_s": 1.13,
+     "fetch_s": 1.11,
      "fetch_new_bars": 2520,
-     "compute_s": 0.02,
+     "compute_s": 0.03,
      "json_bytes": 354067,
      "gzip_bytes": 88290,
      "earliest": false
@@ -523,7 +539,7 @@
      "bars": 10081,
      "first_t": 1645905600000,
      "last_t": 1791057600000,
-     "fetch_s": 2.13,
+     "fetch_s": 2.19,
      "fetch_new_bars": 5040,
      "compute_s": 0.03,
      "json_bytes": 698732,
@@ -535,9 +551,9 @@
      "bars": 14596,
      "first_t": 1580889600000,
      "last_t": 1791057600000,
-     "fetch_s": 2.4,
+     "fetch_s": 2.3,
      "fetch_new_bars": 4515,
-     "compute_s": 0.03,
+     "compute_s": 0.05,
      "json_bytes": 1014062,
      "gzip_bytes": 243601,
      "earliest": false
@@ -549,9 +565,10 @@
       "笔端点": 0,
       "段端点": 1,
       "类中枢": 1,
-      "线段中枢": 1
+      "线段中枢": 1,
+      "买卖点": 1
      },
-     "total": 3,
+     "total": 4,
      "rightmost_from_end": 724,
      "k": 1,
      "k2": 2
@@ -561,9 +578,10 @@
       "笔端点": 0,
       "段端点": 2,
       "类中枢": 1,
-      "线段中枢": 3
+      "线段中枢": 3,
+      "买卖点": 1
      },
-     "total": 6,
+     "total": 7,
      "rightmost_from_end": 1386,
      "k": 2,
      "k2": 4
@@ -573,9 +591,10 @@
       "笔端点": 0,
       "段端点": 2,
       "类中枢": 0,
-      "线段中枢": 4
+      "线段中枢": 4,
+      "买卖点": 3
      },
-     "total": 6,
+     "total": 9,
      "rightmost_from_end": 1386,
      "k": 4,
      "k2": 8
@@ -585,10 +604,11 @@
       "笔端点": 0,
       "段端点": 1,
       "类中枢": 0,
-      "线段中枢": 2
+      "线段中枢": 2,
+      "买卖点": 4
      },
-     "total": 3,
-     "rightmost_from_end": 8708,
+     "total": 7,
+     "rightmost_from_end": 8626,
      "k": 8,
      "k2": 16
     }
@@ -604,7 +624,7 @@
      "bars": 20161,
      "first_t": 1772927100000,
      "last_t": 1791071100000,
-     "fetch_s": 7.28,
+     "fetch_s": 7.11,
      "fetch_new_bars": 20161,
      "compute_s": 0.06,
      "json_bytes": 1572284,
@@ -616,9 +636,9 @@
      "bars": 40321,
      "first_t": 1754783100000,
      "last_t": 1791071100000,
-     "fetch_s": 7.45,
+     "fetch_s": 7.41,
      "fetch_new_bars": 20160,
-     "compute_s": 0.15,
+     "compute_s": 0.14,
      "json_bytes": 3163939,
      "gzip_bytes": 770440,
      "earliest": false
@@ -628,7 +648,7 @@
      "bars": 80641,
      "first_t": 1718495100000,
      "last_t": 1791071100000,
-     "fetch_s": 14.18,
+     "fetch_s": 13.81,
      "fetch_new_bars": 40320,
      "compute_s": 0.44,
      "json_bytes": 6366406,
@@ -640,9 +660,9 @@
      "bars": 161281,
      "first_t": 1645919100000,
      "last_t": 1791071100000,
-     "fetch_s": 28.02,
+     "fetch_s": 28.41,
      "fetch_new_bars": 80640,
-     "compute_s": 1.62,
+     "compute_s": 1.63,
      "json_bytes": 12631767,
      "gzip_bytes": 3010250,
      "earliest": false
@@ -652,7 +672,7 @@
      "bars": 247897,
      "first_t": 1567964700000,
      "last_t": 1791071100000,
-     "fetch_s": 29.84,
+     "fetch_s": 29.59,
      "fetch_new_bars": 86616,
      "compute_s": 4.12,
      "json_bytes": 19498698,
@@ -666,9 +686,10 @@
       "笔端点": 0,
       "段端点": 2,
       "类中枢": 1,
-      "线段中枢": 3
+      "线段中枢": 3,
+      "买卖点": 2
      },
-     "total": 6,
+     "total": 8,
      "rightmost_from_end": 16709,
      "k": 1,
      "k2": 2
@@ -678,10 +699,11 @@
       "笔端点": 0,
       "段端点": 2,
       "类中枢": 2,
-      "线段中枢": 1
+      "线段中枢": 1,
+      "买卖点": 4
      },
-     "total": 5,
-     "rightmost_from_end": 39592,
+     "total": 9,
+     "rightmost_from_end": 10557,
      "k": 2,
      "k2": 4
     },
@@ -690,10 +712,11 @@
       "笔端点": 0,
       "段端点": 2,
       "类中枢": 1,
-      "线段中枢": 6
+      "线段中枢": 6,
+      "买卖点": 4
      },
-     "total": 9,
-     "rightmost_from_end": 76265,
+     "total": 13,
+     "rightmost_from_end": 10557,
      "k": 4,
      "k2": 8
     },
@@ -702,10 +725,11 @@
       "笔端点": 1,
       "段端点": 1,
       "类中枢": 0,
-      "线段中枢": 3
+      "线段中枢": 3,
+      "买卖点": 9
      },
-     "total": 5,
-     "rightmost_from_end": 157830,
+     "total": 14,
+     "rightmost_from_end": 69401,
      "k": 8,
      "k2": 16
     }
@@ -721,9 +745,9 @@
      "bars": 10081,
      "first_t": 1772926200000,
      "last_t": 1791070200000,
-     "fetch_s": 3.48,
+     "fetch_s": 3.62,
      "fetch_new_bars": 10081,
-     "compute_s": 0.02,
+     "compute_s": 0.03,
      "json_bytes": 781252,
      "gzip_bytes": 194839,
      "earliest": false
@@ -733,9 +757,9 @@
      "bars": 20161,
      "first_t": 1754782200000,
      "last_t": 1791070200000,
-     "fetch_s": 3.48,
+     "fetch_s": 3.6,
      "fetch_new_bars": 10080,
-     "compute_s": 0.06,
+     "compute_s": 0.05,
      "json_bytes": 1582482,
      "gzip_bytes": 396420,
      "earliest": false
@@ -745,7 +769,7 @@
      "bars": 40321,
      "first_t": 1718494200000,
      "last_t": 1791070200000,
-     "fetch_s": 7.44,
+     "fetch_s": 7.35,
      "fetch_new_bars": 20160,
      "compute_s": 0.16,
      "json_bytes": 3192355,
@@ -757,7 +781,7 @@
      "bars": 80641,
      "first_t": 1645918200000,
      "last_t": 1791070200000,
-     "fetch_s": 14.12,
+     "fetch_s": 13.66,
      "fetch_new_bars": 40320,
      "compute_s": 0.43,
      "json_bytes": 6309239,
@@ -769,9 +793,9 @@
      "bars": 123949,
      "first_t": 1567963800000,
      "last_t": 1791070200000,
-     "fetch_s": 15.72,
+     "fetch_s": 15.07,
      "fetch_new_bars": 43308,
-     "compute_s": 1.01,
+     "compute_s": 0.99,
      "json_bytes": 9724553,
      "gzip_bytes": 2433967,
      "earliest": false
@@ -783,9 +807,10 @@
       "笔端点": 0,
       "段端点": 1,
       "类中枢": 0,
-      "线段中枢": 1
+      "线段中枢": 1,
+      "买卖点": 1
      },
-     "total": 2,
+     "total": 3,
      "rightmost_from_end": 8354,
      "k": 1,
      "k2": 2
@@ -795,9 +820,10 @@
       "笔端点": 0,
       "段端点": 2,
       "类中枢": 2,
-      "线段中枢": 2
+      "线段中枢": 2,
+      "买卖点": 2
      },
-     "total": 6,
+     "total": 8,
      "rightmost_from_end": 18929,
      "k": 2,
      "k2": 4
@@ -807,7 +833,8 @@
       "笔端点": 1,
       "段端点": 1,
       "类中枢": 0,
-      "线段中枢": 1
+      "线段中枢": 1,
+      "买卖点": 0
      },
      "total": 3,
      "rightmost_from_end": 40104,
@@ -819,10 +846,11 @@
       "笔端点": 1,
       "段端点": 2,
       "类中枢": 4,
-      "线段中枢": 4
+      "线段中枢": 4,
+      "买卖点": 7
      },
-     "total": 11,
-     "rightmost_from_end": 77540,
+     "total": 18,
+     "rightmost_from_end": 36078,
      "k": 8,
      "k2": 16
     }
@@ -838,7 +866,7 @@
      "bars": 5041,
      "first_t": 1772924400000,
      "last_t": 1791068400000,
-     "fetch_s": 2.12,
+     "fetch_s": 1.77,
      "fetch_new_bars": 5041,
      "compute_s": 0.01,
      "json_bytes": 384142,
@@ -850,7 +878,7 @@
      "bars": 10081,
      "first_t": 1754780400000,
      "last_t": 1791068400000,
-     "fetch_s": 2.34,
+     "fetch_s": 2.17,
      "fetch_new_bars": 5040,
      "compute_s": 0.03,
      "json_bytes": 785914,
@@ -862,7 +890,7 @@
      "bars": 20161,
      "first_t": 1718492400000,
      "last_t": 1791068400000,
-     "fetch_s": 3.91,
+     "fetch_s": 4.0,
      "fetch_new_bars": 10080,
      "compute_s": 0.06,
      "json_bytes": 1586392,
@@ -874,7 +902,7 @@
      "bars": 40321,
      "first_t": 1645916400000,
      "last_t": 1791068400000,
-     "fetch_s": 7.47,
+     "fetch_s": 7.44,
      "fetch_new_bars": 20160,
      "compute_s": 0.14,
      "json_bytes": 3137892,
@@ -886,9 +914,9 @@
      "bars": 61975,
      "first_t": 1567962000000,
      "last_t": 1791068400000,
-     "fetch_s": 8.29,
+     "fetch_s": 7.44,
      "fetch_new_bars": 21654,
-     "compute_s": 0.28,
+     "compute_s": 0.27,
      "json_bytes": 4851516,
      "gzip_bytes": 1225013,
      "earliest": false
@@ -900,7 +928,8 @@
       "笔端点": 1,
       "段端点": 0,
       "类中枢": 0,
-      "线段中枢": 1
+      "线段中枢": 1,
+      "买卖点": 0
      },
      "total": 2,
      "rightmost_from_end": 4304,
@@ -912,9 +941,10 @@
       "笔端点": 0,
       "段端点": 2,
       "类中枢": 3,
-      "线段中枢": 2
+      "线段中枢": 2,
+      "买卖点": 1
      },
-     "total": 7,
+     "total": 8,
      "rightmost_from_end": 7994,
      "k": 2,
      "k2": 4
@@ -924,9 +954,10 @@
       "笔端点": 3,
       "段端点": 3,
       "类中枢": 1,
-      "线段中枢": 3
+      "线段中枢": 3,
+      "买卖点": 1
      },
-     "total": 10,
+     "total": 11,
      "rightmost_from_end": 16992,
      "k": 4,
      "k2": 8
@@ -936,10 +967,11 @@
       "笔端点": 0,
       "段端点": 1,
       "类中枢": 1,
-      "线段中枢": 13
+      "线段中枢": 13,
+      "买卖点": 7
      },
-     "total": 15,
-     "rightmost_from_end": 33217,
+     "total": 22,
+     "rightmost_from_end": 23430,
      "k": 8,
      "k2": 16
     }
@@ -955,7 +987,7 @@
      "bars": 2521,
      "first_t": 1772920800000,
      "last_t": 1791064800000,
-     "fetch_s": 1.01,
+     "fetch_s": 0.97,
      "fetch_new_bars": 2521,
      "compute_s": 0.02,
      "json_bytes": 194273,
@@ -967,7 +999,7 @@
      "bars": 5041,
      "first_t": 1754776800000,
      "last_t": 1791064800000,
-     "fetch_s": 0.98,
+     "fetch_s": 1.21,
      "fetch_new_bars": 2520,
      "compute_s": 0.02,
      "json_bytes": 392868,
@@ -979,9 +1011,9 @@
      "bars": 10081,
      "first_t": 1718488800000,
      "last_t": 1791064800000,
-     "fetch_s": 2.44,
+     "fetch_s": 2.4,
      "fetch_new_bars": 5040,
-     "compute_s": 0.03,
+     "compute_s": 0.04,
      "json_bytes": 791239,
      "gzip_bytes": 202827,
      "earliest": false
@@ -991,9 +1023,9 @@
      "bars": 20161,
      "first_t": 1645912800000,
      "last_t": 1791064800000,
-     "fetch_s": 3.64,
+     "fetch_s": 3.99,
      "fetch_new_bars": 10080,
-     "compute_s": 0.06,
+     "compute_s": 0.05,
      "json_bytes": 1564628,
      "gzip_bytes": 396409,
      "earliest": false
@@ -1003,7 +1035,7 @@
      "bars": 30988,
      "first_t": 1567958400000,
      "last_t": 1791064800000,
-     "fetch_s": 3.99,
+     "fetch_s": 3.92,
      "fetch_new_bars": 10827,
      "compute_s": 0.1,
      "json_bytes": 2424485,
@@ -1017,9 +1049,10 @@
       "笔端点": 0,
       "段端点": 1,
       "类中枢": 0,
-      "线段中枢": 4
+      "线段中枢": 4,
+      "买卖点": 1
      },
-     "total": 5,
+     "total": 6,
      "rightmost_from_end": 604,
      "k": 1,
      "k2": 2
@@ -1029,9 +1062,10 @@
       "笔端点": 0,
       "段端点": 2,
       "类中枢": 1,
-      "线段中枢": 3
+      "线段中枢": 3,
+      "买卖点": 4
      },
-     "total": 6,
+     "total": 10,
      "rightmost_from_end": 2979,
      "k": 2,
      "k2": 4
@@ -1041,9 +1075,10 @@
       "笔端点": 2,
       "段端点": 2,
       "类中枢": 3,
-      "线段中枢": 5
+      "线段中枢": 5,
+      "买卖点": 5
      },
-     "total": 12,
+     "total": 17,
      "rightmost_from_end": 6232,
      "k": 4,
      "k2": 8
@@ -1053,9 +1088,10 @@
       "笔端点": 0,
       "段端点": 1,
       "类中枢": 0,
-      "线段中枢": 1
+      "线段中枢": 1,
+      "买卖点": 2
      },
-     "total": 2,
+     "total": 4,
      "rightmost_from_end": 19358,
      "k": 8,
      "k2": 16
@@ -1072,7 +1108,7 @@
      "bars": 1261,
      "first_t": 1772913600000,
      "last_t": 1791057600000,
-     "fetch_s": 0.41,
+     "fetch_s": 0.39,
      "fetch_new_bars": 1261,
      "compute_s": 0.01,
      "json_bytes": 97081,
@@ -1084,7 +1120,7 @@
      "bars": 2521,
      "first_t": 1754769600000,
      "last_t": 1791057600000,
-     "fetch_s": 0.63,
+     "fetch_s": 0.69,
      "fetch_new_bars": 1260,
      "compute_s": 0.02,
      "json_bytes": 196498,
@@ -1096,9 +1132,9 @@
      "bars": 5041,
      "first_t": 1718481600000,
      "last_t": 1791057600000,
-     "fetch_s": 1.16,
+     "fetch_s": 1.02,
      "fetch_new_bars": 2520,
-     "compute_s": 0.02,
+     "compute_s": 0.03,
      "json_bytes": 394175,
      "gzip_bytes": 103992,
      "earliest": false
@@ -1108,9 +1144,9 @@
      "bars": 10081,
      "first_t": 1645905600000,
      "last_t": 1791057600000,
-     "fetch_s": 2.13,
+     "fetch_s": 2.28,
      "fetch_new_bars": 5040,
-     "compute_s": 0.03,
+     "compute_s": 0.02,
      "json_bytes": 779655,
      "gzip_bytes": 201821,
      "earliest": false
@@ -1120,9 +1156,9 @@
      "bars": 15494,
      "first_t": 1567958400000,
      "last_t": 1791057600000,
-     "fetch_s": 2.42,
+     "fetch_s": 2.11,
      "fetch_new_bars": 5413,
-     "compute_s": 0.05,
+     "compute_s": 0.04,
      "json_bytes": 1199569,
      "gzip_bytes": 317959,
      "earliest": false
@@ -1134,7 +1170,8 @@
       "笔端点": 0,
       "段端点": 3,
       "类中枢": 1,
-      "线段中枢": 2
+      "线段中枢": 2,
+      "买卖点": 0
      },
      "total": 6,
      "rightmost_from_end": 446,
@@ -1146,7 +1183,8 @@
       "笔端点": 0,
       "段端点": 0,
       "类中枢": 0,
-      "线段中枢": 5
+      "线段中枢": 5,
+      "买卖点": 0
      },
      "total": 5,
      "rightmost_from_end": 602,
@@ -1158,9 +1196,10 @@
       "笔端点": 0,
       "段端点": 1,
       "类中枢": 0,
-      "线段中枢": 2
+      "线段中枢": 2,
+      "买卖点": 1
      },
-     "total": 3,
+     "total": 4,
      "rightmost_from_end": 4339,
      "k": 4,
      "k2": 8
@@ -1170,10 +1209,11 @@
       "笔端点": 0,
       "段端点": 1,
       "类中枢": 1,
-      "线段中枢": 3
+      "线段中枢": 3,
+      "买卖点": 5
      },
-     "total": 5,
-     "rightmost_from_end": 8573,
+     "total": 10,
+     "rightmost_from_end": 8304,
      "k": 8,
      "k2": 16
     }
@@ -1189,7 +1229,7 @@
      "bars": 17321,
      "first_t": 1775483100000,
      "last_t": 1791071100000,
-     "fetch_s": 6.01,
+     "fetch_s": 6.12,
      "fetch_new_bars": 17321,
      "compute_s": 0.04,
      "json_bytes": 1227918,
@@ -1215,7 +1255,8 @@
       "笔端点": 0,
       "段端点": 0,
       "类中枢": 0,
-      "线段中枢": 0
+      "线段中枢": 0,
+      "买卖点": 0
      },
      "total": 0,
      "rightmost_from_end": null,
@@ -1234,7 +1275,7 @@
      "bars": 8661,
      "first_t": 1775482200000,
      "last_t": 1791070200000,
-     "fetch_s": 2.98,
+     "fetch_s": 2.84,
      "fetch_new_bars": 8661,
      "compute_s": 0.02,
      "json_bytes": 615082,
@@ -1260,7 +1301,8 @@
       "笔端点": 0,
       "段端点": 0,
       "类中枢": 0,
-      "线段中枢": 0
+      "线段中枢": 0,
+      "买卖点": 0
      },
      "total": 0,
      "rightmost_from_end": null,
@@ -1279,9 +1321,9 @@
      "bars": 4331,
      "first_t": 1775480400000,
      "last_t": 1791068400000,
-     "fetch_s": 1.66,
+     "fetch_s": 1.51,
      "fetch_new_bars": 4331,
-     "compute_s": 0.01,
+     "compute_s": 0.02,
      "json_bytes": 303066,
      "gzip_bytes": 65570,
      "earliest": false
@@ -1293,7 +1335,7 @@
      "last_t": 1791068400000,
      "fetch_s": 0.1,
      "fetch_new_bars": 0,
-     "compute_s": 0.02,
+     "compute_s": 0.03,
      "json_bytes": 303066,
      "gzip_bytes": 65570,
      "earliest": true
@@ -1305,7 +1347,8 @@
       "笔端点": 0,
       "段端点": 0,
       "类中枢": 0,
-      "线段中枢": 0
+      "线段中枢": 0,
+      "买卖点": 0
      },
      "total": 0,
      "rightmost_from_end": null,
@@ -1324,9 +1367,9 @@
      "bars": 2166,
      "first_t": 1775476800000,
      "last_t": 1791064800000,
-     "fetch_s": 1.0,
+     "fetch_s": 1.31,
      "fetch_new_bars": 2166,
-     "compute_s": 0.01,
+     "compute_s": 0.02,
      "json_bytes": 153516,
      "gzip_bytes": 35170,
      "earliest": false
@@ -1350,7 +1393,8 @@
       "笔端点": 0,
       "段端点": 0,
       "类中枢": 0,
-      "线段中枢": 0
+      "线段中枢": 0,
+      "买卖点": 0
      },
      "total": 0,
      "rightmost_from_end": null,
@@ -1369,7 +1413,7 @@
      "bars": 1083,
      "first_t": 1775476800000,
      "last_t": 1791057600000,
-     "fetch_s": 0.47,
+     "fetch_s": 0.41,
      "fetch_new_bars": 1083,
      "compute_s": 0.01,
      "json_bytes": 76728,
@@ -1383,7 +1427,7 @@
      "last_t": 1791057600000,
      "fetch_s": 0.1,
      "fetch_new_bars": 0,
-     "compute_s": 0.01,
+     "compute_s": 0.0,
      "json_bytes": 76728,
      "gzip_bytes": 18947,
      "earliest": true
@@ -1395,7 +1439,8 @@
       "笔端点": 0,
       "段端点": 0,
       "类中枢": 0,
-      "线段中枢": 0
+      "线段中枢": 0,
+      "买卖点": 0
      },
      "total": 0,
      "rightmost_from_end": null,
