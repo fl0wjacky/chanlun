@@ -41,6 +41,9 @@ try {
 const PAGE = (process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2]
   : 'http://127.0.0.1:8799/').replace(/\/?$/, '/');
 const MUT = (process.argv.find((a) => a.startsWith('--mut=')) || '--mut=none').split('=')[1];
+const arg = (k, d) => (process.argv.find((a) => a.startsWith(`--${k}=`)) || `--${k}=${d}`).split('=')[1];
+const SYMBOL = arg('symbol', 'BTCUSDT'), TF = arg('tf', '4h');   // Nova 外测那两张图是 1h 与 4h，都能量
+const QUERY = `?symbol=${SYMBOL}&tf=${TF}&macd=1`;
 const ZOOM_N = 200;                 // ⑤ 收到最近几根
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -119,16 +122,16 @@ async function judge(page, tag) {
   }
   const errs = [];
   c.on('pageerror', (e) => errs.push(String(e)));
-  await c.goto(PAGE + '?symbol=BTCUSDT&tf=4h&macd=1', { waitUntil: 'domcontentloaded' });
+  await c.goto(PAGE + QUERY, { waitUntil: 'domcontentloaded' });
   await c.waitForFunction(() => window.__app && window.__app.sub && window.__app.sub.series, null, { timeout: 60000 });
   await sleep(2500);
   if (errs.length) { console.error('✗ 页面报错：', errs.slice(0, 3).join(' | ')); process.exit(2); }
 
-  console.log(`跑法：${MUT === 'none' ? '原样' : '变异 · ' + site.name}   ${PAGE}?symbol=BTCUSDT&tf=4h&macd=1`);
+  console.log(`跑法：${MUT === 'none' ? '原样' : '变异 · ' + site.name}   ${PAGE}${QUERY}`);
   const before = await judge(c, '');
   const shotBox = await c.evaluate(() => { const r = document.getElementById('chart').getBoundingClientRect();
     const p = window.__app.chart.panes(); return { x: r.x, y: r.y + p[0].getHeight(), w: r.width, h: p[1].getHeight() }; });
-  await c.screenshot({ path: `/tmp/macd-axis-${MUT}.png`, clip: { x: shotBox.x, y: shotBox.y, width: shotBox.w, height: shotBox.h } });
+  await c.screenshot({ path: `/tmp/macd-axis-${SYMBOL}-${TF}-${MUT}.png`, clip: { x: shotBox.x, y: shotBox.y, width: shotBox.w, height: shotBox.h } });
 
   // ⑤ 缩放跟着缩
   const n = await c.evaluate(() => window.__app.state.data.bars.length);
