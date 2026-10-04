@@ -44,6 +44,12 @@ const el = (id) => document.getElementById(id);
 const opts = { ...DEFAULTS, sigKinds: { ...DEFAULTS.sigKinds } };
 const state = { data: null, opts, candleSeries: null };
 const primitives = [];
+// 往左拖那套状态：span＝现在手上是第几档，spanMax＝后台给的封顶，earliest＝币安真没有了。
+// viewSet＝**我们自己摆的那个视口**（用来认事件回声，见 setView）；reqId＝在飞的那一份的号（换品种就作废）。
+const paging = { span: 1, spanMax: null, earliest: false, nogain: false, stop: null, loading: false, failedAt: 0, reqId: 0, applying: false };
+let viewSet = null;
+let settleTimer = 0;
+const SETTLE_MS = 40;      // 「自己摆视口」的认回声窗口，见 holdView()
 
 const chart = LWC.createChart(el('chart'), {
   autoSize: true,
@@ -100,20 +106,110 @@ function fixtureNames(symbol, tf) {
   return names;
 }
 
-async function load(symbol, tf) {
+// span = 数据档（后端白名单 1、2、4、8……）：1 档 210 天，每翻一档往前多要同样长的一段。
+// ★ 这个 **`span` 是发给后台的参数**，跟地址栏里 `?at=N&span=M` 那个「看多少根」**不是一回事**
+//   —— 同一个词两个意思，所以地址栏里那个数据档我另叫 `?load=`（见 go()），别混。
+async function load(symbol, tf, span) {
   try {
-    const r = await fetch(`/api/chart?symbol=${encodeURIComponent(symbol)}&tf=${encodeURIComponent(tf)}`);
-    if (r.ok) return { ...(await r.json()), source: 'api' };
+    const r = await fetch(`/api/chart?symbol=${encodeURIComponent(symbol)}&tf=${encodeURIComponent(tf)}&span=${span}`);
+    if (r.ok) return vetted({ ...(await r.json()), source: 'api' });
   } catch (e) { /* 静态打开（file:// 或本地 http.server）时没有后台，走样本 */ }
   for (const n of fixtureNames(symbol, tf)) {
     const r = await fetch(`fixtures/${n}`);
-    if (r.ok) return { ...(await r.json()), source: `样本 ${n}` };
+    // 样本只有一段：说自己「到最早」是实话（手上就这些），也就不会去要下一档。
+    if (r.ok) return vetted({ ...(await r.json()), source: `样本 ${n}`, span: 1, span_max: 1, earliest: true });
   }
   throw new Error(`取不到 ${symbol} ${tf}（后台没起、仓里也没有这一份样本）`);
 }
 
+// >>> EARLIER_PAGING （tools/web_more_check.py 抠出来在 node 里真跑；纯函数，不碰 DOM、不碰图）
+// 往左拖自动加载更早的 K 线，做四件事，每件都是**纯函数**，好让尺子量的是真身而不是我拼的替身：
+//   ① 什么时候该去要下一档   nextSpan()
+//   ② 要哪一档               nextSpan()
+//   ③ 换数据之后画面放回哪儿  anchorOf() / restoreRange()   ← 这一条是「不许跳」的全部
+//   ④ 那两句话什么时候印      moreText()
+//   ⑤ 换数据之前的体检        badIndex() / vetted()
+const PAGE_FROM = 20;            // 可视区左沿离**已加载的最左一根**不到这么多根 ⇒ 该往前要了
+// ⑤ 凡是**用下标指位置**的地方（笔的 i0/i1、线段的 i0/i1）都得落在这份 bars 里；落不进去就当这份数据没取到。
+//    ★ **一根线都不许先画上去**：paint() 是一样一样画的，画到一半才抛，屏幕上就是
+//      「K 线已经换成新的、笔还是上一份的」，两套东西互相打架。这不是假想 —— 2026-10-04 的联调工装里
+//      真撞出来了（我那份假后台切了 bars 却没重算结构：图换了一半，提示还写着「没取到」）。
+//      后台哪天真回一份这样的，页面上该**什么都没变**才对。样本也走同一道体检。
+function badIndex(d) {
+  const n = (d.bars || []).length, over = (i) => !(i >= 0 && i < n);
+  for (const p of d.pens || []) if (over(p.i0) || over(p.i1)) return `笔 [${p.i0}, ${p.i1}]`;
+  for (const s of d.segs || []) if (over(s.i0) || over(s.i1)) return `线段 [${s.i0}, ${s.i1}]`;
+  return null;
+}
+function vetted(d) {
+  const bad = badIndex(d);
+  if (bad) throw new Error(`后台这份数据对不上：${bad} 超出了 ${(d.bars || []).length} 根 —— 图没换`);
+  return d;
+}
+// ① 下一档：白名单是 1、2、4、8……（翻倍），越过封顶就返回 null（null＝别发请求）
+function nextSpan(span, spanMax) {
+  const s = span * 2;
+  return spanMax != null && s > spanMax ? null : s;
+}
+// ② 为什么不再要了（null＝还能要）。三种「到头」是**三件事**，别塌成一句：
+//    earliest＝币安真没有更早的数据了 ／ cap＝我们自己封的顶（币安还有） ／ nogain＝要了但一根没多
+function stopReason(s) {
+  if (s.earliest) return 'earliest';
+  if (s.spanMax != null && s.span >= s.spanMax) return 'cap';
+  if (s.nogain) return 'nogain';
+  return null;
+}
+// ① 拖到左边该干什么：'load'＝去要下一档 ／ 'stop'＝到头了，说一句话 ／ null＝不关我的事（离左沿还远）
+//    ★ 边界就写在**这一块里**（`>= PAGE_FROM` 就是不触发）：尺子要能改到这里，才能证明它真会红。
+function onLeft(s) {
+  if (s.from >= PAGE_FROM) return null;
+  return stopReason(s) ? 'stop' : 'load';
+}
+// 地址栏 ?load=N 进来的档位：**只认白名单上的 1、2、4、8**，别的（3、0、-1、"abc"）一律退回它下面的那一档；
+// 小于 1 的退回 1。这样手改地址栏乱填也不会发出后台白名单外的请求。
+function ladderSpan(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 1) return 1;
+  return Math.max(1, Math.pow(2, Math.min(20, Math.floor(Math.log2(n)))));
+}
+// ④ 三句话。★ 刻意**不合并**成一句「已到最早」：`earliest` 是币安真没有更早的了，
+//    而 `span===span_max` 是**我们自己封的顶**——那时候币安明明还有更早的数据，
+//    印「已到最早」就是一句假话（跟图脚「数据源」那次是同一类账）。所以分开两句话。
+function moreText(s) {
+  if (s.loading) return '加载更早数据…';
+  if (s.failed) return '更早的数据没取到';
+  if (s.stop === 'earliest') return '已到最早';
+  if (s.stop === 'cap') return '已到本档上限';
+  if (s.stop === 'nogain') return '取不到更早数据';   // 要了但一根没多（后台没认这一档）——别打转
+  return '';
+}
+// ③ 「按时间放回原位」：**锚点存时间，不存下标**。往前补数据是往**数组头上插**，
+//    同一个下标指向的是**另一根** K 线（插了多少根就错多少根），所以下标一存就跳。
+//    存的是「可视区左沿那一根的时间 + 它在左沿外多少根（小数）」——左边多出多少根都不影响它。
+function anchorOf(bars, range) {
+  if (!bars || !bars.length || !range) return null;
+  const k = Math.max(0, Math.min(bars.length - 1, Math.ceil(range.from)));
+  return { t: bars[k].t, frac: range.from - k, width: range.to - range.from, oldLen: bars.length, oldFrom: range.from };
+}
+// 二分找回同一根：时间戳是升序的（后台按时间排），找不到（换了品种/样本对不上）返回 null
+function timeIndex(bars, t) {
+  let lo = 0, hi = bars.length - 1;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (bars[m].t < t) lo = m + 1; else hi = m; }
+  return bars.length && bars[lo].t === t ? lo : null;
+}
+function restoreRange(bars, anchor) {
+  const i = timeIndex(bars, anchor.t);
+  // 找不回那一根才退回「按右端对」：新数据是往左补的，**离右端的距离**跟下标无关，
+  // 拿它兜底至少不跳得离谱。（这不是常态——时间戳对得上就走上面那条。）
+  const from = i === null ? bars.length - anchor.oldLen + anchor.oldFrom : i + anchor.frac;
+  return { from, to: from + anchor.width };
+}
+// <<< EARLIER_PAGING
+
 // ---------------------------------------------------------------- 画一张
-function draw(d) {
+// ★ 画（paint）和**摆视口**（draw 里那一段）分开了：往左补数据之后重画，**不能**再走「摆视口」
+//   那一段（它要么 fitContent 缩成一团、要么按 ?last/?at 跳走）—— 补数据时视口由 place() 按**时间**放回原位。
+function paint(d) {
   state.data = d;
   const bars = d.bars.map((b) => ({ time: b.t / 1000, open: b.o, high: b.h, low: b.l, close: b.c }));
   candle.applyOptions({ priceFormat: priceFormat(d.meta?.tick) });
@@ -143,25 +239,118 @@ function draw(d) {
   } else segDash.setData([]);
 
   overlay.setData(bars.length ? [{ time: bars.at(-1).time, value: bars.at(-1).close }] : []);
+  applyToggles();
+  renderMeta(d);
+  const last = bars.at(-1);
+  el('last').textContent = last ? `最新 ${fmtPrice(last.close, d.meta?.tick)}` : '';
+  stamp(d);
+}
+
+// 装一张新数据：**先画，再摆视口**。keep 是补数据前抓的锚点（见 paging）；给了它就走「按时间放回原位」。
+function draw(d, keep) {
+  paint(d);
+  if (keep) { place(d, keep); return; }
   chart.timeScale().fitContent();
+  holdView();                                   // fitContent 也是「我们自己摆的」，给它同一个认回声的窗口
   // ?last=N：只显示最后 N 根（可分享 / 截图复现同一段）；不带就整段
   // ★ 参数**在不在**要用 has() 判，不能用 Number() 的返回值判：`Number(null)` 是 0、`isFinite(0)` 是 true
   //   ⇒ 不带 ?at= 的时候会被当成 at=0，视图被钉在「序列最开头 ±80 根」，fitContent 白调了。
   //   （截图对账时才照出来：整图那一格显示的是开头两周，不是全序列。）
   const q2 = new URLSearchParams(location.search);
   const num = (k) => (q2.has(k) ? Number(q2.get(k)) : NaN);
-  const lastN = num('last'), at = num('at'), span = num('span');
+  const lastN = num('last'), at = num('at'), viewSpan = num('span');
   if (Number.isFinite(lastN) && lastN > 0) {
-    chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, bars.length - lastN), to: bars.length + 3 });
-  } else if (Number.isFinite(at)) {                 // ?at=<某根K线下标>&span=<看多少根>：对准某一段（可分享、可截图复现）
-    const n = Number.isFinite(span) && span > 0 ? span : 160;
-    chart.timeScale().setVisibleLogicalRange({ from: at - n / 2, to: at + n / 2 });
+    setView({ from: Math.max(0, d.bars.length - lastN), to: d.bars.length + 3 });
+  } else if (Number.isFinite(at)) {               // ?at=<某根K线下标>&span=<看多少根>：对准某一段（可分享、可截图复现）
+    const n = Number.isFinite(viewSpan) && viewSpan > 0 ? viewSpan : 160;
+    setView({ from: at - n / 2, to: at + n / 2 });
+  } else markView();
+}
+
+// 摆视口只走这一个口：**记下这次是我们自己摆的**，好把随后那一次事件回声认出来
+// （不然 fitContent 自己触发的那一下会被当成「用户拖到左边了」，一打开页面就去要下一档）。
+// ★ 只记「要的那个」还不够：LWC 会把视口**微调**一下再报一次（要 from=-50，它随后报 -53.373），
+//   而 getVisibleLogicalRange 是**懒更新**的 —— 摆完同步读回来还是旧值，光靠读回来认不出后一下。
+//   所以自己摆完开一个很短的窗口：**窗口里来的视口事件全算回声**，窗口末再把**真实**视口记成基准。
+//   （这一下是真事件也不会被吃掉：窗口 40ms，用户一拖还在继续出事件。）
+function holdView() {
+  paging.applying = true;
+  clearTimeout(settleTimer);
+  settleTimer = setTimeout(() => { paging.applying = false; markView(); }, SETTLE_MS);
+}
+function setView(r) {
+  chart.timeScale().setVisibleLogicalRange(r);
+  markView(r);
+  holdView();
+}
+function markView(r) {
+  viewSet = r || chart.timeScale().getVisibleLogicalRange();
+}
+function place(d, anchor) {
+  setView(restoreRange(d.bars, anchor));
+}
+
+// ---------------------------------------------------------------- 往左拖 ⇒ 要更早的 K 线
+// 提示挂在图上（`#more`），不塞进顶栏那排徽标：用户是在图**左边**做这个动作，话就要说在眼睛在看的地方。
+let moreTimer = 0;
+function renderMore(s, hold) {
+  const n = el('more');
+  if (!n) return;
+  const txt = moreText(s);
+  clearTimeout(moreTimer);
+  n.textContent = txt;
+  n.classList.toggle('on', !!txt);
+  n.classList.toggle('end', !!txt && !s.loading);
+  // 到头那两句话是**回答用户那一下拖**的，说一次就够；常驻会变成一块贴在图上不走的膏药。
+  if (txt && !s.loading && hold) moreTimer = setTimeout(() => n.classList.remove('on', 'end'), hold);
+}
+function resetPaging(span) {
+  paging.span = ladderSpan(span); paging.spanMax = null; paging.earliest = false; paging.nogain = false;
+  paging.loading = false; paging.failedAt = 0; paging.applying = false;
+  clearTimeout(settleTimer);                     // 上一份数据的「认回声窗口」别带到这一份上
+  paging.reqId++;                                // 在飞的那一份作废（换品种/周期了）
+  renderMore({});
+}
+const sameRange = (a, b) => !!b && Math.abs(a.from - b.from) < 0.5 && Math.abs(a.to - b.to) < 0.5;
+
+// 一次只飞一个（paging.loading 就是那道闸）；失败退避 FAIL_COOLDOWN，别在一次拖拽里把后台敲烂。
+const FAIL_COOLDOWN = 10000;
+chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
+  if (!r || !state.data || paging.applying || sameRange(r, viewSet)) return;   // 自己摆的那一下不算用户拖
+  const act = onLeft({ from: r.from, span: paging.span, spanMax: paging.spanMax,
+                       earliest: paging.earliest, nogain: paging.nogain });
+  if (act === null) { if (!paging.loading) renderMore({}); return; }           // 离左沿还远：把话收掉
+  if (act === 'stop') return renderMore({ stop: stopReason(paging) }, 2600);
+  if (paging.loading || Date.now() - paging.failedAt < FAIL_COOLDOWN) return;  // 一次只飞一个 ＋ 失败退避
+  loadEarlier(nextSpan(paging.span, paging.spanMax));
+});
+
+async function loadEarlier(span) {
+  const own = state.data;
+  // ★ 锚点必须在**动数据之前**抓：setData 一换，视口的下标含义就变了，那时候再问「左边是哪一根」已经晚了。
+  const anchor = anchorOf(own.bars, chart.timeScale().getVisibleLogicalRange());
+  const id = ++paging.reqId;
+  const symbol = el('symbol').value, tf = el('tf').value;
+  paging.loading = true;
+  renderMore({ loading: true });
+  try {
+    const d = await load(symbol, tf, span);
+    if (id !== paging.reqId) return;             // 等数据这段时间里换了品种/周期 ⇒ 这一份丢掉，别画上去
+    const grew = d.bars.length > own.bars.length;
+    paging.span = Number.isFinite(d.span) ? d.span : (grew ? span : paging.span);   // 后台回显优先（它可能钳过档）
+    if (Number.isFinite(d.span_max)) paging.spanMax = d.span_max;
+    paging.earliest = !!d.earliest;
+    paging.nogain = !grew && !paging.earliest;   // 要了却一根没多 ⇒ 别再要（防打转）
+    setUrl();
+    draw(d, anchor);
+    renderMore({ stop: stopReason(paging) }, 2600);
+  } catch (e) {
+    paging.failedAt = Date.now();
+    renderMore({ failed: true }, 4000);
+    console.warn('更早的数据没取到：', e);
+  } finally {
+    paging.loading = false;
   }
-  applyToggles();
-  renderMeta(d);
-  const last = bars.at(-1);
-  el('last').textContent = last ? `最新 ${fmtPrice(last.close, d.meta?.tick)}` : '';
-  stamp(d);
 }
 
 const fmtPrice = (v, tick) => {
@@ -365,32 +554,46 @@ function buildPickers() {
   const sym = SYMBOLS.some((s) => s[0] === q.get('symbol')) ? q.get('symbol') : 'BTCUSDT';   // 白名单外不认
   const tf = TFS.includes(q.get('tf')) ? q.get('tf') : '4h';
   el('symbol').value = sym; el('tf').value = tf;
-  for (const id of ['symbol', 'tf']) el(id).onchange = () => go();
+  for (const id of ['symbol', 'tf']) el(id).onchange = () => go(1);   // 换品种/周期：回到 1 档重来
 }
 
-async function go() {
-  const symbol = el('symbol').value, tf = el('tf').value;
-  const q = new URLSearchParams(location.search);     // 保留 last= 之类的既有参数，别把地址栏洗掉
-  q.set('symbol', symbol); q.set('tf', tf);
+// 地址栏只写**真话**：`load` 只在本档 >1 时挂上去（1 档是默认值，写了是噪音，换品种时还得记得抹掉）。
+function setUrl() {
+  const q = new URLSearchParams(location.search);     // 保留 last= / at= 之类的既有参数，别把地址栏洗掉
+  q.set('symbol', el('symbol').value); q.set('tf', el('tf').value);
+  if (paging.span > 1) q.set('load', paging.span); else q.delete('load');
   history.replaceState(null, '', `?${q}`);            // 可分享、可截图复现
+}
+
+async function go(span = 1) {
+  const symbol = el('symbol').value, tf = el('tf').value;
+  resetPaging(span);
+  setUrl();
+  const id = paging.reqId;                            // 连点两次品种：先发的那份回来时已经不是它了，别画
+  paging.loading = true;        // 这一份还在飞（换品种时旧图还挂在屏上）⇒ 别在这中间再插一个「更早」的请求
   el('state').textContent = '取数…'; el('state').className = 'badge';
   try {
-    const d = await load(symbol, tf);
+    const d = await load(symbol, tf, paging.span);
+    if (id !== paging.reqId) return;
     draw(d);
     el('state').textContent = d.closed ? '已收盘' : '未收盘（最后一根还在走）';
     el('state').className = 'badge ' + (d.closed ? '' : 'live');
   } catch (e) {
+    if (id !== paging.reqId) return;
     el('state').textContent = String(e.message || e);
     el('state').className = 'badge bad';
+  } finally {
+    if (id === paging.reqId) paging.loading = false;
   }
 }
 
 buildPickers();
 buildChips();
 applyToggles();
-go();
+// ?load=N：直接打开某一档（可分享 / 可截图复现；N 不在白名单上就退回它下面的那一档）
+go(ladderSpan(new URLSearchParams(location.search).get('load')));
 
 // 给验收工装一个**只读**入口：并排截图要把网页这一格切到跟 Python 出图同一段 K 线、同一价格带，
 // 那就得问图自己「第 i 根在哪个 x、这个价在哪个 y」（timeToCoordinate / priceToCoordinate）。
 // 不是功能开关，页面上没有任何东西读它；去掉它，验收那两张图就没法对齐。
-window.__app = { chart, state, opts };
+window.__app = { chart, state, opts, paging };

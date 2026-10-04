@@ -60,8 +60,25 @@ body {
 .badge.bad  { color: var(--rd); border-color: var(--rd-line); }   /* style.py CHART.sell */
 
 /* ---- 主区 ---- */
-main { display: grid; grid-template-columns: minmax(0, 1fr) 190px; min-height: 0; }
+/* main 是 relative：#more 那句提示贴在图的左上（绝对定位的锚点得有个定位祖先） */
+main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 190px; min-height: 0; }
 #chart { min-height: 0; min-width: 0; }
+
+/* 往左拖的提示：一个贴在图上、左边居中的小药丸。默认不占位（`.on` 才出现、文字为空就整块收掉），
+   免得图上常驻一块膏药。色只用变量（尺 ① 规定 :root 之外不许有裸色值）。 */
+.more {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  padding: 4px 10px; border-radius: 999px; font-size: 11px; line-height: 1.4;
+  color: var(--tx); background: var(--panel); border: 1px solid var(--line);
+  /* 浮起来的那点分离感用**现成的变量**做（--panel-hi）—— 不写 `rgb(0 0 0 / .35)` 那种裸色值：
+     尺 ① 的规矩是 :root 之外一个色都不许自带出处，而它当时只认 `#hex`（rgb() 会溜过去）。
+     尺 ① 现在两种写法都认了，探针也补了一格。 */
+  box-shadow: 0 0 0 3px var(--panel-hi);
+  opacity: 0; visibility: hidden; transition: opacity .15s;
+  pointer-events: none;      /* 它盖在图上：不许把拖拽/缩放吃掉 */
+}
+.more.on { opacity: 1; visibility: visible; }
+.more.end { color: var(--mu); }   /* 「已到最早」这类是收尾的话，比加载中弱一档 */
 .panel {
   border-left: 1px solid var(--line); background: var(--panel);
   padding: 10px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; overflow: auto;
