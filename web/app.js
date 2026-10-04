@@ -130,6 +130,7 @@ async function load(symbol, tf, span) {
 //   ④ 那两句话什么时候印      moreText()
 //   ⑤ 换数据之前的体检        badIndex() / vetted()
 const PAGE_FROM = 20;            // 可视区左沿离**已加载的最左一根**不到这么多根 ⇒ 该往前要了
+const SPAN_WL_MAX = 16;          // 契约里 span 只认 1、2、4、8、16（Nova 2026-10-04）：发出去的值必须落在这五个里
 // ⑤ 凡是**用下标指位置**的地方（笔的 i0/i1、线段的 i0/i1）都得落在这份 bars 里；落不进去就当这份数据没取到。
 //    ★ **一根线都不许先画上去**：paint() 是一样一样画的，画到一半才抛，屏幕上就是
 //      「K 线已经换成新的、笔还是上一份的」，两套东西互相打架。这不是假想 —— 2026-10-04 的联调工装里
@@ -165,12 +166,30 @@ function onLeft(s) {
   if (s.from >= PAGE_FROM) return null;
   return stopReason(s) ? 'stop' : 'load';
 }
-// 地址栏 ?load=N 进来的档位：**只认白名单上的 1、2、4、8**，别的（3、0、-1、"abc"）一律退回它下面的那一档；
-// 小于 1 的退回 1。这样手改地址栏乱填也不会发出后台白名单外的请求。
+// 地址栏 ?load=N 进来的档位：**只认契约里那五个值 1、2、4、8、16**（Nova 2026-10-04 定的），
+// 别的（3、0、-1、"abc"、64…）一律退回它下面的那一档；小于 1 的退回 1。
+// ★ 上限**必须封在 16**：发出去的值不在那五个里，后台按契约回 400 ⇒ 首屏整张挂掉（Atlas 两头各打一次挑出来的）。
+//   周期自己的封顶（15m 4 / 30m 8 / 1h 以上 16）前端**不猜** —— 后台会在 span_max 里说，见 adopt()。
 function ladderSpan(v) {
   const n = Number(v);
-  if (!Number.isFinite(n) || n < 1) return 1;
-  return Math.max(1, Math.pow(2, Math.min(20, Math.floor(Math.log2(n)))));
+  if (!Number.isFinite(n) || n < 1) return 1;               // 非数字/小于 1 ⇒ 1
+  return Math.max(1, Math.min(SPAN_WL_MAX, Math.pow(2, Math.floor(Math.log2(n)))));   // 大于 16 ⇒ 16
+}
+// ⑤ 后台回显说了算（Nova 2026-10-04 定的口径）：我们发出去的那个数只是「请求」，手上到底是第几档、
+//    是不是到头了，一律以**响应里的回显**为准（后台会钳档、会标 earliest）。
+// ★ 首屏（go）和往左加载（loadEarlier）**共用这一个口** —— 两处各写一遍，迟早只有一处认回显：
+//   首屏不认 ⇒ 一开始就 earliest 的品种（AAPL 那种）会白发一次请求；?load=16 在 15m 上被钳到 4 之后，
+//   页面还以为自己是 16 档，停法就印错（Atlas 2026-10-04 读代码挑出来的）。
+// 纯函数：给「现在手上那份的状态 cur」和「后台回的一份 d」，算出手上该变成什么；调用方 Object.assign 回去。
+function adopt(cur, d, prevLen) {
+  const s = { span: Number.isFinite(d.span) ? d.span : cur.span,          // 回显的档位就是真档位
+              spanMax: Number.isFinite(d.span_max) ? d.span_max : cur.spanMax,
+              // 三个字段同一条规矩：**回了就听回显的，没回就维持现状**。
+              // 离线的仓里样本就没有这三个字段（老后台也没有）⇒ 那时候等于什么都不改，照旧能翻页。
+              earliest: d.earliest == null ? cur.earliest : !!d.earliest, nogain: false };
+  // 「要了却一根没多」只有在补数据时才有基准（首屏没有「上一份」可比，就不判这条）
+  s.nogain = prevLen != null && (d.bars || []).length <= prevLen && !s.earliest;
+  return s;
 }
 // ④ 三句话。★ 刻意**不合并**成一句「已到最早」：`earliest` 是币安真没有更早的了，
 //    而 `span===span_max` 是**我们自己封的顶**——那时候币安明明还有更早的数据，
@@ -179,7 +198,7 @@ function moreText(s) {
   if (s.loading) return '加载更早数据…';
   if (s.failed) return '更早的数据没取到';
   if (s.stop === 'earliest') return '已到最早';
-  if (s.stop === 'cap') return '已到本档上限';
+  if (s.stop === 'cap') return '已到本周期可加载的最早';
   if (s.stop === 'nogain') return '取不到更早数据';   // 要了但一根没多（后台没认这一档）——别打转
   return '';
 }
@@ -339,11 +358,7 @@ async function loadEarlier(span) {
     //   就是把他刚拖出来的画面**弹回去**（工装里量到过：拖到一半来的数据，画面被拽回 200px）。
     //   此刻 state.data 还是旧那份，bar 的时间戳还是旧的下标，抓锚点正合适。
     const anchor = anchorOf(own.bars, chart.timeScale().getVisibleLogicalRange());
-    const grew = d.bars.length > own.bars.length;
-    paging.span = Number.isFinite(d.span) ? d.span : (grew ? span : paging.span);   // 后台回显优先（它可能钳过档）
-    if (Number.isFinite(d.span_max)) paging.spanMax = d.span_max;
-    paging.earliest = !!d.earliest;
-    paging.nogain = !grew && !paging.earliest;   // 要了却一根没多 ⇒ 别再要（防打转）
+    Object.assign(paging, adopt(paging, d, own.bars.length));   // 回显说了算（钳档 / earliest / 有没有多出来）
     setUrl();
     draw(d, anchor);
     renderMore({ stop: stopReason(paging) }, 2600);
@@ -578,6 +593,8 @@ async function go(span = 1) {
   try {
     const d = await load(symbol, tf, paging.span);
     if (id !== paging.reqId) return;
+    Object.assign(paging, adopt(paging, d));     // ★ 首屏也认回显：一开始就 earliest 的品种不该白发请求
+    setUrl();                                    // 后台钳过档的话（15m 要 16 钳到 4），地址栏写**真**档位
     draw(d);
     el('state').textContent = d.closed ? '已收盘' : '未收盘（最后一根还在走）';
     el('state').className = 'badge ' + (d.closed ? '' : 'live');

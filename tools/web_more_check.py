@@ -4,8 +4,11 @@
   ① **画面不跳**：换数据之后，视口**左沿那一刻的时间**必须跟换之前一模一样。
      这是这一支的**全部职责**（2026-10-04 小栋定：「换数据后按时间把画面放回原位，不许跳」）。
   ② **什么时候要 / 要哪一档 / 什么时候停**：离左沿不到 20 根才要；档是 1、2、4、8……翻倍；
-     `earliest`、封顶、要了没多 三种「到头」各自停法。
-  ③ **那两句话**：加载中／已到最早／已到本档上限——★ 后两句**不许塌成一句**（见下）。
+     `earliest`、封顶、要了没多 三种「到头」各自停法。**还有两处「数从哪儿来」**：
+     地址栏 `?load=N` 进来先**夹进白名单那五个值**（>16 当 16、非数字当 1，Nova 2026-10-04 定），
+     以及 `adopt()` ——手上到底是第几档、是不是到头了，**一律以后台回显为准**，不信自己发出去的数
+     （首屏和往左加载共用这一个口）。
+  ③ **那两句话**：加载中／已到最早／已到本周期可加载的最早——★ 后两句**不许塌成一句**（见下）。
 
 为什么要它：这三件事在浏览器里量不出来（要拖、要等网络、还要一个真后台），可真出错的地方
 全在这三个纯函数里。所以把它们留在 `web/app.js` 的 `// >>> EARLIER_PAGING` 标记块里**抠出来单跑**
@@ -68,12 +71,41 @@ WANT_ACT = [(0, {}, "load"), (19.9, {}, "load"), (20, {}, None), (99, {}, None),
             (0, {"nogain": True}, "stop"), (25, {"earliest": True}, None)]   # 离左沿远：到头也不关我事
 WANT_TEXT = [({"loading": True}, "加载更早数据…"),
              ({"stop": "earliest"}, "已到最早"),
-             ({"stop": "cap"}, "已到本档上限"),
+             ({"stop": "cap"}, "已到本周期可加载的最早"),
              ({"stop": "nogain"}, "取不到更早数据"),
              ({"failed": True}, "更早的数据没取到"),
              ({}, "")]
-WANT_LADDER = [("1", 1), ("2", 2), ("3", 2), ("4", 4), ("7", 4), ("8", 8), ("12", 8), ("99", 64),
+WANT_LADDER = [("1", 1), ("2", 2), ("3", 2), ("4", 4), ("7", 4), ("8", 8), ("12", 8), ("16", 16),
+               # ★ 契约只认 1、2、4、8、16（Nova 2026-10-04）：地址栏写超了必须**夹到 16**，
+               #   照发 32/64 后台按契约回 400 ⇒ 首屏整张挂掉（Atlas 两头各打一次挑出来的）
+               ("32", 16), ("64", 16), ("99", 16),
                ("0", 1), ("-1", 1), ("abc", 1), ("", 1), (None, 1), ("2.9", 2)]
+# ---- ② 的「回显说了算」表：adopt(cur, d, prevLen) → 手上那份的状态 ----
+#   cur＝现在手上的（span/spanMax/earliest），d＝后台回的那份（span/span_max/earliest/bars），
+#   prevLen＝这一趟之前的根数（首屏传 null ＝ 没有「上一份」可比）。三个字段同一条规矩：回了听回显，没回维持现状。
+WANT_ADOPT = [
+    ("后台钳了档（15m 求 16 只给 4）", {"span": 16, "spanMax": None, "earliest": False},
+     {"span": 4, "span_max": 4, "earliest": False, "bars": [{}] * 900}, None,
+     {"span": 4, "spanMax": 4, "earliest": False, "nogain": False}),
+    ("首屏后台就说没了（AAPL 那种：一档就到底）", {"span": 1, "spanMax": None, "earliest": False},
+     {"span": 1, "span_max": 1, "earliest": True, "bars": [{}] * 900}, None,
+     {"span": 1, "spanMax": 1, "earliest": True, "nogain": False}),
+    ("没有回显（离线样本 / 老后台）⇒ 现状原样", {"span": 2, "spanMax": 8, "earliest": False},
+     {"bars": [{}] * 900}, None,
+     {"span": 2, "spanMax": 8, "earliest": False, "nogain": False}),
+    ("补上来的没有更多（有基准 ⇒ 白要了一趟）", {"span": 4, "spanMax": 16, "earliest": False},
+     {"span": 8, "span_max": 16, "earliest": False, "bars": [{}] * 600}, 600,
+     {"span": 8, "spanMax": 16, "earliest": False, "nogain": True}),
+    ("补上来的更多了 ⇒ 不是白要", {"span": 4, "spanMax": 16, "earliest": False},
+     {"span": 8, "span_max": 16, "earliest": False, "bars": [{}] * 1200}, 600,
+     {"span": 8, "spanMax": 16, "earliest": False, "nogain": False}),
+    ("真到头的那一趟「没多」不算故障（earliest 优先）", {"span": 4, "spanMax": 16, "earliest": False},
+     {"span": 8, "span_max": 16, "earliest": True, "bars": [{}] * 600}, 600,
+     {"span": 8, "spanMax": 16, "earliest": True, "nogain": False}),
+    ("首屏没有上一份可比 ⇒ 不判「白要」", {"span": 1, "spanMax": None, "earliest": False},
+     {"span": 2, "span_max": 16, "earliest": False, "bars": [{}] * 10}, None,
+     {"span": 2, "spanMax": 16, "earliest": False, "nogain": False}),
+]
 # ---- ⑤ 体检（badIndex / vetted）：结构里凡是用下标指位置的地方都得落在 bars 里 ----
 VET = [("结构都在 bars 里", {"bars": [{}] * 100, "pens": [{"i0": 0, "i1": 5}],
                              "segs": [{"i0": 5, "i1": 99}]}, True),
@@ -95,7 +127,7 @@ def block(path=JS, begin=BEGIN, end=END):
 DRIVER = r"""
 const fs = require('fs');
 const P = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
-const out = { uniform: {}, anchor: [], spans: [], stops: [], acts: [], texts: [], lads: [] };
+const out = { uniform: {}, anchor: [], spans: [], stops: [], acts: [], texts: [], lads: [], adopts: [] };
 
 // 时间轴：位置 x 处的时间 = 头一根的时间 + x*步长。★ 前提是等距（见文件头）。
 function axis(bars) {
@@ -137,6 +169,7 @@ out.stops = P.stops.map((s) => stopReason(s));
 out.acts = P.acts.map(([from, s]) => onLeft(Object.assign({ from: from }, s)));
 out.texts = P.texts.map((s) => moreText(s));
 out.lads = P.lads.map((v) => ladderSpan(v));
+out.adopts = P.adopts.map(([cur, d, prevLen]) => adopt(cur, d, prevLen));
 out.vet = P.vet.map((d) => {
   let bad = null, throws = false;
   try { bad = badIndex(d); } catch (e) { bad = 'THROW'; }
@@ -177,6 +210,7 @@ def payload():
             "acts": [[f, s] for f, s, _ in WANT_ACT],
             "texts": [s for s, _ in WANT_TEXT],
             "lads": [v for v, _ in WANT_LADDER],
+            "adopts": [[c, d, p] for _, c, d, p, _ in WANT_ADOPT],
             "vet": [d for _, d, _ in VET]}
 
 
@@ -232,6 +266,15 @@ def failures(js=None, quiet=True):
         g = got["lads"][i]
         if g != want:
             bad.append(("②规则", "ladderSpan(%r)" % v, g, want, "地址栏进来的档"))
+    # ② 回显说了算（首屏 / 往左加载共用的那一个口）
+    for i, (name, _cur, _d, _p, want) in enumerate(WANT_ADOPT):
+        g = got["adopts"][i]
+        off = [k for k in ("span", "spanMax", "earliest", "nogain") if g.get(k) != want[k]]
+        if off:
+            bad.append(("②规则", "adopt：" + name,
+                        "、".join("%s=%r" % (k, g.get(k)) for k in off),
+                        "、".join("%s=%r" % (k, want[k]) for k in off),
+                        "手上第几档/到头没有一律以后台回显为准"))
     # ⑤ 体检：合格的那几行必须既不判坏也不抛；不合格的必须判坏 **且** vetted 抛（两件事一起错才叫没取到）
     for i, (name, _d, want) in enumerate(VET):
         g = got["vet"][i]
@@ -260,8 +303,14 @@ def report(quiet=False):
         for i, (f, s, want) in enumerate(WANT_ACT):
             print("     from=%-6s %-28s ⇒ %-5s（要 %s）"
                   % (f, json.dumps(s, ensure_ascii=False), got["acts"][i], want))
-        for i, (v, want) in enumerate(WANT_LADDER[:6]):
-            print("     ?load=%-5r ⇒ %-4s（要 %s）" % (v, got["lads"][i], want))
+        for i, (v, want) in enumerate(WANT_LADDER):
+            if i < 6 or v in ("32", "64", "abc"):
+                print("     ?load=%-5r ⇒ %-4s（要 %s）" % (v, got["lads"][i], want))
+        for i, (name, _c, _d, _p, want) in enumerate(WANT_ADOPT):
+            g = got["adopts"][i]
+            print("     %-34s ⇒ span=%-4s max=%-4s earliest=%-5s nogain=%-5s（要 %s/%s/%s/%s）"
+                  % (name, g["span"], g["spanMax"], g["earliest"], g["nogain"],
+                     want["span"], want["spanMax"], want["earliest"], want["nogain"]))
         print("\n  ⑤ 换数据前的体检（badIndex / vetted）")
         for i, (name, _d, want) in enumerate(VET):
             print("     %-38s ⇒ %-28s（要 %s）"
@@ -305,7 +354,19 @@ PROBES = [
     ("②规则：无视 earliest（到最早还接着要）", "if (s.earliest) return 'earliest';", "if (false) return 'earliest';"),
     ("②规则：无视「要了没多」（会原地打转）", "if (s.nogain) return 'nogain';", "if (false) return 'nogain';"),
     ("②规则：地址栏的档不夹回白名单", "Math.floor(Math.log2(n))", "Math.round(Math.log2(n))"),
-    ("③话：封顶和真到头塌成一句", "if (s.stop === 'cap') return '已到本档上限';",
+    # ★ 这一格是 Atlas 两头各打一次挑出来的：?load=64 照发 64 ⇒ 契约回 400 ⇒ 首屏整张挂掉
+    ("②规则：地址栏的档不封在 16（?load=64 照发）",
+     "Math.max(1, Math.min(SPAN_WL_MAX, Math.pow(2, Math.floor(Math.log2(n)))))",
+     "Math.max(1, Math.pow(2, Math.floor(Math.log2(n))))"),
+    # ★ 「回显说了算」：不信后台，只认自己发出去的那个数（首屏整张挂 / 停法印错都是这一个口出来的）
+    ("②规则：不信回显，只认自己发出去的档",
+     "span: Number.isFinite(d.span) ? d.span : cur.span,", "span: cur.span,"),
+    ("②规则：回显说没了也当还有（earliest 不听回显）",
+     "earliest: d.earliest == null ? cur.earliest : !!d.earliest,", "earliest: false,"),
+    ("②规则：真到头那趟也判成「白要了一趟」",
+     "s.nogain = prevLen != null && (d.bars || []).length <= prevLen && !s.earliest;",
+     "s.nogain = prevLen != null && (d.bars || []).length <= prevLen;"),
+    ("③话：封顶和真到头塌成一句", "if (s.stop === 'cap') return '已到本周期可加载的最早';",
      "if (s.stop === 'cap') return '已到最早';"),
     ("⑤体检：把越界当合格（照画不误）", "const n = (d.bars || []).length, over = (i) => !(i >= 0 && i < n);",
      "const n = (d.bars || []).length, over = (i) => false;"),
