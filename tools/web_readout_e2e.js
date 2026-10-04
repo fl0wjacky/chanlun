@@ -24,12 +24,36 @@
 //   ⑭ 手机的手势出口（**换一页新起**，不接 ⑫⑬ 的尾巴 —— 库的触摸状态机有记忆，理由写在那一节）：
 //      第一下快滑＝拖图；长按 ⇒ 读到、**抬手后还在**；这一下之后的横滑归十字线（视口不许动）；
 //      **轻点一下**再快滑 ⇒ 视口平移、读数收掉。（⑭ 后半量的是**库的手势模型**，不是我们的浮层）
+//      ★ 偶发（2026-10-04，Iris 记）：同一份代码连跑 6 遍，⑭ 红过 **1** 次 ——
+//        `a 快滑 4740.000→4740.000`（第一下快滑没拖动视口），复跑即绿。**不加重试**（Atlas 定的：
+//        重试会把偶发变成看不见）。见红先按这句读：多半是库的触摸状态机，不是这一格要量的东西。
 //   ⑮ 换数据**那一刻**读数就收：把那一趟响应扣在手里 ⇒ 在「新数据还在飞」的窗口里读一眼，
 //      屏上还是旧图、十字线也没动，读数不许写着**上一份**的数。⑯ 是它的另一头：收了要能回来，
 //      且回来时写的是**新那份刻度**上的数（指针全程没离开图）。
 //      ★ 为什么量的是**窗口**而不是「换完之后」：`paint()` 里那句 `hideRead()` 的位置**量不出来**
 //        （LWC 在 setData 后会自己重发十字线，读数当场就用新那份重读）—— 在那里加格是空转格。
 //        实测与对照（含变异跑法）在 `tools/web_readout_swap_probe.js`，理由写在 ⑮⑯ 那一节。
+//   ⑰ 窗口里**动鼠标**：⑮ 只量了「指针不动」的那一眼 —— 口径是「取数那段时间读数**整个压住**」，
+//      指针一动，`showRead()` 就又被叫了一次。修之前实测：块里当场亮回来、写的是**上一份**的价
+//      （ZEC→BTC 那一趟扣住 2.5s，指针一扫，块里是 `1,655.24`，页头写着 BTCUSDT）。
+//      ⇒ ⑰ 量的是**动过之后**还不亮（并且那一刻确实还在窗口里：状态写着「取数…」、屏上还是旧那份）。
+//   ⑱ 同一个窗口、同一条账的**另一处**：副图那一格的三个数（DIF/DEA/柱）也是**跟着光标走**的读数，
+//      修之前同样印着上一份的量级（实测 DIF -11.69，而 BTC 那份是 -121.11）⇒ 这段里印「—」。
+//      ★ 前提先断言：换之前这三格**是有数的**（不然「—」是空转 —— 本来就写着「—」也能过）。
+//   ⑲ ⑰ 的另一头：新图**画上之后**再动鼠标 ⇒ 读数要回来，而且写的是**当时画着的那一份**上的数。
+//      （⑯ 量的是「不用动鼠标、LWC 自己重发」那条路；⑲ 管的是**动**那条路不许被压死。）
+//   ⑳ 取数**失败**那一趟（只让点名的那趟 503）⇒ 也不许把读数压死：新图没来、屏上还是旧那份，
+//      老读数跟它还是同一份 ⇒ 动一下就该回来，而且对得上**当时画着的那一份**。
+//      ★ 这一格是修法里「放在 finally 而不是 draw() 后面」那一条的牙。
+//   ㉑ **换看法不压读数**（口径见下：压的只有换品种/换周期，换看法和往左补数据不压）。
+//      这一格是 Atlas 核 readout-hold 时点的缺口：变异「换看法时也立起 dataStale」全绿、没一格看见。
+//      摆法上三个坑都绕开了（换看法在**页面里**点，指针不许离开图；先开买卖点那层，不然芯片是灰的；
+//      先断言「换之前就亮着 ＋ 回显真换了」）—— 理由写在 ㉑ 那一节。
+//
+// 判据的牙齿（每一条都跑得红，跑法与数在 `tools/web_readout_swap_probe.js` 的 D/E 段）：
+//   摘掉 `showRead` 里那道闸 ⇒ ⑰ 红；摘掉 `refreshSubVals` 里那道 ⇒ ⑱ 红；
+//   那个标志**永不放开** ⇒ ⑯⑲⑳ 红。⑮ 的牙还是原来那条（摘 go() 里那句）。
+//   **在 `setMeasure()` 里也立起 `dataStale`** ⇒ ㉑ 红（只红这一格：㉑ 自己一页，不牵连后面）。
 //
 // 假后台：拿仓里 zec_1h.json 的真 bars/结构，只改 `meta.tick`（精度那几条的被测量）、
 // 以及**第二份**（span≥2）把笔和线段的价格乘 1.002（⑪ 要的那句「结构重算了」得真够格触发）。
@@ -69,23 +93,33 @@ const FULL = JSON.parse(fs.readFileSync(path.join(WEB, 'fixtures/zec_1h.json'), 
 //   symShift：⑮ 用 —— 换成 BTCUSDT 之后那份把价整体乘 1.5。
 //          ★ 不乘的话两份一模一样，「换了数据之后读数该不该收」这件事在屏幕上**分不出来**
 //            （指针底下还是同一根），那一格就是空转。
-//   hold   ：⑮ 用 —— 这趟请求**扣住**多少毫秒再回（holdSym 是扣哪一趟，默认 BTCUSDT）。
+//   hold   ：⑮⑰⑱ 用 —— 这趟请求**扣住**多少毫秒再回（holdSym 是扣哪一趟，默认 BTCUSDT）。
+//          ★ 这一段里 ⑮ 读一眼、⑰⑱ 还要**连动三下鼠标**，窗口得撑得住这三下（现在是 6000ms；
+//            2500 那次真跑红了 ⑰：第三下落在窗口外面，量到的是新图上的读数）。
 //          ★ 不扣住就没有「新数据还在飞」那一段可量：静态假后台回得太快，
 //            ⑮ 量的那一眼会落在数据到了之后 —— 那正是**量不出来**的位置（见下面 ⑮ 那段注释）。
-const DEFAULT_SCEN = { tick: 0.1, bend: false, fail: false, symShift: false, hold: 0, holdSym: 'BTCUSDT' };
+//   failSym：⑳ 用 —— **只让点名那一趟** 503（`fail` 是整页都失败，那样首屏起不来，⑳ 摆不出来）。
+//   holdMeasure：㉑ 用 —— 把**带 measure 的那一趟**（＝换看法那一趟）扣住。
+//          ★ 不扣住就没有「看法还在换」这段窗口可量：静态假后台秒回，㉑ 那一眼会落在换完之后，
+//            于是「换的那一刻压一下、换完才放开」这个形状**量不出来**（那正是 ㉑ 要防的）。
+const DEFAULT_SCEN = { tick: 0.1, bend: false, fail: false, failSym: null, symShift: false, hold: 0,
+                       holdSym: 'BTCUSDT', holdMeasure: 0 };
 const SCEN = Object.assign({}, DEFAULT_SCEN);
 const scen = (o) => { Object.assign(SCEN, DEFAULT_SCEN, o || {}); };
 
 const decimals = (t) => { const s = String(t); return s.includes('.') ? s.split('.')[1].length : 0; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function payload(span, sym) {
+function payload(span, sym, measure) {
   const d = JSON.parse(JSON.stringify(FULL));
   d.meta.tick = SCEN.tick;
   d.source = 'api';
   d.fetched_at = new Date().toISOString();
   d.span = span; d.span_max = 4; d.earliest = false;
-  d.measure = 'macd';
+  // ★ 回显点名的那一种（没点名才落到 macd 缺省）。原来这儿写死 `'macd'` ⇒ 点「斜率」那趟回来还是
+  //   「面积」⇒ 页面按**回显**点亮芯片（renderMeasures 认的是 paging.measure），当场亮回原来那颗 ——
+  //   换看法**根本没换**。真后台是回显你点的那种，假后台也得是；不然 ㉑ 是一格空转（量的是"没换"）。
+  d.measure = measure || 'macd';
   if (sym) d.symbol = sym;
   // ★ 换品种那一格（⑮）：另一份**真的不一样**，不然「读数收了没有」看不出来（见 DEFAULT_SCEN 那段）
   if (SCEN.symShift && sym === 'BTCUSDT') {
@@ -129,6 +163,33 @@ const shown = (p) => p.evaluate(() => {
            last: document.getElementById('last').textContent };
 });
 
+// ★ ⑰⑱ 那一眼要一起看四样：读数块的状态、副图那三格、**这一眼确实还在窗口里**的两个证据
+//   （状态写着「取数…」＋ 屏上那份还是旧的）。少一样就可能量在数据到了之后 —— 那一眼是替身。
+const midProbe = (p) => p.evaluate(() => {
+  const g = (id) => (document.getElementById(id) || {}).textContent || '';
+  const sh = document.getElementById('subhead');
+  const d = window.__app.state.data;
+  const cells = sh ? Array.from(sh.querySelectorAll('.cell b')).map((b) => b.textContent) : null;
+  return { on: document.getElementById('readout').classList.contains('on'),
+           c: g('ro-close'), time: g('ro-time'), badge: g('state'),
+           firstO: d ? d.bars[0].o : 0, subCells: cells };
+});
+// ★ ⑲⑳：读数上那一刻，在**当时画着的那一份**里是哪一根？（`timeLabel` 是 UTC 到分 —— 那串字抄一份就迟早在某处错开）
+const inDrawn = (p) => p.evaluate(() => {
+  const d = window.__app.state.data;
+  const tm = (document.getElementById('ro-time') || {}).textContent || '';
+  const cs = Number(String((document.getElementById('ro-close') || {}).textContent || '').replace(/,/g, ''));
+  const pad = (n) => String(n).padStart(2, '0');
+  const label = (ms) => { const x = new Date(ms);
+    return `${x.getUTCFullYear()}-${pad(x.getUTCMonth() + 1)}-${pad(x.getUTCDate())} `
+         + `${pad(x.getUTCHours())}:${pad(x.getUTCMinutes())} UTC`; };
+  const bar = d ? d.bars.find((b) => label(b.t) === tm) : null;
+  return { tm, c: cs, found: !!bar, firstO: d ? d.bars[0].o : 0,
+           match: !!bar && Math.abs(bar.c - cs) <= Math.max(0.051, Math.abs(bar.c) * 1e-6) };
+});
+// 「换成了新那份」的分界。★ 假后台那份是 `ZEC 样本 × 1.5`（首根 195.7 → 293.6），拿 300 当分界会**永远**判成
+//   旧那份 —— ⑯ 里原来那句 `> 300` 就是个死条件（真后台的首根才是 6 万，这个数搬不到假后台来）。
+const NEW_FIRST = 250;
 const rgbOf = (hex) => 'rgb(' + [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ') + ')';
 
 (async () => {
@@ -141,19 +202,31 @@ const rgbOf = (hex) => 'rgb(' + [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2
     (cond ? ok : bad).push(line);
     console.log((cond ? '  ✓ ' : '  ✗ ') + line);
   };
+  // ★ ⑳ 那一段我们**故意**让那一趟 503（连带页面去够样本时的 404）—— 那两条是**摆的场景**，不是页面出毛病。
+  //   不过滤掉，报错清单里就混进假警报 —— 这一套把「页面报错」也算红，假警报一多，真出问题时就没人看了。
+  let expectNet = false;
+  const NET_EXPECTED = /Failed to load resource: the server responded with a status of (404|503)/;
   const watch = (p) => {
     p.on('pageerror', (e) => errors.push('pageerror: ' + e));
-    p.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+    p.on('console', (m) => {
+      if (m.type() !== 'error') return;
+      if (expectNet && NET_EXPECTED.test(m.text())) return;      // 摆出来的那几条（见上）
+      errors.push('console: ' + m.text());
+    });
   };
   // 假后台：/api/chart 一律我们答；/fixtures 关掉（逼它只能走后台那条路，跟线上同一条）
   const newCtx = async (opts) => {
     const ctx = await b.newContext(opts);
     await ctx.route('**/api/chart*', async (r) => {
-      if (SCEN.fail) return r.fulfill({ status: 503, body: '' });
       const u = new URL(r.request().url());
-      const span = Number(u.searchParams.get('span') || 1);
       const sym = u.searchParams.get('symbol');
-      const body = JSON.stringify(payload(span, sym));
+      // ★ ⑳：点名的那一趟单独失败（别的趟照常答 —— 整页都 503 的话首屏都起不来）
+      if (SCEN.fail || (SCEN.failSym && sym === SCEN.failSym)) return r.fulfill({ status: 503, body: '' });
+      const span = Number(u.searchParams.get('span') || 1);
+      const meas = u.searchParams.get('measure');
+      const body = JSON.stringify(payload(span, sym, meas));
+      // ★ ㉑ 要的那段「看法还在换」：只扣**带 measure 的那一趟**（首屏那一趟不带）
+      if (SCEN.holdMeasure && meas) await sleep(SCEN.holdMeasure);
       // ★ ⑮ 要的那段「新数据还在飞」：把点名的那一趟扣住 hold 毫秒再回（不扣住就没有窗口可量）
       if (SCEN.hold && sym === SCEN.holdSym) await sleep(SCEN.hold);
       return r.fulfill({ status: 200, contentType: 'application/json', body });
@@ -445,7 +518,10 @@ const rgbOf = (hex) => 'rgb(' + [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2
   // ★★ 换的时候**不许让指针离开图**。去点 chip、或挪到别的控件上，指针一走 LWC 发 `time==null`，
   //    读数自己就收了 —— 那样量到的是「鼠标移开」不是「换了数据」，又是一格替身。
   //    所以这里用 select 换品种：只改 selection，指针原地不动、十字线也不动。
-  scen({ tick: 0.1, symShift: true, hold: 2500 });
+  // ★ 扣 6000ms（原来 2500）：这一段里要连做三件事 —— ⑮ 那一眼、⑰⑱ 连动三下、然后等新图上来。
+  //   2500 撑不住：真跑过一轮 19/20，第三下鼠标落在窗口**外面**（那一眼读数是「亮着 2,283.8」、
+  //   状态已经是「已收盘」）—— ⑰ 当场报红而不是假绿，但那是**量具的窗口太短**，不是页面的毛病。
+  scen({ tick: 0.1, symShift: true, hold: 6000 });
   const sctx = await newCtx({ viewport: { width: 1280, height: 800 } });
   const sp = await open(sctx, '?symbol=ZECUSDT&tf=1h&last=300');
   const sbox = await boxOf(sp);
@@ -458,7 +534,7 @@ const rgbOf = (hex) => 'rgb(' + [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2
   const t0 = Date.now();
   await sp.evaluate(() => { const s = document.getElementById('symbol');
     s.value = 'BTCUSDT'; s.dispatchEvent(new Event('change', { bubbles: true })); });
-  await sleep(Math.max(0, 700 - (Date.now() - t0)));           // 那一趟还扣在手里（扣 2500ms）
+  await sleep(Math.max(0, 700 - (Date.now() - t0)));           // 那一趟还扣在手里（扣 6000ms）
   const rMid = await shown(sp);
   const midState = await sp.evaluate(() => ((document.getElementById('state') || {}).textContent || ''));
   t('⑮ 换数据**那一刻**读数就收（新数据还在飞：屏上还是旧图，读数不许留着上一份的数）',
@@ -466,6 +542,29 @@ const rgbOf = (hex) => 'rgb(' + [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2
     `换之前 on=${rA.on}（这格不成立就是空转）、收盘=${rA.c}；窗口里那一眼 on=${rMid.on}` +
     `，块里${rMid.on ? '**还亮着**（里面那行字还是 ' + rMid.c + '）' : '已经收起'}` +
     `｜那一刻页面写着「${midState}」（不是"取数"里就说明这眼没落在窗口里）｜请求 ${seen.length} 趟`);
+  // ================================================================ ⑰⑱ 窗口里**动鼠标**（口径：这一整段都压住）
+  // 见文件头 ⑰⑱。★ 这三下必须落在**同一段窗口**里（响应还扣着）：紧接着 ⑮ 那一眼做，别等。
+  await sp.mouse.move(Math.round(sbox.x + sbox.width * 0.5), sy);
+  await sleep(80);
+  const beforeSub = (await midProbe(sp)).subCells;          // 前提：换之前副图那三格是**有数的**
+  const win = [];
+  for (const f of [0.42, 0.58, 0.35]) {
+    await sp.mouse.move(Math.round(sbox.x + sbox.width * f), sy, { steps: 6 });
+    await sleep(120);
+    win.push(await midProbe(sp));
+  }
+  const stillOld = win.every((x) => x.firstO > 0 && x.firstO < NEW_FIRST);      // 屏上还是旧那份（ZEC）
+  const inWin = win.every((x) => x.badge.includes('取数'));
+  t('⑰ 取数那一段里**动鼠标**读数不许亮回来（口径是整段压住，不是只压「换的那一刻」）',
+    rA.on && stillOld && inWin && win.every((x) => !x.on),
+    `换之前 on=${rA.on}（这格不成立就是空转）｜窗口里连动 3 下 ⇒ `
+    + `${win.map((x) => (x.on ? `亮着(${x.c})` : 'off')).join(' / ')}`
+    + `｜那三眼状态＝${[...new Set(win.map((x) => x.badge))].join('、')}、屏上首根 o=${win[0].firstO}（旧那份 <${NEW_FIRST}）`);
+  t('⑱ 同一段里，副图那三个数（DIF/DEA/柱）也不许印上一份的旧量级（写「—」）',
+    Array.isArray(beforeSub) && beforeSub.length === 3 && beforeSub.every((v) => v && v !== '—')
+      && win.every((x) => x.subCells && x.subCells.length === 3 && x.subCells.every((v) => v === '—')),
+    `换之前那三格＝${JSON.stringify(beforeSub)}（得是有数的，不然这格空转）｜窗口里＝`
+    + JSON.stringify(win.map((x) => x.subCells)));
   // ★ ⑯ 两件事一起量：(a) 不是「收死了」—— 新数据画上之后读数得**回来**（不然这格是在奖励一个 bug）；
   //   (b) 回来时写的是**新那份刻度**上的数（symShift 那份整体 ×1.5，两份差着 1.5 倍，写旧答案对不上）。
   //   ★ 指针全程没离开图 ⇒ 这一格不是「鼠标回来把它叫醒」那笔账。
@@ -473,15 +572,125 @@ const rgbOf = (hex) => 'rgb(' + [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2
   for (let i = 0; i < 40; i++) {
     await sleep(200);
     back = await shown(sp);
-    const drawn = await sp.evaluate(() => !!(window.__app.state.data && window.__app.state.data.bars[0].o > 300));
+    const drawn = await sp.evaluate((f) => !!(window.__app.state.data && window.__app.state.data.bars[0].o > f), NEW_FIRST);
     if (drawn && back.on) break;
   }
   const num = (s) => parseFloat(String(s).replace(/,/g, '')) || 0;
   t('⑯ （⑮ 的另一头：收了要能回来，且写的是**新那份**的数）',
     back.on && num(back.c) > num(rA.c) * 1.2,
     `换之前 收盘=${rA.c} → 回来 收盘=${back.c}（新那份是 ×1.5 那一档；指针全程没离开图）`);
+
+  // ================================================================ ⑲ 新图画上之后再**动**一下 ⇒ 回来，且是当时那份的数
+  await sp.mouse.move(Math.round(sbox.x + sbox.width * 0.62), sy, { steps: 6 });
+  await sleep(300);
+  const r19 = await shown(sp);
+  const l19 = await inDrawn(sp);
+  t('⑲ 新图画上之后再动鼠标 ⇒ 读数回来，且写的是**当时画着的那一份**上的数（防压死）',
+    r19.on && l19.found && l19.match,
+    `动一下 ⇒ on=${r19.on}，读到 ${r19.c} ${r19.time}；当时那份（首根 o=${l19.firstO}）里 `
+    + (l19.found ? (l19.match ? '找得到同一根、数对得上' : '找得到那一刻但 close 对不上 ⇒ 停在旧数上')
+                 : '根本没有那一刻 ⇒ 读的不是这一份'));
   await sp.close();
   await sctx.close();
+
+  // ================================================================ ⑳ 取数**失败**那一趟 ⇒ 也不许把读数压死
+  // 见文件头 ⑳：修法里「放开」那一句放在 `finally` 而不是 `draw()` 后面，这一格就是它的牙。
+  scen({ tick: 0.1, failSym: 'BTCUSDT' });          // ★ 只让**换过去那一趟** 503：整页都失败的话首屏都起不来
+  expectNet = true;                                 // 这一段的 503/404 是摆出来的（见 watch 上面那段）
+  const fctx = await newCtx({ viewport: { width: 1280, height: 800 } });
+  const fp = await open(fctx, '?symbol=ZECUSDT&tf=1h&last=300');
+  const fbox = await boxOf(fp);
+  const fy = Math.round(fbox.y + fbox.height - 40);
+  await fp.mouse.move(Math.round(fbox.x + fbox.width * 0.5), fy);
+  await sleep(300);
+  const fA = await shown(fp);
+  await fp.evaluate(() => { const s = document.getElementById('symbol');
+    s.value = 'BTCUSDT'; s.dispatchEvent(new Event('change', { bubbles: true })); });
+  await sleep(1500);                                  // 这一趟是 503（没扣住），当场就回来
+  const fBadge = await fp.evaluate(() => (document.getElementById('state') || {}).textContent || '');
+  const fMid = await shown(fp);
+  await fp.mouse.move(Math.round(fbox.x + fbox.width * 0.45), fy, { steps: 6 });
+  await sleep(300);
+  const f19 = await shown(fp);
+  const fl = await inDrawn(fp);
+  t('⑳ 取数**失败**那一趟（新图没来）⇒ 读数不许被压死：动一下得回来，写的还是屏上那份的数',
+    fA.on && !/取数…/.test(fBadge) && /取不到|失败|HTTP/.test(fBadge) && f19.on && fl.found && fl.match,
+    `换之前 on=${fA.on}；那一趟回来写着「${fBadge}」（不是失败那一趟的话这格是空转）｜`
+    + `失败后那一瞬 on=${fMid.on}｜再动一下 on=${f19.on}，读到 ${f19.c} ${f19.time}，当时那份（首根 o=${fl.firstO}）里 `
+    + (fl.found ? (fl.match ? '数对得上' : '**对不上**') : '**没有那一刻**'));
+  await fp.close();
+  await fctx.close();
+  expectNet = false;
+
+  // ================================================================ ㉑ 换看法**不压**读数
+  // Atlas 2026-10-04 核 readout-hold 时点的缺口：变异「换看法时也立起 dataStale」⇒ 全绿，没有一格看见。
+  //   代码里那条口径是对的（`dataStale` 全文只在 `go()` 里出现一次），但「换看法不被压」这半句**没有闸门**。
+  // ★ 怎么摆才不是替身：
+  //   ① 先去点 chip **把指针挪开** ⇒ 指针一走 LWC 就发 `time==null`，读数自己收了 —— 量到的是「鼠标移开」，
+  //      不是「换看法」。所以换看法那一下在**页面里**点（`el.click()`），指针全程钉在图上不动。
+  //   ② 那四颗看法芯片**只换买卖点的画法**，买卖点那层关着时它们是 `disabled`（renderMeasures 里），
+  //      点了等于没点 ⇒ 先开 `sig`。
+  //   ③ 前提先断言「换之前就亮着」＋「回显真的换了」（fake 后台回显点名的那种，见 payload 那段）——
+  //      没换成的话这一格是空转，不是"过了"。
+  //   ④ 三半都量：**(0)** 换的那一趟**还扣在手里**时读数就得亮着（＝换看法这段**不许压**；这一半在
+  //      「立起来、等换完再放开」那个形状下红 —— 那正是这次要防的）；**(a)** 换完**不碰指针**也得亮着
+  //      （这一半在「立起来、没人放开」那个形状下红）；**(b)** 再动一下指针还亮着、写的还是**当时那份**
+  //      上的数（Atlas 的原话）。★ 只量 (b) 不行：那两个形状它都漏。
+  scen({ tick: 0.1, holdMeasure: 2500 });      // ④ 那一半要一段真窗口（秒回的假后台没有窗口可量）
+  const xctx = await newCtx({ viewport: { width: 1280, height: 800 } });
+  const xp = await open(xctx, '?symbol=ZECUSDT&tf=1h&last=300');
+  const xbox = await boxOf(xp);
+  const xx = Math.round(xbox.x + xbox.width * 0.5), xy = Math.round(xbox.y + xbox.height - 40);
+  const sigOn = await xp.evaluate(() => {                      // ② 先开买卖点那层（不开，看法芯片是灰的）
+    const c = document.querySelector('button.chip[data-key="sig"]');
+    if (!c) return false;
+    if (c.getAttribute('aria-pressed') !== 'true') c.click();
+    return true;
+  });
+  await sleep(500);
+  await xp.mouse.move(xx, xy);                                 // ① 指针钉在图上，之后不再挪开（除了 (b) 那一下）
+  await sleep(350);
+  const xA = await shown(xp);
+  const m0 = await xp.evaluate(() => window.__app.paging.measure);
+  const clicked = await xp.evaluate(() => {                    // 换看法：页面里点，指针不动
+    const g = document.getElementById('mgroup');
+    if (!g) return null;
+    const b = [...g.querySelectorAll('.mchip')].find((e) => !e.disabled && e.dataset.measure !== window.__app.paging.measure);
+    if (!b) return null;
+    b.click();
+    return b.dataset.measure;
+  });
+  // ④(0) 这一趟还扣在手里（2500ms）⇒ 窗口里读一眼：读数得**亮着**，状态写着「换看法…」
+  //    （状态不是「换看法…」就说明这一眼落在换完之后 —— 那是替身，这半格当场报红，不装作量过了）
+  await sleep(700);
+  const xW = await shown(xp);
+  const wBadge = await xp.evaluate(() => ((document.getElementById('state') || {}).textContent || ''));
+  const seq = [];                                              // 换完之后读数亮不亮（光看末态会把"闪一下"藏掉）
+  let m1 = m0, badge = '';
+  for (let i = 0; i < 40; i++) {
+    await sleep(150);
+    const r = await xp.evaluate(() => ({ on: document.getElementById('readout').classList.contains('on'),
+      m: window.__app.paging.measure, s: (document.getElementById('state') || {}).textContent || '' }));
+    seq.push(r.on ? '1' : '0'); m1 = r.m; badge = r.s;
+    if (m1 === clicked && !/换看法/.test(badge)) break;
+  }
+  const xB = await shown(xp);                                  // (a) 全程没动过指针
+  const lB = await inDrawn(xp);
+  await xp.mouse.move(xx + 40, xy, { steps: 6 });              // (b) 再动一下指针
+  await sleep(350);
+  const xC = await shown(xp);
+  const lC = await inDrawn(xp);
+  t('㉑ 换看法**不压**读数：换的那一趟还在飞时亮着、换完不碰指针也亮着、再动一下还亮着且数是对的',
+    sigOn && xA.on && !!clicked && /换看法/.test(wBadge) && xW.on && m1 === clicked
+      && xB.on && lB.found && lB.match && xC.on && lC.found && lC.match,
+    `换之前 ${m0}（on=${xA.on} 收=${xA.c}${xA.on ? '' : ' ⇒ 这格是空转'}）⇒ 点「${clicked}」，`
+    + `回显变成 ${m1}（没变就是没换成）｜那趟还扣在手里时 on=${xW.on}（状态「${wBadge}」——不是"换看法"就说明这眼落在换完之后）`
+    + `｜指针没动那一段：${seq.join('')}（1=亮）⇒ on=${xB.on} 收=${xB.c} ${lB.tm}`
+    + `（当时那份首根 o=${lB.firstO}，${lB.found ? (lB.match ? '数对得上' : '**close 对不上**') : '**没有那一刻**'}）`
+    + `｜再动一下 on=${xC.on} 收=${xC.c} ${lC.match ? '对得上' : '**对不上**'}｜状态「${badge}」`);
+  await xp.screenshot({ path: path.join(OUT, 'measure-swap.png'), clip: { x: xbox.x, y: xbox.y, width: 620, height: 180 } });
+  await xp.close();
+  await xctx.close();
 
   await b.close();
   console.log(`\n${ok.length}/${ok.length + bad.length} 绿`
