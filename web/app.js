@@ -46,7 +46,21 @@ const state = { data: null, opts, candleSeries: null };
 const primitives = [];
 // 往左拖那套状态：span＝现在手上是第几档，spanMax＝后台给的封顶，earliest＝币安真没有了。
 // viewSet＝**我们自己摆的那个视口**（用来认事件回声，见 setView）；reqId＝在飞的那一份的号（换品种就作废）。
-const paging = { span: 1, spanMax: null, earliest: false, nogain: false, stop: null, loading: false, failedAt: 0, reqId: 0, applying: false };
+const DEFAULT_MEASURE = 'macd';       // 后台的缺省也是它（core/signals.py 的 MEASURES）；地址栏里不写它
+// ★ measure 的初值是**地址栏说的那个**（可分享、可截图复现），不是写死的缺省 —— 但地址栏点名的那个
+//   后台认不认只有 /api/meta 知道，所以首屏是「先等名单、再发图表那一趟」，见文件末尾的启动那几行。
+const paging = { span: 1, spanMax: null, earliest: false, nogain: false, stop: null, loading: false, failedAt: 0, reqId: 0, applying: false,
+                 measure: new URLSearchParams(location.search).get('measure') || DEFAULT_MEASURE };
+
+// ---- 背驰看法（卡 card-84091d2d-c97：四选一、默认不动、图脚标明当前用的是哪种）----
+// 口径在 docs/spec/背驰.md 第六节，四个名字的出处是 core/signals.py 的 MEASURES 上面那一行。
+// ★ 四个名字**不写死在前端**（跟图层那份 SHOWN_LAYERS 一个道理：两份名单迟早错开，那时候用户点的
+//   那颗和后台算的那份就不是一回事了）：**能切哪几种以 /api/meta 的 measures 为准**，前端只负责把
+//   代号翻成人话。翻不出来（后台加了第五种、我这儿还没起名）⇒ 原样印代号 + title 里说明白，
+//   **不吞** —— 宁可难看，也不能让后台真有的东西在页面上凭空消失。
+// （代号 → 人话那张表在图脚那一块里，见 RENDER_META —— 图和脚用的是同一份，别在这儿再抄一遍。）
+// list 空 ⇒ 这一组不画（离线样本、旧后台：不知道的事不编，页面上一个字都不多）。
+const measures = { list: [] };
 let viewSet = null;
 let settleTimer = 0;
 const SETTLE_MS = 40;      // 「自己摆视口」的认回声窗口，见 holdView()
@@ -109,9 +123,14 @@ function fixtureNames(symbol, tf) {
 // span = 数据档（后端白名单 1、2、4、8……）：1 档 210 天，每翻一档往前多要同样长的一段。
 // ★ 这个 **`span` 是发给后台的参数**，跟地址栏里 `?at=N&span=M` 那个「看多少根」**不是一回事**
 //   —— 同一个词两个意思，所以地址栏里那个数据档我另叫 `?load=`（见 go()），别混。
-async function load(symbol, tf, span) {
+async function load(symbol, tf, span, measure) {
   try {
-    const r = await fetch(`/api/chart?symbol=${encodeURIComponent(symbol)}&tf=${encodeURIComponent(tf)}&span=${span}`);
+    const q = new URLSearchParams({ symbol, tf, span: String(span) });
+    // ★ 名单还没到手（离线样本、旧后台、或者首屏那个并行的 /api/meta 还没回来）⇒ measure 一个字都不带，
+    //   走后台自己的缺省。**这不是省事**：旧后台的查询白名单里没有 measure，多带一个参数就是 400，
+    //   整张图会挂在这一个词上。
+    if (measures.list.length && measure) q.set('measure', measure);
+    const r = await fetch(`/api/chart?${q}`);
     if (r.ok) return vetted({ ...(await r.json()), source: 'api' });
   } catch (e) { /* 静态打开（file:// 或本地 http.server）时没有后台，走样本 */ }
   for (const n of fixtureNames(symbol, tf)) {
@@ -182,7 +201,8 @@ function ladderSpan(v) {
 //   页面还以为自己是 16 档，停法就印错（Atlas 2026-10-04 读代码挑出来的）。
 // 纯函数：给「现在手上那份的状态 cur」和「后台回的一份 d」，算出手上该变成什么；调用方 Object.assign 回去。
 function adopt(cur, d, prevLen) {
-  const s = { span: Number.isFinite(d.span) ? d.span : cur.span,          // 回显的档位就是真档位
+  const s = { measure: typeof d.measure === 'string' && d.measure ? d.measure : cur.measure,
+              span: Number.isFinite(d.span) ? d.span : cur.span,          // 回显的档位就是真档位
               spanMax: Number.isFinite(d.span_max) ? d.span_max : cur.spanMax,
               // 三个字段同一条规矩：**回了就听回显的，没回就维持现状**。
               // 离线的仓里样本就没有这三个字段（老后台也没有）⇒ 那时候等于什么都不改，照旧能翻页。
@@ -452,7 +472,8 @@ async function loadEarlier(span) {
   paging.loading = true;
   renderMore({ loading: true });
   try {
-    const d = await load(symbol, tf, span);
+    // 补数据这一趟带着**当前**的看法（换品种/换档时看法不该自己变回默认）
+    const d = await load(symbol, tf, span, paging.measure);
     if (id !== paging.reqId) return;             // 等数据这段时间里换了品种/周期 ⇒ 这一份丢掉，别画上去
     // ★ 锚点要在**动数据之前**抓（setData 一换，视口的下标含义就变了），但要是**数据到手的这一刻**抓，
     //   不是发请求的那一刻：这一趟可能要等一两秒，用户在这期间还会接着往左拖 —— 拿发请求时的位置去「放回原位」，
@@ -499,7 +520,10 @@ function applyToggles() {
   segDash.applyOptions({ visible: opts.seg });
   repaint();
   renderLegend();
-  for (const b of document.querySelectorAll('.chip')) {
+  // ★ 只扫**图层那排**（带 data-key 的）。底下「背驰看法」那一组也长着 .chip 的皮（同一个药丸尺寸），
+  //   但它是**单选**（aria-checked，归 renderMeasures 管），没有 data-key ——
+  //   扫进来就会对着 undefined 取 .startsWith，整张图连带图脚一起炸（2026-10-04 真撞过）。
+  for (const b of document.querySelectorAll('.chip[data-key]')) {
     const k = b.dataset.key;
     const on = k === 'sigPend' ? opts.sigPend : k.startsWith('sig:') ? opts.sigKinds[k.slice(4)] : opts[k];
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
@@ -547,6 +571,85 @@ function watchOverflow(box) {
   addEventListener('resize', hint);
   addEventListener('orientationchange', hint);
   hint();                                 // 验收工装要重算，`dispatchEvent(new Event('resize'))` 即可
+}
+
+// ---------------------------------------------------------------- 背驰看法那一组（卡 card-84091d2d-c97）
+// 放在图层那一排**前面**：它决定的是「买卖点按哪种力度比较算出来」（算什么），比「画哪几层」还靠上一步。
+// ★ 样式上跟图层开关**刻意分开**：图层是一排可多选的开关（`aria-pressed`，虚边），这一组是**单选**
+//   （`role=radio` / `aria-checked`，选中的那颗实心）—— 眼睛一扫就知道这两排不是一回事。
+// ★ 能切哪几种**以 /api/meta 的 measures 为准**（同上：名单不许写死在前端）。名单没到 ⇒ 这一组不画。
+async function loadMeasures() {
+  try {
+    const r = await fetch('/api/meta');
+    if (!r.ok) return;
+    const m = await r.json();
+    const list = Array.isArray(m.measures) ? m.measures.filter((x) => typeof x === 'string' && x) : [];
+    if (list.length < 2) return;         // 只有一种看法＝没什么可切的；不画一个只有一个选项的开关
+    measures.list = list;
+    // 地址栏点名的那个后台认不认：名单外的一律退回缺省（缺省不在名单里才拿第一个）
+    const want = new URLSearchParams(location.search).get('measure');
+    if (want && !list.includes(want)) paging.measure = list.includes(DEFAULT_MEASURE) ? DEFAULT_MEASURE : list[0];
+    buildMeasures();
+  } catch (e) { /* 没后台（离线样本）或没这个接口：没有看法可切，页面上不多一个字 */ }
+}
+
+function buildMeasures() {
+  const box = el('panel');
+  const g = document.createElement('div');
+  g.className = 'mgroup'; g.id = 'mgroup';
+  g.setAttribute('role', 'radiogroup'); g.setAttribute('aria-label', '背驰看法');
+  const cap = document.createElement('span');
+  cap.className = 'mcap'; cap.textContent = '背驰看法';
+  g.appendChild(cap);
+  for (const id of measures.list) {
+    // 翻不出中文名的（后台加了第五种）⇒ 原样印代号，title 里说明白：**不吞**。
+    const [short, long] = MEASURE_NAME[id] || [id, `${id}（后台新加的看法，前端还没有中文名）`];
+    const b = document.createElement('button');
+    b.className = 'chip mchip'; b.type = 'button'; b.dataset.measure = id;
+    b.textContent = short; b.title = long;
+    b.setAttribute('role', 'radio');
+    b.onclick = () => setMeasure(id);
+    g.appendChild(b);
+  }
+  box.prepend(g);
+  watchOverflow(box);                  // 手机上多了一排，右边还有没有东西要重算一遍
+  renderMeasures();
+}
+
+// 亮哪一颗**看回显**（paging.measure 是 adopt() 从响应里认来的），不看用户刚点的那一颗。
+function renderMeasures() {
+  const g = el('mgroup'); if (!g) return;
+  for (const b of g.querySelectorAll('.mchip')) b.setAttribute('aria-checked', b.dataset.measure === paging.measure ? 'true' : 'false');
+}
+
+async function setMeasure(id) {
+  if (!measures.list.includes(id) || id === paging.measure || paging.loading) return;
+  const own = state.data;
+  const id0 = ++paging.reqId;          // 跟首屏／往左加载共用同一个号：谁后发谁算数，先到的那份丢掉
+  paging.loading = true;
+  el('state').textContent = '换看法…'; el('state').className = 'badge';
+  try {
+    // ★ 锚点在**动数据之前**按**时间**抓（anchorOf）。后台契约是「切看法只换 signals，K线/笔/段/中枢
+    //   逐字节不变」⇒ 这个锚点原样指回同一根，视口一动不动。真变了也不跳：这一手本来就是按时间放回去的，
+    //   所以这里**不押**在「一定不变」上。
+    const anchor = own ? anchorOf(own.bars, chart.timeScale().getVisibleLogicalRange()) : null;
+    const d = await load(el('symbol').value, el('tf').value, paging.span, id);
+    if (id0 !== paging.reqId) return;
+    // prevLen 传 undefined：换看法**不是补数据**，「要了却一根没多」这条判据在这儿不成立 ——
+    // K 线根数本来就该一样，传了它，下一次往左拖就会被判成 nogain、印一句「取不到更早数据」的假话。
+    Object.assign(paging, adopt(paging, d));
+    setUrl();
+    if (anchor) draw(d, anchor); else draw(d);
+    renderMeasures();
+    el('state').textContent = d.closed ? '已收盘' : '未收盘（最后一根还在走）';
+    el('state').className = 'badge ' + (d.closed ? '' : 'live');
+  } catch (e) {
+    if (id0 !== paging.reqId) return;
+    el('state').textContent = String(e.message || e); el('state').className = 'badge bad';
+    renderMeasures();                  // 没换成 ⇒ 亮回原来那一颗
+  } finally {
+    if (id0 === paging.reqId) paging.loading = false;
+  }
 }
 
 function renderLegend() {
@@ -623,6 +726,24 @@ function sourceLabel(src, stale) {
   return src || '未知';        // 离线样本原样透出；字段缺就写「未知」—— 空着是看不出来，未知是看得出来的不知道
 }
 
+// 背驰看法：代号 → 人话。措辞照 core/signals.py 里 MEASURES 上面那一行（不自己另起名字）。
+// ★ 这张表**同时给图脚和控件**用，放在这一块里：尺 ③ 把 renderMeta 抠出来单跑，只喂 `el` 和 `d`
+//   —— 模板要是回头去读块外的符号（比如「后台给了哪几种」那份名单），当场 ReferenceError ⇒ 直接红。
+//   **图脚本来也不该依赖那份名单**：它认的是**回显**（d.measure），跟 span / earliest 同一条规矩。
+const MEASURE_NAME = {
+  macd: ['面积', 'MACD 柱子的面积（默认）'],
+  slope: ['斜率', '斜率'],
+  lines: ['黄白线', '黄白线不创新高低'],
+  peak: ['峰值', '柱子一波的峰值'],
+};
+// 图脚那一格：**以回显为准** —— 用户点的那颗可能会失败（后台 400/503），屏幕上画的到底是哪种，
+// 只有后台回的那份说了算。旧后台和离线样本没有这个字段 ⇒ 这一格**不出现**，不知道的事不编。
+function measureText(d) {
+  const m = d.measure;
+  if (typeof m !== 'string' || !m) return '';
+  return ` ｜ 背驰看法 ${(MEASURE_NAME[m] || [m])[0]}`;
+}
+
 function renderMeta(d) {
   const done = d.segs.filter((s) => !s.live).length;
   el('meta').textContent =
@@ -630,6 +751,7 @@ function renderMeta(d) {
     + ` ｜ 完成线段 ${done}（+${d.segs.length - done} 未完成）｜ 线段中枢 ${d.seg_centers.length}`
     + ` ｜ 精度 ${d.meta?.tick} ｜ ${d.meta?.pen_rule === 'new' ? '新笔' : '老笔'}`
     + ` ｜ 买卖点 线段中枢层 ${sigTierText(d.signals?.seg || [])} · 类中枢层 ${sigTierText(d.signals?.pen || [])}`
+    + measureText(d)
     + ` ｜ 数据源 ${sourceLabel(d.source, d.stale)}`;
 }
 // <<< RENDER_META
@@ -690,6 +812,9 @@ function setUrl() {
   const q = new URLSearchParams(location.search);     // 保留 last= / at= 之类的既有参数，别把地址栏洗掉
   q.set('symbol', el('symbol').value); q.set('tf', el('tf').value);
   if (paging.span > 1) q.set('load', paging.span); else q.delete('load');
+  // 看法同理：写着缺省（面积）是噪音，抹掉；只有真换了才写上去（可分享、可截图复现）。
+  if (measures.list.length && paging.measure !== DEFAULT_MEASURE) q.set('measure', paging.measure);
+  else q.delete('measure');
   history.replaceState(null, '', `?${q}`);            // 可分享、可截图复现
 }
 
@@ -701,11 +826,12 @@ async function go(span = 1) {
   paging.loading = true;        // 这一份还在飞（换品种时旧图还挂在屏上）⇒ 别在这中间再插一个「更早」的请求
   el('state').textContent = '取数…'; el('state').className = 'badge';
   try {
-    const d = await load(symbol, tf, paging.span);
+    const d = await load(symbol, tf, paging.span, paging.measure);
     if (id !== paging.reqId) return;
     Object.assign(paging, adopt(paging, d));     // ★ 首屏也认回显：一开始就 earliest 的品种不该白发请求
     setUrl();                                    // 后台钳过档的话（15m 要 16 钳到 4），地址栏写**真**档位
     draw(d);
+    renderMeasures();                            // 亮哪一颗看回显（名单是后到的，首屏画完得补一次）
     el('state').textContent = d.closed ? '已收盘' : '未收盘（最后一根还在走）';
     el('state').className = 'badge ' + (d.closed ? '' : 'live');
   } catch (e) {
@@ -720,10 +846,19 @@ async function go(span = 1) {
 buildPickers();
 buildChips();
 applyToggles();
-// ?load=N：直接打开某一档（可分享 / 可截图复现；N 不在白名单上就退回它下面的那一档）
-go(ladderSpan(new URLSearchParams(location.search).get('load')));
+// 看法那份名单跟首屏的图表请求**并行**发（不为一个小请求把首屏推后）。只有一个例外见下面：
+const metaReady = loadMeasures();
+(async () => {
+  const q = new URLSearchParams(location.search);
+  // ★ 地址栏**点名了**看法就得先等名单：名单外的名字发出去后台回 400，整张图会白挂在这一个词上
+  //   （跟 `?load=` 超白名单会被钳是同一类账，只是那边前端能自己钳、这边得先问后台认哪几个）。
+  //   没点名（绝大多数）⇒ 一个字都不等，立刻发第一趟；那一趟不带 measure，走后台自己的缺省。
+  if (q.has('measure')) await metaReady;
+  // ?load=N：直接打开某一档（可分享 / 可截图复现；N 不在白名单上就退回它下面的那一档）
+  go(ladderSpan(q.get('load')));
+})();
 
 // 给验收工装一个**只读**入口：并排截图要把网页这一格切到跟 Python 出图同一段 K 线、同一价格带，
 // 那就得问图自己「第 i 根在哪个 x、这个价在哪个 y」（timeToCoordinate / priceToCoordinate）。
 // 不是功能开关，页面上没有任何东西读它；去掉它，验收那两张图就没法对齐。
-window.__app = { chart, state, opts, paging };
+window.__app = { chart, state, opts, paging, measures };

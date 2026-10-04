@@ -116,6 +116,18 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
   border: 1px solid var(--line); font: inherit; font-size: 12px;
   transition: color .12s, border-color .12s, background .12s;
 }
+/* ---- 背驰看法：单选那一组。跟图层开关**刻意长得不一样** —— 选中的那颗是**实心**（图层那边只是边框变亮），
+   一个 radiogroup 对一排 pressed 开关，眼睛不用读字就分得开。桌面站上一整行（标题单独一行、按钮两两一行），
+   手机上收进同一根横滑条、排到**最后**（见窄屏那档）。 ---- */
+.mgroup {
+  flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--line);
+}
+.mcap { flex: 1 0 100%; font-size: 11px; color: var(--dim); }
+/* 实心用 --tx（墨色）当底、--bg 当字：**不借信号色**（--am 是「未收盘/旧数据」、--rd 是「出错」，
+   借来当选中色，那两个色就不只一个意思了）。 */
+.mchip[aria-checked="true"] { background: var(--tx); border-color: var(--tx); color: var(--bg); }
+
 .chip i { width: 9px; height: 9px; border-radius: 2px; opacity: .45; }
 .chip[aria-pressed="true"] { color: var(--tx); border-color: var(--mu); background: var(--panel-hi); }
 .chip[aria-pressed="true"] i { opacity: 1; }
@@ -160,6 +172,14 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
     -webkit-overflow-scrolling: touch;
   }
   .chip { flex: 0 0 auto; }
+  /* ★ 手机上这一组**排到最后**（`order` 只在窄屏挂）。竖着排的时候它在最上面合情合理（决定算什么），
+     可手机是一根横滑条：插在最前面会把**天天用的** 笔/线段/线段中枢 挤到屏幕外，得先滑一下才点得到。
+     排到最后，前面那 13 颗的位置一个没动；右边还有东西本来就有渐隐提示，图脚也一直写着当前用的是哪种。 */
+  .mgroup {
+    order: 10; flex: 0 0 auto; flex-wrap: nowrap; gap: 6px;
+    padding: 0 0 0 8px; margin-left: 2px; border-bottom: none; border-left: 1px solid var(--line);
+  }
+  .mcap { flex: 0 0 auto; font-size: 11px; }      /* 手机上标题跟按钮同一行：这一条竖着长一截太贵 */
   /* ★ 2026-10-03 真机反馈：这一行右边被切掉、看着像"少了一个按钮"。
      实测**本来就能横滑**（overflow-x:auto、scrollWidth 953 / clientWidth 390），缺的只是**提示**。
      渐隐只在「那个方向还有东西」时出现（类由 app.js 按 scrollLeft / scrollWidth 挂），
