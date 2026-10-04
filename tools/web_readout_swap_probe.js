@@ -7,12 +7,23 @@
 //     摘 paint 里那句  ：`paint()` 里的 hideRead()（＝ Atlas 点的那一处）
 //
 // 两个场景，量的是两个不同的时刻：
-//   A/B「换完之后」：换品种 / 换周期，**等新数据画上来**再读。→ 三种跑法应当**逐条一样**：
+//   A/B「换完之后」：换品种 / 换周期，**等新数据画上来**再读。→ 三种跑法结论应当一样：
 //        LWC 在 setData 之后会自己重发一次十字线，读数当场就用新那份重读了。
 //        ⇒ 结论：`paint()` 那个位置**量不出来**，在那儿加格是空转格（删了不红，因为它本来就没在做事）。
 //   C「换的那一刻」：把那一趟响应**扣在手里** 2.5s，在「新数据还在飞」的窗口里读一眼。
 //        屏上还是旧图、十字线一动没动 ⇒ 读数该收。→ 原样：off；摘了 go 那句：**on 且是旧数**。
 //        ⇒ 结论：真正盖住这段的是 go() 里那句；工装 ⑮ 量的是这里。
+//
+// ★★ A/B 那一族 2026-10-04 改过判据（原来是把「三种跑法读出来的那串字」逐条比）：
+//    **那串字本身会跳一根**，跟删不删那句没关系 —— 同一个 URL 连开三次（没有任何变异）：
+//      等完就读 83,686.4 2026-09-28 16:00 ／ 83,686.4 16:00 ／ 83,832.7 17:00（差一根）
+//    数据没动（5040 根、首根、末根时刻三次全同）、盒子没动、指针没动；换一条路（直接开 BTC 页）
+//    三次又完全一样。⇒ 换完之后**指针底下的那一根**在摆视口这一段里会跳一格，这是**量具的噪声**，
+//    拿它当判据的话，红绿都是在报「这一趟正好跳到哪一根」，不是在报行为。
+//    ⇒ 判据换成**每一跑对着当时画着的那一份**查：换完之后读数必须**亮着**，而且它那一刻在
+//      `state.data.bars` 里**找得到**、close 对得上（＝读的是新那份，不是旧那份）。
+//      这条对「读数停在旧数上」正是死穴（换品种时旧数是另一种价格量级；换周期时 1h 的时刻
+//      根本不在 4h 那份里），而它**不**管落在相邻哪一根 —— 那件事本来就会跳，见上。
 //
 // 跑法（要**真后台**：两个品种都得有，8742 那个假后台只有一份数据）：
 //   1) python3 web/server.py --port 8792          （只绑回环）
@@ -36,18 +47,39 @@ const MUT = (process.argv.find((a) => a.startsWith('--mut=')) || '--mut=none').s
 const HOLD = 2500;                       // 「新数据还在飞」那段撑多久（撑不出来就没窗口可量）
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// 两处 hideRead() 的锚点：各按**下一行**认（行号会漂，下一行这句话不会）
+// 变异的锚点：各按**下一行**认（行号会漂，下一行这句话不会）
 const SITES = {
   go:    { name: 'go()（换数据那一刻）', re: /\n  hideRead\(\);\n(  el\('state'\)\.textContent = '取数…';)/ },
   paint: { name: 'paint()',             re: /\n  hideRead\(\);\n(  const bars = d\.bars\.map)/ },
+  // ★ 这条**不是**「哪句 hideRead 该放哪」的对照，是 A/B 那条判据的**牙齿**自己：
+  //   读数块照样亮着，但**字只印第一次** ⇒ 换完之后 DOM 上留着的是旧那份的数（＝「停在旧数上」）。
+  //   跑 `--mut=stale` 应当看到 A/B 那两格红、报「读数上的 close 跟当时那一份里那一刻对不上」——
+  //   红得出来，那条判据才不是空转格。（2026-10-04 加：原来的判据比的是「三种跑法读出的那串字」，
+  //   无变异也会跳一根，见文件头。）
+  //   ★ 头一版写的是「整个 showRead 只跑第一次」——那会把块也一起掐灭（读数再也不亮），
+  //     量到的是「读数没了」不是「字是旧的」，报出来是空转格。掐字不掐块才对得上这条判据。
+  stale: { name: 'showRead()（字只印第一次，块照样亮）', re: /\n(function showRead\(b\) \{\n)/,
+           rep: '\n$1  if (window.__ro0) { el(\'readout\').classList.add(\'on\'); readShown = true; return; }'
+              + ' window.__ro0 = 1;      // ← 变异：字只印第一次\n' },
 };
 const read = (p) => p.evaluate(() => {
   const r = document.getElementById('readout');
-  return { on: r.classList.contains('on'), c: document.getElementById('ro-close').textContent,
-           tm: document.getElementById('ro-time').textContent, sym: document.getElementById('symbol').value,
+  const d = window.__app.state.data;
+  const pad = (n) => String(n).padStart(2, '0');
+  const label = (ms) => { const x = new Date(ms);            // 跟读数上那串字同一套（UTC，分）
+    return `${x.getUTCFullYear()}-${pad(x.getUTCMonth() + 1)}-${pad(x.getUTCDate())} `
+         + `${pad(x.getUTCHours())}:${pad(x.getUTCMinutes())} UTC`; };
+  const tm = document.getElementById('ro-time').textContent;
+  const cs = document.getElementById('ro-close').textContent;
+  const num = Number(cs.replace(/,/g, ''));
+  // 读数上那一刻，在**当前画着的这一份**里是哪一根？（找不到 ⇒ 读的不是这一份）
+  const bar = d ? d.bars.find((b) => label(b.t) === tm) : null;
+  return { on: r.classList.contains('on'), c: cs, tm, sym: document.getElementById('symbol').value,
            tf: document.getElementById('tf').value, badge: (document.getElementById('state') || {}).textContent || '',
-           drawn: window.__app.state.data ? window.__app.state.data.bars.length : 0,
-           first: window.__app.state.data ? window.__app.state.data.bars[0].o : 0 };
+           drawn: d ? d.bars.length : 0,
+           first: d ? d.bars[0].o : 0,                       // 换品种/换周期都变 → 用它认「新那份画上来了」
+           在这份里: !!bar,
+           对得上: !!bar && Math.abs(bar.c - num) <= Math.max(0.051, Math.abs(bar.c) * 1e-6) };
 });
 const show = (x) => `${x.on ? 'on ' : 'off'} ${x.c} ${x.tm}`.trim();
 
@@ -68,7 +100,8 @@ async function run(b, mode) {
       // ★ 替换要**留住那个换行**（'\n$1'，不是 '$1'）：$1 是**下一行的缩进**，
       //   少了换行它会被并进上一行的注释里 —— 那样删掉的就不只是 hideRead()，
       //   连同下一句一起变成了注释（paint 那处会让整页画不出来，量到的是「页面坏了」）。
-      await route.fulfill({ status: 200, contentType: 'text/javascript', body: t.replace(site.re, '\n$1') });
+      await route.fulfill({ status: 200, contentType: 'text/javascript',
+                            body: t.replace(site.re, site.rep || '\n$1') });
     });
   }
   // 换品种那一趟扣在手里：C 要的就是「新数据还在飞」那一段
@@ -87,7 +120,7 @@ async function run(b, mode) {
   const swap = (id, v) => p.evaluate(([i, val]) => { const s = document.getElementById(i);
     s.value = val; s.dispatchEvent(new Event('change', { bubbles: true })); }, [id, v]);
   const out = {};
-  // A/B：换完之后（等新数据画上来再读）—— 这两格应当在三种跑法下**完全一样**
+  // A/B：换完之后（等新数据画上来再读）—— 每一跑都对着**当时画着的那一份**查（见文件头）
   for (const [label, id, v] of [['A 换品种 → BTCUSDT', 'symbol', 'BTCUSDT'], ['B 换周期 → 4h', 'tf', '4h']]) {
     await p.mouse.move(mx, my); await sleep(500);
     const before = await read(p);
@@ -96,7 +129,10 @@ async function run(b, mode) {
     await p.waitForFunction((f0) => window.__app.state.data.bars[0].o !== f0, before.first, { timeout: 30000 })
       .catch(() => {});
     await sleep(1200);                       // 数据画上之后（re-emit 已经发生过）
-    out[label] = { 换前: show(before), 换后: show(await read(p)), 换前在不在: before.on };
+    const after = await read(p);
+    out[label] = { 换前: show(before), 换后: show(after), 换前在不在: before.on,
+                   换后亮着: after.on, 换后在这份里: after.在这份里, 换后对得上: after.对得上,
+                   换后时刻: after.tm, 这份根数: after.drawn };
   }
   // C：换的那一刻（窗口里）—— 这一格才是分叉的地方
   await p.mouse.move(mx, my); await sleep(500);
@@ -130,35 +166,46 @@ async function run(b, mode) {
     res.push({ m, label, ...r });
   }
   await b.close();
-  if (modes.length < 3) process.exit(0);
-  // 判据就三条：每一跑的**前提**得成立（换之前读数在）；A/B 三种跑法逐条同；
+  const single = modes.length < 3;                 // --mut=X 只跑一种：跨跑对照判不了，但每跑自己那几条照样判
+  // 判据：每一跑的**前提**得成立（换之前读数在）；A/B 换完之后读数**亮着**且读的是**当时画着的那一份**；
   // C 只有「摘 go」那一跑分叉（原样 off、摘了那张还亮着旧数）
-  const ref = res.find((r) => r.m === 'none');
+  const ref = res.find((r) => r.m === 'none') || res[0];
   const bad = [];
   for (const r of res) {
     if (r.m !== 'none' && r.hit !== 1) continue;          // 变异没命中：这一跑的数不算数（上面已经大字报了）
     for (const [k, v] of Object.entries(r.out)) {
-      const vac = k.startsWith('C') ? v.换前在不在 : v.换前在不在;
-      if (!vac) bad.push(`${r.label} 的「${k}」**换之前读数就不在** ⇒ 这一跑是空转，数不算数（多半是页面还没起稳）`);
+      if (!v.换前在不在) bad.push(`${r.label} 的「${k}」**换之前读数就不在** ⇒ 这一跑是空转，数不算数（多半是页面还没起稳）`);
     }
     for (const [k, v] of Object.entries(r.out)) {
-      if (!k.startsWith('C') && v.换前在不在 && ref.out[k].换前在不在) {
-        if (v.换后 !== ref.out[k].换后) {
-          bad.push(`${r.label} 的「${k}」跟原样不一样：${v.换后} vs ${ref.out[k].换后}（这一族本该**量不出来**）`);
-        }
-      }
+      if (k.startsWith('C') || !v.换前在不在) continue;
+      if (!v.换后亮着) bad.push(`${r.label} 的「${k}」换完之后读数**没亮着**：${v.换后}`);
+      else if (!v.换后在这份里) bad.push(`${r.label} 的「${k}」换完之后读数上那一刻**不在当时画着的那一份里**：`
+        + `${v.换后}（这份 ${v.这份根数} 根）—— 读数没跟着新数据走`);
+      else if (!v.换后对得上) bad.push(`${r.label} 的「${k}」换完之后读数上的 close 跟当时那一份里「${v.换后时刻}」对不上：`
+        + `${v.换后} ⇒ 停在旧数上了`);
     }
   }
-  const goRun = res.find((r) => r.m === 'go');
   const ck = Object.keys(ref.out).find((k) => k.startsWith('C'));
-  if (ref.out[ck].换前在不在) {
-    if (!/^off/.test(ref.out[ck].窗口里)) bad.push(`原样在窗口里应当是 off，实际 ${ref.out[ck].窗口里}（⑮ 的前提不成立）`);
-    if (!ref.out[ck].指针下那根还是旧那份) bad.push('原样那一跑：窗口里那一眼指针下已经不是旧那份了 ⇒ 那一眼没落在窗口里，数不算数');
+  if (!single) {                                   // C 那两条是**跨跑**比出来的：只跑一种时没有对照
+    const goRun = res.find((r) => r.m === 'go');
+    if (ref.out[ck].换前在不在) {
+      if (!/^off/.test(ref.out[ck].窗口里)) bad.push(`原样在窗口里应当是 off，实际 ${ref.out[ck].窗口里}（⑮ 的前提不成立）`);
+      if (!ref.out[ck].指针下那根还是旧那份) bad.push('原样那一跑：窗口里那一眼指针下已经不是旧那份了 ⇒ 那一眼没落在窗口里，数不算数');
+    }
+    if (goRun && goRun.hit === 1 && goRun.out[ck].换前在不在) {
+      if (!/^on/.test(goRun.out[ck].窗口里)) bad.push(`摘了 go 那句，窗口里应当**还亮着旧数**，实际 ${goRun.out[ck].窗口里}`);
+      if (!goRun.out[ck].指针下那根还是旧那份) bad.push('摘 go 那一跑：窗口里那一眼没落在窗口里，数不算数');
+    }
   }
-  if (goRun && goRun.hit === 1 && goRun.out[ck].换前在不在) {
-    if (!/^on/.test(goRun.out[ck].窗口里)) bad.push(`摘了 go 那句，窗口里应当**还亮着旧数**，实际 ${goRun.out[ck].窗口里}`);
-    if (!goRun.out[ck].指针下那根还是旧那份) bad.push('摘 go 那一跑：窗口里那一眼没落在窗口里，数不算数');
+  // 落在相邻哪一根会跳（无变异也会跳，见文件头）—— 这条只做**记录**，不当判据
+  for (const k of Object.keys(ref.out).filter((x) => !x.startsWith('C'))) {
+    const seen = res.filter((r) => r.out[k].换前在不在).map((r) => `${r.label}：${r.out[k].换后}`);
+    console.log(`\nⓘ 「${k}」换完之后落在哪一根 —— ${seen.join('　｜　')}\n   （差一根是量具自己的事：同一个 URL 连开三次、无变异，也会跳一根）`);
   }
-  console.log('\n' + (bad.length ? '★ 有对照不符合预期：\n  ' + bad.join('\n  ') : '✓ 两条预期都成立：换完之后那个位置**量不出来**（三种跑法逐条同）；分叉只在「换的那一刻」，而且正是 go() 那句管着。'));
+  console.log('\n' + (bad.length ? '★ 有对照不符合预期：\n  ' + bad.join('\n  ')
+    : (single ? `✓ 这一跑（${ref.label}）自己那几条都成立：换完之后读数亮着、而且读的是**当时画着的那一份**。`
+              + ' 跨跑那两条（三种 hideRead 摆法的对照）要三种都跑才算。'
+      : '✓ 三条预期都成立：换完之后每一跑读数都亮着、而且读的是**当时画着的那一份**（三种跑法都成立）'
+        + ' ⇒ `paint()` 那个位置量不出来；分叉只在「换的那一刻」，而且正是 go() 那句管着。')));
   process.exit(bad.length ? 1 : 0);
 })().catch((e) => { console.error('探针自己炸了：', e.message); process.exit(2); });
