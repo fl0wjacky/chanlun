@@ -223,19 +223,38 @@ function restoreRange(bars, anchor) {
   const from = i === null ? bars.length - anchor.oldLen + anchor.oldFrom : i + anchor.frac;
   return { from, to: from + anchor.width };
 }
-const NOTICE_TEXT = '已接上更早的K线，左侧笔和线段按新的起点重算';
+const NOTICE_TEXT = '已接上更早的K线，左侧的笔、线段、中枢和买卖点按新的起点重算';
 const NOTICE_MS = 3000;
 let noticeTimer = 0;
-// 记一句「这一屏里现在是哪几笔、哪几段」：按**时间戳和价格**记，不按下标 ——
+// 记一句「这一屏里现在有哪些东西、长什么样」：按**时间戳和价格**记，不按下标 ——
 // 往左补数据是往数组头上插，同一个下标当场就指向另一根 K 线（跟 anchorOf 是同一条理由）。
 // ★ 只记**跟可视窗口有时间重叠**的那些：窗口外也跟着重算了（一画就是全局的），
 //   但用户没看那儿 —— 没变就别说，变了才说（Nova 2026-10-04 定的口径，Atlas 补的「可视窗口」）。
+// ★ 记哪几层 ＝ **屏幕上看得见的那几层**（Nova 2026-10-04 拍 (a)）：笔、线段、类中枢、线段中枢、买卖点。
+//   原先只记笔和线段 —— 可是换档后先变的往往正是中枢：BTC 4h 那对 1↔2 就是**只有线段中枢的 ZD 变了**
+//   （65569.2 ↔ 67300），笔和段一动没动，屏幕上的框变了却不出声。看得见的东西变了就得说。
 function structKey(d, t0, t1) {
   const ts = (i) => (d.bars[i] || {}).t;
-  const inWin = (o) => ts(o.i0) != null && ts(o.i1) != null && ts(o.i1) >= t0 && ts(o.i0) <= t1;
+  const ov = (a, b) => a != null && b != null && b >= t0 && a <= t1;   // 区间跟窗口有重叠（含边界）
+  const at = (t) => t != null && t >= t0 && t <= t1;                   // 单个时间点落在窗口里
+  const inWin = (o) => ov(ts(o.i0), ts(o.i1));
   const row = (o) => `${ts(o.i0)}>${ts(o.i1)}@${o.p0},${o.p1}`;
   const part = (a) => (a || []).filter(inWin).map(row).join('|');
-  return part(d.pens) + '#' + part(d.segs);
+  // 中枢：取**画出来的那个框**的横跨区 ⇒ 跟 layers.js 的 boxes() 同一个取法
+  //   （host[PI0].i0 ／ host[PI1].i1。类中枢 host=笔；线段中枢 host=**已完成**线段，别拿 segs 直接取。
+  //    样本上 X0/X1 跟这个取法逐条相同，但「画的是哪个」以 boxes() 为准，不押在另一个字段上。）
+  const boxes = (zs, host) => (zs || []).map((z) => {
+    const a = host[z.PI0], b = host[z.PI1];
+    if (!a || !b) return null;
+    const up = (z.up || []).map((u) => `${u.ZD},${u.ZG}`).join(';');   // 升级标签也是画在框上的
+    return { i0: a.i0, i1: b.i1, s: `${z.ZD},${z.ZG}${z.live ? ',live' : ''}${up ? ',' + up : ''}` };
+  }).filter((o) => o && ov(ts(o.i0), ts(o.i1))).map((o) => `${ts(o.i0)}>${ts(o.i1)}@${o.s}`).join('|');
+  // 买卖点：一个点 —— 三角和它的字都画在这个 x 上
+  const sigs = (a) => (a || []).filter((s) => at(ts(s.bar)))
+    .map((s) => `${ts(s.bar)}@${s.price},${s.kind}${s.confirmed === false ? ',未确认' : ''}`).join('|');
+  const done = (d.segs || []).filter((s) => !s.live);   // 线段中枢的 host（跟 layers.js doneSegs 同一条）
+  return [part(d.pens), part(d.segs), boxes(d.centers, d.pens || []), boxes(d.seg_centers, done),
+          sigs((d.signals || {}).seg), sigs((d.signals || {}).pen)].join('#');
 }
 // 可视窗口 → 时间区间。★ 换档前取一次、换档后用**同一段时间**再取一次：
 // 拿换完之后的新窗口去比，比的是「另一段时间」，那就不是「这一屏变没变」了。
@@ -332,10 +351,24 @@ function holdView() {
 //     一律不算「用户要看更早的」—— 这是对的：脚本摆一下不等于有人想看。
 //   ★ 时序竞争**证不了不存在**：快机器上连跑 10 次全绿说明不了慢机器上不出来。工装里有
 //     `--throttle=N`（CDP 把 CPU 拖慢）可以故意把这一格跑红，规矩是**改之前红、改之后绿**。
+//   ★★ `pointermove` **只在按着键的时候**才算（Atlas 2026-10-04 多跑的一格逮到的）：
+//     鼠标**停在图上晃、一个键都不按**，pointermove 照样一直在刷 —— 于是「1.5 秒内动过输入设备」
+//     成立，视口随便一点变化都被当成用户在拖。桌面上从链接点进来、鼠标正好落在图上，是最常见的情形
+//     ⇒ 没人拖，页面自己翻了一档：跟 40ms 时钟那个 bug 同一张脸，换条路又回来了（降速 4× 下 6/6 红）。
+//     `buttons` 是「此刻按着哪几个键」的位掩码：0 ＝ 没按 ⇒ 那是悬停，不是拖。
+//     touchmove / wheel / keydown 照旧：触摸没有「悬停」这回事，滚轮和方向键本身就是动作。
 const INPUT_MS = 1500;      // 最后一次真实输入之后这么久之内，视口变化算用户的（拖拽会一直刷 pointermove）
 let lastInputAt = 0;
-for (const ev of ['pointerdown', 'pointermove', 'wheel', 'touchstart', 'touchmove', 'keydown']) {
-  el('chart').addEventListener(ev, () => { lastInputAt = Date.now(); }, { passive: true, capture: true });
+for (const [ev, real] of [
+  ['pointerdown', () => true],
+  ['pointermove', (e) => e.buttons !== 0],   // ★ 悬停不算：没按键就是在看，不是在拖
+  ['wheel', () => true],
+  ['touchstart', () => true],
+  ['touchmove', () => true],
+  ['keydown', () => true],
+]) {
+  el('chart').addEventListener(ev, (e) => { if (real(e)) lastInputAt = Date.now(); },
+                               { passive: true, capture: true });
 }
 const userDrove = () => Date.now() - lastInputAt <= INPUT_MS;
 function setView(r) {

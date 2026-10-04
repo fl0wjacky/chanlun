@@ -14,6 +14,12 @@
 //   ⑦ ?load=4 打开就是 4 档、不印提示
 //   ⑧ 到封顶（span_max=4 而币安还有更早的）⇒ 印「已到本周期可加载的最早」，**不再发请求**
 //   ⑨ 地址栏写坏了（?load=32 / 64 / abc）⇒ 发出去之前先夹进白名单那五个值，首屏不许整张挂
+//   ⑩ 首屏就拿到 earliest ⇒ 只发一次请求，贴到左沿也不再多发
+//   ⑪ **反着的一格**（脚本把视口摆到贴左沿＝那次回声）⇒ 一个请求都不许发（就是上一轮那个 bug 本身）
+//   ⑫ 换数据那一刻的等值件都在（档位/条数/地址栏）
+//   ⑬ 换档那句话：**只在可视窗口里的结构真变了**才印，3 秒自收。三格各自单开一页：
+//      窗口外变⇒不印 ／ 窗口里笔段变⇒印 ／ **只有中枢变⇒也印**（Nova 2026-10-04 补的第三格）
+//   ⑭ **鼠标只在图上悬停、一个键都不按** ⇒ 一个请求都不许发（Atlas 2026-10-04 多跑逮到的那格）
 //
 // 假后台：拿仓里 zec_1h.json 的真 bars/结构当 1 档，往前补 n 段**编出来的**老 K 线（时间戳按样本
 // 自己的步长往前推，价格贴着数据头），结构整体**平移**到新的下标上。★ 这么造的意思是：两档之间
@@ -56,10 +62,36 @@ const FULL = JSON.parse(fs.readFileSync(path.join(WEB, 'fixtures/zec_1h.json'), 
 const STEP = FULL.bars[1].t - FULL.bars[0].t;
 const PER = 2016;                    // 一档 ≈ 现在线上那 210 天（1h 档折成根数，比例不变）
 
+// 换档那句话的**契约原文**（Nova 2026-10-04 定 (a)：中枢和买卖点也算 ⇒ 文案改成泛指）。
+// 工装里两处断言都引这一个常量 —— 抄两份的话，改文案时改一处漏一处，红的是「另一处」。
+const NOTICE_COPY = '已接上更早的K线，左侧的笔、线段、中枢和买卖点按新的起点重算';
+
 const T0 = Date.now();               // 日志带相对时刻：时序那一族光看「收到 span=2」看不出早晚
 let requests = [], inflight = 0, maxInflight = 0;
+// ★★ 每份响应**是按哪个模式供出去的**，逐份记下来（⑬ 三格要用它证明「场景是干净的」）。
+//   踩过的坑（m4 变异逮到的）：⑬ 第三格 `mk13` 建页时，上一格留下的 `winmode='in'` 还没清，
+//   于是这一页的**首屏那份**也被人动过 ⇒ 换档后拿「被动的首屏」比「只在中枢上动的第二份」，
+//   笔和线段自己就变了 —— 那句话是被**笔线段**点着的，跟中枢一格关系没有：
+//   「不记中枢」的变异因此照样绿（假绿），量到的是空转。所以：**首屏那份必须一个模式都没带**。
+let servedLog = [];
+let bumped = 0;                       // ⑬ 第三格：后台真动过几个窗口内的中枢框（0 ⇒ 这一格是空转）
 const PAGENAMES = new Map();          // 哪一页发的请求（多页同时开着，出问题时要能点名）
-let delay = 0, earliestFlag = false, badNext = false, spanMax = 8;
+const servedFirst = new Set();        // 哪个页名已经供过第一份了（场景对账只在第一份上做）
+// ★★★ 场景开关**只有这一份**（Atlas 2026-10-04）：原先它们是一堆平铺的 `let`，每格自己清自己那份，
+//   于是「上一格留下的开关漏到下一格」这种事，只会在被它污染的那一格的**结论**里显形
+//   （⑬ 第三格就是这么变成假绿的：上一格的 winmode 没清，这一页首屏那份数据也被动过）。
+//   ⇒ 改成：所有开关放进 SCEN，**每格开页之前调一次 `scen({...})`**（先回默认，再盖这一格要的），
+//     并且把「开页那一刻声明要的场景」记下来，跟后台**实际用的那份**逐字对 —— 对不上就红。
+//   新增开关请加进 DEFAULT_SCEN，别在外面另起 `let`：漏进去的那一个，这条自检也看不见。
+const DEFAULT_SCEN = { winmode: null, pageWin: null, earliestFlag: false, badNext: false, spanMax: 8, delay: 0 };
+const SCEN = Object.assign({}, DEFAULT_SCEN);
+const scenKeys = Object.keys(DEFAULT_SCEN).sort();
+const scenSnap = () => scenKeys.map((k) => k + '=' + JSON.stringify(SCEN[k] === null ? null : SCEN[k])).join(',');
+const declared = new Map();        // 页名 ⇒ 开页那一刻声明的场景（跟后台实际用的那份对）
+const scenBad = [];                // 对不上的（跑完统一报红）
+let lastOpenVer = 0;               // 上一次开页时的 scenVer（查「这一页之前声明过没有」）
+let scenVer = 0;              // 每调一次 scen() 加一：开页时对一下，就知这一页是不是「声明过场景」的
+const scen = (o) => { Object.assign(SCEN, DEFAULT_SCEN, o || {}); holdRelease = null; scenVer++; return scenSnap(); };
 // ★★ 「响应扣在后台、由工装决定什么时候放行」（2026-10-04 改）。
 //   原来靠 delay 跟拖拽赛跑：delay 是**时钟**，拖一下要多久是**机器快慢**决定的 ——
 //   降速 4 倍时，一次拖拽能比 900ms 还长，等拖完再去看提示，那一趟早就落地了（实测「加载更早数据…」
@@ -69,7 +101,7 @@ let delay = 0, earliestFlag = false, badNext = false, spanMax = 8;
 // ⑬ 换档那句话：假后台得把「整份重算」演出来。真实后台换档就是从头再算一遍，两边（窗口内/窗口外）都会动；
 //    这里偏偏分开动 —— 只有分开，「按可视窗口判」这句话才有东西能证伪：
 //    两边一起动的话，页面不管拿哪儿当判据都会出提示，'out' 那格就永远是绿的（量不到东西）。
-let winmode = null, pageWin = null;    // 'in'＝只动跟可视窗口重叠的结构 ／ 'out'＝只动窗口外的
+//   SCEN.winmode：'in'＝只动跟可视窗口重叠的结构 ／ 'out'＝只动窗口外的
 let holdRelease = null;
 const holdNext = () => { let open; holdRelease = new Promise((r) => { open = r; });
                          return () => { const h = holdRelease; holdRelease = null; if (h) open(); }; };
@@ -89,22 +121,38 @@ function payload(span) {
   const shift = (a) => (a || []).map((o) => Object.assign({}, o, { i0: o.i0 + extra, i1: o.i1 + extra }));
   const barsOf = (a) => (a || []).map((o) => Object.assign({}, o, { bar: o.bar + extra }));
   const d = Object.assign({}, FULL, {
-    bars, nbars: bars.length, span, span_max: spanMax, earliest: !!earliestFlag,
+    bars, nbars: bars.length, span, span_max: SCEN.spanMax, earliest: !!SCEN.earliestFlag,
     pens: shift(FULL.pens), segs: shift(FULL.segs) });
   if (FULL.signals) d.signals = { seg: barsOf(FULL.signals.seg), pen: barsOf(FULL.signals.pen) };
   // ⑬ 换档重算的替身：跟可视窗口**重叠**的（'in'）或**只在窗口外**的（'out'）结构动一下。
   //    判据跟页面 structKey 里那条一模一样（有时间重叠），不许各写各的 ——
   //    两边口径一旦错开，「窗口外变了」这个场景就摆不出来（会被页面按「窗口里也变了」判）。
-  if (pageWin && winmode) {
+  //   'in'     ＝ 跟窗口重叠的**笔和线段**动一下（'out' ＝ 只在窗口外的那些动）
+  //   'in-cen' ＝ **只有窗口里的中枢**动一下，笔/线段/买卖点一个不碰
+  //              （Nova 2026-10-04 要的那一格：屏幕上看得见的东西变了就该出声，
+  //               而换档后先变的往往正是中枢 —— BTC 4h 1↔2 就是只有线段中枢的 ZD 变了）
+  if (SCEN.pageWin && SCEN.winmode) {
     const ts = (i) => (d.bars[i] || {}).t;
-    const overlap = (o) => ts(o.i0) != null && ts(o.i1) != null && ts(o.i1) >= pageWin.t0 && ts(o.i0) <= pageWin.t1;
-    const pick = winmode === 'in' ? overlap : (o) => !overlap(o);
+    const overlap = (o) => ts(o.i0) != null && ts(o.i1) != null && ts(o.i1) >= SCEN.pageWin.t0 && ts(o.i0) <= SCEN.pageWin.t1;
     const tweak = (o) => Object.assign({}, o, { p0: o.p0 * 1.002, p1: o.p1 * 1.002 });
-    d.pens = (d.pens || []).map((o) => (pick(o) ? tweak(o) : o));
-    d.segs = (d.segs || []).map((o) => (pick(o) ? tweak(o) : o));
+    if (SCEN.winmode === 'in-cen') {
+      //   中枢的横跨区按 host 取（跟页面 structKey、layers.js 的 boxes() 同一个取法：
+      //   类中枢 host=笔、线段中枢 host=**已完成**线段）。只动 ZD 一个数：框的上下沿变了，别的一根不碰。
+      const done = (d.segs || []).filter((s) => !s.live);
+      const boxOv = (z, host) => { const a = host[z.PI0], b = host[z.PI1];
+                                   return !!a && !!b && ts(a.i0) != null && ts(b.i1) != null
+                                          && ts(b.i1) >= SCEN.pageWin.t0 && ts(a.i0) <= SCEN.pageWin.t1; };
+      const bump = (z) => { bumped++; return Object.assign({}, z, { ZD: z.ZD * 1.01 }); };
+      d.centers = (d.centers || []).map((z) => (boxOv(z, d.pens || []) ? bump(z) : z));
+      d.seg_centers = (d.seg_centers || []).map((z) => (boxOv(z, done) ? bump(z) : z));
+    } else {
+      const pick = SCEN.winmode === 'in' ? overlap : (o) => !overlap(o);
+      d.pens = (d.pens || []).map((o) => (pick(o) ? tweak(o) : o));
+      d.segs = (d.segs || []).map((o) => (pick(o) ? tweak(o) : o));
+    }
   }
   // ⑥ 故意回一份**对不上**的：结构下标还留在老位置上（真实世界里＝后台切了 bars 却没重算结构）
-  if (badNext) { badNext = false; d.pens = FULL.pens.map((o) => Object.assign({}, o, { i0: o.i0 + 90000, i1: o.i1 + 90000 })); }
+  if (SCEN.badNext) { SCEN.badNext = false; d.pens = FULL.pens.map((o) => Object.assign({}, o, { i0: o.i0 + 90000, i1: o.i1 + 90000 })); }
   return d;
 }
 
@@ -115,11 +163,20 @@ async function serve(ctx) {
     requests.push(span);
     let who = '?';
     try { who = PAGENAMES.get(route.request().frame().page()) || '?'; } catch (e) { who = '已关'; }
+    // 每一份响应**按哪个场景供的**、以及**是哪一页的第一份**（对账用）。
+    const snap = scenSnap(), first = !servedFirst.has(who);
+    servedLog.push({ who, span, winmode: SCEN.winmode, snap, first });
+    if (first) {
+      servedFirst.add(who);
+      const want = declared.get(who);
+      if (want == null) scenBad.push(`${who}：这一页开页前没声明场景（漏调 scen()）`);
+      else if (want !== snap) scenBad.push(`${who}：开页时声明的是 [${want}]，后台实际用的是 [${snap}]`);
+    }
     // 带上到达时刻和当时的 delay：时序那一族出了问题，光看「收到了 span=2」看不出它是几秒前发的
-    console.log('      · 后台收到 span=' + span + ' 来自第 ' + who + ' 号页（t=' + ((Date.now() - T0) / 1000).toFixed(2) + 's, delay=' + delay + '）');
+    console.log('      · 后台收到 span=' + span + ' 来自第 ' + who + ' 号页（t=' + ((Date.now() - T0) / 1000).toFixed(2) + 's, delay=' + SCEN.delay + '）');
     inflight++; maxInflight = Math.max(maxInflight, inflight);
     try {
-      if (delay) await new Promise((r) => setTimeout(r, delay));
+      if (SCEN.delay) await new Promise((r) => setTimeout(r, SCEN.delay));
       if (holdRelease) await holdRelease;                 // ★ 工装扣住的那一趟：等它说放行
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload(span)) });
     } finally { inflight--; }
@@ -158,11 +215,23 @@ const snap = (p) => p.evaluate(() => {
   //   （rate=4 就是 4 倍慢），比赛条件被放大。规矩还是那条：改之前红、改之后绿才算验过。
   //   CDP session 是**按页**的（新页要自己再开一次），所以这里包一个 openPage。
   const openPage = async (name) => {
+    // ★ 规矩：**每一页开之前都得有一次 scen()**（哪怕是 `scen()` 空调用＝全默认）。
+    //   漏了就是「拿上一格剩下的开关开这一页」—— ⑬ 第三格那个假绿就是这么来的。
+    //   所以这里不只对快照，还查「这一页之前到底有没有人声明过」：没有 ⇒ 当场记账，跑完报红。
+    if (scenVer === lastOpenVer) {
+      scenBad.push(`${name}：开这一页之前没有声明场景（漏调 scen()）—— 上一格留下的开关就是这么漏进来的`);
+    }
+    lastOpenVer = scenVer;
     const q = await ctx.newPage();
     PAGENAMES.set(q, name);
+    declared.set(name, scenSnap());      // 开页这一刻声明要的场景：后台第一份必须跟它逐字相同
     if (THROTTLE > 1) await (await ctx.newCDPSession(q)).send('Emulation.setCPUThrottlingRate', { rate: THROTTLE });
     return q;
   };
+  // ★ 首次响应故意慢一点：图刚建出来是 0 宽，那时候设视口会被随后的**布局重排**吃掉
+  //   （真后台本来也没这么快）—— 这是工装的事，不是页面的事。**在开页之前声明**，
+  //   这样「开页时声明的那份」跟后台实际用的那份才是同一份（⑮ 就是拿这两份对账的）。
+  scen({ delay: 400 });
   const p = await openPage('1');
   const ok = [], bad = [];
   const t = (name, cond, extra = '') => {
@@ -249,12 +318,10 @@ const snap = (p) => p.evaluate(() => {
   try {
     // ?at/&span 是既有的**视口**参数（跟数据档 ?load 不是一回事）：先把视口摆到左沿附近，
     // 再让**真鼠标**把最后那 20 根拖出来。
-    delay = 400;                       // ★ 首次响应故意慢一点：图刚建出来是 0 宽，那时候设视口会被随后的
-                                       //   布局重排吃掉（真后台本来也没这么快）—— 这是工装的事，不是页面的
     await p.goto(PAGE + '?symbol=ZECUSDT&tf=1h&at=40&span=180', { waitUntil: 'load' });
     await p.waitForFunction(() => window.__app && window.__app.state.data);
     await p.waitForTimeout(900);
-    delay = 0;
+    SCEN.delay = 0;
     const a = await snap(p);
     t('① 打开页面不自动要下一档（开在左沿也不许）', requests.length === 1 && requests[0] === 1,
       `请求 ${JSON.stringify(requests)}，视口 from=${a.from}`);
@@ -324,7 +391,7 @@ const snap = (p) => p.evaluate(() => {
     t('④ load=4 写进地址栏', /(^|[?&])load=4(&|$)/.test(after4.url), after4.url);
 
     // ⑤ 到最早：后台说 earliest，再拖一次
-    earliestFlag = true;
+    SCEN.earliestFlag = true;
     // 顺手把 #more 的每一次变化记下来：红了要能看出它到底说过什么、几点说的（挂在页面上，不影响页面）
     await p.evaluate(() => { window.__log5 = []; const m = document.getElementById('more');
       window.__t5 = performance.now();
@@ -353,20 +420,20 @@ const snap = (p) => p.evaluate(() => {
     //    ★ 量法：先自己把视口挪到左沿（挪完先记一笔），再等那一份回来 —— 回来之后视口必须**还停在我挪到的地方**。
     //    ★ 先把这个假后台的开关**摆回干净状态**：不摆回，⑤ 留下的 earliest 会被这一页正经地认下来
     //      （那正是 adopt() 的职责），页面连请求都不会发，量到的就不是「判掉了」而是「压根没试」。
-    earliestFlag = false; spanMax = 8;
+    scen();                                             // 开关回默认（含 earliest／span_max）
     const p3 = await openPage('3');
     await p3.goto(PAGE + '?symbol=ZECUSDT&tf=1h&load=4', { waitUntil: 'load' });
     await p3.waitForFunction(() => window.__app && window.__app.state.data);
     await p3.waitForTimeout(500);
     const beforeBad = await snap(p3);
-    delay = 1200; badNext = true;                       // 下一份（span=8 那份）故意回一份对不上的
+    SCEN.delay = 1200; SCEN.badNext = true;             // 下一份（span=8 那份）故意回一份对不上的
     await pushLeft(p3);                                 // 真拖一下：请求在飞的时候抓「换之前」那一张
     const w6 = await waitPill(p3, '加载更早数据…');      // 等它真在路上（等「出现过」，不等时钟）
     const inFlight = await snap(p3);
     await p3.waitForFunction(() => window.__app.paging && !window.__app.paging.loading,
                              null, { timeout: 20000 }).catch(() => {});  // 等那一份回来（而不是睡 1.2 秒）
     const afterBad = await snap(p3);
-    delay = 0;
+    SCEN.delay = 0;
     t('⑥ 那一下确实发过请求（不是压根没试）', w6.hit && requests.at(-1) === 8,
       `提示${w6.hit ? '出现过' : '一路没出现' + JSON.stringify(w6.seen.slice(0, 8))}，最后一次请求 span=${requests.at(-1)}`);
     t('⑥ 对不上的数据：一根都不换', afterBad.n === beforeBad.n, `${beforeBad.n} → ${afterBad.n}`);
@@ -380,6 +447,7 @@ const snap = (p) => p.evaluate(() => {
     await p3.close();
 
     // ⑦ ?load=4 打开直接是 4 档
+    scen();                                            // 这一页要的也是全默认
     const p2 = await openPage('2');
     const base = requests.length;
     await p2.goto(PAGE + '?symbol=ZECUSDT&tf=1h&load=4&tag=p2', { waitUntil: 'load' });
@@ -395,7 +463,7 @@ const snap = (p) => p.evaluate(() => {
     // ⑧ 封顶那一档（后台说 span_max=4，币安其实还有更早的）：到头了要说「已到本周期可加载的最早」，
     //    而且**不许**再发请求。★ 这一格是尺 ⑥ 量不到的那半边：尺子只判该印哪句话，这里看它真印出来没有。
     //    ★ 这一格正是首屏不认回显那个 bug 的现场：不认 span_max 就会再发一次 span=8（页面上白发一趟）。
-    spanMax = 4; earliestFlag = false;                  // 4 档就是这个周期的顶（而且后台没说「到头」）
+    scen({ spanMax: 4 });                               // 4 档就是这个周期的顶（而且后台没说「到头」）
     const p4 = await openPage('4');
     await p4.goto(PAGE + '?symbol=ZECUSDT&tf=1h&load=4&tag=p4', { waitUntil: 'load' });
     await p4.waitForFunction(() => window.__app && window.__app.state.data);
@@ -415,7 +483,8 @@ const snap = (p) => p.evaluate(() => {
     //    不夹的话 ?load=32/64 会被后台按契约回 400，首屏整张挂掉；?load=abc 会 NaN 出去。
     //    ★ 这一格是尺 ⑥ 的 ladderSpan 那几格在真页面上的回声：尺子量算式，这里量「地址栏进去到底发了什么」。
     for (const [raw, want] of [['32', 16], ['64', 16], ['abc', 1]]) {
-      const q = await openPage('9');
+      scen();                                          // 这一页要的也是全默认（顺带把「声明过」记上）
+      const q = await openPage('9-' + raw);            // ★ 页名唯一：三页都叫 '9' 的话记账会当成同一页
       const b9 = requests.length;
       await q.goto(PAGE + `?symbol=ZECUSDT&tf=1h&load=${raw}&tag=bad-${raw}`, { waitUntil: 'load' });
       await q.waitForFunction(() => window.__app && window.__app.state.data);
@@ -429,10 +498,10 @@ const snap = (p) => p.evaluate(() => {
       t(`⑨ ?load=${raw} 首屏画出来了（没整张挂）`, st.n > 1, `bars=${st.n}`);
       await q.close();
     }
-    spanMax = 8;
+    scen();
     // ⑩ 首屏就撞上「币安真没了」（AAPL 那种一档就到底的）：**一个多余请求都不许发**，
     //    打开就是一句话「已到最早」。Nova 的契约里点名的那条 —— 首屏不认回显就会白发一趟。
-    earliestFlag = true; spanMax = 16;
+    scen({ earliestFlag: true, spanMax: 16 });
     const p5 = await openPage('10');
     const baseA = requests.length;
     await p5.goto(PAGE + '?symbol=ZECUSDT&tf=1h&load=4&tag=aap', { waitUntil: 'load' });
@@ -453,8 +522,7 @@ const snap = (p) => p.evaluate(() => {
     t('⑩ 贴到最左沿：一个额外请求都没有', requests.slice(baseA).length === 1,
       `请求 ${JSON.stringify(requests.slice(baseA))}`);
     await p5.close();
-    earliestFlag = false;
-    spanMax = 8;
+    scen();
 
     // ⑪ ★★ **反着量的一格**（Atlas 2026-10-04 提的）：**脚本**把视口摆到贴左沿
     //    （from 取负数，就是现场那个 -50 → LWC 归一化回 -53.373 的回声），**一个请求都不许发**。
@@ -489,12 +557,20 @@ const snap = (p) => p.evaluate(() => {
     //      换过一次档之后，视口底下那一屏就全是编出来的 K 线了 —— 那一段**一根笔都没有**，
     //      「窗口里的结构变没变」在那儿恒等于「没变」。第一版就是这么绿的/红的（量到的是空转，不是页面）。
     //      每格都用「第一次换档」：那一屏还是真 K 线，窗口里确实有笔有线段。
-    winmode = null; pageWin = null; earliestFlag = false; spanMax = 16;
     const mk13 = async (name) => {
+      // ★ 建页之前先回默认场景（⑬ 三格各自的开关在下面单独盖）：
+      //   上一格留下的 winmode 会顺手改了这一页的**首屏**，那就不是「只有中枢动」的场景了。
+      scen();
       const q = await openPage(name);
       await q.goto(PAGE + '?symbol=ZECUSDT&tf=1h&at=40&span=180', { waitUntil: 'load' });
       await q.waitForFunction(() => window.__app && window.__app.state.data);
       await q.waitForTimeout(700);
+      // 场景干净自检：这一页**首屏**那份，后台实际用的场景 ＝ 开页时声明的那份（逐字相同）。
+      //   对不上 ⇒ 有开关从上一格漏过来了，这一格量到的就不是它想量的东西（⑬ 第三格踩过）。
+      const base = servedLog.find((e) => e.who === name && e.first);
+      t(`⑬ 场景干净（第 ${name} 页）：首屏那份是照开页时声明的场景供的`,
+        !!base && base.snap === declared.get(name),
+        `开页声明 [${declared.get(name)}]／后台实际 [${base && base.snap}]`);
       return q;
     };
     // 可视窗口 → 时间区间（跟页面 windowOf 一个口径；这是**场景**，不是判据）
@@ -504,20 +580,28 @@ const snap = (p) => p.evaluate(() => {
       const a = Math.max(0, Math.ceil(r.from)), z = Math.min(b.length - 1, Math.floor(r.to));
       return { t0: b[a].t, t1: b[z].t };
     });
-    // 窗口里到底有没有笔/线段：**没有的话这一格是空转**（判据恒等于「没变」，红绿都说明不了什么）
+    // 窗口里到底有没有东西：**没有的话这一格是空转**（判据恒等于「没变」，红绿都说明不了什么）。
+    //   ★ 五层逐层报数 —— 少报一层，跟那层有关的格就是「空转的绿」。
     const winStructs = (q, w) => q.evaluate((w) => {
       const d = window.__app.state.data, ts = (i) => (d.bars[i] || {}).t;
       const ov = (o) => ts(o.i0) != null && ts(o.i1) != null && ts(o.i1) >= w.t0 && ts(o.i0) <= w.t1;
-      return { pens: (d.pens || []).filter(ov).length, segs: (d.segs || []).filter(ov).length };
+      const host = (z, h) => { const a = h[z.PI0], b = h[z.PI1]; return !!a && !!b && ov({ i0: a.i0, i1: b.i1 }); };
+      const done = (d.segs || []).filter((s) => !s.live);
+      const at = (s) => ts(s.bar) != null && ts(s.bar) >= w.t0 && ts(s.bar) <= w.t1;
+      const sig = d.signals || { seg: [], pen: [] };
+      return { pens: (d.pens || []).filter(ov).length, segs: (d.segs || []).filter(ov).length,
+               centers: (d.centers || []).filter((z) => host(z, d.pens || [])).length,
+               segc: (d.seg_centers || []).filter((z) => host(z, done)).length,
+               sigs: sig.seg.filter(at).length + sig.pen.filter(at).length };
     }, w);
     const noticeOn = (q) => q.evaluate(() => ({ on: document.getElementById('notice').classList.contains('on'),
                                                 txt: document.getElementById('notice').textContent }));
 
     // —— 第一格：窗口**外**的结构变了、窗口里一根没动 ⇒ 一个字都不许印
     const qA = await mk13('13a');
-    pageWin = await readWin(qA);
-    const cntA = await winStructs(qA, pageWin);
-    winmode = 'out';
+    const wA = await readWin(qA);
+    scen({ pageWin: wA, winmode: 'out' });
+    const cntA = await winStructs(qA, wA);
     const nA0 = (await snap(qA)).n;
     const relA = holdNext();
     await pushLeft(qA);
@@ -538,9 +622,9 @@ const snap = (p) => p.evaluate(() => {
 
     // —— 第二格：同一段时间窗，让变化落在窗口**里** ⇒ 那句话必须出现，而且要停满 3 秒
     const qB = await mk13('13b');
-    pageWin = await readWin(qB);
-    const cntB = await winStructs(qB, pageWin);
-    winmode = 'in';
+    const wB = await readWin(qB);
+    scen({ pageWin: wB, winmode: 'in' });
+    const cntB = await winStructs(qB, wB);
     const nB0 = (await snap(qB)).n;
     const relB = holdNext();
     await pushLeft(qB);
@@ -552,17 +636,75 @@ const snap = (p) => p.evaluate(() => {
     t('⑬ 第二格不是空转：可视窗口里真有笔/线段', cntB.pens + cntB.segs > 0,
       `窗口里 笔 ${cntB.pens}／线段 ${cntB.segs}`);
     t('⑬ 可视窗口里结构变了 ⇒ 印那句话（一个字都不许改）',
-      B.hit && B.txt === '已接上更早的K线，左侧笔和线段按新的起点重算' && pillB.hit,
+      B.hit && B.txt === NOTICE_COPY && pillB.hit,
       `实际 ${JSON.stringify(B.txt)}，请求真发过=${pillB.hit}，采样 ${JSON.stringify(B.seen.slice(0, 5))}`);
     t('⑬ 那句话停 3 秒（说了 3 秒，不是 0.3 秒也不是 30 秒）',
       B.hit && B.offAt != null && Math.abs(B.offAt - B.onAt - 3000) < 400,
       `亮 ${B.onAt}ms → 收 ${B.offAt}ms ＝ ${B.offAt == null ? '没收' : B.offAt - B.onAt}ms`);
     await qB.close();
-    winmode = null; pageWin = null;
+
+    // —— 第三格（Nova 2026-10-04 补）：**只有中枢变**（笔/线段/买卖点一根不动）⇒ 也得印那句话。
+    //   这一格为什么必要：原来的 structKey 只记笔和线段，中枢变了屏幕上的框明明动了却不出声；
+    //   而换档后先变的往往正是中枢（BTC 4h 1↔2 只有线段中枢的 ZD 变了）。这也是最像真换档的一格。
+    const qC = await mk13('13c');
+    const wC = await readWin(qC);
+    scen({ pageWin: wC, winmode: 'in-cen' });
+    const cntC = await winStructs(qC, wC);
+    bumped = 0;
+    const nC0 = (await snap(qC)).n;
+    const relC = holdNext();
+    await pushLeft(qC);
+    const pillC = await waitPill(qC, '加载更早数据…', 8000);
+    const watchC = watchNotice(qC, 4500);
+    relC();
+    await qC.waitForFunction((n) => window.__app.state.data.bars.length > n, nC0, { timeout: 20000 }).catch(() => {});
+    const C = await watchC;
+    t('⑬ 第三格不是空转：可视窗口里真有中枢/买卖点', cntC.centers + cntC.segc + cntC.sigs > 0,
+      `窗口里 类中枢 ${cntC.centers}／线段中枢 ${cntC.segc}／买卖点 ${cntC.sigs}`);
+    t('⑬ 第三格场景不是空转：后台真动过窗口里的中枢框', bumped > 0, `动了 ${bumped} 个`);
+    t('⑬ 只有中枢变了 ⇒ 也印那句话（屏幕上看得见的东西变了就得说）',
+      C.hit && C.txt === NOTICE_COPY && pillC.hit,
+      `实际 ${JSON.stringify(C.txt)}，请求真发过=${pillC.hit}，采样 ${JSON.stringify(C.seen.slice(0, 5))}`);
+    await qC.close();
+    scen();
+
+    // ⑭ ★★ 光**悬停鼠标、一个键都不按** ⇒ 一个请求都不许发（Atlas 2026-10-04 多跑的那一格）。
+    //   机理：pointermove 不管按没按键都在刷 ⇒「1.5 秒内动过输入设备」成立，视口一点变化就被当成
+    //   「用户在拖」。桌面上从链接点进来、鼠标正好停在图上是最常见的情形 —— 没人拖，页面自己翻一档。
+    //   ★ 这一格**不按任何键**，只把鼠标在图上挪；改前（pointermove 不看 buttons）红，改后绿。
+    scen({ spanMax: 16 });
+    const p14 = await openPage('14');
+    const base14 = requests.length;
+    //   悬停**从加载中就开始**（Atlas 那格就是这么复现的：加载那一下的视口回声离 pointermove 最近，
+    //   等页面全落定了再开始晃，可能一个回声都赶不上 —— 那就成了「量不到」而不是「没问题」）。
+    await p14.goto(PAGE + '?symbol=ZECUSDT&tf=1h&at=40&span=180', { waitUntil: 'domcontentloaded' });
+    const box14 = await p14.evaluate(() => { const r = document.getElementById('chart').getBoundingClientRect();
+                                             return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+    await p14.mouse.move(box14.x, box14.y);
+    for (let k = 0; k < 10; k++) {
+      await p14.mouse.move(box14.x + (k % 2 ? 6 : -6), box14.y + (k % 3 ? 3 : -3));
+      await p14.waitForTimeout(120);
+    }
+    await p14.waitForFunction(() => window.__app && window.__app.state.data).catch(() => {});
+    await p14.waitForTimeout(2200);                     // 够回声 + 可能的下一档跑完（这一格量「什么都不该发生」）
+    const after14 = await snap(p14);
+    //   这一页**只准有首屏那一趟**（span=1）。基线抓在 goto 之前，所以首屏那趟也在 seen 里 ——
+    //   写清「首屏除外」比事后挪基线干净：挪基线的话，基线之后新冒出来的第一趟就分不清是首屏还是闯进来的。
+    const seen14 = requests.slice(base14);
+    t('⑭ 鼠标只在图上悬停（一个键都不按）⇒ 除了首屏那一趟，一个请求都不许发',
+      seen14.length === 1 && seen14[0] === 1,
+      `这一页发过 ${JSON.stringify(seen14)}（只许 [1]），视口 from=${after14.from}`);
+    await p14.close();
   } catch (e) {
     bad.push('工装半路炸了：' + String(e.message || e).split('\n')[0]);
   }
   await b.close();
+  // ★★ 场景对账的账在这里收（Atlas 2026-10-04 提的「别一处一处补」）：
+  //   每一页**第一份**响应，后台实际用的场景必须跟开页那一刻声明的那份逐字相同。
+  //   多一条开关从上一格漏过来（或者谁又起了个平铺的 `let` 忘了进 DEFAULT_SCEN），
+  //   这一条就红 —— 它是**跨格**的守卫，不是单格自检。
+  t('⑮ 每一页首屏那份数据，用的都是开页时声明的场景（开关没从上一格漏过来）',
+    scenBad.length === 0, scenBad.length ? scenBad.join('；') : `${declared.size} 页逐页对过`);
   // ★ 降速值必须印在结果里：同一份代码「绿」和「红」的差别就在这一行，不印出来，
   //   贴出来的结果说不清是哪一档跑出来的（报数带尺，尺也得带参数）。
   console.log('请求序列：', JSON.stringify(requests));

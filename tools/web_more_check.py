@@ -117,21 +117,38 @@ VET = [("结构都在 bars 里", {"bars": [{}] * 100, "pens": [{"i0": 0, "i1": 5
 
 # ---- ④ 换档那句话（NOTICE）什么时候出：拿**真样本**切一个可视窗口，只动结构，看 structKey 认不认 ----
 #   值＝「两次的 key 应该**相同**吗」。这一组量的是一条口径：**只认跟可视窗口有时间重叠的结构，
-#   而且按时间戳比、不按下标比**。坐标是样本里第 100～260 根那一屏（写死，不挑不试）。
+#   而且按时间戳比、不按下标比**；结构 ＝ **屏幕上看得见的那五层**（笔／线段／类中枢／线段中枢／买卖点）。
+#   坐标是样本里第 240～420 根那一屏：**写死的**，挑的规矩也只有一条 —— 五层在这一屏里各至少有一个成员
+#   （笔 15 / 线段 2 / 类中枢 3 / 线段中枢 1 / 买卖点 1）。不这么挑，「只有中枢变」那几格会落在空窗口上，
+#   绿得毫无意义（跟工装 ⑬ 第一版同一个坑）。各层在窗口里的个数由 inWin 报出来，是 0 就当场红。
 WANT_NOTICE = [
-    ("窗口里动一处（改窗口里第一笔的 p0）", False),
-    ("只有窗口外动一处（改窗口外第一笔的 p0）", True),
+    ("窗口里动一处笔（改窗口里第一笔的 p0）", False),
+    ("只有窗口外动一处笔（改窗口外第一笔的 p0）", True),
     ("往左补 500 根：下标全移、时间价格不动（＝真的换档）", True),
     ("贴着窗口左沿收尾的那一笔（边界含等号）", False),
     ("窗口落在数据右边之外（一根结构都没有）", True),
+    # ★ 这四格是 2026-10-04 Nova 拍 (a) 之后补的：原来只记笔和线段，中枢/买卖点变了不出声。
+    #   「只有线段中枢变」那格照着真实形状写的：BTC 4h 1↔2 就是只有线段中枢的 ZD 变了（笔和段没动）。
+    ("只有窗口里的类中枢变了（框里的上下沿）", False),
+    ("只有窗口里的线段中枢变了（BTC 4h 那处的形状）", False),
+    ("窗口里的买卖点换了价（三角还在原位）", False),
+    ("只有窗口外的中枢变了", True),
+    ("只有窗口外的买卖点变了", True),
 ]
-WANT_NOTICE_TEXT = "已接上更早的K线，左侧笔和线段按新的起点重算"
+WANT_NOTICE_TEXT = "已接上更早的K线，左侧的笔、线段、中枢和买卖点按新的起点重算"
 WANT_NOTICE_MS = 3000
-NOTICE_KEY = {"窗口里动一处（改窗口里第一笔的 p0）": "same_in",
-              "只有窗口外动一处（改窗口外第一笔的 p0）": "same_out",
+NOTICE_KEY = {"窗口里动一处笔（改窗口里第一笔的 p0）": "same_in",
+              "只有窗口外动一处笔（改窗口外第一笔的 p0）": "same_out",
               "往左补 500 根：下标全移、时间价格不动（＝真的换档）": "same_shift",
               "贴着窗口左沿收尾的那一笔（边界含等号）": "same_edge",
-              "窗口落在数据右边之外（一根结构都没有）": "same_far"}
+              "窗口落在数据右边之外（一根结构都没有）": "same_far",
+              "只有窗口里的类中枢变了（框里的上下沿）": "same_cen",
+              "只有窗口里的线段中枢变了（BTC 4h 那处的形状）": "same_segc",
+              "窗口里的买卖点换了价（三角还在原位）": "same_sig",
+              "只有窗口外的中枢变了": "same_cen_out",
+              "只有窗口外的买卖点变了": "same_sig_out"}
+# 「窗口里五层各至少几个成员」才不算空转 —— 少一层，跟那一层有关的用例就说明不了任何事
+NOTICE_MIN = {"pens": 1, "segs": 1, "centers": 1, "segc": 1, "sigs": 1}
 
 
 def block(path=JS, begin=BEGIN, end=END):
@@ -196,31 +213,64 @@ out.vet = P.vet.map((d) => {
   return { bad: bad === null ? null : String(bad), throws: throws };
 });
 // ④ 换档那句话：拿真样本切一屏，只动结构，看 structKey 认不认（判据本身在围栏里，量的是真身）
+//   ★ 每一格**只动一处、只动一层**：动得多看不出是哪一层在起作用（那正是「红得对 ≠ 红对了地方」）。
 {
   const fx = JSON.parse(fs.readFileSync(P.data.zec_1h, 'utf8'));
   const bars = fx.bars, pens = fx.pens, segs = fx.segs;
+  const centers = fx.centers || [], segc = fx.seg_centers || [];
+  const sigs = fx.signals || { seg: [], pen: [] };
+  const done = segs.filter((s) => !s.live);           // 线段中枢的 host（跟 layers.js doneSegs 同一条）
   const step = bars[1].t - bars[0].t;
-  const W = { t0: bars[100].t, t1: bars[260].t };                 // 写死的一屏，不挑不试
-  const d0 = { bars: bars, pens: pens, segs: segs };
-  const base = structKey(d0, W.t0, W.t1);
+  const A = 240, B = 420;                             // 写死的一屏：五层都有成员（见 Python 那边注释）
+  const W = { t0: bars[A].t, t1: bars[B].t };
+  const d0 = { bars: bars, pens: pens, segs: segs, centers: centers, seg_centers: segc, signals: sigs };
   const ov = (o) => bars[o.i0].t <= W.t1 && bars[o.i1].t >= W.t0;
+  const bOv = (z, host) => { const a = host[z.PI0], b = host[z.PI1];
+                             return !!a && !!b && bars[a.i0].t <= W.t1 && bars[b.i1].t >= W.t0; };
+  const sOv = (s) => bars[s.bar].t >= W.t0 && bars[s.bar].t <= W.t1;
+  const take = (o) => Object.assign({}, d0, o);
+  const S = (o, w) => structKey(o, (w || W).t0, (w || W).t1);
+  const base = S(d0);
   const iIn = pens.findIndex(ov), iOut = pens.findIndex((o) => !ov(o));
   const tweak = (a, i) => a.map((o, k) => (k === i ? Object.assign({}, o, { p0: o.p0 * 1.002 }) : o));
   const pre = []; for (let i = 500; i >= 1; i--) pre.push({ t: bars[0].t - i * step });
   const mk = (o) => Object.assign({}, o, { i0: o.i0 + 500, i1: o.i1 + 500 });
-  // 贴着窗口左沿**收尾**的那一笔：i0 在窗口外、i1 落在窗口里 —— 边界含等号它才在
+  //   买卖点的 bar 也是**下标**，补 500 根就得跟着 +500（少了这一步，这一格量的就成了
+  //   「下标没跟着挪」——那是另一件事，真换档不会那样）。中枢不用挪：它存的是 host 里的位置（PI0/PI1）。
+  const mkb = (s) => Object.assign({}, s, { bar: s.bar + 500 });
+  // 贴着窗口左沿**收尾**的那一笔：i0 在窗口外、i1 正好落在窗口左沿上 —— 边界含等号它才在。
+  //   ★ 量法是**只挪窗口左沿**（W3 = 压在那根上 ／ W4 = 往右 1ms 就不压了），不删结构：
+  //     删一笔会让中枢的 PI0/PI1 整体错位（host 是笔数组），那样量到的就不是「边界在不在」了。
   const edge = pens.filter((o) => bars[o.i1].t >= W.t0 && bars[o.i0].t < W.t0)[0];
-  const W3 = { t0: bars[edge.i1].t, t1: W.t1 };                   // 窗口左沿正好＝那一笔收尾的那根
+  const W3 = { t0: bars[edge.i1].t, t1: W.t1 };       // 窗口左沿正好＝那一笔收尾的那根
+  const W4 = { t0: bars[edge.i1].t + 1, t1: W.t1 };   // 往右挪 1ms ⇒ 那一笔就不在窗口里了
   const far0 = bars[bars.length - 1].t + step, far1 = far0 + 9 * step;
+  // 五层各挑一个「窗口里」和一个「窗口外」的成员：下面每格只动其中一个
+  const cIn = centers.findIndex((z) => bOv(z, pens)), cOut = centers.findIndex((z) => !bOv(z, pens));
+  const gIn = segc.findIndex((z) => bOv(z, done)),  gOut = segc.findIndex((z) => !bOv(z, done));
+  const sIn = sigs.pen.findIndex(sOv),              sOut = sigs.pen.findIndex((s) => !sOv(s));
+  const rep = (a, i, o) => a.map((x, k) => (k === i ? o : x));
+  const zd = (z) => Object.assign({}, z, { ZD: z.ZD * 1.01 });
+  const px = (s) => Object.assign({}, s, { price: s.price * 1.01 });
   out.notice = {
-    ovCount: pens.filter(ov).length + segs.filter(ov).length,
-    same_in: structKey({ bars: bars, pens: tweak(pens, iIn), segs: segs }, W.t0, W.t1) === base,
-    same_out: structKey({ bars: bars, pens: tweak(pens, iOut), segs: segs }, W.t0, W.t1) === base,
-    same_shift: structKey({ bars: pre.concat(bars), pens: pens.map(mk), segs: segs.map(mk) },
-                          W.t0, W.t1) === base,
-    same_edge: structKey({ bars: bars, pens: pens.filter((o) => o !== edge), segs: segs }, W3.t0, W3.t1)
-               === structKey(d0, W3.t0, W3.t1),
-    same_far: structKey(d0, far0, far1) === '#',
+    inWin: { pens: pens.filter(ov).length, segs: segs.filter(ov).length,
+             centers: centers.filter((z) => bOv(z, pens)).length,
+             segc: segc.filter((z) => bOv(z, done)).length,
+             sigs: sigs.pen.filter(sOv).length + sigs.seg.filter(sOv).length },
+    same_in: S(take({ pens: tweak(pens, iIn) })) === base,
+    same_out: S(take({ pens: tweak(pens, iOut) })) === base,
+    same_shift: S({ bars: pre.concat(bars), pens: pens.map(mk), segs: segs.map(mk),
+                    centers: centers, seg_centers: segc,
+                    signals: { seg: sigs.seg.map(mkb), pen: sigs.pen.map(mkb) } }) === base,
+    same_edge: S(d0, W3) === S(d0, W4),
+    same_far: S(d0, { t0: far0, t1: far1 })
+              === S({ bars: bars, pens: [], segs: [], centers: [], seg_centers: [],
+                      signals: { seg: [], pen: [] } }, { t0: far0, t1: far1 }),
+    same_cen: S(take({ centers: rep(centers, cIn, zd(centers[cIn])) })) === base,
+    same_cen_out: S(take({ centers: rep(centers, cOut, zd(centers[cOut])) })) === base,
+    same_segc: S(take({ seg_centers: rep(segc, gIn, zd(segc[gIn])) })) === base,
+    same_sig: S(take({ signals: { seg: sigs.seg, pen: rep(sigs.pen, sIn, px(sigs.pen[sIn])) } })) === base,
+    same_sig_out: S(take({ signals: { seg: sigs.seg, pen: rep(sigs.pen, sOut, px(sigs.pen[sOut])) } })) === base,
   };
   out.notice_text = NOTICE_TEXT;
   out.notice_ms = NOTICE_MS;
@@ -325,9 +375,12 @@ def failures(js=None, quiet=True):
                         "、".join("%s=%r" % (k, want[k]) for k in off),
                         "手上第几档/到头没有一律以后台回显为准"))
     # ④ 换档那句话：**只在可视窗口里的结构变了**的时候出
-    if got["notice"]["ovCount"] < 2:
-        bad.append(("④那句话", "这一屏里有多少结构", got["notice"]["ovCount"], "≥2",
-                    "窗口里没有结构 ⇒ 这一组全是空转，红绿都说明不了什么"))
+    #    ★ 先量这一屏有没有东西可比：**五层逐层报数**，缺哪层哪层的用例就是空转的绿。
+    iw = got["notice"]["inWin"]
+    for k, lo in NOTICE_MIN.items():
+        if iw.get(k, 0) < lo:
+            bad.append(("④那句话", "这一屏窗口里的「%s」有几个" % k, iw.get(k, 0), "≥%d" % lo,
+                        "那一层一个都没有 ⇒ 跟它有关的用例是空转，绿不算绿"))
     for name, want_same in WANT_NOTICE:
         g = got["notice"][NOTICE_KEY[name]]
         if g != want_same:
@@ -382,8 +435,10 @@ def report(quiet=False):
             g = got["notice"][NOTICE_KEY[name]]
             print("     %-46s ⇒ 两次的 key %s（要 %s）"
                   % (name, "相同" if g else "不同", "相同" if want_same else "不同"))
-        print("     窗口里 %d 个结构 · 文案 %r · 停 %d ms"
-              % (got["notice"]["ovCount"], got["notice_text"], got["notice_ms"]))
+        print("     窗口里 笔 %d · 线段 %d · 类中枢 %d · 线段中枢 %d · 买卖点 %d · 文案 %r · 停 %d ms"
+              % (got["notice"]["inWin"]["pens"], got["notice"]["inWin"]["segs"],
+                 got["notice"]["inWin"]["centers"], got["notice"]["inWin"]["segc"],
+                 got["notice"]["inWin"]["sigs"], got["notice_text"], got["notice_ms"]))
         print("\n  ③ 那两句话")
         for i, (s, _) in enumerate(WANT_TEXT):
             print("     %-28s ⇒ %r" % (json.dumps(s, ensure_ascii=False), got["texts"][i]))
@@ -395,7 +450,7 @@ def report(quiet=False):
     if not quiet:
         print(f"\n{GREEN}✓{OFF} 左沿那一刻的时间换档前后不变（{len(got['anchor'])} 个场景 / 真样本）、"
               f"档位与停法逐格对得上、两个「到头」没塌成一句、"
-              f"换档那句话只认可视窗口里的结构（{len(WANT_NOTICE)} 个场景 / 真样本）")
+              f"换档那句话只认可视窗口里的结构、五层都算数（{len(WANT_NOTICE)} 个场景 / 真样本）")
     return 0
 
 
@@ -448,11 +503,23 @@ PROBES = [
      "const row = (o) => `${ts(o.i0)}>${ts(o.i1)}@${o.p0},${o.p1}`;",
      "const row = (o) => `${o.i0}>${o.i1}@${o.p0},${o.p1}`;"),
     ("④那句话：窗口左沿的边界不含等号（贴着左沿收尾的那一笔漏掉）",
-     "ts(o.i1) >= t0 && ts(o.i0) <= t1", "ts(o.i1) > t0 && ts(o.i0) <= t1"),
+     "const ov = (a, b) => a != null && b != null && b >= t0 && a <= t1;",
+     "const ov = (a, b) => a != null && b != null && b > t0 && a <= t1;"),
     ("④那句话：文案被顺手改了一个字",
-     "const NOTICE_TEXT = '已接上更早的K线，左侧笔和线段按新的起点重算';",
-     "const NOTICE_TEXT = '已接上更早的K线，左边笔和线段按新的起点重算';"),
+     "const NOTICE_TEXT = '已接上更早的K线，左侧的笔、线段、中枢和买卖点按新的起点重算';",
+     "const NOTICE_TEXT = '已接上更早的K线，左边的笔、线段、中枢和买卖点按新的起点重算';"),
     ("④那句话：3 秒被改成 0.3 秒", "const NOTICE_MS = 3000;", "const NOTICE_MS = 300;"),
+    # ★★ 这四格是 2026-10-04 补的：**每一层都得真在判据里**，而且**都得按窗口筛**。
+    #   只留「笔/线段」两层的话，屏幕上明明变了的框和三角不出声（Nova 拍 (a) 之前就是这个洞）。
+    ("④那句话：不记类中枢（框里的上下沿变了也不出声）",
+     "boxes(d.centers, d.pens || []),", "'',"),
+    ("④那句话：不记线段中枢（BTC 4h 那种情形漏掉）",
+     "boxes(d.seg_centers, done),", "'',"),
+    ("④那句话：不记买卖点",
+     "sigs((d.signals || {}).seg), sigs((d.signals || {}).pen)]",
+     "'', '']"),
+    ("④那句话：中枢不看窗口（窗口外动一下也当成变了）",
+     ".filter((o) => o && ov(ts(o.i0), ts(o.i1)))", ".filter((o) => o)"),
     ("⑤体检：把越界当合格（照画不误）", "const n = (d.bars || []).length, over = (i) => !(i >= 0 && i < n);",
      "const n = (d.bars || []).length, over = (i) => false;"),
     ("⑤体检：负下标不算越界", "!(i >= 0 && i < n)", "!(i < n)"),
