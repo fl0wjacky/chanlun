@@ -245,7 +245,7 @@ def run_macd(quiet=False):
     """副图 /api/macd：每份数据上 ① t 跟 /api/chart 的 bars 逐根同一份；② dif / dea / hist ≡ 引擎
     macd_lines(那一份 K 线, 12, 26, 9)、hist = dif − dea，逐个浮点相等；③ hist_def / params / 头部回显对；
     ④ 成交量：给夹具每根注入 v，/api/chart 的 bars[].v 原样带回。"""
-    from core.signals import macd_lines
+    eng = sys.modules["core.signals"]                     # 模块对象（core/__init__ 把 signals 导成了函数）
     files = sorted(os.path.basename(p) for p in glob.glob(data("*.json")))
     cases = [(fn, dataset(fn)) for fn in files if dataset(fn)]
     bars_by_key = {}
@@ -258,14 +258,15 @@ def run_macd(quiet=False):
             ch = get(port, sym, tf)
             mc = get_path(port, "/api/macd?symbol=%s&tf=%s" % (sym, tf))
             bars = [dict(t=x["t"], o=x["o"], h=x["h"], l=x["l"], c=x["c"]) for x in ch["bars"]]
-            dif, dea = macd_lines(bars, 12, 26, 9)
+            dif, dea = eng.macd_lines(bars, 12, 26, 9)
+            hist_eng = eng.macd_hist(bars, 12, 26, 9)             # 背驰判断读的就是这一份柱子
             diffs = []
             if mc.get("t") != [x["t"] for x in ch["bars"]]:
                 diffs.append("t 跟 /api/chart 的 bars 不是同一份")
             if mc.get("dif") != dif or mc.get("dea") != dea:
                 diffs.append("dif/dea ≠ 引擎 macd_lines")
-            if mc.get("hist") != [x - y for x, y in zip(dif, dea)]:
-                diffs.append("hist ≠ dif − dea")
+            if mc.get("hist") != hist_eng:
+                diffs.append("hist ≠ 引擎 macd_hist（副图跟背驰判断不是同一份柱子）")
             if (mc.get("hist_def"), mc.get("params")) != ("dif-dea", [12, 26, 9]):
                 diffs.append("约定字段不对：%r %r" % (mc.get("hist_def"), mc.get("params")))
             if any(mc.get(k) != ch.get(k) for k in ("span", "span_max", "earliest", "fetched_at")):
@@ -358,6 +359,18 @@ def self_test():
         finally:
             server.macd_lines = real
     arms.append(("副图用的不是同一份 K 线", arm_macd_other_bars))
+
+    def arm_hist_not_engine():
+        """Atlas 10-04 的打法：引擎柱子改成 ×2（背驰用的那份变了），副图却自己减 DIF−DEA ⇒ 必须红。"""
+        eng = sys.modules["core.signals"]
+        real_mh, real_h = eng.macd_hist, server._hist
+        eng.macd_hist = lambda bars, *a: [2 * h for h in real_mh(bars, *a)]
+        server._hist = lambda bars: [x - y for x, y in zip(*eng.macd_lines(bars, *server.MACD_PARAMS))]
+        try:
+            return run_macd(quiet=True)
+        finally:
+            eng.macd_hist, server._hist = real_mh, real_h
+    arms.append(("副图自己减柱子、引擎柱子 ×2", arm_hist_not_engine))
 
     miss = 0
     for name, f in arms:

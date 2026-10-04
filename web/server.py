@@ -51,6 +51,8 @@ from fetch_klines import fetch as binance_fetch         # noqa: E402
 from make_web_fixture import iso, shape                 # noqa: E402
 from core.analyze import analyze                        # noqa: E402
 from core.signals import MEASURES, macd_lines, signals as engine_signals   # noqa: E402
+import core.signals as _engine_signals_mod              # noqa: E402,F401  （见下行：模块对象从 sys.modules 取）
+_ENGINE = sys.modules["core.signals"]                    # core/__init__ 把 signals 导成了函数，模块要从这里拿
 
 HOST = "127.0.0.1"                       # 默认回环；make_server 拒绝任何非回环地址
 
@@ -214,8 +216,16 @@ MACD_PARAMS = (12, 26, 9)                # 跟引擎背驰判断用的同一组�
 MACD_KEY = "__macd__"                    # mbodies / variants 里副图那一份的键（跟 measure 名字不会撞）
 
 
+def _hist(bars):
+    """副图的柱子＝**引擎背驰判断读的那一份**（signals.macd_hist），不在这里另减一遍 DIF−DEA：
+    另减的话，引擎哪天改了柱子的定义，副图跟背驰就不是同一份柱子了，却没有一处会红（Atlas 10-04 核出）。
+    走模块属性取函数（不是 import 时绑死的名字），引擎改了这里跟着变。"""
+    return _ENGINE.macd_hist(bars, *MACD_PARAMS)
+
+
 def _macd_body(slot, symbol, tf):
-    """副图那一份：同一格、同一份 K 线（slot.bars）上用引擎的 macd_lines 算，hist = DIF − DEA（不乘 2）。
+    """副图那一份：同一格、同一份 K 线（slot.bars）上用引擎的 macd_lines 算 DIF / DEA，柱子取引擎的
+    macd_hist（背驰判断读的就是它；现在的定义是 DIF − DEA、不乘 2）。
     跟 /api/chart 共用头部（fetched_at / stale / refreshing / span / earliest / span_max），带每根 K 线的 t
     让前端按时间对齐；懒算一次，数据刷新就作废（跟 measure 那几份同一个口袋）。"""
     b = slot.mbodies.get(MACD_KEY)
@@ -227,7 +237,7 @@ def _macd_body(slot, symbol, tf):
             span=head["span"], earliest=head["earliest"], span_max=head["span_max"],
             symbol=symbol, tf=tf, params=list(MACD_PARAMS), hist_def="dif-dea",
             t=[x["t"] for x in slot.bars], dif=_clean(dif), dea=_clean(dea),
-            hist=_clean([x - y for x, y in zip(dif, dea)])),
+            hist=_clean(_hist(slot.bars))),
             ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
     return b
 
