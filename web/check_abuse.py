@@ -354,6 +354,47 @@ def main():
          "earliest=%s · 之后多拉 %d 次（15m span=4 冷拉 1 次，不该再有）" % (flags_, extra))
     server.start_prefetch = lambda *a: None
 
+    # ⑭ 背驰看法 measure（Atlas 10-04 定的量法）：四种各回显对、结构逐字节相同、币安 0 次、
+    #    每种的买卖点 ≡ 引擎在吐出的那段 K 线上直接 signals(r, 层, measure)；不比四种彼此（结果可以碰巧一样）。
+    #    前提：引擎在这份夹具上至少有一种看法的买卖点跟 macd 不同 —— 否则探针「忽略 measure」红不出来，记未执行。
+    import sys as _sys
+    from core.analyze import analyze as _analyze
+    from config import tick_of as _tick_of
+    _S = _sys.modules["core.signals"]
+    calls["n"] = 0
+    bad_m = [m for m in ("abc", "MACD", "", "macd2", "1") if
+             req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=4h&span=2&measure=" + m)[0] != 400]
+    cell("⑭ measure 不认的 5 种写法全 400", not bad_m, "不是 400 的：%s" % bad_m)
+    # 夹具换成真 zec15（15m）：zec_4h 的假历史上四种看法买卖点全一样，分不开（实测）；zec15 类中枢层分得开
+    global BARS
+    saved_bars = BARS
+    BARS = json.load(open(os.path.join(ROOT, "data", "zec15.json"), encoding="utf-8"))
+    for (s_, t_, k_), sl_ in server.SLOTS.items():
+        if (s_, t_) == ("ZECUSDT", "15m"):
+            sl_.reset()
+    req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=15m")            # 先进缓存（这一下拉 1 次）
+    calls["n"] = 0
+    got = {}
+    for m in _S.MEASURES:
+        code_, body_ = req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=15m&measure=" + m)
+        got[m] = json.loads(body_) if code_ == 200 else {}
+    BARS = saved_bars
+    bars_ = [dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"]) for b in got["macd"].get("bars", [])]
+    r_ = _analyze(bars_, tick=_tick_of("zec_.json"))
+    eng = {m: {lv: json.loads(json.dumps(server._clean(_S.signals(r_, lv, m)))) for lv in ("seg", "pen")}
+           for m in _S.MEASURES}
+    separable = any(eng[m] != eng["macd"] for m in _S.MEASURES if m != "macd")
+    strip = lambda d: {k: v for k, v in d.items() if k not in ("signals", "measure", "fetched_at", "refreshing")}
+    echo_ok = all(got[m].get("measure") == m for m in _S.MEASURES)
+    same_struct = all(strip(got[m]) == strip(got["macd"]) for m in _S.MEASURES)
+    match_eng = {m: got[m].get("signals") == eng[m] for m in _S.MEASURES}
+    if not separable:
+        cell("⑭ 四种看法（未执行：夹具上四种看法的买卖点全一样，分不开 —— 不算绿）", False, "")
+    else:
+        cell("⑭ 四种看法：回显对、结构逐字节同、币安 0 次、各自买卖点 ≡ 引擎",
+             echo_ok and same_struct and calls["n"] == 0 and all(match_eng.values()),
+             "回显=%s 结构同=%s 拉=%d ≡引擎=%s" % (echo_ok, same_struct, calls["n"], match_eng))
+
     # 收尾：等每一格的后台刷新都落地再返回。不等的话，上一条变异臂留下的后台线程（⑨ 里睡 5 秒的那种）
     # 会在下一条臂的 ⓪ 里继续调假币安、把计数和峰值打脏 —— 自测里「错误回堆栈」那臂 ⓪ 莫名变红就是它。
     calls["delay"] = 0.0
@@ -428,6 +469,17 @@ def self_test():
         server._refresh = lambda slot, symbol, tf: (lambda b, body, e: (
             b, body.replace(b'"earliest":true', b'"earliest":false', 1), False))(*real(slot, symbol, tf))
 
+    def ignore_measure():
+        real = server.get_chart
+
+        def g(symbol, tf, span=1, prefetch=True, touch=True, measure="macd"):
+            out = real(symbol, tf, span, prefetch, touch, "macd")    # 全按 macd 算
+            if out is None:
+                return None
+            body = out[0].replace(b'"measure":"macd"', ('"measure":"%s"' % measure).encode(), 1)   # 只改回显
+            return body, gzip.compress(body, 6)
+        server.get_chart = g
+
     def serve_source():
         server.STATIC_EXT[".py"] = "text/plain; charset=utf-8"
 
@@ -435,7 +487,8 @@ def self_test():
     for name, f in [("拿掉单飞锁", no_lock), ("拿掉刷新节流", no_throttle), ("错误回堆栈", leaky),
                     ("静态放行 .py", serve_source), ("预热改成并发", parallel_prewarm),
                     ("刷新挂在请求上", sync_refresh), ("span 不设白名单", any_span), ("超封顶不钳", no_clamp), ("不预拉", no_prefetch),
-                    ("不拿上一档当底（整窗重拉）", no_seed), ("earliest 恒为假", never_earliest)]:
+                    ("不拿上一档当底（整窗重拉）", no_seed), ("earliest 恒为假", never_earliest),
+                    ("忽略 measure（全按 macd 算、只改回显）", ignore_measure)]:
         importlib.reload(server)
         f()
         buf = io.StringIO()

@@ -13,7 +13,8 @@
   · 前端只看得到固定措辞的错误，**不出本机路径、密钥、堆栈**（详细原因只进 stderr）。
 
 接口：
-  GET /api/chart?symbol=ZECUSDT&tf=15m[&span=1|2|4|8|16]   （缺省 1；不在这五个值里 400；超本周期封顶钳到封顶并回显）
+  GET /api/chart?symbol=ZECUSDT&tf=15m[&span=1|2|4|8|16][&measure=macd|slope|lines|peak]
+      （span 缺省 1；不在这五个值里 400；超本周期封顶钳到封顶并回显。measure 缺省 macd；不认的 400；回显 measure）
       → tools/make_web_fixture.shape() 的那一份（形状只在那里定义一处，前端离线样本也是它烤的），
         顶上再加 fetched_at（拉币安的时间，UTC …Z，与 updated 同一写法）/ stale（上一次拉取失败、回的是之前的结果）/
         refreshing（缓存已过期、后台正在拉，这次先回旧的）/ span（回显）/ earliest（币安没有更早的了）/
@@ -45,6 +46,8 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 from config import tick_of                              # noqa: E402
 from fetch_klines import fetch as binance_fetch         # noqa: E402
 from make_web_fixture import iso, shape                 # noqa: E402
+from core.analyze import analyze                        # noqa: E402
+from core.signals import MEASURES, signals as engine_signals   # noqa: E402
 
 HOST = "127.0.0.1"                       # 默认回环；make_server 拒绝任何非回环地址
 
@@ -119,6 +122,7 @@ class Slot:
         self.earliest = False            # 币安没有比这一份更早的数据了 ⇒ 响应里 earliest
         self.prefetching = False         # 后台正在预拉这一格（上一档送出之后触发）—— 预拉的单飞旗
         self.used_at = 0.0               # 上次被请求的时间（闲置清理用）
+        self.mbodies = {}                # measure → 换了买卖点的那一份 JSON（默认 macd 就是 body 本身；数据一刷新就清）
 
 
 SLOTS = {(s, t, k): Slot(k) for s in SYMBOLS for t in TFS for k in spans_of(t)}
@@ -162,7 +166,7 @@ def _refresh(slot, symbol, tf):
     bars = [merged[t] for t in sorted(merged) if t >= lo]
     # fetched_at / stale / refreshing 放最前：两个旗只在响应时替换这一处，不重算结构
     body = json.dumps(dict(fetched_at=iso(now_ms), stale=False, refreshing=False,
-                           span=slot.span, earliest=earliest, span_max=SPAN_MAX[tf],
+                           span=slot.span, earliest=earliest, span_max=SPAN_MAX[tf], measure="macd",
                            **build_payload(bars, symbol, tf)),
                       ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
     return bars, body, earliest
@@ -185,6 +189,7 @@ def _refresh_into(slot, symbol, tf):
         # 不补这一下，下一个请求进来先跑闲置清理 ⇒ 刚预拉好的当场被清掉、又同步拉一遍（check_abuse ⑫ 抓到的）
         slot.used_at = max(slot.used_at, time.time())
         slot.variants = {}
+        slot.mbodies = {}
 
 
 def _bg_refresh(slot, symbol, tf):
@@ -202,12 +207,29 @@ def start_refresh(slot, symbol, tf):
     threading.Thread(target=_bg_refresh, args=(slot, symbol, tf), daemon=True).start()
 
 
-def _variant(slot):
+def _measure_body(slot, symbol, tf, measure):
+    """在 slot.lock 里调用 → 这一格在某种背驰看法下的 JSON。买卖点之外的一切跟默认那份是同一份：
+    K 线、笔、段、中枢跟看法无关，只有 signals 两层重算（懒算、按 measure 各存一份，数据刷新就作废）。
+    切看法不碰币安。"""
+    if measure == "macd":
+        return slot.body
+    b = slot.mbodies.get(measure)
+    if b is None:
+        d = json.loads(slot.body)
+        r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"))
+        d["signals"] = _clean({"seg": engine_signals(r, "seg", measure), "pen": engine_signals(r, "pen", measure)})
+        d["measure"] = measure
+        b = slot.mbodies[measure] = json.dumps(d, ensure_ascii=False, separators=(",", ":"),
+                                               allow_nan=False).encode("utf-8")
+    return b
+
+
+def _variant(slot, symbol=None, tf=None, measure="macd"):
     """在 slot.lock 里调用 → (json, gzip)，头上两个旗按当下状态如实标。"""
-    key = (slot.failed, slot.refreshing)
+    key = (slot.failed, slot.refreshing, measure)
     v = slot.variants.get(key)
     if v is None:
-        body = slot.body
+        body = _measure_body(slot, symbol, tf, measure)
         if slot.failed:
             body = body.replace(b'"stale":false', b'"stale":true', 1)
         if slot.refreshing:
@@ -254,7 +276,7 @@ def start_prefetch(symbol, tf, span):
     threading.Thread(target=_prefetch, args=(symbol, tf, nxt), daemon=True).start()
 
 
-def get_chart(symbol, tf, span=1, prefetch=True, touch=True):
+def get_chart(symbol, tf, span=1, prefetch=True, touch=True, measure="macd"):
     """→ (json bytes, gzip bytes) 或 None（一次都没拉成功过）。
 
     · 冷（还没有缓存）：同步拉，持锁 ⇒ 并发进来的都等这一次，不回空；
@@ -280,7 +302,7 @@ def get_chart(symbol, tf, span=1, prefetch=True, touch=True):
             slot.refreshing = True
             slot.variants = {}
             start_refresh(slot, symbol, tf)
-        out = _variant(slot)
+        out = _variant(slot, symbol, tf, measure)
     if prefetch:
         start_prefetch(symbol, tf, span)
     return out
@@ -400,7 +422,7 @@ class Handler(BaseHTTPRequestHandler):
                 q = urllib.parse.parse_qs(u.query, keep_blank_values=True, strict_parsing=True, max_num_fields=4)
             except ValueError:
                 return self._err(400)
-            if not {"symbol", "tf"} <= set(q) <= {"symbol", "tf", "span"} or any(len(v) != 1 for v in q.values()):
+            if not {"symbol", "tf"} <= set(q) <= {"symbol", "tf", "span", "measure"} or any(len(v) != 1 for v in q.values()):
                 return self._err(400)                     # 多参数、少参数、重复参数一律不认
             symbol, tf = q["symbol"][0].upper(), q["tf"][0]
             if symbol not in SYMBOLS or tf not in TFS:
@@ -409,15 +431,19 @@ class Handler(BaseHTTPRequestHandler):
             if raw not in {str(v) for v in SPAN_VALUES}:
                 return self._err(400)                     # 只认 "1" "2" "4" "8" "16" 这五个写法（"02"、"2.0" 都不认）
             span = min(int(raw), SPAN_MAX[tf])            # 超封顶：钳到封顶，响应里如实回显 span / span_max
-            got = get_chart(symbol, tf, span)
+            measure = q.get("measure", ["macd"])[0]
+            if measure not in MEASURES:
+                return self._err(400)                     # 背驰看法只认四个名字（macd / slope / lines / peak）
+            got = get_chart(symbol, tf, span, measure=measure)
             if got is None:
                 return self._err(503)
             return self._send(200, got[0], gz=got[1])
         if u.path == "/api/meta":
             if u.query:
                 return self._err(400)
-            return self._send(200, json.dumps(dict(symbols=list(SYMBOLS), tfs=list(TFS),
-                                                   days=DAYS, refresh_s=REFRESH_S, span_max=SPAN_MAX)).encode())
+            return self._send(200, json.dumps(dict(symbols=list(SYMBOLS), tfs=list(TFS), days=DAYS,
+                                                   refresh_s=REFRESH_S, span_max=SPAN_MAX,
+                                                   measures=list(MEASURES))).encode())
         return self._static(u.path, u.query)
 
     def _static(self, path, query=""):
