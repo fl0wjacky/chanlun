@@ -94,6 +94,17 @@ npm i playwright && npx playwright install chromium            # 各机器一次
 NODE_PATH=<装 playwright 的那个 node_modules> node tools/web_more_e2e.js [输出目录] [页面地址]
 ```
 
+接口那半张（**要后台的 span 上了才跑得起来**）：`tools/web_span_overlap.py` 量的是「相邻两档在**重叠区间**里
+结构变没变」—— 位置不跳是前端的事，**结构**跳不跳只有真接口量得出（假 payload 是自己编的，编的当然自洽）。
+判据是**老那份的后半段必须逐条一模一样**（往前补数据本来只会动贴着数据头的那一截），
+顺带报「右边未动多少根」给自己一个尺度；同一根 K 线的开高低收被改写也算红。
+
+```bash
+python3 tools/web_span_overlap.py --selftest                 # 7 格（含一条反向：最左边那截该变就得让它变）
+python3 tools/web_span_overlap.py --url <站根> --symbol BTCUSDT --tf 1h --span 1 --span2 2
+python3 tools/web_span_overlap.py --pair old.json new.json   # 别人贴过来的一对响应也能对
+```
+
 尺 ② 是 2026-10-03 联调补的：图脚那段买卖点文字原来是**逐个信号列出来**的，长度跟着**信号数**涨 ——
 仓里的样本只有 4~17 个信号（最长 50 字符），看着就是一句归纳，配色尺和并排图全是绿的；换成后台的
 实时源（ZECUSDT 15m，20160 根）一次 66 个信号 ⇒「类中枢层」那一层列表 197 字符 ≈ 1598px
