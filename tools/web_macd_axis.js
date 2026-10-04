@@ -30,13 +30,24 @@
 //     柱子太小量出来是噪声），量完把**原来的可见区间放回去**（后面 ⑤ 的 before/after 与那张截图都不受影响），
 //     并且**跳过页头那块浮层（#subhead）盖住的柱尖**（它压在副图上沿，柱子最尖那几个像素是被它画掉的）。
 //     判据一个字没动，动的只是「在哪一屏、量哪一根」。
+//  ⑨ **页头不许盖数据**（Atlas 15m 截图上那条 · Nova 派的那件）：副图左上角那块头框（#subhead）是**浮层**，
+//     它下沿以上不许有任何数据点。量法：把可见窗口里 hist/dif/dea **各自最极端**的那个点的 y 量出来
+//     （priceToCoordinate），三个都要 ≥ 页头下沿；余量还要 ≤ 12px（让过头＝白挤数据，另一半的牙）。
+//     ★ 为什么不是「有没有柱尖被盖住」：多数窗口里 DIF 比柱子大 ⇒ 柱子根本够不到顶，照那个量**首屏永远是 0**
+//       —— 这正是它藏到现在的原因（首屏 2041 根里最高的柱子离页头还有 70px，可 DIF 的极值就在 y=13.4）。
+//       按「这一条里有没有数据」量，跟缩放到哪一屏无关：轴的上沿就是这一屏最极端的那个点。
+//     ★ 像素复核**有前提**（跟 ⑧ 同一条）：柱距 ≥ 2px 才量。首屏 0.5px/柱时一列挤两根，量到的是邻居
+//       （实测 ZEC 15m 首屏：映射 y 62.4 vs 画布 84 ⇒ 差 21.6px，是量具的错）；那时这半边认「没量」，
+//       明写在那一行里。判据的主半（映射出来的 y）不受影响 —— 变异跑证明了它有牙（见下）。
+//     ★ 两半的牙各有一个变异（都跑过，都是 19/22、只红 ⑨ 那三格，干净地红）：
+//       摘掉修法（`--mut=noreserve`）⇒ 余量 **-12.6px**；把留白让过头（`--mut=fat`，top 写死 0.35）⇒ **+32.8px**。
 //   ★ ⑧ 的**诚实记录**（都是量具自己的账，不是页面的）：
 //     1. 页头那条闸**第一版是死的**：对象里写 `bot:`、判据里念 `band.bottom` ⇒ 那个键不存在 ⇒
 //        `108 <= undefined + 2` 恒 false ⇒「盖住」永远是 0。手工把带子撑大（x 拉到全宽、y 拉高 120px）
 //        才当场逮到 —— 跟 readout 那次 ⑯ 的死条件同一个形状：**量不出来的闸，看着绿其实是没跑**。
-//     2. 修好之后，这三次跑（4h/1h/15m）「盖住」仍然是 0：真页头那块只占 y 6～27、x 10～338（贴左上角），
-//        而三根候选柱子的柱尖落在 y 53～156、x 460 往上 —— 够不到它。**这条闸是防着的，不是量出来的**
-//        （柱子够不到最上面那 10%：副图那格的轴是 DIF/DEA/hist 一起撑的，DIF 通常比柱子大）。
+//     2. 修好之后，这三次跑（4h/1h/15m）「盖住」仍然是 0（⑨ 修完之后更是恒 0：那一条数据根本不让进）。
+//        修之前它一直是 0 是因为**柱子够不到最上面那 10%**（副图那格的轴是 DIF/DEA/hist 一起撑的，
+//        DIF 通常比柱子大）—— 所以这条「跳过」是防着的，判决交给 ⑨（⑨ 量的正是那一条带子本身）。
 //     3. 轴被钉死在全量范围上时（--mut=freeze），柱子会缩到 3～5px ⇒ 三根凑不齐 / 比例拉不开 ⇒
 //        ⑧ 报**量不出来**（名字里就写着「不是画错了」），不是形状的判决：那种情况下形状其实还是对的，
 //        该红的是 ⑤/④。这一支只在变异跑里出现，干净树上不会。
@@ -51,7 +62,8 @@
 //   1) python3 web/server.py --port 8799 --no-prewarm      （只绑回环）
 //   2) NODE_PATH=<playwright 的 node_modules> node tools/web_macd_axis.js [页面地址] [--mut=nofix|freeze]
 //   不给 --mut ⇒ 只跑原样。--mut=nofix 摘掉那行修（＝复现外测那张图）；
-//   --mut=freeze 换成「轴钉死在全量范围上」（＝Bram 猜的那条，用来证明 ⑤ 有牙）。
+//   --mut=freeze 换成「轴钉死在全量范围上」（＝Bram 猜的那条，用来证明 ⑤ 有牙）；
+//   --mut=noreserve / --mut=fat 是 ⑨ 那两半的牙（摘掉让白 / 让过头）。
 //
 // ★ ⑦ **没有自己的变异**（不是忘了写）：试过「修法只在第一次建格时生效」，它照样绿 —— 关掉再打开时
 //   LWC **复用** pane 1 那根 right 轴，mode 留在 Normal 上（拆了重建丢不掉）。所以 ⑦ 是**记录性**的一格：
@@ -84,6 +96,14 @@ const SITES = {
     rep: '' },
   // 轴钉死：第一次画完之后关掉 autoScale ⇒ 轴停在「全量范围」上，缩放它不跟
   //   （＝Bram 说的那半句「轴拿了全量范围、没按可见窗口算」）。锚在 paintSubData 的尾巴上。
+  // ⑨ 的牙：把「给页头让出那一条」那一句摘掉 ⇒ 页头又压回柱尖上（＝ Atlas 15m 截图上那个样子）
+  noreserve: { name: '摘掉「给页头让出比例尺上边留白」那一句（reserveSubhead 不叫了）',
+    re: /\n  reserveSubhead\(\);[^\n]*/,
+    rep: '' },
+  // ⑨ 的另一半（余量 ≤12px）的牙：让过头 —— 页头那一条留得太多就是白挤数据，看着也不对
+  fat: { name: '比例尺上边留白让过头（top 写死 0.35）',
+    re: /const top = Math\.min\(0\.4, need \/ h\);[^\n]*/,
+    rep: 'const top = 0.35;' },
   freeze: { name: '轴钉死在全量范围上（autoScale:false，画完之后）',
     re: /\n  renderSubHead\(\);\n  placeSubhead\(\);\n\}/,
     rep: '\n  renderSubHead();\n  placeSubhead();\n  sub.series.dif.priceScale().applyOptions({ autoScale: false });      // ← 变异：轴钉死\n}' },
@@ -297,8 +317,105 @@ async function readPixels(page) {
            挑的窗口: [plan.windows[用的哪一屏].from, plan.windows[用的哪一屏].to], 还回去了: back } };
 }
 
+// ⑨ 页头那块浮层**压在**副图上沿（它不是排在窗格上面，是盖上去的）—— 它下沿以上不许有数据。
+// Atlas 15m 截图上那条：最高那根柱子的柱尖被它画掉了。见 app.js 的 reserveSubhead()。
+// ★ 量的是**三个系列各自的最极端点**的 y（hist/dif/dea 都是那一格的轴在撑），不是「有没有柱子被盖住」：
+//   柱尖够不够得到页头要看「这一屏里柱子是不是最极端的那个」，多数窗口里 DIF 比柱子大 ⇒ 柱子根本到不了顶，
+//   照「柱子被盖住没有」量，首屏永远是 0 —— 那正是这个病藏了这么久的原因（Atlas 是缩放/换档之后才看见的）。
+//   「页头那一条里有没有数据」这条判据跟窗口无关：轴的上沿就是这一屏最极端的那个点，它在哪一屏都贴着轴顶画。
+//   外加像素复核：最极端那根**柱子**那一列，画布上第一个柱色像素要跟映射出来的 y 对上（±2px）
+//   —— 证明「映射说它在下面」和「画出来确实在下面」是同一件事（⑧ 那格是同一个道理）。
+async function readHeadBand(page) {
+  return page.evaluate(() => {
+    const A = window.__app, S = A.sub.series, paneEl = A.chart.panes()[1].getHTMLElement();
+    const ts = A.chart.timeScale();
+    const pr = paneEl.getBoundingClientRect();
+    const sh = document.getElementById('subhead');
+    const on = !!(sh && sh.classList.contains('on'));
+    const sr = on ? sh.getBoundingClientRect() : null;
+    const head = sr ? { top: Math.round((sr.top - pr.top) * 10) / 10, bot: Math.round((sr.bottom - pr.top) * 10) / 10,
+                        left: Math.round((sr.left - pr.left) * 10) / 10, right: Math.round((sr.right - pr.left) * 10) / 10,
+                        h: Math.round(sr.height * 10) / 10 } : null;
+    const vis = ts.getVisibleLogicalRange();
+    const r2 = (v) => Math.round(v * 100) / 100;
+    // 每个系列在**可见窗口**里最极端的那个点：正负都算，取 y 最小（最靠上）的那个
+    const peaks = {};
+    for (const [k, s] of Object.entries({ hist: S.hist, dif: S.dif, dea: S.dea })) {
+      const d = s.data();
+      let best = null;
+      for (let i = Math.max(0, Math.ceil(vis.from)); i <= Math.min(d.length - 1, Math.floor(vis.to)); i++) {
+        const q = d[i]; if (!q || q.value == null) continue;
+        const y = s.priceToCoordinate(q.value);
+        if (!isFinite(y)) continue;
+        if (!best || y < best.y) best = { i, v: r2(q.value), y: Math.round(y * 10) / 10 };
+      }
+      peaks[k] = best;
+    }
+    const minY = Math.min(...Object.values(peaks).filter(Boolean).map((q) => q.y));
+    // 最极端的那根柱子（柱尖最靠上的）：像素复核它那一列
+    const hd = S.hist.data();
+    let tb = null;
+    for (let i = Math.max(0, Math.ceil(vis.from)); i <= Math.min(hd.length - 1, Math.floor(vis.to)); i++) {
+      const q = hd[i]; if (!q || q.value == null) continue;
+      const y = S.hist.priceToCoordinate(q.value);
+      if (isFinite(y) && (!tb || y < tb.y)) tb = { i, t: q.time, v: r2(q.value), color: q.color, y: Math.round(y * 10) / 10 };
+    }
+    // ★ 像素复核跟 ⑧ 同一条前提：**柱距 ≥ 2px** 才谈得上「这一列量到的是它自己」。
+    //   首屏 1280px 铺 2000 根（0.5px/柱）时，一列里挤着两根 —— 量出来的是邻居（实测 ZEC 15m 首屏：
+    //   映射 y 62.4、画布上第一个柱色像素 84 ⇒ 差 21.6px，**是量具的错，不是页面的错**）。
+    //   那种时候这半边认「没量」，明写在那一行里；判据的**主半**（映射出来的极值 y）不受影响。
+    const 柱距 = Math.abs(ts.timeToCoordinate(hd[Math.min(1, hd.length - 1)].time) - ts.timeToCoordinate(hd[0].time));
+    let painted = null;
+    if (tb && 柱距 >= 1.9) {
+      const x = ts.timeToCoordinate(tb.t);
+      const hex = (c) => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
+      const bgPal = [16, 18, 24];
+      const onSeg = (px, q, bg) => {
+        let best = Infinity;
+        for (let a = 1; a >= 0.30; a -= 0.05) {
+          const dd = Math.abs(px[0] - (a * q[0] + (1 - a) * bg[0])) + Math.abs(px[1] - (a * q[1] + (1 - a) * bg[1]))
+                   + Math.abs(px[2] - (a * q[2] + (1 - a) * bg[2]));
+          if (dd < best) best = dd;
+        }
+        return best <= 36;
+      };
+      const rgb = hex(tb.color || '#26a69a');
+      for (const cv of [...paneEl.querySelectorAll('canvas')]) {
+        const cr = cv.getBoundingClientRect();
+        if (!cv.width || !cr.width || !isFinite(x)) continue;
+        const sc = cv.width / cr.width;
+        const cx = Math.round((x + (cr.left - pr.left)) * sc);
+        if (cx < 0 || cx >= cv.width) continue;
+        const col = cv.getContext('2d').getImageData(cx, 0, 1, cv.height).data;
+        const ys = [];
+        for (let y = 0; y < cv.height; y++) {
+          if (onSeg([col[y * 4], col[y * 4 + 1], col[y * 4 + 2]], rgb, bgPal)) ys.push(y / sc);
+        }
+        if (ys.length && (!painted || ys.length > painted.n)) painted = { n: ys.length, top: Math.round(Math.min(...ys) * 10) / 10 };
+      }
+    }
+    return { on, head, 窗格高: Math.round(pr.height), peaks, minY: Math.round(minY * 10) / 10,
+             余量: head ? Math.round((minY - head.bot) * 10) / 10 : null,
+             柱尖: tb, 画出来: painted, 柱距: Math.round(柱距 * 100) / 100,
+             像素差: painted && tb ? Math.round(Math.abs(painted.top - tb.y) * 10) / 10 : null,
+             可见根数: Math.max(0, Math.min(hd.length - 1, Math.floor(vis.to)) - Math.max(0, Math.ceil(vis.from)) + 1) };
+  });
+}
+
 async function judge(page, tag) {
   const a = await readAxis(page);
+  // ⑨ 页头那条带子：压在上面就不许盖住数据（每一趟都量 —— 它跟缩放到哪一屏无关）。
+  const hb = await readHeadBand(page);
+  ok(`${tag}⑨ 页头不盖数据`, 'hist/dif/dea 最极端的点都在页头下沿以下，且让出来的正是那一条（余量 0～12px）',
+     hb.on && hb.head && hb.minY >= hb.head.bot && hb.余量 <= 12 && (hb.像素差 == null || hb.像素差 <= 2),
+     `页头 y=${hb.head ? JSON.stringify([hb.head.top, hb.head.bot]) : '没开'}（高 ${hb.head && hb.head.h}，格高 ${hb.窗格高}）`
+     + `；三个系列的极值 y ${JSON.stringify(Object.fromEntries(Object.entries(hb.peaks).map(([k, q]) => [k, q && q.y]))) }`
+     + `（hist 最极端那根：值 ${hb.柱尖 && hb.柱尖.v} → y ${hb.柱尖 && hb.柱尖.y}）`
+     + `｜像素复核：${hb.像素差 == null
+        ? `★ 没量（柱距 ${hb.柱距}px < 2 ⇒ 一列里挤着不止一根，量到的是邻居 —— 跟 ⑧ 同一条前提）；判据的主半还是量出来的`
+        : `画布上第一个柱色像素 y ${hb.画出来.top}，跟映射差 ${hb.像素差}px`}`
+     + `｜最小 y ${hb.minY} vs 页头下沿 ${hb.head && hb.head.bot} ⇒ 余量 ${hb.余量}px（负＝盖住了；>12＝让过头，白挤数据）`
+     + `｜窗口里 ${hb.可见根数} 根`);
   const span = a.轴跨, wspan = a.窗口.跨;
   ok(`${tag}① 线性`, '轴是线性的（三点共线，残差 ≤1px）', a.线性残差 <= 1,
      `残差 ${r2(a.线性残差)}px；映射 ${JSON.stringify(a.映射)}`);

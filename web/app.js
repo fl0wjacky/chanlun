@@ -744,6 +744,7 @@ function buildSub() {
   //   轴上的刻度就成了 0.00 / -20000.00 这种跟数据无关的数，柱子也按错的比例尺画（Nova 外测那两张截图）。
   //   这一格的量法是线性：`Normal` 之后轴自己按**可见窗口**收，±3586 罩住 dif 的 -2497～3477（工装 web_macd_axis.js）。
   ps[1].priceScale('right').applyOptions({ mode: LWC.PriceScaleMode.Normal });
+  subTopMargin = null;        // ★ 新窗格是新的一根比例尺：把「记着的留白」抹掉，不然 reserveSubhead 会以为已经让过了
   // 窗格一分，主图那一栏的高度就变了 ⇒ 图例/读数/页脚都不用动，但那一格的头要重新贴一次（见 placeSubhead）
 }
 function teardownSub() {
@@ -751,6 +752,7 @@ function teardownSub() {
   for (const s of Object.values(sub.series)) chart.removeSeries(s);   // 摘干净 ⇒ 窗格自己收回去
   sub.series = null;
   subHover = null;
+  subTopMargin = null;        // 窗格没了，记的留白也作废（跟 buildSub 那头一对）
 }
 // 副图的点**按时间取**，不按下标：换档是往数组头上插 K 线，同一个下标当场就指向另一根
 // （跟 anchorOf / timeIndex 是同一条账）。主图有哪几根，副图就画哪几根；响应里没有这一根 ⇒ **那根不画**。
@@ -779,19 +781,45 @@ function paintSubData() {
 }
 // 那一格的头**贴着副图窗格的上沿**：位置不是 CSS 摆的 —— 窗格高是 LWC 按 stretchFactor 排出来的，
 // CSS 算不出那个数（算得出来也会在换档、展开开关、转屏时过期）。所以每次布局变都重算一次。
+const SUBHEAD_TOP = 4;      // 页头离窗格上沿的那个偏移（placeSubhead 与 reserveSubhead 用的是同一个数）
+const SUBHEAD_GAP = 4;      // 页头下沿再留一点气口：柱尖贴在它下沿上看着还是「顶着」
 function placeSubhead() {
   if (!subBox) return;
   const on = !!opts.macd && !!sub.series;
   subBox.classList.toggle('on', on);
   if (!on) return;
+  reserveSubhead();                              // 先给页头让出那一条（比例尺变了不影响下面那行 top 的计算）
   const pane = chart.panes()[1];
   const chartBox = el('chart').getBoundingClientRect();
   const tsH = chart.timeScale().height();          // 时间轴是**共用**的一条，压在整栏的最下面
   // top 是**相对 .overlays 那个盒子**算的（它就是 subBox 的定位祖先，自己离图顶有 10px，见 style.css）——
   // 那个 10px 不在这里再抄一遍：从**两个盒子的实测距离**里减掉（CSS 改了这里也跟着对）。
   const offset = subBox.parentElement.getBoundingClientRect().top - chartBox.top;
-  const top = chartBox.height - tsH - (pane ? pane.getHeight() : 0) + 4 - offset;
+  const top = chartBox.height - tsH - (pane ? pane.getHeight() : 0) + SUBHEAD_TOP - offset;
   subBox.style.top = Math.max(0, Math.round(top)) + 'px';
+}
+// 页头那块浮层**压在副图上沿**而不是排在它上面 —— 它盖住的那一条里不许有数据。
+// 量过（2026-10-04，真后台 8796，ZECUSDT 15m，可见窗口收到 120 根）：那一格的比例尺上下各留 8%
+// ⇒ 窗格里最极端的那个点正好画在 y=13.4（168px 的 8%），而页头的下沿在 y=26 ⇒ **最高那根柱子的
+// 柱尖上面 12.6px 是画了、被它画掉的**（把页头 display:none 再拍一张，柱尖就露出来了）。挑窗有讲究：
+// 副图那格的轴是 hist/dif/dea **一起**撑的，多数窗口里 DIF 比柱子大、柱子够不到顶（首屏就是这样，
+// 所以一直没人看见）；要 max|hist| ≥ max(|dif|,|dea|) 的那种窗口（柱子自己撑轴）才咬得着。
+// 修法：把那一格的右轴**上边留白按页头实测的高度让出来** —— 数据一个像素都不进那条带子。
+// 页头的高度是**量出来的**（手机上这句会换行，两行就更高），所以跟 placeSubhead 一起每次布局重算；
+// 值没变就别再 applyOptions（那会重画一整格）。★ 建／拆窗格时要把记的值抹掉（见 buildSub/teardownSub）：
+// 新窗格的比例尺是新的，记着旧值就会「只有第一次生效」。
+let subTopMargin = null;
+function reserveSubhead() {
+  const pane = chart.panes()[1];
+  if (!pane || !subBox) return;
+  const h = pane.getHeight();
+  if (!h) return;
+  const need = SUBHEAD_TOP + subBox.offsetHeight + SUBHEAD_GAP;   // 页头在窗格顶占掉的那一条（px）
+  const top = Math.min(0.4, need / h);                            // 兜个上限：窗户太小也不许把数据挤没
+  if (subTopMargin != null && Math.abs(subTopMargin - top) < 1e-4) return;
+  subTopMargin = top;
+  // bottom 跟着 LWC 的缺省（0.08）写出来：只改 top 的话另一头也跟着漂，那就不是「让出页头」了
+  pane.priceScale('right').applyOptions({ scaleMargins: { top, bottom: 0.08 } });
 }
 if (subBox && 'ResizeObserver' in window) new ResizeObserver(() => placeSubhead()).observe(el('chart'));
 
