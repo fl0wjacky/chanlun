@@ -586,6 +586,16 @@ const priceFormat = (tick) => ({ type: 'price', precision: decimals(tick), minMo
 //   只读 computedStyle 是替身 —— `.more` 那次就是位置对、字对、`visibility` 也对，整块被画布盖住。
 const PCT_DASH = '—';            // 没有前一根（最左边那根）＝ 不编一个数给它，写「不知道」
 let readShown = false;
+// ★★ 2026-10-04（Nova 定的口径，卡 card-4cdf628c-c84）：**换品种/周期这一段（新的一份还在飞）里，读数整个压住**。
+//   不只是「换的那一刻收一下」—— 那段时间页头已经写着新品种了，屏上还是旧图，**光标一动**读数就自己亮回来，
+//   亮的是**上一份**的量级。实测（`tools/web_readout_swap_probe.js` 的 D 段，真后台，那一趟扣 2.5s）：
+//     ZEC→BTC 换到一半，指针往旁边扫一下 ⇒ 块里亮着 `1,655.24 2026-09-27 12:00 UTC`（ZEC 那份的价），
+//     页头写着 BTCUSDT；副图那三格同理（印着 DIF -11.69，而 BTC 那份是 -121.11）。
+//   ⇒ 所以要压的是**整段**，不是那一刻：`showRead()` 在这一段里谁来叫都不亮、`refreshSubVals()` 印「—」，
+//     放开的那一刻是**新数据画上去**（或这一趟完了）—— 放开之后光标一动／LWC 重发十字线，读数照旧回来。
+//   谁在压：只有 `go()`（换品种、换周期、首屏）。**不**压「往左补数据」和「换看法」：那两条换的不是品种，
+//     屏上那份的刻度没作废（换看法后台契约里 K 线逐字节不变），压住只会让读数白闪两下。
+let dataStale = false;
 
 function readAt(param) {
   const s = param.seriesData && param.seriesData.get(candle);
@@ -605,6 +615,9 @@ function pctText(p) {
   return (r > 0 ? '+' : r < 0 ? '-' : '') + Math.abs(r).toFixed(2) + '%';
 }
 function showRead(b) {
+  // ★ 屏上那份 K 线已经不是页头写着的那一份了（新的一份还在飞）⇒ 光标动到哪儿都不亮（见 dataStale 那段）。
+  //   放在这儿而不是那个回调里：**亮读数只有这一个口**，以后谁加了一条叫它的路，也自动归这条口径管。
+  if (dataStale) return;
   const dir = Math.sign(Math.round(b.pct == null ? 0 : b.pct * 100));   // 印出来的那个数的方向
   const pct = el('ro-pct');
   el('ro-time').textContent = timeLabel(b.t);
@@ -677,6 +690,11 @@ const subDom = subBox ? (() => {
 
 function refreshSubVals() {
   if (!subDom) return;
+  // ★ 同一个病、同一段时间：页头已经写着新品种，这三格却念着**上一份**的量级（实测见 dataStale 那段）。
+  //   ⇒ 跟读数块一起压住，印「—」（这一格本来就有的写法：对不上就不印数，见上面那句「— 不写 0」）。
+  //   ★ 标题不跟着改：它念的是**口径**（params / hist_def），不是这一根的数 —— 屏上那张副图也还是旧那份，
+  //     标题跟它一起留着是对的（这一格写「MACD 取数…」是 sub.data 没到手时的写法，不是这一段的）。
+  if (dataStale) { subDom.cells.forEach((b) => { b.textContent = '—'; }); return; }
   const m = sub.data;
   const bars = (state.data && state.data.bars) || [];
   const t = subHover != null ? subHover * 1000 : (bars.length ? bars.at(-1).t : null);
@@ -1179,6 +1197,7 @@ async function go(span = 1) {
   //   但读数要是留着，写的就是**上一份数据的数**（屏上那份图跟它已经不是一回事了）。
   //   放这儿而不是 paint() 里：paint() 跑在新数据到了之后，**那一段它够不到**（实测见 paint() 那段注释）。
   //   收掉不会让它回不来：新数据画上之后 LWC 会重发一次十字线，读数自己就用新那份回来了（工装 ⑮⑯ 量着）。
+  dataStale = true;      // ★ 而且**整段压住**，不只是这一下：这段时间里光标一动读数也不许亮回来（见 dataStale 那段）
   hideRead();
   el('state').textContent = '取数…'; el('state').className = 'badge';
   try {
@@ -1195,7 +1214,11 @@ async function go(span = 1) {
     el('state').textContent = String(e.message || e);
     el('state').className = 'badge bad';
   } finally {
-    if (id === paging.reqId) paging.loading = false;
+    // ★ 放开读数：新的画上去了就是这一趟的结尾。放在 `finally` 而不是 `draw()` 后面，是为了**失败那一趟
+    //   也放开** —— 取数失败时新图没来、屏上那张老图没被换掉，老读数跟它还是同一份，压着不放才是一句谎
+    //   （工装 ⑳ 量的就是这一条：不许把读数压死）。
+    //   id 对不上就别碰：那是**更新的一趟**在管这个标志，它自己有始有终。
+    if (id === paging.reqId) { paging.loading = false; dataStale = false; }
   }
 }
 
