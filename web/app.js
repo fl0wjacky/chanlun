@@ -223,6 +223,28 @@ function restoreRange(bars, anchor) {
   const from = i === null ? bars.length - anchor.oldLen + anchor.oldFrom : i + anchor.frac;
   return { from, to: from + anchor.width };
 }
+const NOTICE_TEXT = '已接上更早的K线，左侧笔和线段按新的起点重算';
+const NOTICE_MS = 3000;
+let noticeTimer = 0;
+// 记一句「这一屏里现在是哪几笔、哪几段」：按**时间戳和价格**记，不按下标 ——
+// 往左补数据是往数组头上插，同一个下标当场就指向另一根 K 线（跟 anchorOf 是同一条理由）。
+// ★ 只记**跟可视窗口有时间重叠**的那些：窗口外也跟着重算了（一画就是全局的），
+//   但用户没看那儿 —— 没变就别说，变了才说（Nova 2026-10-04 定的口径，Atlas 补的「可视窗口」）。
+function structKey(d, t0, t1) {
+  const ts = (i) => (d.bars[i] || {}).t;
+  const inWin = (o) => ts(o.i0) != null && ts(o.i1) != null && ts(o.i1) >= t0 && ts(o.i0) <= t1;
+  const row = (o) => `${ts(o.i0)}>${ts(o.i1)}@${o.p0},${o.p1}`;
+  const part = (a) => (a || []).filter(inWin).map(row).join('|');
+  return part(d.pens) + '#' + part(d.segs);
+}
+// 可视窗口 → 时间区间。★ 换档前取一次、换档后用**同一段时间**再取一次：
+// 拿换完之后的新窗口去比，比的是「另一段时间」，那就不是「这一屏变没变」了。
+function windowOf(bars, range) {
+  if (!bars || !bars.length || !range) return null;
+  const a = Math.max(0, Math.ceil(range.from)), b = Math.min(bars.length - 1, Math.floor(range.to));
+  if (b < a) return null;
+  return { t0: bars[a].t, t1: bars[b].t };
+}
 // <<< EARLIER_PAGING
 
 // ---------------------------------------------------------------- 画一张
@@ -290,13 +312,32 @@ function draw(d, keep) {
 // （不然 fitContent 自己触发的那一下会被当成「用户拖到左边了」，一打开页面就去要下一档）。
 // ★ 只记「要的那个」还不够：LWC 会把视口**微调**一下再报一次（要 from=-50，它随后报 -53.373），
 //   而 getVisibleLogicalRange 是**懒更新**的 —— 摆完同步读回来还是旧值，光靠读回来认不出后一下。
-//   所以自己摆完开一个很短的窗口：**窗口里来的视口事件全算回声**，窗口末再把**真实**视口记成基准。
-//   （这一下是真事件也不会被吃掉：窗口 40ms，用户一拖还在继续出事件。）
+//   所以自己摆完先记一笔「接下来那一次视口事件是我的回声」，**由事件本身来销账**（见下面的订阅），
+//   不再拿时钟当判据。
 function holdView() {
   paging.applying = true;
   clearTimeout(settleTimer);
+  // 兜底：万一下一次视口事件永远不来（摆成跟原来一样，LWC 就不吭声），别让 applying 一直挂着
+  // 把用户下一次拖的第一下吃掉。这是**兜底**，不是判据 —— 判据是「真有没有人动过输入设备」。
   settleTimer = setTimeout(() => { paging.applying = false; markView(); }, SETTLE_MS);
 }
+// ★★ 怎么认出「这一下是用户弄的」：**问输入设备，不问时钟**（2026-10-04 改的）。
+//   原来只靠上面那个 40ms 窗口 —— 那是个**替身**：它猜「刚才多半是我们自己摆的」，猜错就出事。
+//   Atlas 2026-10-04 在三次里红过一次：**打开页面没人拖，它自己发了 span=2**。机理很清楚：
+//   `?at=40&span=180` 摆出来的是 from=-50，LWC 归一化后回一个 -53.373 的**回声** ——
+//   这个回声跟我们要的不一样（sameRange 认不出），而 -53.373 < 20 又正好满足「贴到左沿」，
+//   于是**我们自己的回声被当成了用户在拖**。机器快，回声落在 40ms 窗口里就没事；机器慢，落在窗口外，就发请求。
+//   ⇒ 判据换成真东西：**用户有没有真的动过输入设备**（pointerdown/move、wheel、touch、keydown）。
+//     自己摆视口不产生这些事件；拖、滚、捏一定会。脚本摆视口（工装、?at=?last=、fitContent）从此
+//     一律不算「用户要看更早的」—— 这是对的：脚本摆一下不等于有人想看。
+//   ★ 时序竞争**证不了不存在**：快机器上连跑 10 次全绿说明不了慢机器上不出来。工装里有
+//     `--throttle=N`（CDP 把 CPU 拖慢）可以故意把这一格跑红，规矩是**改之前红、改之后绿**。
+const INPUT_MS = 1500;      // 最后一次真实输入之后这么久之内，视口变化算用户的（拖拽会一直刷 pointermove）
+let lastInputAt = 0;
+for (const ev of ['pointerdown', 'pointermove', 'wheel', 'touchstart', 'touchmove', 'keydown']) {
+  el('chart').addEventListener(ev, () => { lastInputAt = Date.now(); }, { passive: true, capture: true });
+}
+const userDrove = () => Date.now() - lastInputAt <= INPUT_MS;
 function setView(r) {
   chart.timeScale().setVisibleLogicalRange(r);
   markView(r);
@@ -323,6 +364,18 @@ function renderMore(s, hold) {
   // 到头那两句话是**回答用户那一下拖**的，说一次就够；常驻会变成一块贴在图上不走的膏药。
   if (txt && !s.loading && hold) moreTimer = setTimeout(() => n.classList.remove('on', 'end'), hold);
 }
+// ---------------------------------------------------------------- 换档之后那句话
+// 往左多要一段 K 线 ＝ **整份重算**（原文算法决定的：起点一挪，后面的笔和线段全都重新划分，拼接是假的）。
+// 所以换完之后左边那些线可能已经不是用户刚才看到的样子了 —— 这时候得说一句，
+// 不然「图怎么自己变了」就成了一桩没有解释的事。
+function showNotice() {
+  const n = el('notice');
+  if (!n) return;
+  n.textContent = NOTICE_TEXT;
+  n.classList.add('on');
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => n.classList.remove('on'), NOTICE_MS);
+}
 function resetPaging(span) {
   paging.span = ladderSpan(span); paging.spanMax = null; paging.earliest = false; paging.nogain = false;
   paging.loading = false; paging.failedAt = 0; paging.applying = false;
@@ -335,7 +388,12 @@ const sameRange = (a, b) => !!b && Math.abs(a.from - b.from) < 0.5 && Math.abs(a
 // 一次只飞一个（paging.loading 就是那道闸）；失败退避 FAIL_COOLDOWN，别在一次拖拽里把后台敲烂。
 const FAIL_COOLDOWN = 10000;
 chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
-  if (!r || !state.data || paging.applying || sameRange(r, viewSet)) return;   // 自己摆的那一下不算用户拖
+  if (!r || !state.data) return;
+  // 自己摆的那一下（含 LWC 随后那点微调）：认下来当新基准，销掉 applying，**不触发**。
+  // ★ 基准每次事件都往前挪一格（原来只在窗口末尾挪一次）—— 这样连着来两次回声也不会漏。
+  if (paging.applying) { paging.applying = false; markView(r); return; }
+  if (sameRange(r, viewSet)) return;                 // 视口没真动
+  if (!userDrove()) return;                          // ★ 没人在动输入设备 ⇒ 这是脚本摆的/回声，不是用户要看更早的
   const act = onLeft({ from: r.from, span: paging.span, spanMax: paging.spanMax,
                        earliest: paging.earliest, nogain: paging.nogain });
   if (act === null) { if (!paging.loading) renderMore({}); return; }           // 离左沿还远：把话收掉
@@ -357,10 +415,16 @@ async function loadEarlier(span) {
     //   不是发请求的那一刻：这一趟可能要等一两秒，用户在这期间还会接着往左拖 —— 拿发请求时的位置去「放回原位」，
     //   就是把他刚拖出来的画面**弹回去**（工装里量到过：拖到一半来的数据，画面被拽回 200px）。
     //   此刻 state.data 还是旧那份，bar 的时间戳还是旧的下标，抓锚点正合适。
-    const anchor = anchorOf(own.bars, chart.timeScale().getVisibleLogicalRange());
+    const range0 = chart.timeScale().getVisibleLogicalRange();
+    const anchor = anchorOf(own.bars, range0);
+    // ★ 基准要在**动数据之前**取：换完之后再取就没得比了（比的就是换前换后）。
+    const win = windowOf(own.bars, range0);
+    const keyBefore = win && structKey(own, win.t0, win.t1);
     Object.assign(paging, adopt(paging, d, own.bars.length));   // 回显说了算（钳档 / earliest / 有没有多出来）
     setUrl();
     draw(d, anchor);
+    // 同一段时间、换完之后再取一次：不一样 ⇒ 用户正看着的那一屏被重算了 ⇒ 说一句，3 秒自己收
+    if (win && structKey(d, win.t0, win.t1) !== keyBefore) showNotice();
     renderMore({ stop: stopReason(paging) }, 2600);
   } catch (e) {
     paging.failedAt = Date.now();

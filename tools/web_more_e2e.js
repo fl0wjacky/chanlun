@@ -25,9 +25,14 @@
 //        python3 -m http.server 8791 --bind 127.0.0.1 --directory web
 //   2) playwright：`npm i playwright && npx playwright install chromium`（各机器一次）
 //      node_modules 不在仓里 —— 在任何装好 playwright 的目录下跑，用 NODE_PATH 指过来即可。
-//   3) node tools/web_more_e2e.js [输出目录] [页面地址]
+//   3) node tools/web_more_e2e.js [输出目录] [页面地址] [--throttle=N]
 //        输出目录默认 $TMPDIR/more-e2e（截图落这儿；不写进仓）
 //        页面地址默认 http://127.0.0.1:8791/（服务换个端口就改这个）
+//        --throttle=N：把这一页的 CPU 拖慢 N 倍（CDP Emulation.setCPUThrottlingRate，默认 1＝不降速）。
+//          ★ 什么时候该用它：这套里有一格量的是**时序竞争**（「打开页面没人拖，它自己会不会去要下一档」）。
+//            竞争这种事**证不了不存在** —— 快机器上连跑 10 次全绿，说明的只是这台机器快。
+//            所以验它的办法是**故意输**：把 CPU 拖慢（4～6 倍就够），让那个窗口真被错过。
+//            规矩照旧：**改之前红、改之后绿**，才算这一格被验过（Atlas 2026-10-04 提的）。
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -43,13 +48,31 @@ try {
 const WEB = path.join(__dirname, '..', 'web');           // 仓相对：工装跟着仓走，不写死谁的家目录
 const OUT = process.argv[2] || path.join(os.tmpdir(), 'more-e2e');
 const PAGE = (process.argv[3] || 'http://127.0.0.1:8791/').replace(/\/?$/, '/');
+// --throttle=4：把这一页的 CPU 拖慢 4 倍（CDP）。默认 1＝不降速。
+// 为什么要有：这条工装里有一格量的是**时序竞争**（没人拖的时候会不会自己发请求）。
+// 竞争**证不了不存在**——快机器上 10/10 绿什么都不说明。要验它，就得能故意把机器拖慢。
+const THROTTLE = Number((process.argv.find((a) => a.startsWith('--throttle=')) || '').split('=')[1]) || 1;
 const FULL = JSON.parse(fs.readFileSync(path.join(WEB, 'fixtures/zec_1h.json'), 'utf8'));
 const STEP = FULL.bars[1].t - FULL.bars[0].t;
 const PER = 2016;                    // 一档 ≈ 现在线上那 210 天（1h 档折成根数，比例不变）
 
+const T0 = Date.now();               // 日志带相对时刻：时序那一族光看「收到 span=2」看不出早晚
 let requests = [], inflight = 0, maxInflight = 0;
 const PAGENAMES = new Map();          // 哪一页发的请求（多页同时开着，出问题时要能点名）
 let delay = 0, earliestFlag = false, badNext = false, spanMax = 8;
+// ★★ 「响应扣在后台、由工装决定什么时候放行」（2026-10-04 改）。
+//   原来靠 delay 跟拖拽赛跑：delay 是**时钟**，拖一下要多久是**机器快慢**决定的 ——
+//   降速 4 倍时，一次拖拽能比 900ms 还长，等拖完再去看提示，那一趟早就落地了（实测「加载更早数据…」
+//   只在 592ms~710ms 之间活过 118ms，全在拖拽过程里，工装根本没看到）。
+//   那不是页面的错，是工装拿时钟当同步器。改成：非 null 时**请求先扣住**，工装说放才放 ——
+//   「数据还在路上」从「多半还在」变成「一定还在」，任何倍率下都成立。
+// ⑬ 换档那句话：假后台得把「整份重算」演出来。真实后台换档就是从头再算一遍，两边（窗口内/窗口外）都会动；
+//    这里偏偏分开动 —— 只有分开，「按可视窗口判」这句话才有东西能证伪：
+//    两边一起动的话，页面不管拿哪儿当判据都会出提示，'out' 那格就永远是绿的（量不到东西）。
+let winmode = null, pageWin = null;    // 'in'＝只动跟可视窗口重叠的结构 ／ 'out'＝只动窗口外的
+let holdRelease = null;
+const holdNext = () => { let open; holdRelease = new Promise((r) => { open = r; });
+                         return () => { const h = holdRelease; holdRelease = null; if (h) open(); }; };
 
 function payload(span) {
   const extra = (span - 1) * PER, head = FULL.bars[0], older = [];
@@ -69,6 +92,17 @@ function payload(span) {
     bars, nbars: bars.length, span, span_max: spanMax, earliest: !!earliestFlag,
     pens: shift(FULL.pens), segs: shift(FULL.segs) });
   if (FULL.signals) d.signals = { seg: barsOf(FULL.signals.seg), pen: barsOf(FULL.signals.pen) };
+  // ⑬ 换档重算的替身：跟可视窗口**重叠**的（'in'）或**只在窗口外**的（'out'）结构动一下。
+  //    判据跟页面 structKey 里那条一模一样（有时间重叠），不许各写各的 ——
+  //    两边口径一旦错开，「窗口外变了」这个场景就摆不出来（会被页面按「窗口里也变了」判）。
+  if (pageWin && winmode) {
+    const ts = (i) => (d.bars[i] || {}).t;
+    const overlap = (o) => ts(o.i0) != null && ts(o.i1) != null && ts(o.i1) >= pageWin.t0 && ts(o.i0) <= pageWin.t1;
+    const pick = winmode === 'in' ? overlap : (o) => !overlap(o);
+    const tweak = (o) => Object.assign({}, o, { p0: o.p0 * 1.002, p1: o.p1 * 1.002 });
+    d.pens = (d.pens || []).map((o) => (pick(o) ? tweak(o) : o));
+    d.segs = (d.segs || []).map((o) => (pick(o) ? tweak(o) : o));
+  }
   // ⑥ 故意回一份**对不上**的：结构下标还留在老位置上（真实世界里＝后台切了 bars 却没重算结构）
   if (badNext) { badNext = false; d.pens = FULL.pens.map((o) => Object.assign({}, o, { i0: o.i0 + 90000, i1: o.i1 + 90000 })); }
   return d;
@@ -81,10 +115,12 @@ async function serve(ctx) {
     requests.push(span);
     let who = '?';
     try { who = PAGENAMES.get(route.request().frame().page()) || '?'; } catch (e) { who = '已关'; }
-    console.log('      · 后台收到 span=' + span + ' 来自第 ' + who + ' 号页');
+    // 带上到达时刻和当时的 delay：时序那一族出了问题，光看「收到了 span=2」看不出它是几秒前发的
+    console.log('      · 后台收到 span=' + span + ' 来自第 ' + who + ' 号页（t=' + ((Date.now() - T0) / 1000).toFixed(2) + 's, delay=' + delay + '）');
     inflight++; maxInflight = Math.max(maxInflight, inflight);
     try {
       if (delay) await new Promise((r) => setTimeout(r, delay));
+      if (holdRelease) await holdRelease;                 // ★ 工装扣住的那一趟：等它说放行
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload(span)) });
     } finally { inflight--; }
   });
@@ -116,7 +152,18 @@ const snap = (p) => p.evaluate(() => {
   const b = await chromium.launch();
   const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3 });
   await serve(ctx);
-  const p = await ctx.newPage(); PAGENAMES.set(p, '1');
+  // ★ 降速（Atlas 2026-10-04）：这一套里有一条**时序**判据（「打开页面没人拖，它自己该不该去要下一档」），
+  //   而时序竞争**证明不了不存在** —— 我这台机器快，跑 10 次全绿也说明不了它在慢机器上不出来。
+  //   所以给它一个能**故意输**的开关：CDP 的 Emulation.setCPUThrottlingRate 把这一页的 CPU 拖慢
+  //   （rate=4 就是 4 倍慢），比赛条件被放大。规矩还是那条：改之前红、改之后绿才算验过。
+  //   CDP session 是**按页**的（新页要自己再开一次），所以这里包一个 openPage。
+  const openPage = async (name) => {
+    const q = await ctx.newPage();
+    PAGENAMES.set(q, name);
+    if (THROTTLE > 1) await (await ctx.newCDPSession(q)).send('Emulation.setCPUThrottlingRate', { rate: THROTTLE });
+    return q;
+  };
+  const p = await openPage('1');
   const ok = [], bad = [];
   const t = (name, cond, extra = '') => {
     const line = `${name}${extra ? '：' + extra : ''}`;
@@ -125,9 +172,78 @@ const snap = (p) => p.evaluate(() => {
   };
   // ★ 截图必须**指定是哪一页**：工装同时开着好几页，写死第一页就会拿另一页的「没有这句提示」当失败
   //   （⑧ 那格就是这么假红过一次：提示明明在 4 号页上亮着）。
+  // ★ 盯着一句话**出现过**（驱动侧轮询，不是页面侧 rAF 轮询）。
+  //   为什么要自己轮：`page.waitForFunction` 默认按页面里的 requestAnimationFrame 轮询，
+  //   CPU 一降速，页面侧那一套就跟着慢/掉帧 —— 量的是页面被拖慢之后还能不能及时跑判据，
+  //   而不是「那句话有没有出现过」。而且是**出现过**就算数：提示到点会自己收（loading 不会，
+  //   但「已到最早」会），拿「轮到判据那一刻它还挂着」当条件，就是拿收尾时刻当判据。
+  //   顺手把看到过的都记下来：红的时候能看出它到底说了什么、还是压根没说。
+  const waitPill = async (page, want, ms = 10000) => {
+    const seen = [], t0 = Date.now();
+    for (;;) {
+      const s = await page.evaluate(() => {
+        const m = document.getElementById('more');
+        const g = window.__app && window.__app.paging;
+        return { txt: m.textContent, on: m.classList.contains('on'),
+                 loading: !!(g && g.loading), span: g && g.span, applying: !!(g && g.applying),
+                 n: window.__app && window.__app.state.data.bars.length };
+      });
+      seen.push(s.on || s.txt === want ? s.txt
+                 : `[${s.txt}](收起了) loading=${s.loading} span=${s.span} applying=${s.applying} bars=${s.n}`);
+      if (s.txt === want) return { hit: true, seen };
+      if (Date.now() - t0 > ms) return { hit: false, seen };
+      await page.waitForTimeout(60);
+    }
+  };
+  // ★ 盯「换档那句话」（#notice）：跟 waitPill 同一个理由用驱动侧轮询，另外**把 ON/OFF 的时刻都记下来** ——
+  //   契约里写了「停 3 秒」，那是这句话的一部分，不量时长就等于没量它。采样交给调用方决定停在哪里。
+  const watchNotice = async (page, ms) => {
+    const t0 = Date.now();
+    let onAt = null, offAt = null, txt = '', seen = [];
+    for (;;) {
+      const s = await page.evaluate(() => { const n = document.getElementById('notice');
+        return { on: n.classList.contains('on'), txt: n.textContent }; });
+      const dt = Date.now() - t0;
+      if (s.on) { if (onAt == null) { onAt = dt; txt = s.txt; } }
+      else if (onAt != null && offAt == null) offAt = dt;
+      seen.push((s.on ? 'ON' : 'off') + '@' + dt);
+      if (offAt != null || dt > ms) return { hit: onAt != null, onAt, offAt, txt, seen };
+      await page.waitForTimeout(50);
+    }
+  };
   const shot = async (sel, file, page = p) => {
     if (await page.locator(sel).isVisible()) await page.locator(sel).screenshot({ path: `${OUT}/${file}` });
     else bad.push(`截图 ${file}：${sel} 没显示出来（这一页是空的 —— 是不是截错了页？）`);
+  };
+  // ★★ 视口只许用**真鼠标**推（2026-10-04 改）：页面现在只认「用户真动过输入设备」
+  //   （pointerdown/move、wheel、touch…），**脚本摆视口一律不算**（那是对的：脚本摆一下不等于有人要看）。
+  //   所以工装里原来那几处 `evaluate(setVisibleLogicalRange)` 全部换成真拖 —— 工装得跟用户走同一条路，
+  //   不然它量的是「页面会不会响应脚本」，而不是「用户拖到左沿会怎样」。
+  //   往**右**拖 = 把更老的 K 线拖出来（跟 ② 那一下同一个方向）。
+  const dragLeft = async (page, px) => {
+    const box = await page.locator('#chart').boundingBox();
+    const cy = box.y + box.height / 2;
+    await page.mouse.move(box.x + 40, cy);
+    await page.mouse.down();
+    const steps = Math.max(2, Math.round(px / 20));
+    for (let i = 1; i <= steps; i++) await page.mouse.move(box.x + 40 + (px * i) / steps, cy, { steps: 2 });
+    await page.mouse.up();
+    await page.waitForTimeout(80);          // 让 LWC 把视口事件吐完再读
+  };
+  // 「用户滚到最左边、又拖了一下」＝ **摆到位（脚本）＋ 真拖一下（鼠标）**，两步都要，理由不同：
+  //   ① 摆到位：换档之后，**老的那个左沿在新数据里已经是几千根开外**（1→2 档就是 +2016 根），
+  //      390px 的屏一下拖不了那么远，要拖几十下 —— 而这一步是**布置场景**（模拟「用户已经滚到最左」），
+  //      不是用户动作。页面**本来就该忽略脚本摆视口**，那是它对的（⑪ 那格专门盯着这一点）。
+  //   ② 真拖一下：**这才是用户动作**。页面现在只认真实输入事件，所以这一下必须真按鼠标 ——
+  //      脚本摆完不拖，页面不发请求是对的（⑪ 就是据此判的），拿它当「该发请求」就是量错了东西。
+  //   ★ 两条合起来才跟 766d053 那版工装的语义等价（那版只用 ①，而且**①本身就会误触发**，正是这次的 bug）。
+  const pushLeft = async (page, from = 3, px = 110) => {
+    await page.evaluate((from) => { const c = window.__app.chart; const r = c.timeScale().getVisibleLogicalRange();
+                                    c.timeScale().setVisibleLogicalRange({ from, to: r.to - r.from + from }); },
+                        from);
+    await page.waitForTimeout(120);
+    await dragLeft(page, px);
+    return await snap(page);
   };
 
   try {
@@ -145,7 +261,9 @@ const snap = (p) => p.evaluate(() => {
 
     // ② 真按住往左拖（把更老的 K 线拖出来）。★ 这一档的响应故意慢：要在**请求在飞**的时候抓一张「换之前」，
     //    不然「换数据前后」四个字就没有基准可对（响应一瞬就回来了，抓到的是换完之后的第二张）。
-    delay = 2500;                                       // ★ 慢到「拖完了、数据还在路上」，才量得到「换数据那一刻放不跳」
+    //    ★ 「还在路上」现在由**后台那道闸**保证（holdNext），不再拿 delay 跟拖拽赛跑：
+    //      拖一下要多久是机器快慢决定的，降速时能比 delay 还长 —— 那时候「换之前」那张早就是换完之后的第二张了。
+    const rel3 = holdNext();                             // 这一趟的响应扣在后台，等这一格量完再放
     const nReq0 = requests.length;
     const box = await p.locator('#chart').boundingBox();
     const cy = box.y + box.height / 2;
@@ -154,12 +272,16 @@ const snap = (p) => p.evaluate(() => {
     for (let i = 0; i < 12; i++) await p.mouse.move(box.x + 40 + i * 20, cy, { steps: 2 });
     await p.mouse.up();
     await p.waitForTimeout(200);
-    const before3 = await snap(p);                      // 手离开鼠标之后、数据还没回来的那一屏（还是 1 档）
+    const before3 = await snap(p);                      // 手离开鼠标之后、数据**一定**还没回来的那一屏（还是 1 档）
+    const w3 = await waitPill(p, '加载更早数据…', 8000); // 「在飞」不只是内部状态，那句话也要真印出来
     const T3 = before3.anchor, x3 = await xAt(p, T3);   // 挑一根（按时间挑），记下它在屏幕上的像素
-    t('③ 量之前先确认数据确实还在路上（不然这一格是空转）', before3.more === '加载更早数据…',
+    t('③ 量之前先确认数据确实还在路上（不然这一格是空转）', w3.hit,
       `提示 ${JSON.stringify(before3.more)}`);
-    await p.waitForTimeout(3000);                       // 拖出来那一下发的请求已经回来了
-    delay = 0;
+    rel3();                                             // 放行：这一趟该落地了
+    // ★ 等**状态**，不等时钟：慢机器上（工装可以 --throttle 降速）3 秒不一定够，等不到就量成
+    //   「一根没多」—— 那是工装的假红，不是页面的错。这一格原来就是靠睡 3 秒，降速一跑就红。
+    await p.waitForFunction((n) => window.__app.state.data.bars.length > n, before3.n, { timeout: 20000 })
+           .catch(() => {});
     t('② 真拖一下（用户动作）确实要了下一档（且只要了一次）',
       requests.length === nReq0 + 1 && requests.at(-1) === 2,
       `请求 ${JSON.stringify(requests)}，拖后 from=${before3.from}`);
@@ -177,18 +299,19 @@ const snap = (p) => p.evaluate(() => {
     t('③ 一次只飞一个请求', maxInflight === 1, `最大并发 ${maxInflight}`);
     t('③ 地址栏写上了 load=2', /(^|[?&])load=2(&|$)/.test(after2.url), after2.url);
 
-    // ④ 加载中那句话（把延迟拉长，看得见）
-    delay = 900;
-    await p.evaluate(() => { const c = window.__app.chart; const r = c.timeScale().getVisibleLogicalRange();
-                             c.timeScale().setVisibleLogicalRange({ from: 3, to: r.to - r.from + 3 }); });
-    await p.waitForTimeout(250);
+    // ④ 加载中那句话（响应同样扣在后台，看得见才放）
+    const rel4 = holdNext();
+    await pushLeft(p);                                   // 真鼠标再往左拖一下（脚本摆视口页面现在不认）
+    const w4 = await waitPill(p, '加载更早数据…');       // 等那句「加载更早数据…」**出现过**
     const loading = await snap(p);
     const T4 = loading.anchor, x4 = await xAt(p, T4);   // 同样：按**时间**挑一根当基准
-    t('④ 加载中印「加载更早数据…」', loading.more === '加载更早数据…', `实际 ${JSON.stringify(loading.more)}`);
+    t('④ 加载中印「加载更早数据…」', w4.hit,
+      w4.hit ? '' : `看了一路（前4）：${JSON.stringify(w4.seen.slice(0, 4))} （后2）：${JSON.stringify(w4.seen.slice(-2))}`);
     await shot('#more', 'more_loading.png');
     await p.locator('#chart').screenshot({ path: `${OUT}/more_s2_loading.png` });   // 证据图：换档**前**这一屏
-    await p.waitForTimeout(1200);
-    delay = 0;
+    rel4();
+    await p.waitForFunction((n) => window.__app.state.data.bars.length > n, after2.n, { timeout: 20000 })
+           .catch(() => {});
     const after4 = await snap(p);
     await p.locator('#chart').screenshot({ path: `${OUT}/more_s3_after.png` });     // 证据图：换档**后**同一屏
     t('④ 4 档也落地了', after4.n > after2.n, `${after2.n} → ${after4.n}`);
@@ -202,15 +325,24 @@ const snap = (p) => p.evaluate(() => {
 
     // ⑤ 到最早：后台说 earliest，再拖一次
     earliestFlag = true;
-    await p.evaluate(() => { const c = window.__app.chart; const r = c.timeScale().getVisibleLogicalRange();
-                             c.timeScale().setVisibleLogicalRange({ from: 2, to: r.to - r.from + 2 }); });
-    await p.waitForTimeout(800);
+    // 顺手把 #more 的每一次变化记下来：红了要能看出它到底说过什么、几点说的（挂在页面上，不影响页面）
+    await p.evaluate(() => { window.__log5 = []; const m = document.getElementById('more');
+      window.__t5 = performance.now();
+      new MutationObserver(() => window.__log5.push([Math.round(performance.now() - window.__t5),
+        JSON.stringify(m.textContent), m.className]))
+        .observe(m, { attributes: true, childList: true, subtree: true, characterData: true }); });
+    const rel5 = holdNext();
+    await pushLeft(p);                                   // 真拖一下：到最早之后**该不再发请求**（⑤ 后一条量这个）
+    const w5a = await waitPill(p, '加载更早数据…', 8000);
+    rel5();
+    const w5 = await waitPill(p, '已到最早');            // 这句话说 2.6 秒自己收 —— 量「出现过」，不量「此刻还挂着」
+    const hist5 = JSON.stringify(await p.evaluate(() => window.__log5.slice(0, 40)));
     const end = await snap(p);
-    t('⑤ 到头印「已到最早」', end.more === '已到最早', `实际 ${JSON.stringify(end.more)}`);
+    t('⑤ 到头印「已到最早」', w5.hit,
+      w5.hit ? '' : `在飞时印的是 ${JSON.stringify(w5a.hit)}，变化史 ${hist5}，看了一路（前2）：${JSON.stringify(w5.seen.slice(0, 2))} （后2）：${JSON.stringify(w5.seen.slice(-2))}`);
     await shot('#more', 'more_earliest.png');
     const nReq = requests.length;
-    await p.evaluate(() => { const c = window.__app.chart; const r = c.timeScale().getVisibleLogicalRange();
-                             c.timeScale().setVisibleLogicalRange({ from: 1, to: r.to - r.from + 1 }); });
+    await pushLeft(p);                                   // 再真拖一下（这一下**不许**再发请求）
     await p.waitForTimeout(400);
     t('⑤ 到最早之后不再发请求（不打转）', requests.length === nReq, `${nReq} → ${requests.length}`);
     await p.locator('#chart').screenshot({ path: `${OUT}/more_chart.png` });
@@ -222,21 +354,21 @@ const snap = (p) => p.evaluate(() => {
     //    ★ 先把这个假后台的开关**摆回干净状态**：不摆回，⑤ 留下的 earliest 会被这一页正经地认下来
     //      （那正是 adopt() 的职责），页面连请求都不会发，量到的就不是「判掉了」而是「压根没试」。
     earliestFlag = false; spanMax = 8;
-    const p3 = await ctx.newPage(); PAGENAMES.set(p3, '3');
+    const p3 = await openPage('3');
     await p3.goto(PAGE + '?symbol=ZECUSDT&tf=1h&load=4', { waitUntil: 'load' });
     await p3.waitForFunction(() => window.__app && window.__app.state.data);
     await p3.waitForTimeout(500);
     const beforeBad = await snap(p3);
     delay = 1200; badNext = true;                       // 下一份（span=8 那份）故意回一份对不上的
-    await p3.evaluate(() => { const c = window.__app.chart; const r = c.timeScale().getVisibleLogicalRange();
-                              c.timeScale().setVisibleLogicalRange({ from: 5, to: r.to - r.from + 5 }); });
-    await p3.waitForTimeout(700);                       // 请求还在飞；我摆的那个视口早落定了
+    await pushLeft(p3);                                 // 真拖一下：请求在飞的时候抓「换之前」那一张
+    const w6 = await waitPill(p3, '加载更早数据…');      // 等它真在路上（等「出现过」，不等时钟）
     const inFlight = await snap(p3);
-    await p3.waitForTimeout(1200);                      // 回来了（而且是被判掉的那一份）
+    await p3.waitForFunction(() => window.__app.paging && !window.__app.paging.loading,
+                             null, { timeout: 20000 }).catch(() => {});  // 等那一份回来（而不是睡 1.2 秒）
     const afterBad = await snap(p3);
     delay = 0;
-    t('⑥ 那一下确实发过请求（不是压根没试）', inFlight.more === '加载更早数据…' && requests.at(-1) === 8,
-      `提示 ${JSON.stringify(inFlight.more)}，最后一次请求 span=${requests.at(-1)}`);
+    t('⑥ 那一下确实发过请求（不是压根没试）', w6.hit && requests.at(-1) === 8,
+      `提示${w6.hit ? '出现过' : '一路没出现' + JSON.stringify(w6.seen.slice(0, 8))}，最后一次请求 span=${requests.at(-1)}`);
     t('⑥ 对不上的数据：一根都不换', afterBad.n === beforeBad.n, `${beforeBad.n} → ${afterBad.n}`);
     // 视口这条要拿**我自己挪到的地方**当基准（挪完、还没回来那一笔）：拿「挪之前」比就是拿我自己的动作当差。
     // ★ 只比「回来前后一不一样」，不钉它必须等于 5：LWC 会把摆进去的值自己归一化一手（这是库的事，不是页面的事）。
@@ -248,7 +380,7 @@ const snap = (p) => p.evaluate(() => {
     await p3.close();
 
     // ⑦ ?load=4 打开直接是 4 档
-    const p2 = await ctx.newPage(); PAGENAMES.set(p2, '2');
+    const p2 = await openPage('2');
     const base = requests.length;
     await p2.goto(PAGE + '?symbol=ZECUSDT&tf=1h&load=4&tag=p2', { waitUntil: 'load' });
     await p2.waitForFunction(() => window.__app && window.__app.state.data);
@@ -264,14 +396,13 @@ const snap = (p) => p.evaluate(() => {
     //    而且**不许**再发请求。★ 这一格是尺 ⑥ 量不到的那半边：尺子只判该印哪句话，这里看它真印出来没有。
     //    ★ 这一格正是首屏不认回显那个 bug 的现场：不认 span_max 就会再发一次 span=8（页面上白发一趟）。
     spanMax = 4; earliestFlag = false;                  // 4 档就是这个周期的顶（而且后台没说「到头」）
-    const p4 = await ctx.newPage(); PAGENAMES.set(p4, '4');
+    const p4 = await openPage('4');
     await p4.goto(PAGE + '?symbol=ZECUSDT&tf=1h&load=4&tag=p4', { waitUntil: 'load' });
     await p4.waitForFunction(() => window.__app && window.__app.state.data);
     await p4.waitForTimeout(400);
     // ★ 基准必须在**首屏那一发落地之后**取：这一页自己也有一发（load=4），拿它当「多出来的」就是冤枉。
     const base8 = requests.length;
-    await p4.evaluate(() => { const c = window.__app.chart; const r = c.timeScale().getVisibleLogicalRange();
-                              c.timeScale().setVisibleLogicalRange({ from: 2, to: r.to - r.from + 2 }); });
+    await pushLeft(p4);                                 // 真拖一下（这一次内部该去要下一档）
     await p4.waitForTimeout(500);
     const cap = await snap(p4);
     t('⑧ 到封顶印的是「已到本周期可加载的最早」（不是「已到最早」）',
@@ -284,7 +415,7 @@ const snap = (p) => p.evaluate(() => {
     //    不夹的话 ?load=32/64 会被后台按契约回 400，首屏整张挂掉；?load=abc 会 NaN 出去。
     //    ★ 这一格是尺 ⑥ 的 ladderSpan 那几格在真页面上的回声：尺子量算式，这里量「地址栏进去到底发了什么」。
     for (const [raw, want] of [['32', 16], ['64', 16], ['abc', 1]]) {
-      const q = await ctx.newPage(); PAGENAMES.set(q, '9');
+      const q = await openPage('9');
       const b9 = requests.length;
       await q.goto(PAGE + `?symbol=ZECUSDT&tf=1h&load=${raw}&tag=bad-${raw}`, { waitUntil: 'load' });
       await q.waitForFunction(() => window.__app && window.__app.state.data);
@@ -302,7 +433,7 @@ const snap = (p) => p.evaluate(() => {
     // ⑩ 首屏就撞上「币安真没了」（AAPL 那种一档就到底的）：**一个多余请求都不许发**，
     //    打开就是一句话「已到最早」。Nova 的契约里点名的那条 —— 首屏不认回显就会白发一趟。
     earliestFlag = true; spanMax = 16;
-    const p5 = await ctx.newPage(); PAGENAMES.set(p5, '10');
+    const p5 = await openPage('10');
     const baseA = requests.length;
     await p5.goto(PAGE + '?symbol=ZECUSDT&tf=1h&load=4&tag=aap', { waitUntil: 'load' });
     await p5.waitForFunction(() => window.__app && window.__app.state.data);
@@ -314,8 +445,7 @@ const snap = (p) => p.evaluate(() => {
       `请求 ${JSON.stringify(requests.slice(baseA))}`);
     // 首屏是 fitContent（整段铺满），那句话是**回答拖**的，开着不动不印也说得过去；
     // 所以这里真把它拖到左沿，量「贴到最左沿也不发请求、并老实说已到最早」。
-    await p5.evaluate(() => { const c = window.__app.chart; const r = c.timeScale().getVisibleLogicalRange();
-                              c.timeScale().setVisibleLogicalRange({ from: 1, to: r.to - r.from + 1 }); });
+    await pushLeft(p5);                                 // 真拖一下（贴到最左沿）
     await p5.waitForTimeout(500);
     const aa2 = await snap(p5);
     t('⑩ 贴到最左沿：印「已到最早」', aa2.more === '已到最早' && aa2.moreOn,
@@ -325,11 +455,118 @@ const snap = (p) => p.evaluate(() => {
     await p5.close();
     earliestFlag = false;
     spanMax = 8;
+
+    // ⑪ ★★ **反着量的一格**（Atlas 2026-10-04 提的）：**脚本**把视口摆到贴左沿
+    //    （from 取负数，就是现场那个 -50 → LWC 归一化回 -53.373 的回声），**一个请求都不许发**。
+    //    这一格量的就是 2026-10-04 那个 bug 本身：别的格子全改成真鼠标拖之后，只剩它守着
+    //    「页面会不会把自己的回声当成用户在拖」。规矩照旧 —— **改之前红、改之后绿**，
+    //    拿 766d053 当「改之前」跑这一格必须是红的（它会在这里发出 span=8）。
+    const p6 = await openPage('11');
+    const base11 = requests.length;
+    await p6.goto(PAGE + '?symbol=ZECUSDT&tf=1h&load=4&tag=echo', { waitUntil: 'load' });
+    await p6.waitForFunction(() => window.__app && window.__app.state.data);
+    await p6.waitForTimeout(600);
+    const before11 = await snap(p6);
+    // 两下，**都不按鼠标**：①先摆到远离左沿的地方 ②再摆回贴左沿（from=-50，就是现场那个值）。
+    // ★ 为什么要两下：只摆一下的话，如果视口本来就在那儿，LWC 根本不发视口事件，
+    //   这一格就成了空转（老页面也能假绿 —— 第一版就是这么绿过一次）。② 那一下**一定会**改变视口。
+    const jump = (from) => p6.evaluate((from) => {
+      const c = window.__app.chart, r = c.timeScale().getVisibleLogicalRange();
+      c.timeScale().setVisibleLogicalRange({ from, to: r.to - r.from + from });
+    }, from);
+    await jump(200);
+    await p6.waitForTimeout(400);                       // 老页面那个 40ms 窗口早过了（bug 就在窗口外）
+    await jump(-50);
+    await p6.waitForTimeout(2000);                      // 够回声 + 可能的下一档跑完（这一格量「什么都不该发生」）
+    const after11 = await snap(p6);
+    t('⑪ 脚本摆视口贴到左沿（＝那次回声）⇒ 一个请求都不许发', requests.slice(base11).length === 1,
+      `首屏之外 ${JSON.stringify(requests.slice(base11, base11 + 4))}，from ${before11.from} → ${after11.from}`);
+    await p6.close();
+
+    // ⑬ ★★ 换档那句话：**只在可视窗口里的结构真变了**的时候出，3 秒，自己收。
+    //    Atlas 2026-10-04 要的两格一对：窗口外变 ⇒ 不出 ／ 窗口里变 ⇒ 出。
+    //    ★ 两格各自**单开一页**（同一个地址），不是同一页连着拖两下：假后台的老 K 线是编出来的，
+    //      换过一次档之后，视口底下那一屏就全是编出来的 K 线了 —— 那一段**一根笔都没有**，
+    //      「窗口里的结构变没变」在那儿恒等于「没变」。第一版就是这么绿的/红的（量到的是空转，不是页面）。
+    //      每格都用「第一次换档」：那一屏还是真 K 线，窗口里确实有笔有线段。
+    winmode = null; pageWin = null; earliestFlag = false; spanMax = 16;
+    const mk13 = async (name) => {
+      const q = await openPage(name);
+      await q.goto(PAGE + '?symbol=ZECUSDT&tf=1h&at=40&span=180', { waitUntil: 'load' });
+      await q.waitForFunction(() => window.__app && window.__app.state.data);
+      await q.waitForTimeout(700);
+      return q;
+    };
+    // 可视窗口 → 时间区间（跟页面 windowOf 一个口径；这是**场景**，不是判据）
+    const readWin = (q) => q.evaluate(() => {
+      const { chart, state } = window.__app;
+      const r = chart.timeScale().getVisibleLogicalRange(), b = state.data.bars;
+      const a = Math.max(0, Math.ceil(r.from)), z = Math.min(b.length - 1, Math.floor(r.to));
+      return { t0: b[a].t, t1: b[z].t };
+    });
+    // 窗口里到底有没有笔/线段：**没有的话这一格是空转**（判据恒等于「没变」，红绿都说明不了什么）
+    const winStructs = (q, w) => q.evaluate((w) => {
+      const d = window.__app.state.data, ts = (i) => (d.bars[i] || {}).t;
+      const ov = (o) => ts(o.i0) != null && ts(o.i1) != null && ts(o.i1) >= w.t0 && ts(o.i0) <= w.t1;
+      return { pens: (d.pens || []).filter(ov).length, segs: (d.segs || []).filter(ov).length };
+    }, w);
+    const noticeOn = (q) => q.evaluate(() => ({ on: document.getElementById('notice').classList.contains('on'),
+                                                txt: document.getElementById('notice').textContent }));
+
+    // —— 第一格：窗口**外**的结构变了、窗口里一根没动 ⇒ 一个字都不许印
+    const qA = await mk13('13a');
+    pageWin = await readWin(qA);
+    const cntA = await winStructs(qA, pageWin);
+    winmode = 'out';
+    const nA0 = (await snap(qA)).n;
+    const relA = holdNext();
+    await pushLeft(qA);
+    const pillA = await waitPill(qA, '加载更早数据…', 8000);
+    const watchA = watchNotice(qA, 2500);
+    relA();
+    await qA.waitForFunction((n) => window.__app.state.data.bars.length > n, nA0, { timeout: 20000 }).catch(() => {});
+    const A = await watchA;
+    const nA1 = (await snap(qA)).n;
+    await qA.waitForTimeout(400);                      // 真出了的话它要停 3 秒，躲不过这一段
+    const A2 = await noticeOn(qA);
+    t('⑬ 第一格不是空转：可视窗口里真有笔/线段', cntA.pens + cntA.segs > 0,
+      `窗口里 笔 ${cntA.pens}／线段 ${cntA.segs}`);
+    t('⑬ 变化只落在可视窗口**外** ⇒ 不印那句话',
+      !A.hit && !A2.on && nA1 > nA0 && pillA.hit,
+      `请求真发过=${pillA.hit}，bars ${nA0} → ${nA1}，落定后 ${JSON.stringify(A2)}，采样 ${JSON.stringify(A.seen.slice(0, 5))}`);
+    await qA.close();
+
+    // —— 第二格：同一段时间窗，让变化落在窗口**里** ⇒ 那句话必须出现，而且要停满 3 秒
+    const qB = await mk13('13b');
+    pageWin = await readWin(qB);
+    const cntB = await winStructs(qB, pageWin);
+    winmode = 'in';
+    const nB0 = (await snap(qB)).n;
+    const relB = holdNext();
+    await pushLeft(qB);
+    const pillB = await waitPill(qB, '加载更早数据…', 8000);
+    const watchB = watchNotice(qB, 4500);
+    relB();
+    await qB.waitForFunction((n) => window.__app.state.data.bars.length > n, nB0, { timeout: 20000 }).catch(() => {});
+    const B = await watchB;
+    t('⑬ 第二格不是空转：可视窗口里真有笔/线段', cntB.pens + cntB.segs > 0,
+      `窗口里 笔 ${cntB.pens}／线段 ${cntB.segs}`);
+    t('⑬ 可视窗口里结构变了 ⇒ 印那句话（一个字都不许改）',
+      B.hit && B.txt === '已接上更早的K线，左侧笔和线段按新的起点重算' && pillB.hit,
+      `实际 ${JSON.stringify(B.txt)}，请求真发过=${pillB.hit}，采样 ${JSON.stringify(B.seen.slice(0, 5))}`);
+    t('⑬ 那句话停 3 秒（说了 3 秒，不是 0.3 秒也不是 30 秒）',
+      B.hit && B.offAt != null && Math.abs(B.offAt - B.onAt - 3000) < 400,
+      `亮 ${B.onAt}ms → 收 ${B.offAt}ms ＝ ${B.offAt == null ? '没收' : B.offAt - B.onAt}ms`);
+    await qB.close();
+    winmode = null; pageWin = null;
   } catch (e) {
     bad.push('工装半路炸了：' + String(e.message || e).split('\n')[0]);
   }
   await b.close();
+  // ★ 降速值必须印在结果里：同一份代码「绿」和「红」的差别就在这一行，不印出来，
+  //   贴出来的结果说不清是哪一档跑出来的（报数带尺，尺也得带参数）。
   console.log('请求序列：', JSON.stringify(requests));
+  console.log('CPU 降速：', THROTTLE > 1 ? `${THROTTLE}×（CDP setCPUThrottlingRate）` : '不降速');
   console.log('截图落在：', OUT);
   if (bad.length) {
     console.log(`\n${bad.length} 处不对：`);

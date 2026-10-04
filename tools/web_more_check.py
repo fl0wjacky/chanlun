@@ -115,6 +115,25 @@ VET = [("结构都在 bars 里", {"bars": [{}] * 100, "pens": [{"i0": 0, "i1": 5
        ("没有结构层（最小样本）", {"bars": [{}] * 100}, True)]
 
 
+# ---- ④ 换档那句话（NOTICE）什么时候出：拿**真样本**切一个可视窗口，只动结构，看 structKey 认不认 ----
+#   值＝「两次的 key 应该**相同**吗」。这一组量的是一条口径：**只认跟可视窗口有时间重叠的结构，
+#   而且按时间戳比、不按下标比**。坐标是样本里第 100～260 根那一屏（写死，不挑不试）。
+WANT_NOTICE = [
+    ("窗口里动一处（改窗口里第一笔的 p0）", False),
+    ("只有窗口外动一处（改窗口外第一笔的 p0）", True),
+    ("往左补 500 根：下标全移、时间价格不动（＝真的换档）", True),
+    ("贴着窗口左沿收尾的那一笔（边界含等号）", False),
+    ("窗口落在数据右边之外（一根结构都没有）", True),
+]
+WANT_NOTICE_TEXT = "已接上更早的K线，左侧笔和线段按新的起点重算"
+WANT_NOTICE_MS = 3000
+NOTICE_KEY = {"窗口里动一处（改窗口里第一笔的 p0）": "same_in",
+              "只有窗口外动一处（改窗口外第一笔的 p0）": "same_out",
+              "往左补 500 根：下标全移、时间价格不动（＝真的换档）": "same_shift",
+              "贴着窗口左沿收尾的那一笔（边界含等号）": "same_edge",
+              "窗口落在数据右边之外（一根结构都没有）": "same_far"}
+
+
 def block(path=JS, begin=BEGIN, end=END):
     """抠出标记之间那一段。抠不到就抛 —— 被测量没了，尺子绝不假装绿。"""
     src = open(path, encoding="utf-8").read()
@@ -176,6 +195,36 @@ out.vet = P.vet.map((d) => {
   try { vetted(d); } catch (e) { throws = true; }
   return { bad: bad === null ? null : String(bad), throws: throws };
 });
+// ④ 换档那句话：拿真样本切一屏，只动结构，看 structKey 认不认（判据本身在围栏里，量的是真身）
+{
+  const fx = JSON.parse(fs.readFileSync(P.data.zec_1h, 'utf8'));
+  const bars = fx.bars, pens = fx.pens, segs = fx.segs;
+  const step = bars[1].t - bars[0].t;
+  const W = { t0: bars[100].t, t1: bars[260].t };                 // 写死的一屏，不挑不试
+  const d0 = { bars: bars, pens: pens, segs: segs };
+  const base = structKey(d0, W.t0, W.t1);
+  const ov = (o) => bars[o.i0].t <= W.t1 && bars[o.i1].t >= W.t0;
+  const iIn = pens.findIndex(ov), iOut = pens.findIndex((o) => !ov(o));
+  const tweak = (a, i) => a.map((o, k) => (k === i ? Object.assign({}, o, { p0: o.p0 * 1.002 }) : o));
+  const pre = []; for (let i = 500; i >= 1; i--) pre.push({ t: bars[0].t - i * step });
+  const mk = (o) => Object.assign({}, o, { i0: o.i0 + 500, i1: o.i1 + 500 });
+  // 贴着窗口左沿**收尾**的那一笔：i0 在窗口外、i1 落在窗口里 —— 边界含等号它才在
+  const edge = pens.filter((o) => bars[o.i1].t >= W.t0 && bars[o.i0].t < W.t0)[0];
+  const W3 = { t0: bars[edge.i1].t, t1: W.t1 };                   // 窗口左沿正好＝那一笔收尾的那根
+  const far0 = bars[bars.length - 1].t + step, far1 = far0 + 9 * step;
+  out.notice = {
+    ovCount: pens.filter(ov).length + segs.filter(ov).length,
+    same_in: structKey({ bars: bars, pens: tweak(pens, iIn), segs: segs }, W.t0, W.t1) === base,
+    same_out: structKey({ bars: bars, pens: tweak(pens, iOut), segs: segs }, W.t0, W.t1) === base,
+    same_shift: structKey({ bars: pre.concat(bars), pens: pens.map(mk), segs: segs.map(mk) },
+                          W.t0, W.t1) === base,
+    same_edge: structKey({ bars: bars, pens: pens.filter((o) => o !== edge), segs: segs }, W3.t0, W3.t1)
+               === structKey(d0, W3.t0, W3.t1),
+    same_far: structKey(d0, far0, far1) === '#',
+  };
+  out.notice_text = NOTICE_TEXT;
+  out.notice_ms = NOTICE_MS;
+}
 // 完全分类：白名单外的档一个都不许发出去
 out.ladder_all_pow2 = [];
 for (let v = 1; v <= 200; v++) out.ladder_all_pow2.push(ladderSpan(v));
@@ -275,6 +324,19 @@ def failures(js=None, quiet=True):
                         "、".join("%s=%r" % (k, g.get(k)) for k in off),
                         "、".join("%s=%r" % (k, want[k]) for k in off),
                         "手上第几档/到头没有一律以后台回显为准"))
+    # ④ 换档那句话：**只在可视窗口里的结构变了**的时候出
+    if got["notice"]["ovCount"] < 2:
+        bad.append(("④那句话", "这一屏里有多少结构", got["notice"]["ovCount"], "≥2",
+                    "窗口里没有结构 ⇒ 这一组全是空转，红绿都说明不了什么"))
+    for name, want_same in WANT_NOTICE:
+        g = got["notice"][NOTICE_KEY[name]]
+        if g != want_same:
+            bad.append(("④那句话", name, "相同" if g else "不同", "相同" if want_same else "不同",
+                        "只看可视窗口里的结构 ＋ 按时间戳比"))
+    if got["notice_text"] != WANT_NOTICE_TEXT:
+        bad.append(("④那句话", "提示的文案", got["notice_text"], WANT_NOTICE_TEXT, "契约原文，不许顺手改字"))
+    if got["notice_ms"] != WANT_NOTICE_MS:
+        bad.append(("④那句话", "提示停多久", got["notice_ms"], WANT_NOTICE_MS, "说好停 3 秒"))
     # ⑤ 体检：合格的那几行必须既不判坏也不抛；不合格的必须判坏 **且** vetted 抛（两件事一起错才叫没取到）
     for i, (name, _d, want) in enumerate(VET):
         g = got["vet"][i]
@@ -315,6 +377,13 @@ def report(quiet=False):
         for i, (name, _d, want) in enumerate(VET):
             print("     %-38s ⇒ %-28s（要 %s）"
                   % (name, got["vet"][i]["bad"] or "合格", "合格" if want else "判坏"))
+        print("\n  ④ 换档那句话（只在可视窗口里的结构变了才出）")
+        for name, want_same in WANT_NOTICE:
+            g = got["notice"][NOTICE_KEY[name]]
+            print("     %-46s ⇒ 两次的 key %s（要 %s）"
+                  % (name, "相同" if g else "不同", "相同" if want_same else "不同"))
+        print("     窗口里 %d 个结构 · 文案 %r · 停 %d ms"
+              % (got["notice"]["ovCount"], got["notice_text"], got["notice_ms"]))
         print("\n  ③ 那两句话")
         for i, (s, _) in enumerate(WANT_TEXT):
             print("     %-28s ⇒ %r" % (json.dumps(s, ensure_ascii=False), got["texts"][i]))
@@ -325,7 +394,8 @@ def report(quiet=False):
         return 1
     if not quiet:
         print(f"\n{GREEN}✓{OFF} 左沿那一刻的时间换档前后不变（{len(got['anchor'])} 个场景 / 真样本）、"
-              f"档位与停法逐格对得上、两个「到头」没塌成一句")
+              f"档位与停法逐格对得上、两个「到头」没塌成一句、"
+              f"换档那句话只认可视窗口里的结构（{len(WANT_NOTICE)} 个场景 / 真样本）")
     return 0
 
 
@@ -368,6 +438,21 @@ PROBES = [
      "s.nogain = prevLen != null && (d.bars || []).length <= prevLen;"),
     ("③话：封顶和真到头塌成一句", "if (s.stop === 'cap') return '已到本周期可加载的最早';",
      "if (s.stop === 'cap') return '已到最早';"),
+    # ★ ④ 这一组是「那句话什么时候出」的**判据本身**：四条各打一处，缺哪条这条口径就漏哪一面。
+    #   ①判据退化成「整个 payload 变没变」（不看窗口）②用下标比、不用时间戳比（补数据就当成变了）
+    #   ③边界不含等号（贴着左沿收尾的那一笔漏掉）④文案/时长被顺手改掉。
+    ("④那句话：判据不看可视窗口（整个 payload 变没变）",
+     "const part = (a) => (a || []).filter(inWin).map(row).join('|');",
+     "const part = (a) => (a || []).map(row).join('|');"),
+    ("④那句话：按下标比，不按时间戳比（换档就当成变了）",
+     "const row = (o) => `${ts(o.i0)}>${ts(o.i1)}@${o.p0},${o.p1}`;",
+     "const row = (o) => `${o.i0}>${o.i1}@${o.p0},${o.p1}`;"),
+    ("④那句话：窗口左沿的边界不含等号（贴着左沿收尾的那一笔漏掉）",
+     "ts(o.i1) >= t0 && ts(o.i0) <= t1", "ts(o.i1) > t0 && ts(o.i0) <= t1"),
+    ("④那句话：文案被顺手改了一个字",
+     "const NOTICE_TEXT = '已接上更早的K线，左侧笔和线段按新的起点重算';",
+     "const NOTICE_TEXT = '已接上更早的K线，左边笔和线段按新的起点重算';"),
+    ("④那句话：3 秒被改成 0.3 秒", "const NOTICE_MS = 3000;", "const NOTICE_MS = 300;"),
     ("⑤体检：把越界当合格（照画不误）", "const n = (d.bars || []).length, over = (i) => !(i >= 0 && i < n);",
      "const n = (d.bars || []).length, over = (i) => false;"),
     ("⑤体检：负下标不算越界", "!(i >= 0 && i < n)", "!(i < n)"),
@@ -380,7 +465,8 @@ def selftest():
     cases = []
     for name, a, z in PROBES:
         judge = ("①不跳" if name.startswith("①") else "③话" if name.startswith("③")
-                 else "⑤体检" if name.startswith("⑤") else "②规则")
+                 else "④那句话" if name.startswith("④") else "⑤体检" if name.startswith("⑤")
+                 else "②规则")
         # ★ 探针「红」的原因也算判据：改得跑不起来（node 报错）或者**尺子自己在 Python 里炸了**，
         #   都不算红 —— 那正是「红得对 ≠ 红对了地方」要拦的事。红必须是**判据**判出来的。
         try:

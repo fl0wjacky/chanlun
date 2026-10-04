@@ -22,7 +22,12 @@
 </header>
 
 <main>
-  <div id="chart" role="img" aria-label="缠论结构图：K线、笔、线段、中枢、买卖点"></div>
+  <div id="chart" role="img" aria-label="缠论结构图：K线、笔、线段、中枢、买卖点">
+    <!-- 换档之后那句话（可视窗口里的结构真变了才出，3 秒自己淡掉）。
+         放在 #chart **里面**：#chart 是 position:relative，这句话就永远只横跨图那一栏 ——
+         放到 main 下面的话，桌面端的 right:10px 会越过图层栏去（190px 那个数就得再抄一遍）。 -->
+    <div id="notice" class="notice" role="status" aria-live="polite"></div>
+  </div>
   <!-- 往左拖要更早 K 线时的话（加载中 / 已到最早）。挂在图上、不塞顶栏：用户在图左边做动作，话就说在他眼睛在的地方 -->
   <div id="more" class="more" role="status" aria-live="polite"></div>
   <aside id="panel" class="panel" aria-label="图层开关"></aside>
