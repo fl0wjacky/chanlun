@@ -35,6 +35,12 @@
 //            而同一次切法里**买卖点那层贡献的差是 0** —— 也就是说它绿得跟买卖点毫无关系。
 //        现在这一格跟 ⑦ 同一套读法（同一小块、同一组颜色、只看差），所以它绿一定是因为那几个点。
 //
+//   ⑱ 「非原文」那枚标（2026-10-04 补，card-6381042d-03f，小栋定 ①A）：**标 ⇔ `/api/meta` 的
+//      `measure_orig[看法] === false`**，不是前端认死「斜率」两个字。五格：真后台一致（后台还没这个
+//      字段时要求**一个标都没有**）／旧形状没有 measure_orig ⇒ 不凭空冒标／**四颗全是原文 ⇒ 一个标都没有**
+//      （牙齿，抓「写死斜率带标」）／只有斜率非原文 ⇒ 只它带标、名字不受污染、悬停那句在／名单换成
+//      `[{id, orig}]` ⇒ 照吃。★ 每格都印两串（页面带标的 vs meta 说的），免得后台没字段时成为**死闸**。
+//
 //   ★ 牙齿（2026-10-04 我补的）：把页面弄坏、看它**是红还是炸**。做法：去掉 web/app.js 里那句
 //     `b.dataset.measure = id;`（芯片照常渲染四颗按钮，只是工装点不着 `.mchip[data-measure="lines"]`）。
 //       摘掉修法 ⇒ rc=2「炸了：locator.click: Timeout 30000ms exceeded」——只印了 7 格，**没有判词**；
@@ -91,11 +97,18 @@ const ui = (p) => p.evaluate(() => {
   const g = document.getElementById('mgroup');
   return {
     has: !!g,
-    items: g ? [...g.querySelectorAll('.mchip')].map((b) => ({ id: b.dataset.measure, txt: b.textContent.trim(),
-                                                              on: b.getAttribute('aria-checked'),
-                                                              pressed: b.getAttribute('aria-pressed'),
-                                                              disabled: b.disabled,
-                                                              role: b.getAttribute('role'), title: b.title })) : [],
+    items: g ? [...g.querySelectorAll('.mchip')].map((b) => ({
+      // ★ `txt` 是**名字**，**不含**那枚「非原文」小标（`.nonorig`）—— 标是标记，不是名字的一部分。
+      //   拿整条 `textContent` 当名字的话，「名字是大白话」那一格会跟着标记一起变，两件事量成一件事，
+      //   而且以后换了标记的措辞，那一格会无缘无故地红。
+      id: b.dataset.measure,
+      txt: [...b.childNodes].filter((nd) => !(nd.nodeType === 1 && nd.classList.contains('nonorig')))
+                            .map((nd) => nd.textContent).join('').trim(),
+      mark: (b.querySelector('.nonorig') || {}).textContent || null,
+      on: b.getAttribute('aria-checked'),
+      pressed: b.getAttribute('aria-pressed'),
+      disabled: b.disabled,
+      role: b.getAttribute('role'), title: b.title })) : [],
     cap: g ? (g.querySelector('.mcap') || {}).textContent : null,
     meta: (document.getElementById('meta') || {}).textContent || '',
   };
@@ -403,6 +416,60 @@ const shotChart = async (p, tag) => {
      d4.opts.sawMeasure || '没带');
   ck('图脚不多那一格', !u4.meta.includes('背驰看法'));
   await d4.c.close();
+
+  // ---- ⑱：「非原文」那枚标（card-6381042d-03f，小栋 2026-10-04 定 ①A：留着，标明）
+  //  判据一句话：**标 ⇔ `/api/meta` 的 `measure_orig[看法] === false`**。两半都得量，少一半就有洞：
+  //    只量「斜率带标」⇒ 前端写死「斜率那颗挂标」照样绿（那一半是 ㉗ 抓的）；
+  //    只量「全是原文就一个标都没有」⇒ 该标的时候没标也照样绿（那一半是 ㉕㉘ 抓的）。
+  //  ★ 这一组的**每一格都自带见证**：把「页面上带标的」和「/api/meta 说的非原文」两串都印出来。
+  //    光印 ✓ 的话，真后台还没这个字段时那是**死闸**——绿的是「没跑」，不是「没事」。
+  console.log('25–29 「非原文」那枚标（谁是原文由 /api/meta 说，前端不许写死）');
+  const META4 = ['macd', 'slope', 'lines', 'peak'];
+  const fakeMeta = (measures, measure_orig) => ({ symbols: ['ZECUSDT'], tfs: ['15m'], measures, measure_orig });
+  // ㉕：真后台。两件事一起判（卡上要的「标记在」＋「默认不变」），因为「默认」那一半跟 ④ 同页同状态。
+  const real = await (async () => { try { return await (await fetch(PAGE + 'api/meta')).json(); } catch (e) { return null; } })();
+  const said = (real && typeof real.measure_orig === 'object' && real.measure_orig) || null;
+  const got = u0.items.filter((i) => i.mark).map((i) => i.id);
+  const want = said ? u0.items.filter((i) => said[i.id] === false).map((i) => i.id) : [];
+  ck('真后台：带标的那颗 ⇔ /api/meta 的 measure_orig 说它不是原文；且**默认没动**（亮着面积、图脚写面积）',
+     JSON.stringify(got) === JSON.stringify(want) && lit(u0) === 'macd' && u0.meta.includes('背驰看法 面积'),
+     `页面带标 ${JSON.stringify(got)} ／ meta 说非原文 ${said ? JSON.stringify(want) : '（**后台还没有 measure_orig** ⇒ 这一格要求一个标都没有）'}`
+     + ` ｜ 亮着 ${lit(u0)}、图脚…${u0.meta.slice(-16)}`);
+  // ㉖：旧形状（字符串列表、**没有** measure_orig）—— 新前端配旧后台就是这个状态，不许凭空冒标。
+  const d5 = await open(QS, { meta: { symbols: ['ZECUSDT'], tfs: ['15m'], measures: META4 } });
+  const u5 = await ui(d5.p);
+  ck('旧后台（有 measures、没有 measure_orig）⇒ 四颗照常、**一个标都没有**（读不到就不编）',
+     u5.items.length === 4 && u5.items.every((i) => !i.mark),
+     `带了 ${u5.items.length} 颗：${u5.items.map((i) => `${i.id}${i.mark ? '+' + i.mark : ''}`).join(' ')}`);
+  await d5.c.close();
+  // ㉗：全是原文 —— 牙齿。铁了心「斜率那颗挂标」的话，只有这一格抓得住。
+  const d6 = await open(QS, { meta: fakeMeta(META4, { macd: true, slope: true, lines: true, peak: true }) });
+  const u6 = await ui(d6.p);
+  ck('**四颗全是原文** ⇒ 一个标都不许有（牙齿：写死「斜率那颗带标」在这一格当场红）',
+     u6.items.length === 4 && u6.items.every((i) => !i.mark),
+     u6.items.map((i) => `${i.id}${i.mark ? '+' + i.mark : ''}`).join(' '));
+  await d6.c.close();
+  // ㉘：只有斜率非原文 —— 标挂在**该挂的那颗**上，且不污染名字、悬停那句在。
+  const d7 = await open(QS, { meta: fakeMeta(META4, { macd: true, slope: false, lines: true, peak: true }) });
+  const u7 = await ui(d7.p);
+  const slope7 = u7.items.find((i) => i.id === 'slope') || {}, macd7 = u7.items.find((i) => i.id === 'macd') || {};
+  ck('只有斜率那颗带标、其余三颗不带，且**名字还是「斜率」**（标不许混进名字里）',
+     JSON.stringify(u7.items.map((i) => [i.id, i.mark]))
+       === JSON.stringify([['macd', null], ['slope', '非原文'], ['lines', null], ['peak', null]])
+     && JSON.stringify(u7.items.map((i) => i.txt)) === JSON.stringify(['面积', '斜率', '黄白线', '峰值']),
+     u7.items.map((i) => `${i.id}:${i.txt}${i.mark ? '+' + i.mark : ''}`).join(' '));
+  ck('悬停那句话说出来了（「非原文」出现在页面上，就得答得出「那原文是什么」）',
+     /非原文/.test(slope7.title || '') && !/非原文/.test(macd7.title || ''),
+     `斜率 title=${JSON.stringify(slope7.title)}`);
+  await d7.c.close();
+  // ㉙：名单换成对象数组 —— **形状变了不许把整组静默抹掉**（Bram 选「旁边挂一张表」正是为了这个）。
+  const d8 = await open(QS, { meta: { symbols: ['ZECUSDT'], tfs: ['15m'],
+    measures: META4.map((id) => ({ id, orig: id !== 'slope' })) } });
+  const u8 = await ui(d8.p);
+  ck('名单换成 `[{id, orig}]` ⇒ 四颗照常渲染、标跟着走（这是「空数组 ⇒ 整组消失」那条路的护栏）',
+     u8.items.length === 4 && u8.items.filter((i) => i.mark).map((i) => i.id).join() === 'slope',
+     u8.has ? u8.items.map((i) => `${i.id}${i.mark ? '+' + i.mark : ''}`).join(' ') : '★ 整组没了 —— 这正是要防的静默消失');
+  await d8.c.close();
 
   await b.close();
   console.log(`\n${n - bad}/${n} 过${bad ? `，${bad} 条红` : ''}　截图：${OUT}`);

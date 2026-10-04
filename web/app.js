@@ -78,7 +78,9 @@ const paging = { span: 1, spanMax: null, earliest: false, nogain: false, stop: n
 //   **不吞** —— 宁可难看，也不能让后台真有的东西在页面上凭空消失。
 // （代号 → 人话那张表在图脚那一块里，见 RENDER_META —— 图和脚用的是同一份，别在这儿再抄一遍。）
 // list 空 ⇒ 这一组不画（离线样本、旧后台：不知道的事不编，页面上一个字都不多）。
-const measures = { list: [] };
+// ★ orig：**哪些看法不是 108 课原文**由 /api/meta 说（card-6381042d-03f），前端不写死名字。
+//   `orig[id] === false` ⇒ 那颗芯片挂「非原文」那枚小标；**读不到就一个标都不挂**（不知道的事不编）。
+const measures = { list: [], orig: {} };
 let viewSet = null;
 let settleTimer = 0;
 const SETTLE_MS = 40;      // 「自己摆视口」的认回声窗口，见 holdView()
@@ -931,20 +933,52 @@ setFold(false);
 // ★ 样式上跟图层开关**刻意分开**：图层是一排可多选的开关（`aria-pressed`，虚边），这一组是**单选**
 //   （`role=radio` / `aria-checked`，选中的那颗实心）—— 眼睛一扫就知道这两排不是一回事。
 // ★ 能切哪几种**以 /api/meta 的 measures 为准**（同上：名单不许写死在前端）。名单没到 ⇒ 这一组不画。
+//
+// ★★ measures 这个字段**两种形状都吃**（card-6381042d-03f）：
+//    ① **契约**（后端 `agent/bram/meta-measure-orig` = 787c923）：`measures` 还是字符串数组，
+//       「是不是原文」另挂一张 `measure_orig = {看法: 布尔}`；
+//    ② **往后挪一步的容错**：哪天有人把 `measures` 改成 `[{id, orig}, …]`，这里也照吃。
+//    为什么要留这半步：只认一种形状的话，后台先换、浏览器还缓存着旧 app.js（或反过来），过滤完是
+//    **空数组** ⇒ `list.length < 2` 直接 return ⇒ 整组「背驰看法」**从页面上消失**，而且**一声不响**
+//    （没报错、没空格子，就是没了）。那是最坏的失败方式 —— Bram 选①也是这个理由。
+//    ⇒ 名单照收；`orig` 读得到就读，**读不到就一个标都不挂**（不知道的事不编，跟图脚同一条规矩）。
+function readMeasures(m) {
+  const raw = Array.isArray(m && m.measures) ? m.measures : [];
+  const side = (m && typeof m.measure_orig === 'object' && m.measure_orig) || null;
+  const list = [], orig = {};
+  for (const it of raw) {
+    const id = typeof it === 'string' ? it : (it && typeof it.id === 'string' ? it.id : '');
+    if (!id) continue;
+    list.push(id);
+    if (side && typeof side[id] === 'boolean') orig[id] = side[id];   // ①：旁边那张表
+    else if (it && typeof it.orig === 'boolean') orig[id] = it.orig;  // ②：项自己带着
+  }
+  return { list, orig };
+}
+
 async function loadMeasures() {
   try {
     const r = await fetch('/api/meta');
     if (!r.ok) return;
     const m = await r.json();
-    const list = Array.isArray(m.measures) ? m.measures.filter((x) => typeof x === 'string' && x) : [];
+    const { list, orig } = readMeasures(m);
     if (list.length < 2) return;         // 只有一种看法＝没什么可切的；不画一个只有一个选项的开关
     measures.list = list;
+    measures.orig = orig;
     // 地址栏点名的那个后台认不认：名单外的一律退回缺省（缺省不在名单里才拿第一个）
     const want = new URLSearchParams(location.search).get('measure');
     if (want && !list.includes(want)) paging.measure = list.includes(DEFAULT_MEASURE) ? DEFAULT_MEASURE : list[0];
     buildMeasures();
   } catch (e) { /* 没后台（离线样本）或没这个接口：没有看法可切，页面上不多一个字 */ }
 }
+
+// 「非原文」那枚小标（card-6381042d-03f，小栋 2026-10-04 定 ①A：**留着，标明**）。
+// 短的是芯片上那两个字，长的是悬停那句 —— 措辞**只写这一处**（跟 MEASURE_NAME 一个道理：屏幕上一份、
+// title 里再抄一份，迟早一份改了另一份没改）。
+// ★ 这里写死的只有**说明那句话**，不是**哪几种看法非原文** —— 后者一律听 /api/meta 的（见 readMeasures）。
+//   「非原文」出现在页面上，就得答得出「那原文是什么」：答案是第 24 课只写柱子面积。
+const NON_ORIG_SHORT = '非原文';
+const NON_ORIG_LONG = '非原文：第 24 课讲到力度只写「柱子面积」，把斜率当力度尺是本引擎自己加的';
 
 function buildMeasures() {
   const box = el('panel');
@@ -960,6 +994,15 @@ function buildMeasures() {
     const b = document.createElement('button');
     b.className = 'chip mchip'; b.type = 'button'; b.dataset.measure = id;
     b.textContent = short; b.title = long;
+    // ★ 后台说它**不是原文**（`orig:false`）⇒ 挂上那枚小标，并把那句说明接到 title 后面。
+    //   判据是**后台那个布尔**，不是前端认死「斜率」两个字 —— 认死的话，后台哪天把某一条改成原文的、
+    //   或者新加一种原文没有的，标记就跟事实脱钩了，而屏幕上没人看得出来。**读不到 orig 就不挂**。
+    if (measures.orig[id] === false) {
+      const mark = document.createElement('span');
+      mark.className = 'nonorig'; mark.textContent = NON_ORIG_SHORT;
+      b.appendChild(mark);
+      b.title = `${long} ｜ ${NON_ORIG_LONG}`;
+    }
     b.setAttribute('role', 'radio');
     b.onclick = () => setMeasure(id);
     g.appendChild(b);
