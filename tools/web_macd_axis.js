@@ -20,6 +20,9 @@
 //   ④ **不虚胖**：轴跨 ≤ 2.5 × 窗口里数据的跨（防「拿了整份范围」）。
 //   ⑤ **缩放跟着缩**：把可见窗口收到最近 200 根 ⇒ 轴跨要明显变小，且在新窗口上照样罩得住。
 //   ⑥ 没误伤：主图那一格**仍然是对数**（mode=1）。
+//   ⑧ **像素上的形状**（Nova 2026-10-04 加的那条）：在**画出来的像素**上量三根柱子的高度，高度比要跟
+//      数据比一致（±6% ＋ 1.5px），而且符号对（正的在零线上边、负的在下边）。① 量的是比例尺、⑧ 量的是
+//      比例尺**画出来的结果** —— 光有 ① 的话，「比例尺对了但柱子按别的比例画」这种还是能溜过去。
 //   ⑦ **重建也管用**：点一次「MACD」那颗 chip（关 ⇒ 窗格收回去；开 ⇒ 重新建格、重新要数据），
 //      回来之后 ①②③④ 必须照样绿 —— 修法长在 `buildSub()` 里，这条防的是「只在第一次打开生效」。
 //   ⇒ 轴上刻度是从这根比例尺生成的，所以「轴的范围」就是「刻度的范围」：
@@ -101,6 +104,74 @@ async function readAxis(page) {
   }, ZOOM_N);
 }
 
+// 在**像素**上量柱子：柱子的颜色 LWC 会写进 data()（`{time, value, color}`），照那个颜色在那一列上数。
+// ★ 不去猜「哪张 canvas 画的是柱子」：四张都扫，谁数出来算谁（线只有 1px，柱子是几十 px，不会认错）。
+async function readPixels(page) {
+  return page.evaluate(() => {
+    const A = window.__app, S = A.sub.series, pane = A.chart.panes()[1].getHTMLElement();
+    const d = S.hist.data(); const vis = A.chart.timeScale().getVisibleLogicalRange();
+    const i0 = Math.max(0, Math.ceil(vis.from)), i1 = Math.min(d.length - 1, Math.floor(vis.to));
+    const win = d.slice(i0, i1 + 1);
+    // 挑三根：最大那根，＋ 各**贴近 max/2、max/4** 的两根。
+    // ★ 不能按名次挑（1st/3rd/8th）：hist 的头几名挤在一起（833/810/716），比值接近 1，量不出东西 ——
+    //   第一版就是这么写的，绿不了不是数错，是**这一格自己没牙**。按目标量级挑，比值才拉得开（2×、4×）。
+    const ranked = win.slice().sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+    const mx = ranked[0];
+    const near = (f) => ranked.reduce((a, b) => Math.abs(Math.abs(b.value) - Math.abs(mx.value) * f) < Math.abs(Math.abs(a.value) - Math.abs(mx.value) * f) ? b : a);
+    const picks = [mx, near(0.5), near(0.25)].filter(Boolean);
+    const hex = (c) => [parseInt(c.slice(1, 3), 16), parseInt(c.slice(3, 5), 16), parseInt(c.slice(5, 7), 16)];
+    // 判「这一像素算不算这根柱子」用**调色板里离谁最近**（不是硬阈值、也不是「比背景近」）：
+    //   · 硬阈值（±6）⇒ 柱子顶端那几像素是跟背景**混**出来的，整条漏掉 ⇒ 矮柱子量矮（偏差 2.2px，量错不是画错）
+    //   · 「比背景近」⇒ 黄白线（196,147,50）离柱子色(38,166,154)比离背景还近 ⇒ 被算成柱子（25px vs 真值 11px）
+    //   把一起画在这一格里的颜色都放进调色板，取最近的那个 ⇒ 两种病一起治。
+    // 判「这一像素算不算这根柱子」：**它是不是落在「柱子色 ↔ 背景色」这条线段上**（α 从 1 到 0）。
+    //   走过两条弯路，都写在下面（都是**量错**，不是画错）：
+    //   · 硬阈值（跟柱子色 ±6）⇒ 柱子顶端那几像素是跟背景**混**出来的，整条漏掉 ⇒ 矮柱子量矮 2.2px
+    //   · 「调色板里离谁最近」⇒ 白线那一列的抗锯齿**灰尾**（87,90,96）离柱子色比离背景还近 ⇒ 被算成柱子（25px vs 真值 11px）
+    //   灰尾不在那条线段上（它是「白线↔背景」那条线上的），落在线段外就判出去 —— 一句话把两种病一起治。
+    const bgPal = [16, 18, 24];
+    const onSegment = (px, q, bg) => {
+      let best = Infinity;
+      for (let a = 1; a >= 0.30; a -= 0.05) {
+        const r = Math.abs(px[0] - (a * q[0] + (1 - a) * bg[0]))
+                + Math.abs(px[1] - (a * q[1] + (1 - a) * bg[1]))
+                + Math.abs(px[2] - (a * q[2] + (1 - a) * bg[2]));
+        if (r < best) best = r;
+      }
+      return best <= 36;                 // 贴合那条线段（抗锯齿、以及跟网格线的轻微混合都容得下）
+    };
+    const canvases = [...pane.querySelectorAll('canvas')];
+    const out = picks.map((pt) => {
+      const x = A.chart.timeScale().timeToCoordinate(pt.time);
+      const rgb = hex(pt.color || '#26a69a');
+      let best = { px: 0, top: null, bot: null };
+      for (const cv of canvases) {
+        if (!cv.width || !cv.getBoundingClientRect().width) continue;
+        const s = cv.width / cv.getBoundingClientRect().width;
+        const cx = Math.round(x * s);
+        if (cx < 0 || cx >= cv.width) continue;
+        const col = cv.getContext('2d').getImageData(cx, 0, 1, cv.height).data;
+        const ys = [];
+        for (let y = 0; y < cv.height; y++) {
+          const px = [col[y * 4], col[y * 4 + 1], col[y * 4 + 2]];
+          if (onSegment(px, rgb, bgPal)) ys.push(y / s);
+        }
+        // ★ 量的是**柱尖**，不是「数了多少像素」：黄白线画在柱子**上头**，穿过那一列时会把柱子**切断**，
+        //   断成几截之后「数像素」就少算了（矮柱子 5.2px 量成 3px）。柱尖是那一列上柱子色**最远**的那一个像素，
+        //   断不断都取得到；柱高 = 柱尖到零线的距离（hist 的 base 就是 0 —— 这也是 ③ 那一格在管的事）。
+        if (ys.length > best.px) best = { px: ys.length, top: Math.min(...ys), bot: Math.max(...ys) };
+      }
+      const 零线y = Math.round(S.dif.priceToCoordinate(0) * 10) / 10;
+      // 正柱看顶、负柱看底 —— 那一个才是柱尖
+      const 柱尖 = pt.value >= 0 ? best.top : best.bot;
+      return { time: pt.time, value: pt.value, color: pt.color,
+               柱尖: 柱尖 == null ? null : Math.round(柱尖 * 10) / 10,
+               高: 柱尖 == null ? 0 : Math.round(Math.abs(零线y - 柱尖) * 10) / 10, 零线y };
+    });
+    return out;
+  });
+}
+
 async function judge(page, tag) {
   const a = await readAxis(page);
   const span = a.轴跨, wspan = a.窗口.跨;
@@ -111,6 +182,19 @@ async function judge(page, tag) {
   ok(`${tag}③ 零线`, '0 在轴里', a.零线y >= 0 && a.零线y <= a.H, `0 的 y=${a.零线y}，格高 ${a.H}`);
   ok(`${tag}④ 不虚胖`, '轴跨 ≤ 2.5 × 窗口数据跨', span <= 2.5 * wspan, `轴跨 ${span} vs 数据跨 ${wspan}（${r2(span / wspan)}×）`);
   ok(`${tag}⑥ 没误伤`, '主图那一格仍是对数（mode=1）', a.modes[0] === 1, `两格 mode=${JSON.stringify(a.modes)}（[0]=主图，[1]=副图）`);
+  // ⑧ 像素：三根柱子的**画出来**的高度比 vs 数据比
+  const px = await readPixels(page);
+  const k = px[0].高 / Math.abs(px[0].value);            // 拿最大那根定比例尺（px / 单位）
+  const 偏差 = px.map((q) => Math.round(Math.abs(q.高 - k * Math.abs(q.value)) * 10) / 10);
+  const 符号对 = px.every((q) => (q.value >= 0 ? q.柱尖 <= q.零线y + 2 : q.柱尖 >= q.零线y - 2));
+  const 比值 = px.map((q) => Math.round(q.高 / Math.abs(q.value) * 1e6) / 1e6);
+  // 「拉得开」按**数据**判（数据比 2× / 4× 才谈得上比高度比），像素上是 8px 起步才量得准
+  const d0 = Math.abs(px[0].value);
+  const 缩得开 = px[0].高 >= 8 && px[2].高 >= 5 && d0 / Math.abs(px[1].value) >= 1.5 && d0 / Math.abs(px[2].value) >= 2.0;
+  ok(`${tag}⑧ 像素形状`, '三根柱子的高度比＝数据比（±1.5px）、符号对、且比例拉得开',
+     符号对 && 缩得开 && 偏差.every((x) => x <= 1.5),
+     px.map((q, i) => `值 ${Math.round(q.value)}→柱尖 ${q.柱尖}（零线 ${q.零线y}，高 ${q.高}px，偏差 ${偏差[i]}px）`).join('；')
+     + `；px/单位 ${比值.join('/')}`);
   return a;
 }
 
