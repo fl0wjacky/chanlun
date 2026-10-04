@@ -140,6 +140,25 @@ _rp2 = rustchan_cases.check(_bs, _rc2)
 count("rust-chan 探针（live 抹掉）没红", 0 if _rp1 else 1, "　｜ 抓到 %d 处" % len(_rp1))
 count("rust-chan 探针（口径改标相同）没红", 0 if _rp2 else 1, "　｜ 抓到 %d 处" % len(_rp2))
 
+# ---- 画笔的区间最值（core/pen.RangeExt）：直接跟切片 max/min 在所有 (k0, k1) 上比 ----
+# 只比 build_pens 的输出证不了它对：Atlas 10-04 把右端点漏掉（hi = k1+size），9 份数据 × 两种笔照样 0 不同。
+from core.pen import RangeExt, check_range_ext                   # noqa: E402
+
+
+class _RangeExtNoRight(RangeExt):                                # 变异：区间漏掉右端点 k1
+    def ext(self, k0, k1, top):
+        k1 = min(k1, self.n - 1)
+        if k0 < 0 or k0 > k1:
+            raise ValueError
+        return RangeExt.ext(self, k0, k1 - 1, top) if k1 > k0 else (
+            self.tmax[k0 + self.size] if top else self.tmin[k0 + self.size])
+
+
+print("=" * 72)
+count("画笔区间最值 ≠ 切片", check_range_ext())
+_rn = check_range_ext(_RangeExtNoRight)
+count("区间最值探针（漏右端点）没红", 0 if _rn else 1, "　｜ 抓到 %d 处" % _rn)
+
 # ---- 变异测试：校验器必须能抓住故意做错的输入 ----
 print("=" * 72)
 print("[变异测试] 校验器对故意做错的输入必须报错")
