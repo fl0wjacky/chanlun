@@ -196,6 +196,16 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
 /* 实心用 --tx（墨色）当底、--bg 当字：**不借信号色**（--am 是「未收盘/旧数据」、--rd 是「出错」，
    借来当选中色，那两个色就不只一个意思了）。 */
 .mchip[aria-checked="true"] { background: var(--tx); border-color: var(--tx); color: var(--bg); }
+/* 「非原文」那枚小标（card-6381042d-03f）：这条看法是本引擎自己加的，108 课没有这种比法。
+   跟 chip 里那个 `<i>`（图层色块）**不是一个东西**：那是**色块**，这是**词** —— 别拿 `<i>` 顶上。
+   做法：缩一号 ＋ 一道发丝框，**靠形（方角小签）分主次，不靠暗** —— 小栋要的是「标明」，
+   所以它得读得出来；用 --dim 压下去（10px 才 3.4:1）就成了脚注符，那不叫标明。
+   ★ 选中那颗是实心（--tx 当底）⇒ 这里必须跟着翻成 --bg，否则墨底上再画墨字。 */
+.mchip .nonorig {
+  font-size: 10px; line-height: 1.45; color: var(--mu);
+  border: 1px solid var(--line); border-radius: 3px; padding: 0 3px; white-space: nowrap;
+}
+.mchip[aria-checked="true"] .nonorig { color: var(--bg); border-color: currentColor; }
 
 .chip i { width: 9px; height: 9px; border-radius: 2px; opacity: .45; }
 .chip[aria-pressed="true"] { color: var(--tx); border-color: var(--mu); background: var(--panel-hi); }
