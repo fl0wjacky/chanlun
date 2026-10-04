@@ -120,15 +120,20 @@ def _units(r, level):
 
 # 力度比较的四种看法（单选；docs/spec/背驰.md 第六节，Nova 2026-10-04 定）：
 #   macd  柱子面积（默认）· slope 斜率 · lines 黄白线不创新高低 · peak 柱子一波峰值
-MEASURES = ("macd", "slope", "lines", "peak")
+#   macd_or_lines  面积**或**黄白线，一条成立就算（spec 六.3，小栋 10-04 ②A）；两条都成立的点打 std=True
+MEASURES = ("macd", "slope", "lines", "peak", "macd_or_lines")
+OR_PARTS = ("macd", "lines")                 # macd_or_lines 由哪两半组成；两半各自原样走单选的判法
 # 哪几种是 108 课原文给的判法（小栋 10-04 ①A）：斜率（价差÷根数）是早期自己加的，原文没有，留着但要标明。
-MEASURE_ORIG = {"macd": True, "slope": False, "lines": True, "peak": True}
+MEASURE_ORIG = {"macd": True, "slope": False, "lines": True, "peak": True, "macd_or_lines": True}
 
 
 def series_for(bars, measure, fast=12, slow=26, sig=9):
-    """力度那一步要读的序列：lines 读 (DIF, DEA) 两条线，其余读 MACD 柱（slope 不读，照旧给柱）。"""
+    """力度那一步要读的序列：lines 读 (DIF, DEA) 两条线，其余读 MACD 柱（slope 不读，照旧给柱）。
+    macd_or_lines 两样都要：给 {"macd": 柱, "lines": (DIF, DEA)}。"""
     if measure not in MEASURES:
         raise ValueError("measure 只认 %s，给的是 %r" % ("/".join(MEASURES), measure))
+    if measure == "macd_or_lines":
+        return {m: series_for(bars, m, fast, slow, sig) for m in OR_PARTS}
     return macd_lines(bars, fast, slow, sig) if measure == "lines" else macd_hist(bars, fast, slow, sig)
 
 
@@ -159,7 +164,10 @@ def _diverges(A, C, want_down, data, measure, ratio):
     """C 对 A 背驰没有（signals 用这一份）。
     · macd / slope / peak：C 的力度 < A 的力度 × ratio（严格 <；macd/slope 就是原来那一行，默认逐位不变）；
     · lines：两条线都不创新低（向下：C 的 min ≥ A 的 min，两条线都要）/ 不创新高（向上：≤）。
-      持平算「不创新」（spec 六.1(b)）。ratio 对 lines 不适用（它比的不是大小，是创不创新）。"""
+      持平算「不创新」（spec 六.1(b)）。ratio 对 lines 不适用（它比的不是大小，是创不创新）。
+    · macd_or_lines：上面 macd 那条 **或** lines 那条，两半各自原样（spec 六.3(a)），不另发明比法。"""
+    if measure == "macd_or_lines":
+        return any(_diverges(A, C, want_down, data[m], m, ratio) for m in OR_PARTS)
     if measure == "lines":
         c, a = lines_extreme(C, data), lines_extreme(A, data)
         return all((x >= y) if want_down else (x <= y) for x, y in zip(c, a))
@@ -265,7 +273,7 @@ def beichi(AU, Z, k, kind, diverge_fn, hist, measure="macd", ratio=1.0,
 
 def signals(r, level="seg", measure="macd", ratio=1.0, fast=12, slow=26, sig=9,
             premise3=True, p3_strict=True):
-    """level: "seg" 线段中枢（默认）/ "pen" 类中枢；measure: MEASURES 四选一（默认 macd）；
+    """level: "seg" 线段中枢（默认）/ "pen" 类中枢；measure: MEASURES 五选一（默认 macd）；
     ratio: C < A × ratio 才算背驰（lines 不用 ratio）。
 
     premise3：前提③ **默认开**（小栋 2026-10-02 拍板 ①A）—— 用 check_premise3 挡掉
@@ -309,8 +317,11 @@ def signals(r, level="seg", measure="macd", ratio=1.0, fast=12, slow=26, sig=9,
                 continue
             C, c = AU[blk["c"]], blk["c"]
             confirmed = bool(blk["ok"]) and done_idx(c)
-            out.append(dict(kind=k1, bar=C["i1"], price=C["p1"], confirmed=confirmed, weak=False,
-                            level=level, center=k + 1, unit=c))
+            pt = dict(kind=k1, bar=C["i1"], price=C["p1"], confirmed=confirmed, weak=False,
+                      level=level, center=k + 1, unit=c)
+            if measure == "macd_or_lines":                                # 「更标准」只打标记，不另出点（六.3(b)）
+                pt["std"] = all(_diverges(blk["A"], C, want_down, hist[m], m, ratio) for m in OR_PARTS)
+            out.append(pt)
             if confirmed and c + 2 < len(AU):                             # 第二类：一买后第二段次级别走势的终点
                 s2 = AU[c + 2]
                 weak = (s2["p1"] < C["p1"]) if want_down else (s2["p1"] > C["p1"])
@@ -346,7 +357,10 @@ def _strength_by_definition(u, hist, measure):
 
 def _diverges_by_definition(A, C, want_down, data, measure, ratio):
     """_diverges 的**独立另写**（check_signals 用）：lines 的比较方向在这里另写一遍，
-    signals 那份写反了，复核才红得出来。"""
+    signals 那份写反了，复核才红得出来。macd_or_lines：两半各自用这里的另写版，再取「或」。"""
+    if measure == "macd_or_lines":
+        return (_diverges_by_definition(A, C, want_down, data["macd"], "macd", ratio)
+                or _diverges_by_definition(A, C, want_down, data["lines"], "lines", ratio))
     if measure == "lines":
         dif, dea = data
         for line in (dif, dea):
