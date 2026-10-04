@@ -327,8 +327,6 @@ chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
 
 async function loadEarlier(span) {
   const own = state.data;
-  // ★ 锚点必须在**动数据之前**抓：setData 一换，视口的下标含义就变了，那时候再问「左边是哪一根」已经晚了。
-  const anchor = anchorOf(own.bars, chart.timeScale().getVisibleLogicalRange());
   const id = ++paging.reqId;
   const symbol = el('symbol').value, tf = el('tf').value;
   paging.loading = true;
@@ -336,6 +334,11 @@ async function loadEarlier(span) {
   try {
     const d = await load(symbol, tf, span);
     if (id !== paging.reqId) return;             // 等数据这段时间里换了品种/周期 ⇒ 这一份丢掉，别画上去
+    // ★ 锚点要在**动数据之前**抓（setData 一换，视口的下标含义就变了），但要是**数据到手的这一刻**抓，
+    //   不是发请求的那一刻：这一趟可能要等一两秒，用户在这期间还会接着往左拖 —— 拿发请求时的位置去「放回原位」，
+    //   就是把他刚拖出来的画面**弹回去**（工装里量到过：拖到一半来的数据，画面被拽回 200px）。
+    //   此刻 state.data 还是旧那份，bar 的时间戳还是旧的下标，抓锚点正合适。
+    const anchor = anchorOf(own.bars, chart.timeScale().getVisibleLogicalRange());
     const grew = d.bars.length > own.bars.length;
     paging.span = Number.isFinite(d.span) ? d.span : (grew ? span : paging.span);   // 后台回显优先（它可能钳过档）
     if (Number.isFinite(d.span_max)) paging.spanMax = d.span_max;
