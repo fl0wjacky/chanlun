@@ -35,7 +35,7 @@ def fetch(symbol, interval, start_ms, end_ms):
             continue
         seen.add(k[0])
         res.append(dict(t=int(k[0]), o=float(k[1]), h=float(k[2]),
-                        l=float(k[3]), c=float(k[4])))
+                        l=float(k[3]), c=float(k[4]), v=float(k[5])))   # v＝成交量（副图要；引擎不读）
     res.sort(key=lambda r: r["t"])
     return res
 

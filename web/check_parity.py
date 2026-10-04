@@ -232,6 +232,57 @@ def run_span(quiet=False):
     return bad
 
 
+def get_path(port, path):
+    req = urllib.request.Request("http://127.0.0.1:%d%s" % (port, path), headers={"Accept-Encoding": "gzip"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        body = r.read()
+        if r.headers.get("Content-Encoding") == "gzip":
+            body = gzip.decompress(body)
+    return json.loads(body)
+
+
+def run_macd(quiet=False):
+    """副图 /api/macd：每份数据上 ① t 跟 /api/chart 的 bars 逐根同一份；② dif / dea / hist ≡ 引擎
+    macd_lines(那一份 K 线, 12, 26, 9)、hist = dif − dea，逐个浮点相等；③ hist_def / params / 头部回显对；
+    ④ 成交量：给夹具每根注入 v，/api/chart 的 bars[].v 原样带回。"""
+    eng = sys.modules["core.signals"]                     # 模块对象（core/__init__ 把 signals 导成了函数）
+    files = sorted(os.path.basename(p) for p in glob.glob(data("*.json")))
+    cases = [(fn, dataset(fn)) for fn in files if dataset(fn)]
+    bars_by_key = {}
+    for fn, key in cases:
+        b = json.load(open(data(fn), encoding="utf-8"))
+        bars_by_key[key] = [dict(x, v=round(1000 + 7.5 * i, 2)) for i, x in enumerate(b)]   # 注入成交量
+    bad = n = 0
+    with running(bars_by_key) as port:
+        for fn, (sym, tf) in cases:
+            ch = get(port, sym, tf)
+            mc = get_path(port, "/api/macd?symbol=%s&tf=%s" % (sym, tf))
+            bars = [dict(t=x["t"], o=x["o"], h=x["h"], l=x["l"], c=x["c"]) for x in ch["bars"]]
+            dif, dea = eng.macd_lines(bars, 12, 26, 9)
+            hist_eng = eng.macd_hist(bars, 12, 26, 9)             # 背驰判断读的就是这一份柱子
+            diffs = []
+            if mc.get("t") != [x["t"] for x in ch["bars"]]:
+                diffs.append("t 跟 /api/chart 的 bars 不是同一份")
+            if mc.get("dif") != dif or mc.get("dea") != dea:
+                diffs.append("dif/dea ≠ 引擎 macd_lines")
+            if mc.get("hist") != hist_eng:
+                diffs.append("hist ≠ 引擎 macd_hist（副图跟背驰判断不是同一份柱子）")
+            if (mc.get("hist_def"), mc.get("params")) != ("dif-dea", [12, 26, 9]):
+                diffs.append("约定字段不对：%r %r" % (mc.get("hist_def"), mc.get("params")))
+            if any(mc.get(k) != ch.get(k) for k in ("span", "span_max", "earliest", "fetched_at")):
+                diffs.append("头部回显跟 /api/chart 不一致")
+            if [x.get("v") for x in ch["bars"]] != [x["v"] for x in bars_by_key[(sym, tf)]]:
+                diffs.append("bars[].v 没原样带回")
+            n += len(dif)
+            bad += bool(diffs)
+            if not quiet:
+                print("%s %-18s %s %-3s 副图 %5d 根%s" % ("✗" if diffs else "✓", fn, sym, tf, len(dif),
+                                                       "  ← " + " ｜ ".join(diffs) if diffs else ""))
+    if not quiet:
+        print("副图 MACD %d 份、%d 根：不一致 %d 份（逐根浮点相等）" % (len(cases), n, bad))
+    return bad
+
+
 def self_test():
     """服务侧三种「看起来能跑、其实算错」：精度错、背驰度量错、一个类中枢的 ZG 差一跳 —— 对账必须各自红。"""
     arms = []
@@ -286,6 +337,41 @@ def self_test():
             server.build_payload = real
     arms.append(("扩展档最右一笔被改", arm_span_tail))
 
+    def arm_hist_x2():
+        orig = server._macd_body
+
+        def x2(slot, symbol, tf):
+            d = json.loads(orig(slot, symbol, tf))
+            d["hist"] = [2 * h for h in d["hist"]]
+            return json.dumps(d, separators=(",", ":")).encode()
+        server._macd_body = x2
+        try:
+            return run_macd(quiet=True)
+        finally:
+            server._macd_body = orig
+    arms.append(("副图 hist 乘 2", arm_hist_x2))
+
+    def arm_macd_other_bars():
+        real = server.macd_lines
+        server.macd_lines = lambda bars, *a: real(bars[1:] + bars[:1], *a)   # 喂的不是同一份（轮转一根）
+        try:
+            return run_macd(quiet=True)
+        finally:
+            server.macd_lines = real
+    arms.append(("副图用的不是同一份 K 线", arm_macd_other_bars))
+
+    def arm_hist_not_engine():
+        """Atlas 10-04 的打法：引擎柱子改成 ×2（背驰用的那份变了），副图却自己减 DIF−DEA ⇒ 必须红。"""
+        eng = sys.modules["core.signals"]
+        real_mh, real_h = eng.macd_hist, server._hist
+        eng.macd_hist = lambda bars, *a: [2 * h for h in real_mh(bars, *a)]
+        server._hist = lambda bars: [x - y for x, y in zip(*eng.macd_lines(bars, *server.MACD_PARAMS))]
+        try:
+            return run_macd(quiet=True)
+        finally:
+            eng.macd_hist, server._hist = real_mh, real_h
+    arms.append(("副图自己减柱子、引擎柱子 ×2", arm_hist_not_engine))
+
     miss = 0
     for name, f in arms:
         n = f()
@@ -300,4 +386,5 @@ if __name__ == "__main__":
         sys.exit(self_test())
     rc = run()[0]
     rc = rc or (1 if run_span() else 0)
+    rc = rc or (1 if run_macd() else 0)
     sys.exit(rc)
