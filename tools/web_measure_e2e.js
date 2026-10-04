@@ -35,6 +35,14 @@
 //            而同一次切法里**买卖点那层贡献的差是 0** —— 也就是说它绿得跟买卖点毫无关系。
 //        现在这一格跟 ⑦ 同一套读法（同一小块、同一组颜色、只看差），所以它绿一定是因为那几个点。
 //
+//   ★ 牙齿（2026-10-04 我补的）：把页面弄坏、看它**是红还是炸**。做法：去掉 web/app.js 里那句
+//     `b.dataset.measure = id;`（芯片照常渲染四颗按钮，只是工装点不着 `.mchip[data-measure="lines"]`）。
+//       摘掉修法 ⇒ rc=2「炸了：locator.click: Timeout 30000ms exceeded」——只印了 7 格，**没有判词**；
+//       现在   ⇒ rc=1、**24 格全印**，⑧ 红在那一格上并写着「★ 那颗芯片**点不动**：…」，
+//                ⑨⑩⑫⑮⑰⑲ 跟着红（后面那几格是这次没换成的后果，不是新账）。
+//     ★ 两处都守住才算「不炸」：**点不动**（`sw()` 里 click 的 try）＋**读不到亮着的那颗**
+//       （`lit()` 的 `(… || {}).id`）。原来只有前半边，坏页面会一路炸到第 ⑩ 格。
+//
 // 跑法：
 //   1) 真后台，**只绑回环**（部署纪律：不许绑全网卡）：
 //        python3 web/server.py --port 8792
@@ -93,6 +101,11 @@ const ui = (p) => p.evaluate(() => {
   };
 });
 const waitData = (p) => p.waitForFunction(() => window.__app && window.__app.state && window.__app.state.data, null, { timeout: 120000 });
+// 「亮着的那颗是哪个」——**读不到就回 undefined**（`(… || {}).id`），别当场炸。
+// ★ 一处炸了整支工装就 rc=2、后面的格一个字都不印 ⇒ 页面坏的时候是**没有判词**的，比红还糟。
+//   三处 `items.find(…).id` 原来都是裸链（⑩⑲ 那两处会真炸：页面上没有一颗 aria-checked=true 时
+//   find 回 undefined）。判据一个字没改：undefined !== 'lines' 照样红，只是红得出来。
+const lit = (u) => (u.items.find((i) => i.on === 'true') || {}).id;
 // 只拍图那一栏（顶栏/图脚那些字不参与）：像素一样＝这一屏没变
 const shotChart = async (p, tag) => {
   const box = await p.locator('#chart').boundingBox();
@@ -162,7 +175,7 @@ const shotChart = async (p, tag) => {
      u0.items.map((i) => i.txt).join(' '));
   ck('是**单选**的形状：role=radio ＋ aria-checked，不是图层那排的 aria-pressed',
      u0.items.every((i) => i.role === 'radio' && i.pressed === null) && u0.items.filter((i) => i.on === 'true').length === 1
-     && u0.items.find((i) => i.on === 'true').id === 'macd');
+     && lit(u0) === 'macd');
   ck('图脚写着当前用的那种（默认＝面积）', u0.meta.includes('背驰看法 面积'), u0.meta.slice(-40));
   // ★ 买卖点默认是**关**的：这一组只换**买卖点**的画法 ⇒ 层关着的时候换看法，屏幕上**什么都不会变**，
   //   那就得**点不动**（点了没反应，用户会当成坏了）。手机没有 hover，所以标题那行也得说。
@@ -261,20 +274,29 @@ const shotChart = async (p, tag) => {
   //    原来在这行 Timeout 炸了、rc=2，一个字都没印出来）。**炸掉不等于红** ——
   //    红要红在某一格上，并且说出它当时看到了什么（发出的是什么、回显是什么、图脚写的什么）。
   //    所以超时收成一个返回值，让下面几格照实报。
+  //    ★ 同一笔账的另一半（2026-10-04 我补的）：**点不动也不许炸**。上面那句守的是「点了之后没换过来」，
+  //      可 `.mchip[data-measure=…]` 本身找不着／被置灰时，**click() 自己就会抛**（Playwright 等
+  //      actionability 等满 30s 再扔），一样是 rc=2、一个字都不印 —— 而且它比超时更早、更靠前，
+  //      栽在它上面的话连「发出的是什么」都读不到。所以点成了才去等；没点成就把原因写进 clk，
+  //      让 ②③④ 那几格照旧红、并且红的时候说得出「芯片点不动：…」。
   const sw = async (id) => {                    // 点一颗看法、等它真换过来；回这一趟发出的 measure ＋ 当时的状态
     const kk = reqs.length;
-    await p.locator(`.mchip[data-measure="${id}"]`).click();
-    let ok = true;
+    let ok = true, clk = null;
     try {
-      await p.waitForFunction((m) => window.__app.state.data && window.__app.state.data.measure === m, id, { timeout: 30000 });
-    } catch (e) { ok = false; }
+      await p.locator(`.mchip[data-measure="${id}"]`).click();
+    } catch (e) { ok = false; clk = String((e && e.message) || e).split('\n')[0]; }
+    if (ok) {
+      try {
+        await p.waitForFunction((m) => window.__app.state.data && window.__app.state.data.measure === m, id, { timeout: 30000 });
+      } catch (e) { ok = false; }
+    }
     await sleep(900);
     const got = await p.evaluate(() => ({
       echo: window.__app.paging.measure,
       drawn: window.__app.state.data && window.__app.state.data.measure,
       footer: (document.getElementById('meta') || {}).textContent || '',
     }));
-    return { ok, id, sent: reqs.slice(kk).map((u) => new URL(u).searchParams.get('measure')), got };
+    return { ok, id, clk, sent: reqs.slice(kk).map((u) => new URL(u).searchParams.get('measure')), got };
   };
   let s0, s1, px0, px1, sent, redo = 0;
   for (;;) {
@@ -289,10 +311,11 @@ const shotChart = async (p, tag) => {
   const u1 = await ui(p);
   const nAfter = await countMarks(diffBoxes);      // ⑰ 的「切之后」这一读（此刻已经是黄白线）
   const why = `发出的 measure=${JSON.stringify(sent.sent)}；回显=${JSON.stringify(sent.got.echo)}` +
-              `、画的是=${JSON.stringify(sent.got.drawn)}；图脚尾=…${sent.got.footer.slice(-28)}`;
+              `、画的是=${JSON.stringify(sent.got.drawn)}；图脚尾=…${sent.got.footer.slice(-28)}` +
+              (sent.clk ? `；★ 那颗芯片**点不动**：${sent.clk}` : '');
   ck('点的是「黄白线」⇒ 发出去的就是 lines', sent.ok && sent.sent.length === 1 && sent.sent[0] === 'lines', why);
   ck('图脚跟着**回显**换：背驰看法 黄白线', u1.meta.includes('背驰看法 黄白线'), u1.meta.slice(-40));
-  ck('亮着的那颗也跟着回显换', u1.items.find((i) => i.on === 'true').id === 'lines');
+  ck('亮着的那颗也跟着回显换', lit(u1) === 'lines');
   ck('结构逐字节不变（bars/pens/segs/centers/seg_centers）',
      s0.fetched === s1.fetched && s0.struct === s1.struct && s0.nbars === s1.nbars,
      s0.fetched === s1.fetched
@@ -359,7 +382,7 @@ const shotChart = async (p, tag) => {
   const first = d2.reqs.length ? new URL(d2.reqs[0]).searchParams.get('measure') : null;
   const u2 = await ui(d2.p);
   ck('**第一趟**图表请求就带 lines（不是先要缺省再补一趟）', first === 'lines', `第一趟 measure=${first}，共 ${d2.reqs.length} 趟`);
-  ck('图脚与选中态都说黄白线', u2.meta.includes('背驰看法 黄白线') && u2.items.find((i) => i.on === 'true').id === 'lines');
+  ck('图脚与选中态都说黄白线', u2.meta.includes('背驰看法 黄白线') && lit(u2) === 'lines');
   await d2.c.close();
 
   // ---- ⑪：?measure=乱写
