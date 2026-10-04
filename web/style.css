@@ -259,6 +259,8 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
      由它让出来（原先这条账挂在收起开关上 —— 它就是当时最下面那一格）。展开的时候下面还长着图例跟
      页脚，那条账归 `.foot`（它一直带着 env()）。 */
   body.m-fold .panel { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+  /* 收起时开关跟 `.panel` 同一条账（两处一起加、一起不加 —— 差一截就是「开关飘起来压住图」） */
+  body.m-fold .fold { bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
   .chip { flex: 0 0 auto; }
   /* ★ 手机上这一组**排到最后**（`order` 只在窄屏挂）。竖着排的时候它在最上面合情合理（决定算什么），
      可手机是一根横滑条：插在最前面会把**天天用的** 笔/线段/线段中枢 挤到屏幕外，得先滑一下才点得到。
@@ -319,9 +321,15 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
      底色用**不透明的 `--panel`**：它压在横滑条上面，底下划过去的 chip 得被挡住（透明就等于两块字叠一起）。
      右边那一格的宽度由 app.js 量真身写进 `--fold-w`（见 `.panel` 的 padding-right）——
      这儿不抄一个数：开关的字改了、字号改了，抄的数就跟它对不上，条子滑到头就会有一两颗 chip 停在它底下。 */
+  /* ★ iPhone 底部安全区（Atlas 复核 e72d11e 时抓到的，工装量不到 —— playwright 给的是 0，得注入）：
+     这一截**只在收起时**算。展开的时候开关下面还长着图例跟页脚，屏幕底下那条横条轮不到它 ——
+     账归 `.foot`（它一直带着 env()）。所以口径必须跟 `.panel` 那条**一模一样**（见上面 body.m-fold .panel）：
+     收起时两边一起加、展开时两边一起不加。原先这里**一直**加着而 .panel 只在收起时加 ⇒ 注入 34px 之后
+     展开态开关比自己那一行高 34px：实测 390×844 上开关 589–619、图在 614 结束 ⇒ 压住图的最底下 25px，
+     还离开了图层条（条在 614–661）。 */
   .fold {
     position: absolute; right: 8px; z-index: 3;
-    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+    bottom: 8px;
     display: flex; align-items: center; gap: 6px;
     padding: 5px 10px; cursor: pointer; border-radius: 999px;
     background: var(--panel); color: var(--mu); font: inherit; font-size: 12px;

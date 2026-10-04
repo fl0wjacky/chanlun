@@ -69,6 +69,28 @@ const probe = (p) => p.evaluate(() => {
 const share = (m) => Math.round((m.chart.h / m.vh) * 100);
 const overlap = (a, b) => (a && b ? Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) : 0);
 
+// ⑦ **注入一条 iPhone 底部安全区**（34px，就是那条横条）：收起／展开两态，开关都得贴在图层条那一行里。
+//   为什么非得注入：playwright 给的 `env(safe-area-inset-bottom)` 是 0 —— 这个病在工装里**天然量不到**，
+//   是真机上才会踩的（Atlas 2026-10-04 复核 e72d11e 时抓到的：他把 CSS 里那几处 env() 换成 34px 才看见）。
+//   病的形状：`.fold` 的 bottom **一直**加着安全区，而 `.panel` 只在**收起**时加 ⇒ 展开态开关比自己那一行
+//   高 34px：390×844 上开关 589–619、图在 614 结束 ⇒ **压住图的最底下 25px**，还离开了图层条（条在 614–661）。
+//   注入口径：把送出去的 style.css 里 `env(safe-area-inset-bottom, 0px)` 全换成 34px（跟真机上那条一样宽）。
+//   ★ 锚点先数：一处都没换到 ⇒ 这格是空的（rc=2 报出来），不许静悄悄绿。
+const SAFE_PX = 34;
+// ★ 基准取**条子里那些 chip 自己**的上下沿（＝那一行的内容），**不是 `#panel` 的 rect**：
+//   rect 里含着收起时那 42px 的安全区内边距，拿它当基准，收起态会算出一个假的 -42px（第一版就是这么错的）。
+const probeFold = (p) => p.evaluate(() => {
+  const r = (e) => { const b = e.getBoundingClientRect();
+    return { top: Math.round(b.top), bottom: Math.round(b.bottom), left: Math.round(b.left), right: Math.round(b.right) }; };
+  const panel = document.getElementById('panel');
+  const chips = [...panel.querySelectorAll('.chip')].map((e) => e.getBoundingClientRect());
+  return { chart: r(document.getElementById('chart')), panel: r(panel),
+           row: chips.length ? { top: Math.round(Math.min(...chips.map((c) => c.top))),
+                                 bottom: Math.round(Math.max(...chips.map((c) => c.bottom))) } : null,
+           padBottom: getComputedStyle(panel).paddingBottom,
+           fold: r(document.getElementById('fold')), tx: document.getElementById('fold-tx').textContent };
+});
+
 (async () => {
   const b = await chromium.launch();
   const bad = [], lines = [];
@@ -76,6 +98,41 @@ const overlap = (a, b) => (a && b ? Math.max(0, Math.min(a.right, b.right) - Mat
     lines.push(`  ${ok ? '✓' : '★'} ${name}\n      ${detail}`);
     if (!ok) bad.push(name);
   };
+  {
+    const ctx = await b.newContext({ viewport: { width: 390, height: HEIGHT }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    const p = await ctx.newPage();
+    let hits = 0;
+    await p.route('**/style.css*', async (route) => {
+      const r = await route.fetch();
+      const t = await r.text();
+      hits = (t.match(/env\(safe-area-inset-bottom, 0px\)/g) || []).length;
+      await route.fulfill({ status: 200, contentType: 'text/css',
+        body: t.replace(/env\(safe-area-inset-bottom, 0px\)/g, `${SAFE_PX}px`) });
+    });
+    await p.goto(`${Page}?symbol=ZECUSDT&tf=1h`, { waitUntil: 'domcontentloaded' });
+    await p.waitForFunction(() => window.__app && window.__app.state.data, null, { timeout: 30000 }).catch(() => {
+      console.error('✗ 注入那一格：页面没起来（后台没起？）'); process.exit(2); });
+    await sleep(1000);
+    if (!hits) { console.error('✗ 注入那一格：style.css 里一处 env(safe-area-inset-bottom, 0px) 都没换到 —— 锚点没命中，这格是空的。'); process.exit(2); }
+    const shut = await probeFold(p);
+    await p.evaluate(() => document.getElementById('fold').click());
+    await sleep(400);
+    const open = await probeFold(p);
+    await p.evaluate(() => document.getElementById('fold').click());     // 点回去，别影响别的格
+    // 收起／展开两态：开关都跟**那一行的 chip** 同一条底边（安全区两处一起加、或者一起不加）
+    const 对齐 = (m) => m.row && Math.abs(m.fold.bottom - m.row.bottom) <= 2;
+    // 展开：不压图 —— 真实的矩形相交，不是比谁的下沿大（开关在图的下面、各有各的带子）
+    const 压图 = (m) => Math.max(0, Math.min(m.fold.bottom, m.chart.bottom) - Math.max(m.fold.top, m.chart.top));
+    say(对齐(shut) && 对齐(open) && 压图(open) <= 1,
+      `⑦ 390 注入 ${SAFE_PX}px 底部安全区：收起／展开两态开关都跟 chip 同一条底边、且不压图`,
+      `换了 ${hits} 处 env()；收起：开关底 ${shut.fold.bottom} vs chip 行底 ${shut.row.bottom}`
+      + `（差 ${shut.fold.bottom - shut.row.bottom}px，条内边距 ${shut.padBottom}）；`
+      + `展开：开关 ${open.fold.top}–${open.fold.bottom} vs chip 行 ${open.row.top}–${open.row.bottom}、`
+      + `图 ${open.chart.top}–${open.chart.bottom}（开关「${open.tx}」）⇒ 压图 ${压图(open)}px`
+      + (对齐(shut) && 对齐(open) && 压图(open) <= 1 ? ''
+         : '　★ 两态的安全区口径必须一样（跟 `.panel` 那条）：收起时两边一起加、展开时两边一起不加'));
+    await ctx.close();
+  }
   for (const W of WIDTHS) {
     const ctx = await b.newContext({ viewport: { width: W, height: HEIGHT }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
     const p = await ctx.newPage();
@@ -126,6 +183,7 @@ const overlap = (a, b) => (a && b ? Math.max(0, Math.min(a.right, b.right) - Mat
   console.log(`\n== 手机图占比（真后台 ${Page}）==\n` + lines.join('\n'));
   console.log(bad.length
     ? `\n★ ${bad.length} 条没过：\n  - ` + bad.join('\n  - ')
-    : `\n✓ 六条全过（${WIDTHS.join('/')} 三个宽都 ≥${MIN_SHARE}%）—— 改前是 78%（徽标两行 106px）＋ 收起开关自己占 29.5px 一行。`);
+    : `\n✓ 七条全过（${WIDTHS.join('/')} 三个宽都 ≥${MIN_SHARE}%）—— 改前是 78%（徽标两行 106px）`
+      + `＋ 收起开关自己占 29.5px 一行；⑦ 那条（注入 ${SAFE_PX}px 安全区）改前展开态压住图 25px。`);
   process.exit(bad.length ? 1 : 0);
 })().catch((e) => { console.error('尺自己炸了：', e.message); process.exit(2); });
