@@ -43,9 +43,18 @@
      「币安缓存」那一态不是洁癖：stale 为真时角上同时挂着「★ 旧数据（本轮拉取失败）」，
      图脚要是还说「实时」，同一屏上两句话就打架了。
 
+第三件（2026-10-04，卡 card-84091d2d-c97）：图脚多了一格「背驰看法」——
+  `+ measureText(d)` 插在「数据源」前面，写的是**当前画的那份**是哪种力度比较（面积/斜率/黄白线/峰值）。
+  ★★ 跟「数据源」那格同一个坑位：**认的必须是 `d.measure`（后台那份响应里的回显）**，
+     不是用户点的那颗、也不是前端那张代号→人话的表。用户点的那颗可能没换成（后台 400/503），
+     屏幕上到底画的是哪种，只有回的那份说了算。探针 ⑫ 钉的就是这个（写死缺省 ⇒ 必须红）。
+  ★ 三条支路各有判据：四种名字（回显说话）／**后台新加的第五种原样印代号**（不吞，Nova 10-04 定的
+     「宁可难看也不藏」）／**没有这个字段就不出现这一格**（旧后台、离线样本 —— 不知道的事不编）。
+     所以这格「切不到」**不是错**，跟「数据源」那格必须有个值不一样，两把切法分开写。
+
 跑法：
-  python3 tools/web_footer_check.py            # 主跑：拿实时规模的样本量 ＋ 数据源那格
-  python3 tools/web_footer_check.py --selftest # 探针：十格都得变红（尺子自己先证明会红）
+  python3 tools/web_footer_check.py            # 主跑：拿实时规模的样本量 ＋ 数据源/背驰看法那两格
+  python3 tools/web_footer_check.py --selftest # 探针：十三格都得变红（尺子自己先证明会红）
 """
 import json
 import os
@@ -227,6 +236,43 @@ def data_source_check(quiet=False):
     return got, ok
 
 
+# 「背驰看法」那格（card-84091d2d-c97，2026-10-04 加）：跟「数据源」那格同一套规矩 ——
+# 模板认的是 **d.measure（后台的回显）**，不是用户点的那颗、也不是前端的名单。
+MEAS_RE = re.compile(r"｜\s*背驰看法\s*(\S+)")
+
+
+def measure_cell(meta):
+    """从整句图脚里切出「｜ 背驰看法」后面那个名字。切不到 ⇒ None。
+    ★ 跟 source_of 不一样：**切不到不是错**。没有这个字段（旧后台／离线样本）时这一格本来就
+      不该出现，所以「不出现」是要判成的那个态；而「数据源」那格是必须总有个值。
+      两边口径不同就写两把切法，别为省事合成一把（合成那把会把「该不该出现」这件事吞掉）。"""
+    m = MEAS_RE.search(meta)
+    return m.group(1).strip() if m else None
+
+
+def measure_check(quiet=False):
+    """判据：图脚那格＝**它自己给的那份回显**，四态。
+
+    黄白线（回显 lines）／面积（回显 macd）／后台新加的第五种**原样印代号**（不吞，Nova 定的
+    「宁可难看也不藏」）／没有这个字段 ⇒ **整格不出现**（不知道的事不编）。
+    另加一验：新格子插在「数据源」那格前面，不许把它挤坏。
+
+    ★ 报红只印实际印出来的值，不印预设的原因（跟 data_source_check 同一条规矩）。"""
+    got = (measure_cell(footer_text(dict(PAYLOAD, measure="lines"))),
+           measure_cell(footer_text(dict(PAYLOAD, measure="macd"))),
+           measure_cell(footer_text(dict(PAYLOAD, measure="zigzag"))),
+           measure_cell(footer_text(PAYLOAD)))
+    want = ("黄白线", "面积", "zigzag", None)
+    src_got = source_of(footer_text(dict(PAYLOAD, measure="lines")))
+    src_ok = src_got == "币安实时"
+    ok = got == want and src_ok
+    if not quiet:
+        for name, g, w in zip(("回显 lines", "回显 macd", "名单外的第五种（原样印）", "没有这个字段（旧后台/样本）"), got, want):
+            print("  背驰看法那格：%-28s ⇒ %-10r（要 %r）" % (name, g, w))
+        print("  背驰看法那格：%-28s ⇒ %r（要 '币安实时'）" % ("它后面那格「数据源」", src_got))
+    return got, src_got, ok
+
+
 def mutate(js, old, new):
     """探针里改源码用。**改动必须真落到抠出来的那段上** —— 落不上就抛，不许白捡一个红：
     Atlas 2026-10-03 那格探针就是这么假红的（他删的是标记块里那一行，块因为空了才红，
@@ -398,6 +444,33 @@ process.stdout.write(JSON.stringify({t: sigTierText([
     finally:
         os.unlink(tmp)
 
+    # ⑪–⑬ 「背驰看法」那格的三格探针（2026-10-04 加这一格时配的）。
+    #    判据是「名字＝**d.measure 那份回显**」⇒ 三件事都得钉住：接线在不在、认不认回显、缺字段编不编。
+    def _mrun(bjs, payload):
+        try:
+            return measure_cell(footer_text(payload, block_js=bjs))
+        except SystemExit:
+            return None
+
+    # ⑪ 接线被摘掉（模板里不再调 measureText）⇒ 必须印不出名字
+    b = _mut("+ measureText(d)", "+ ''")
+    if b is not None:
+        got = _mrun(b, dict(PAYLOAD, measure="lines"))
+        cases.append(("⑪ 模板不再调 measureText ⇒ 印成 %r，判据必须不认" % got, got != "黄白线"))
+
+    # ⑫ ★ 写死成缺省（不认回显）：回显说是 lines，格子却印「面积」⇒ 判据必须不认。
+    #    这一格钉的是「以回显为准」—— 用户点的那颗、前端的名单，都不能当准。
+    b = _mut("const m = d.measure;", "const m = 'macd';")
+    if b is not None:
+        got = _mrun(b, dict(PAYLOAD, measure="lines"))
+        cases.append(("⑫ 写死缺省、不认回显 ⇒ 印成 %r，判据必须不认" % got, got != "黄白线"))
+
+    # ⑬ 缺字段那态塌成一态：没有 measure 也硬印一个 ⇒ 必须印不出「不出现」（＝不许编）
+    b = _mut("if (typeof m !== 'string' || !m) return '';", "if (false) return '';")
+    if b is not None:
+        got = _mrun(b, PAYLOAD)
+        cases.append(("⑬ 缺字段也硬印 ⇒ 印成 %r，判据必须不认（要的是整格不出现）" % got, got is not None))
+
     print("探针（每一格都必须红）：")
     for name, red in cases:
         print("  %s %s" % ("✓" if red else "✗ 没红", name))
@@ -413,14 +486,17 @@ if __name__ == "__main__":
     try:
         _, ok = measure()
         _ds, ds_ok = data_source_check()
+        _mc, _ms, m_ok = measure_check()
     except SystemExit as e:
         print(str(e))
         sys.exit(1)
-    if ok and ds_ok:
-        print("✓ 两个层级都在一行内，且「数据源」那格印得出真实的出处（%s）" % os.path.relpath(JS, ROOT))
+    if ok and ds_ok and m_ok:
+        print("✓ 两个层级都在一行内，且「数据源」「背驰看法」两格印得出真实的值（%s）" % os.path.relpath(JS, ROOT))
         sys.exit(0)
     if not ok:
         print("✗ 有一段放不下一行 —— 图脚在手机上是几行糊在一起的字（见上面的 ≈px）")
     if not ds_ok:
         print("✗ 「数据源」那格印出来的值不对 —— 实际值印在上面每一行里，照那个看，别猜原因")
+    if not m_ok:
+        print("✗ 「背驰看法」那格印出来的值不对 —— 实际值印在上面每一行里，照那个看，别猜原因")
     sys.exit(1)
