@@ -3,7 +3,7 @@
 """最小回测：拿历史 K 线检验买卖点事后的表现（card-41383e15-d8f，小栋 10-04 ③A）。口径＝docs/spec/回测.md。
 
     python3 tools/backtest.py [--data a.json,b.json] [--level pen|seg] [--measure macd]
-                              [--fee-bps 4] [--slip-bps 2] [--out 报表.json] [--trades]
+                              [--fee-bps 5] [--slip-bps 5] [--out 报表.json] [--trades]
     python3 tools/backtest.py --probe     # 四个探针（spec 第五节），每个都必须让结果变
 
 规则页四条硬规则在这里的落点：
@@ -34,6 +34,7 @@ BUY, SELL = ("一买", "二买", "三买"), ("一卖", "二卖", "三卖")
 DATA = ("aaplusdt_4h.json", "aaplusdt_2h.json", "aaplusdt_1h.json", "aaplusdt_30m.json", "btc_4h.json",
         "zec_4h.json", "zec_2h.json", "zec_1h.json", "zec15.json")       # spec 第四节：正式报表 9 份
 SMALL = 30                                                                # 样本量护栏
+COSTS = (0, 5, 10)                                                        # 成本敏感性：fee = slip = 这几档
 WARN = "样本太小，这些数字不能拿来判断买卖点好坏"
 
 
@@ -131,6 +132,12 @@ def trade(bars, events, fee_bps, slip_bps, fill="next_open"):
     return trades, open_pos, curve, unfilled, gone_hit
 
 
+def hold(bars, fee_bps, slip_bps):
+    """同期持有不动：第一根开盘买、最后一根收盘卖，同一组成本（spec 四）。"""
+    fee, slip = fee_bps / 1e4, slip_bps / 1e4
+    return (bars[-1]["c"] * (1 - slip)) / (bars[0]["o"] * (1 + slip)) * (1 - fee) ** 2 - 1
+
+
 def summary(trades, open_pos, curve):
     comp, peak, mdd = 1.0, 0.0, 0.0
     for x in trades:
@@ -146,7 +153,8 @@ def summary(trades, open_pos, curve):
     return dict(n=n, win_rate=round(sum(x["net"] > 0 for x in trades) / n, 4) if n else None,
                 pnl_comp=round(comp - 1, 6), pnl_sum=round(sum(x["net"] for x in trades), 6),
                 max_dd=round(mdd, 6), weak_n=len(weak), weak_pnl_comp=round(wcomp - 1, 6),
-                open_net=round(open_pos["net"], 6) if open_pos else None, small=n < SMALL)
+                open_net=round(open_pos["net"], 6) if open_pos else None, small=n < SMALL,
+                total=round(comp * (1 + (open_pos["net"] if open_pos else 0)) - 1, 6))   # 已平复利 × 未平盯市
 
 
 def run_one(fn, level, measure, fee_bps, slip_bps):
@@ -154,9 +162,17 @@ def run_one(fn, level, measure, fee_bps, slip_bps):
     events, rp = replay(bars, level, measure)
     trades, open_pos, curve, unfilled, gone_hit = trade(bars, events, fee_bps, slip_bps)
     rp.update(gone_traded=gone_hit, unfilled_at_end=unfilled)
+    s = summary(trades, open_pos, curve)
+    h = hold(bars, fee_bps, slip_bps)
+    sens = []
+    for c in COSTS:                                              # 成本敏感性：重放一次，成交按各档成本重算
+        t_ = trade(bars, events, c, c)
+        x = summary(*t_[:3])
+        sens.append(dict(cost_bps=c, n=x["n"], win_rate=x["win_rate"], pnl_comp=x["pnl_comp"], total=x["total"],
+                         max_dd=x["max_dd"], hold=round(hold(bars, c, c), 6)))
     res = dict(data=fn, sha1=sha, bars=len(bars), level=level, measure=measure, replay=rp,
-               hold=round(bars[-1]["c"] / bars[0]["o"] - 1, 6),
-               summary=summary(trades, open_pos, curve), trades=trades, open=open_pos)
+               hold=round(h, 6), vs_hold=round(s["total"] - h, 6), summary=s, sensitivity=sens,
+               trades=trades, open=open_pos)
     if rp["near_pairs"]:                                         # 近邻对不为 0 ⇒ 另出一份合并对照
         t2 = trade(bars, merge_near(events, bars), fee_bps, slip_bps)
         res["near_merged"] = summary(*t2[:3])
@@ -192,10 +208,14 @@ def print_report(r, fee, slip, commit, show_trades):
           % (r["data"], r["sha1"][:12], commit, r["level"], r["measure"], fee, slip, r["bars"]))
     if s["small"]:
         print("  ⚠ %s（笔数 %d < %d）" % (WARN, s["n"], SMALL))
-    print("  笔数 %d  胜率 %s  盈亏 复利 %s / 加总 %s  最大回撤 %.2f%%  weak 开的 %d 笔 %s  未平 %s  ｜ 持有不动 %s"
+    print("  笔数 %d  胜率 %s  盈亏 复利 %s / 加总 %s  最大回撤 %.2f%%  weak 开的 %d 笔 %s  未平 %s"
           % (s["n"], "-" if s["win_rate"] is None else "%.0f%%" % (100 * s["win_rate"]), pct(s["pnl_comp"]),
-             pct(s["pnl_sum"]), 100 * s["max_dd"], s["weak_n"], pct(s["weak_pnl_comp"]), pct(s["open_net"]),
-             pct(r["hold"])))
+             pct(s["pnl_sum"]), 100 * s["max_dd"], s["weak_n"], pct(s["weak_pnl_comp"]), pct(s["open_net"])))
+    print("  已平＋未平盯市 %s ｜ 同期持有不动 %s ｜ 差 %s" % (pct(s["total"]), pct(r["hold"]), pct(r["vs_hold"])))
+    print("  成本敏感性（fee=slip，每边）：" + "；".join(
+        "%dbp 笔数 %d 胜率 %s 复利 %s 回撤 %.2f%% 持有不动 %s" % (
+            x["cost_bps"], x["n"], "-" if x["win_rate"] is None else "%.0f%%" % (100 * x["win_rate"]),
+            pct(x["pnl_comp"]), 100 * x["max_dd"], pct(x["hold"])) for x in r["sensitivity"]))
     print("  重放：确认事件 %d · 之后被改掉 %d（其中触发了成交 %d）· 近邻对 %d · 末尾未成交 %d"
           % (rp["confirmed"], rp["gone"], rp["gone_traded"], rp["near_pairs"], rp["unfilled_at_end"]))
     if "near_merged" in r:
@@ -214,8 +234,8 @@ def main():
     ap.add_argument("--data", default=",".join(DATA))
     ap.add_argument("--level", default="pen", choices=("seg", "pen"))
     ap.add_argument("--measure", default="macd", choices=ENG.MEASURES)
-    ap.add_argument("--fee-bps", type=float, default=4.0, help="每边手续费，基点")
-    ap.add_argument("--slip-bps", type=float, default=2.0, help="每边滑点，基点")
+    ap.add_argument("--fee-bps", type=float, default=5.0, help="每边手续费，基点")
+    ap.add_argument("--slip-bps", type=float, default=5.0, help="每边滑点，基点")
     ap.add_argument("--probe", action="store_true")
     ap.add_argument("--trades", action="store_true", help="逐笔明细也印出来")
     ap.add_argument("--out")
