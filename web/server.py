@@ -24,6 +24,7 @@
         不乘 2，hist_def 字段写明），带每根的 t；头部跟 /api/chart 一样（span / earliest / span_max / stale…）。
         副图打开才取，关着不付（ZEC 15m 全精度三列 gzip 约 +0.55 MB，所以不塞进 /api/chart）。
   GET /api/meta            → 白名单（前端拿来做下拉）
+        measures 仍是字符串列表（契约不变）；measure_orig = {看法: 是否 108 课原文的判法}，slope 为 false（小栋 10-04 ①A）。
   GET /  /<静态文件>       → web/ 下的前端文件（只送 STATIC_EXT 里的类型，.py / .md / 点文件一律 404）
 """
 import argparse
@@ -50,7 +51,7 @@ from config import tick_of                              # noqa: E402
 from fetch_klines import fetch as binance_fetch         # noqa: E402
 from make_web_fixture import iso, shape                 # noqa: E402
 from core.analyze import analyze                        # noqa: E402
-from core.signals import MEASURES, macd_lines, signals as engine_signals   # noqa: E402
+from core.signals import MEASURES, MEASURE_ORIG, macd_lines, signals as engine_signals   # noqa: E402
 import core.signals as _engine_signals_mod              # noqa: E402,F401  （见下行：模块对象从 sys.modules 取）
 _ENGINE = sys.modules["core.signals"]                    # core/__init__ 把 signals 导成了函数，模块要从这里拿
 
@@ -497,7 +498,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._err(400)
             return self._send(200, json.dumps(dict(symbols=list(SYMBOLS), tfs=list(TFS), days=DAYS,
                                                    refresh_s=REFRESH_S, span_max=SPAN_MAX,
-                                                   measures=list(MEASURES))).encode())
+                                                   measures=list(MEASURES),
+                                                   measure_orig={m: MEASURE_ORIG.get(m, False) for m in MEASURES})).encode())
         return self._static(u.path, u.query)
 
     def _static(self, path, query=""):

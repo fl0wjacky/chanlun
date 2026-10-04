@@ -283,6 +283,25 @@ def run_macd(quiet=False):
     return bad
 
 
+def run_meta(quiet=False):
+    """/api/meta：measures 仍是字符串列表（前端按字符串过滤，换成对象整组会消失）；measure_orig 跟 measures
+    一一对应、全是布尔，且只有 slope 是 false（小栋 10-04 ①A：斜率不是 108 课原文的判法）。"""
+    with running({}) as port:
+        m = get_path(port, "/api/meta")
+    ms, mo = m.get("measures"), m.get("measure_orig")
+    diffs = []
+    if not (isinstance(ms, list) and ms and all(isinstance(x, str) for x in ms)):
+        diffs.append("measures 不是字符串列表：%r" % (ms,))
+    elif not isinstance(mo, dict) or sorted(mo) != sorted(ms) or any(type(v) is not bool for v in mo.values()):
+        diffs.append("measure_orig 跟 measures 对不上或不是布尔：%r" % (mo,))
+    elif [k for k in ms if not mo[k]] != ["slope"]:
+        diffs.append("非原文的应当只有 slope，给的是 %r" % [k for k in ms if not mo[k]])
+    if not quiet:
+        print("%s /api/meta measures=%s measure_orig=%s%s" % ("✗" if diffs else "✓", ms, mo,
+                                                             "  ← " + " ｜ ".join(diffs) if diffs else ""))
+    return len(diffs)
+
+
 def self_test():
     """服务侧三种「看起来能跑、其实算错」：精度错、背驰度量错、一个类中枢的 ZG 差一跳 —— 对账必须各自红。"""
     arms = []
@@ -372,6 +391,27 @@ def self_test():
             eng.macd_hist, server._hist = real_mh, real_h
     arms.append(("副图自己减柱子、引擎柱子 ×2", arm_hist_not_engine))
 
+    def arm_meta_missing():
+        real = server.MEASURES
+        server.MEASURES = real + ("vol",)                 # 白名单多一种、原文表里没它 ⇒ 不许 500 了事、也不许漏标
+        try:
+            return run_meta(quiet=True)
+        except Exception:
+            return 1
+        finally:
+            server.MEASURES = real
+    arms.append(("新看法没进原文表", arm_meta_missing))
+
+    def arm_meta_all_orig():
+        real = dict(server.MEASURE_ORIG)
+        server.MEASURE_ORIG["slope"] = True
+        try:
+            return run_meta(quiet=True)
+        finally:
+            server.MEASURE_ORIG.clear()
+            server.MEASURE_ORIG.update(real)
+    arms.append(("斜率也标成原文", arm_meta_all_orig))
+
     miss = 0
     for name, f in arms:
         n = f()
@@ -387,4 +427,5 @@ if __name__ == "__main__":
     rc = run()[0]
     rc = rc or (1 if run_span() else 0)
     rc = rc or (1 if run_macd() else 0)
+    rc = rc or (1 if run_meta() else 0)
     sys.exit(rc)
