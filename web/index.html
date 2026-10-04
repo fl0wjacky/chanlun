@@ -40,8 +40,11 @@
           <span class="rv"><i>高</i><b id="ro-high"></b></span>
           <span class="rv"><i>低</i><b id="ro-low"></b></span>
           <span class="rv"><i>收</i><b id="ro-close"></b></span>
-          <span class="pct" id="ro-pct"></span>
         </div>
+        <!-- 药丸**单独一个孩子**（不在 .ro 里）：宽屏上它排在四个数后面（读作"收…涨跌幅…"），
+             窄屏上挪到时刻那一行（那边空着，见 style.css 窄屏那档）—— 一个元素两种排法，
+             不用两套 DOM。 -->
+        <span class="pct" id="ro-pct"></span>
       </div>
     </div>
   </div>

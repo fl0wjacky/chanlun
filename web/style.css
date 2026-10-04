@@ -127,11 +127,15 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
   box-shadow: 0 0 0 3px var(--panel-hi);
   font-size: 11px; line-height: 1.5; color: var(--mu);
   font-variant-numeric: tabular-nums;
+  /* 三样东西（时刻／四个数／涨跌幅药丸）装成一个可换行的 flex：宽屏上时刻自己一行、
+     四个数＋药丸第二行；窄屏上药丸挪到时刻那行（见下面 @media 那档）。
+     ★ 药丸是 `.ro` 的**兄弟**、不是它的孩子 —— 就为了窄屏能把它挪上去。 */
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px;
   opacity: 0; visibility: hidden; transition: opacity .12s;   /* 比那句话快：它跟手 */
   pointer-events: none;
 }
 .readout.on { opacity: 1; visibility: visible; }
-.readout .rt { color: var(--dim); font-size: 10px; letter-spacing: .02em; }
+.readout .rt { flex: 1 0 100%; color: var(--dim); font-size: 10px; letter-spacing: .02em; }
 .readout .ro { display: flex; flex-wrap: wrap; align-items: baseline; gap: 1px 10px; }
 .readout .rv { display: inline-flex; gap: 4px; }
 .readout .rv i { font-style: normal; color: var(--dim); }     /* 开/高/低/收 四个字退到背景里 */
@@ -231,6 +235,14 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
     -webkit-mask-image: var(--fade);                  /* Safari 15.4 之前只认带前缀的 */
     mask-image: var(--fade);
   }
+  /* 读数块在手机上：把涨跌幅药丸挪到**时刻那一行**（那边空着 ~200px），四个数独占一行。
+     实测（77,087.6 这种 5 位数）：不挪的话 390 宽差 6px、360 宽差 46px —— 药丸被挤到第三行，
+     整块 370×63、横贯整幅图，右边孤零零挂一颗药丸。挪上去之后 360 也宽松。
+     （这就是药丸在 HTML 里跟 .ro 平级的原因。） */
+  .readout { gap: 1px 8px; padding: 5px 8px; }
+  .readout .rt { flex: 0 0 auto; }
+  .readout .ro { flex: 0 0 100%; order: 2; }
+  .readout .pct { order: 1; }
   .legend { font-size: 10px; gap: 4px 10px; padding: 6px 10px; }
   .foot { font-size: 10px; }
   /* 手机上这一句必须能折行：它 nowrap 时 min-content ≈ 450px，比视口还宽（见上面 body > * 那条） */
