@@ -38,8 +38,12 @@ body {
 }
 .brand { font-size: 15px; font-weight: 600; letter-spacing: .02em; white-space: nowrap; }
 .brand .sub { margin-left: 8px; font-size: 11px; font-weight: 400; color: var(--dim); letter-spacing: .04em; }
+/* 牌子 ＋ 两个下拉 ＝ **一行**（手机上这一行要压到 360 宽还不断）。 */
+.bline { display: flex; align-items: center; gap: 14px; flex: 1 1 auto; min-width: 0; }
 .picks { display: flex; gap: 10px; }
-.pick { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--mu); }
+/* ★ 标签**永远不折行**（`nowrap`）：手机上下拉被压窄时，该被压的是 select 里那条品种名，
+   不是把「品种」竖成「品／种」—— 360 宽上真出过这个（挤窄的时候字先倒）。 */
+.pick { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--mu); white-space: nowrap; }
 .pick select {
   appearance: none; -webkit-appearance: none;
   background: var(--panel); color: var(--tx);
@@ -199,9 +203,14 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
 .foot .sign { margin-left: auto; white-space: nowrap; }
 .foot b { color: var(--mu); font-weight: 500; }
 
+/* 手机上那颗「图例 · 数据 · 约定」收起开关：**桌面不显示**（只有下面窄屏那一档才 display:flex）。
+   桌面本来就放得下（图占 84%），没道理让桌面也多点一下。 */
+.fold { display: none; }
+
 /* ---- 手机 ---- */
 @media (max-width: 760px) {
-  .bar { gap: 8px 10px; padding: 8px 10px; }
+  /* 手机顶栏的密度：上下 6px、行间距 6px（原来是 8/8）。图占比那笔账里，这 6px 是给 360 宽留的。 */
+  .bar { gap: 6px 10px; padding: 6px 10px; }
   .brand { font-size: 14px; flex: 1 1 auto; }
   .badges { margin-left: 0; width: 100%; order: 3; }
   main { grid-template-columns: minmax(0, 1fr); }
@@ -243,6 +252,35 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
   .readout .rt { flex: 0 0 auto; }
   .readout .ro { flex: 0 0 100%; order: 2; }
   .readout .pct { order: 1; }
+  /* ---- 让图占满（卡 card-b9792318-91d，小栋 05:00Z 定 ②B）----
+     改之前 390×844 的账（量出来的）：顶栏 109 ＋ 图 538（**64%**）＋ 图层栏 49 ＋ 图例 47 ＋ 页脚 102。
+     要 ≥80%（675px）就得让出 137px。让的两处，都不是把东西删掉：
+       ① 顶栏：手机上去掉牌子后面那半句域名（`.brand .sub`，105px 宽）—— 牌子跟两个下拉就挤进
+          同一行了，顶栏 109 → 71。域名在页脚那句「冲浪者 · 日期」里还在，手机上看盘也不需要它。
+          另外给两个下拉 min-width:0：品种名再长也只会**把下拉自己压窄**，不会把顶栏撑回两行
+          （撑回去就等于这一让白让，而且换品种时图会跳一下）。
+       ② 图例（学一次）＋ 页脚（元信息是诊断、约定是读一次）收进一颗开关：默认收起。
+          这两块**不是看盘要盯的东西**，但也不能删 —— 小栋的原话是「默认收起，点一下展开」。
+     ★ 图层栏那一排 **不动**：手机上它是天天要点的（笔/中枢/买卖点），
+       而且 web_more_e2e 那一套（61 条）就是在 390×844 上**真点 chip** 的 ——
+       收起来既要多点一下，又会把那套工装整个弄红。也不值得为 49px 那么干。 */
+  .brand .sub { display: none; }
+  .bline { gap: 8px; }
+  .picks { flex: 0 1 auto; min-width: 0; }
+  .pick { min-width: 0; gap: 4px; }
+  /* 下拉被压窄时先吃**右边的内边距**（那是给箭头留的空，不是字）：字最后才被切。
+     padding-right 26 → 22 是为 360 那种宽留的余量，箭头画在 right 12px，22 照样放得下。 */
+  .pick select { min-width: 0; padding-right: 22px; }
+  .fold {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    width: 100%; padding: 6px 12px; text-align: left; cursor: pointer;
+    background: var(--panel); color: var(--mu); font: inherit; font-size: 11px;
+    border: 0; border-top: 1px solid var(--line);
+  }
+  .fold .chev { color: var(--dim); transition: transform .15s; }
+  body:not(.m-fold) .fold .chev { transform: rotate(180deg); }   /* 展开着 ⇒ 箭头朝上（点它＝收起） */
+  body.m-fold .fold { padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)); }
+  body.m-fold #legend, body.m-fold .foot { display: none; }
   .legend { font-size: 10px; gap: 4px 10px; padding: 6px 10px; }
   .foot { font-size: 10px; }
   /* 手机上这一句必须能折行：它 nowrap 时 min-content ≈ 450px，比视口还宽（见上面 body > * 那条） */

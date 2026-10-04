@@ -637,6 +637,20 @@ function watchOverflow(box) {
   hint();                                 // 验收工装要重算，`dispatchEvent(new Event('resize'))` 即可
 }
 
+// ---------------------------------------------------------------- 手机上：图例/数据/约定 收起（卡 card-b9792318-91d）
+// 默认**收起**（小栋 2026-10-04 05:00Z 定 ②B：手机上让图占满）。收的是「学一次（图例）／读一次（约定）／
+// 诊断（元信息）」这三块 —— 图层那一排（天天要点）**不动**，账写在 style.css 窄屏那一档里。
+// ★ 开关不自己藏一个布尔：`aria-expanded` 就是那个状态，收起/展开两句话由它推出来，
+//   点一下只走 setFold 一条路（各自记一个的话，迟早在某处对不上，屏幕上就会出现"箭头说收起、其实没收起"）。
+// ★ 桌面这一颗在 CSS 里就是 display:none（桌面放得下，图占 84%）：这里照挂类，桌面那两条规则不认它。
+function setFold(open) {
+  document.body.classList.toggle('m-fold', !open);
+  el('fold').setAttribute('aria-expanded', String(open));
+  el('fold-tx').textContent = open ? '收起' : '图例 · 数据 · 约定';
+}
+el('fold').addEventListener('click', () => setFold(document.body.classList.contains('m-fold')));
+setFold(false);
+
 // ---------------------------------------------------------------- 背驰看法那一组（卡 card-84091d2d-c97）
 // 放在图层那一排**前面**：它决定的是「买卖点按哪种力度比较算出来」（算什么），比「画哪几层」还靠上一步。
 // ★ 样式上跟图层开关**刻意分开**：图层是一排可多选的开关（`aria-pressed`，虚边），这一组是**单选**

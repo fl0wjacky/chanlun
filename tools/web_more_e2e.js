@@ -20,6 +20,8 @@
 //   ⑬ 换档那句话：**只在可视窗口里的结构真变了**才印，3 秒自收。三格各自单开一页：
 //      窗口外变⇒不印 ／ 窗口里笔段变⇒印 ／ **只有中枢变⇒也印**（Nova 2026-10-04 补的第三格）
 //   ⑭ **鼠标只在图上悬停、一个键都不按** ⇒ 一个请求都不许发（Atlas 2026-10-04 多跑逮到的那格）
+//   ⑯⑰⑱ 手机上「图例 · 数据 · 约定」的收起开关（card-b9792318-91d）：收起来图占屏高 ≥80%（改前 64%）、
+//      收起的两块在屏幕上真没有；点一下真展开、再点真收回；桌面 1280 上这颗开关**不出现**、那两块照旧
 //
 // 假后台：拿仓里 zec_1h.json 的真 bars/结构当 1 档，往前补 n 段**编出来的**老 K 线（时间戳按样本
 // 自己的步长往前推，价格贴着数据头），结构整体**平移**到新的下标上。★ 这么造的意思是：两档之间
@@ -863,6 +865,67 @@ const snap = (p) => p.evaluate(() => {
       seen14.length === 1 && seen14[0] === 1,
       `这一页发过 ${JSON.stringify(seen14)}（只许 [1]），视口 from=${after14.from}`);
     await p14.close();
+
+    // ⑯⑰⑱ 手机上的「图例 · 数据 · 约定」收起开关（card-b9792318-91d，小栋 2026-10-04 定 ②B）。
+    //   卡片验收写的是「手机宽度下**图占比量出来报数**（目标 ≥80%）、收起的内容一键能展开、桌面不变」——
+    //   这三条都量得出来，就别只留在聊天里当一次性数字：谁哪天再往顶栏/图例上加东西，这三条会替他记住。
+    //   ★ 量的都是**真身**，不是替身：图块量 #chart 的 rect，收起的两块量出来必须是 0 高
+    //     （display:none 的元素 rect 就是 0 —— 这是像素证据；computedStyle 只印进旁白，不拿来判）。
+    //   ★ 这一格特意**允许在旧代码上干净地红**：改前（bf4d833 那版）页面上压根没有 #fold，
+    //     所以每处取值都 null-safe（不存在记 -1，跟「在、但 0 高」分开）——
+    //     工装**不许为这事炸掉**（炸掉 ≠ 报红），也不许拿「没这道题」冒充「答对了」。
+    const foldProbe = async (page) => page.evaluate(() => {
+      const one = (s) => document.querySelector(s);
+      const h = (e) => (e ? e.getBoundingClientRect().height : -1);
+      const chart = document.getElementById('chart');
+      const fold = one('#fold');
+      return {
+        fold: h(fold), tx: one('#fold-tx') ? one('#fold-tx').textContent : null,
+        aria: fold ? fold.getAttribute('aria-expanded') : null,
+        legend: h(one('#legend')), foot: h(one('.foot')),
+        chart: chart ? chart.getBoundingClientRect().height : -1,
+        vh: window.innerHeight,
+      };
+    });
+    const sharePct = (r) => (r.vh ? Math.round((r.chart / r.vh) * 100) : -1);
+    const openFoldPage = async (name, w, hgt) => {
+      scen({ spanMax: 16 });
+      const q = await openPage(name);
+      if (w) await q.setViewportSize({ width: w, height: hgt });   // 同一 context（假后台和记账都还在这条线上）
+      await q.goto(PAGE + '?symbol=ZECUSDT&tf=1h', { waitUntil: 'domcontentloaded' });
+      await q.waitForFunction(() => window.__app && window.__app.state.data, null, { timeout: 30000 }).catch(() => {});
+      await q.waitForTimeout(600);                                  // 布局定下来再量
+      return q;
+    };
+
+    const p15 = await openFoldPage('15');
+    const FA = await foldProbe(p15);
+    t('⑯ 手机 390×844：默认收起 ⇒ 图占屏高 ≥80%（改前 64%），收起的图例/页脚在屏幕上真没有（rect 高 0）',
+      FA.fold > 0 && FA.legend === 0 && FA.foot === 0 && sharePct(FA) >= 80,
+      `开关在=${FA.fold}px「${FA.tx}」aria=${FA.aria}；图例 ${FA.legend}px、页脚 ${FA.foot}px；图 ${Math.round(FA.chart)}/${FA.vh} = ${sharePct(FA)}%`);
+    if (FA.fold > 0) {
+      await p15.click('#fold');
+      await p15.waitForTimeout(400);
+      const FB = await foldProbe(p15);
+      await p15.click('#fold');
+      await p15.waitForTimeout(400);
+      const FC = await foldProbe(p15);
+      t('⑰ 开关一键展开、再点一键收回：展开时图例/页脚**真回到屏幕上**（rect 高 >0）、按钮改口「收起」、aria 跟着翻',
+        FB.legend > 0 && FB.foot > 0 && FB.tx === '收起' && FB.aria === 'true'
+          && FC.legend === 0 && FC.foot === 0 && FC.tx !== '收起' && FC.aria === 'false',
+        `展开：图例 ${FB.legend}px 页脚 ${FB.foot}px「${FB.tx}」aria=${FB.aria}（图缩到 ${sharePct(FB)}%）；`
+        + `再点：图例 ${FC.legend}px 页脚 ${FC.foot}px「${FC.tx}」aria=${FC.aria}（图回到 ${sharePct(FC)}%）`);
+    } else {
+      t('⑰ 开关一键展开、再点一键收回', false, '页面上没有 #fold（改前的版本就是这样）—— 展开这一步无从验起');
+    }
+    await p15.close();
+
+    const p16 = await openFoldPage('16', 1280, 860);
+    const FD = await foldProbe(p16);
+    t('⑱ 桌面 1280×860：这颗开关**不在桌面上**（rect 高 0），图例/页脚照旧在，图占屏高 ≥80%',
+      FD.fold === 0 && FD.legend > 0 && FD.foot > 0 && sharePct(FD) >= 80,
+      `开关 ${FD.fold}px；图例 ${FD.legend}px、页脚 ${FD.foot}px；图 ${Math.round(FD.chart)}/${FD.vh} = ${sharePct(FD)}%`);
+    await p16.close();
   } catch (e) {
     bad.push('工装半路炸了：' + String(e.message || e).split('\n')[0]);
   }
