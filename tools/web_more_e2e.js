@@ -25,6 +25,10 @@
 //   ⑲⑳㉑㉒ 副图：成交量 ＋ MACD（card-68704ee6-a5a）：画上去的柱子**逐根＝响应里的 hist**
 //      （假后台故意回 (dif−dea)×2 ⇒ 前端自己减一遍就会红）、窗格与主图高度比、关掉⇒窗格收回且
 //      一个请求都不再发、换档时两个口**同一个 span**且换完仍逐根对齐、手机上默认两个开关都关⇒零请求
+//   ㉓ 副图**按时间**对齐那一格的牙（Atlas 2026-10-04 点的那格）：让假后台回的 `t[]` **错开一根**
+//      （演线上 60s 重拉、两次取数之间窗口滑了一根）⇒ 页面必须把每个数放回**它自己那一刻**：
+//      响应里没有的那根**不画**（不拿邻点凑）。把 `sub.at.get(b.t)` 换成按数组下标（`bars.indexOf(b)`）
+//      ⇒ 这一格红（⑲㉑ 看不见这个错：它们的假后台两边同序同长，下标和时间永远一致）。
 //
 // 假后台：拿仓里 zec_1h.json 的真 bars/结构当 1 档，往前补 n 段**编出来的**老 K 线（时间戳按样本
 // 自己的步长往前推，价格贴着数据头），结构整体**平移**到新的下标上。★ 这么造的意思是：两档之间
@@ -94,7 +98,10 @@ const servedFirst = new Set();        // 哪个页名已经供过第一份了（
 // withVol：给每根 K 线挂一个 `v`（造出来的，只跟这根的时间有关 ⇒ 两个口回的是同一份）。
 //   仓里的样本**一根 v 都没有**，而线上有 —— 成交量那一格要量「有点、且根数对得上」，就得先把 v 造出来；
 //   不造的那几格专门用来看「没有 v 的时候那颗开关是不是按灰的」（不知道的事不许编）。
-const DEFAULT_SCEN = { winmode: null, pageWin: null, earliestFlag: false, badNext: false, spanMax: 8, delay: 0, withVol: false };
+// shift：副图那个口回的 `t[]` **错开一根**（见 tools/fake_macd.js 第三段注释）。㉓ 用；
+//   别的格必须关着 —— 开着的话响应里第一根页面没有、最后一根页面也没有，⑲㉑ 的「逐根对齐」就没得比了。
+const DEFAULT_SCEN = { winmode: null, pageWin: null, earliestFlag: false, badNext: false, spanMax: 8, delay: 0,
+                       withVol: false, shift: false };
 const SCEN = Object.assign({}, DEFAULT_SCEN);
 const scenKeys = Object.keys(DEFAULT_SCEN).sort();
 const scenSnap = () => scenKeys.map((k) => k + '=' + JSON.stringify(SCEN[k] === null ? null : SCEN[k])).join(',');
@@ -242,7 +249,7 @@ async function serve(ctx) {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(Object.assign({
       symbol: u.searchParams.get('symbol'), tf: u.searchParams.get('tf'),
       span, earliest: !!SCEN.earliestFlag, span_max: SCEN.spanMax,
-    }, macdOf(barsFor(span), true))) });
+    }, macdOf(barsFor(span), true, SCEN.shift))) });
   });
   await ctx.route('**/fixtures/**', (r) => r.fulfill({ status: 404, body: '' }));   // 逼它只能走后台那条路
 }
@@ -1010,6 +1017,46 @@ const snap = (p) => p.evaluate(() => {
                volPts: volS.length ? volS[0].data().length : -1 };
     }, span);
 
+    // ㉓ 专用的探针。**不能拿 subProbe 改**：subProbe 是按**主图下标 i** 去读画上去的第 i 个点
+    //   （它假定两边同序同长）—— 后台的 t[] 一错开，这个假定本身就没了，它会自己先错。
+    //   这里按**时间**读：画上去的每一个点，拿它自己的 time 回响应里找那一列的数。
+    //   `stray` ＝ 画在「响应里根本没有的那一刻」上的点数（编数）；`shiftMatters` ＝ 非空转见证
+    //   （按下标放的话，有多少根会画成另一个数）。
+    const shiftProbe = async (page, span) => page.evaluate(async (span) => {
+      const { sub, state } = window.__app;
+      const D = (s) => (s && s.data ? s.data() : []);
+      const bars = state.data ? state.data.bars : [];
+      const raw = await (await fetch(`/api/macd?symbol=ZECUSDT&tf=1h&span=${span}&probe=1`)).json();
+      const at = new Map(raw.t.map((t, j) => [t, j]));
+      const cols = { hist: D(sub.series && sub.series.hist), dif: D(sub.series && sub.series.dif),
+                     dea: D(sub.series && sub.series.dea) };
+      let checked = 0, bad = 0, stray = 0;
+      const per = [];
+      for (const name of ['hist', 'dif', 'dea']) {
+        const p = cols[name];
+        let n = 0, b = 0;
+        for (const q of p) {
+          const j = at.get(Math.round(q.time * 1000));            // 画在 lwc 的时间里（秒）→ 换回毫秒找
+          if (j == null) { stray++; continue; }                   // 响应里没有这一刻 ⇒ 这个点是编出来的
+          n++;
+          if (Math.abs(q.value - raw[name][j]) > 1e-9) b++;
+        }
+        checked += n; bad += b; per.push(`${name} ${p.length}点/核过${n}/差${b}`);
+      }
+      // 非空转见证：按**下标**放（第 i 根用第 i 个值）跟按时间放差多远
+      let shiftMatters = 0, idx = 0;
+      for (let i = 1; i < bars.length; i++) {
+        const j = at.get(bars[i].t); if (j == null) continue;
+        idx++;
+        if (Math.abs(raw.hist[j] - raw.hist[i]) > 1e-9) shiftMatters++;
+      }
+      return { bars: bars.length, rawN: raw.t.length, checked, bad, stray, per, shiftMatters, idx,
+               pts: [cols.hist.length, cols.dif.length, cols.dea.length],
+               noBar: raw.t.filter((t) => !bars.some((b) => b.t === t)).length,
+               firstBarInRaw: at.has(bars[0].t),
+               lastRawNoBar: !bars.some((b) => b.t === raw.t[raw.t.length - 1]) };
+    }, span);
+
     // ⑲ 桌面 + 数据里带 v：窗格、逐根对齐、**画的必须是响应里那份（×2）**、成交量有点
     scen({ spanMax: 16, withVol: true });
     const p17 = await openPage('17');
@@ -1079,6 +1126,30 @@ const snap = (p) => p.evaluate(() => {
       `副图请求 ${macdCalls.length - m0} 次；${SE.n} 格、图 ${box18.chart}/${box18.vh}`
       + `（${Math.round(100 * box18.chart / box18.vh)}%）；成交量开关 disabled=${SE.volDisabled}`);
     await p18.close();
+
+    // ㉓ 后台的 `t[]` **错开一根** ⇒ 页面必须按**时间**把每个数放回它自己那一根
+    //    （Atlas 2026-10-04 点的那格：把 `sub.at.get(b.t)` 换成 `bars.indexOf(b)`（按下标）时，
+    //      ㉑ 全绿 —— 因为假后台回的 t[] 跟主图完全同序同长，下标和时间**永远一致**，这一格量不出差别。
+    //      线上会出现差别：后台 60s 重拉，窗口滑一根，图表和副图两次取数之间差一根，那时按下标错一位。）
+    // ★ 这一格**自己造那份错开**（SCEN.shift，见 fake_macd.js）：响应里第一根页面没有、最后一根页面没有。
+    //   两头的见证都印出来 —— 没有它们，这一格绿的是「后台没动过」不是「页面对齐对了」。
+    scen({ spanMax: 16, shift: true });
+    const p19 = await openPage('19');
+    await p19.setViewportSize({ width: 1280, height: 860 });
+    await p19.goto(PAGE + '?symbol=ZECUSDT&tf=1h', { waitUntil: 'domcontentloaded' });
+    await p19.waitForFunction(() => window.__app && window.__app.sub && window.__app.sub.data, null, { timeout: 30000 }).catch(() => {});
+    await p19.waitForTimeout(800);
+    const SF = await shiftProbe(p19, 1);
+    t('㉓ 后台的 t[] 错开一根 ⇒ 页面按**时间**对齐：每个点落在它自己那一刻上、值＝响应里那一列；'
+      + '响应里没有的那根**不画**（不拿邻点凑一个）',
+      SF.bars > 100 && SF.noBar === 1 && !SF.firstBarInRaw && SF.lastRawNoBar
+      && SF.checked > 100 && SF.bad === 0 && SF.stray === 0
+      && SF.pts.every((x) => x === SF.bars - 1) && SF.shiftMatters > 100,
+      `主图 ${SF.bars} 根／响应 ${SF.rawN} 根（第一根${SF.firstBarInRaw ? '在' : '**不在**'}响应里、`
+      + `响应最后一根主图没有=${SF.lastRawNoBar}、对不上的那根数=${SF.noBar}）；逐列 ${SF.per.join('｜')}；`
+      + `画的点数 ${SF.pts.join('/')}（该＝主图 ${SF.bars} − 1）；★ 非空转见证：按**下标**放的话 `
+      + `${SF.shiftMatters}/${SF.idx} 根会画错（值不一样）`);
+    await p19.close();
   } catch (e) {
     bad.push('工装半路炸了：' + String(e.message || e).split('\n')[0]);
   }
