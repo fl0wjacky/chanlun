@@ -395,6 +395,31 @@ def main():
              echo_ok and same_struct and calls["n"] == 0 and all(match_eng.values()),
              "回显=%s 结构同=%s 拉=%d ≡引擎=%s" % (echo_ok, same_struct, calls["n"], match_eng))
 
+    # ⑮ 副图 /api/macd：跟 /api/chart 同一格同一份 K 线 —— 乱参 400、冷并发 100 拉 1 次、
+    #    先要了图再要副图拉 0 次、头部（span / span_max / earliest / fetched_at）跟图一样、t 跟 bars 同一份
+    calls["n"] = 0
+    junk_m = ["symbol=ZECUSDT&tf=4h&span=3", "symbol=ZECUSDT&tf=4h&measure=lines", "symbol=ETHUSDT&tf=4h",
+              "symbol=ZECUSDT&tf=1d", "symbol=ZECUSDT", "symbol=ZECUSDT&tf=4h&x=1", "symbol=ZECUSDT&tf=4h&span=2&span=4"]
+    badj = [j for j in junk_m if req(port, "GET", "/api/macd?" + j)[0] != 400]
+    cell("⑮ /api/macd 乱参 %d 条全 400、拉 0 次" % len(junk_m), not badj and calls["n"] == 0,
+         "不是 400 的：%s · 拉=%d" % (badj, calls["n"]))
+    for (s_, t_, k_), sl_ in server.SLOTS.items():
+        if (s_, t_) == ("BTCUSDT", "2h"):
+            sl_.reset()
+    calls["n"] = 0
+    rs = burst(port, 100, "GET", "/api/macd?symbol=BTCUSDT&tf=2h&span=2")
+    n_cold = calls["n"]
+    calls["n"] = 0
+    ch = json.loads(req(port, "GET", "/api/chart?symbol=BTCUSDT&tf=2h&span=2")[1])
+    mc = json.loads(req(port, "GET", "/api/macd?symbol=BTCUSDT&tf=2h&span=2")[1])
+    n_warm = calls["n"]
+    head_ok = all(mc.get(k) == ch.get(k) for k in ("span", "span_max", "earliest", "fetched_at"))
+    t_ok = mc.get("t") == [x["t"] for x in ch.get("bars", [])]
+    cell("   ⑮ 副图冷并发 100 拉 1 次；跟图同一格：再要图和副图拉 0 次、头部同、t 同",
+         {c for c, _ in rs} == {200} and n_cold == 1 and n_warm == 0 and head_ok and t_ok
+         and mc.get("hist_def") == "dif-dea" and mc.get("span") == 2,
+         "冷拉=%d 热拉=%d 头部同=%s t 同=%s span=%s" % (n_cold, n_warm, head_ok, t_ok, mc.get("span")))
+
     # 收尾：等每一格的后台刷新都落地再返回。不等的话，上一条变异臂留下的后台线程（⑨ 里睡 5 秒的那种）
     # 会在下一条臂的 ⓪ 里继续调假币安、把计数和峰值打脏 —— 自测里「错误回堆栈」那臂 ⓪ 莫名变红就是它。
     calls["delay"] = 0.0
@@ -480,6 +505,21 @@ def self_test():
             return body, gzip.compress(body, 6)
         server.get_chart = g
 
+    def macd_ignores_span():
+        real = server.get_chart
+
+        def g(symbol, tf, span=1, prefetch=True, touch=True, measure="macd"):
+            return real(symbol, tf, 1 if measure == server.MACD_KEY else span, prefetch, touch, measure)
+        server.get_chart = g
+
+    def macd_own_fetch():
+        orig = server._macd_body
+
+        def own(slot, symbol, tf):
+            server.fetch(symbol, tf, 0, int(time.time() * 1000))          # 副图自己另去拉一遍
+            return orig(slot, symbol, tf)
+        server._macd_body = own
+
     def serve_source():
         server.STATIC_EXT[".py"] = "text/plain; charset=utf-8"
 
@@ -488,7 +528,8 @@ def self_test():
                     ("静态放行 .py", serve_source), ("预热改成并发", parallel_prewarm),
                     ("刷新挂在请求上", sync_refresh), ("span 不设白名单", any_span), ("超封顶不钳", no_clamp), ("不预拉", no_prefetch),
                     ("不拿上一档当底（整窗重拉）", no_seed), ("earliest 恒为假", never_earliest),
-                    ("忽略 measure（全按 macd 算、只改回显）", ignore_measure)]:
+                    ("忽略 measure（全按 macd 算、只改回显）", ignore_measure),
+                    ("副图不认 span（总给 1 档）", macd_ignores_span), ("副图自己另去拉币安", macd_own_fetch)]:
         importlib.reload(server)
         f()
         buf = io.StringIO()

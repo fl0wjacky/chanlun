@@ -20,6 +20,9 @@
         refreshing（缓存已过期、后台正在拉，这次先回旧的）/ span（回显）/ earliest（币安没有更早的了）/
         span_max（本周期封顶档）。span=k 看最近 k×210 天，缠论结构对整段重算，不拼接。
         结构直接是 core.analyze / core.signals 的输出，不另写算法。
+  GET /api/macd?symbol=&tf=[&span=]   → 副图：同一格同一份 K 线上的 MACD(12,26,9)，dif / dea / hist（hist = DIF−DEA，
+        不乘 2，hist_def 字段写明），带每根的 t；头部跟 /api/chart 一样（span / earliest / span_max / stale…）。
+        副图打开才取，关着不付（ZEC 15m 全精度三列 gzip 约 +0.55 MB，所以不塞进 /api/chart）。
   GET /api/meta            → 白名单（前端拿来做下拉）
   GET /  /<静态文件>       → web/ 下的前端文件（只送 STATIC_EXT 里的类型，.py / .md / 点文件一律 404）
 """
@@ -47,7 +50,7 @@ from config import tick_of                              # noqa: E402
 from fetch_klines import fetch as binance_fetch         # noqa: E402
 from make_web_fixture import iso, shape                 # noqa: E402
 from core.analyze import analyze                        # noqa: E402
-from core.signals import MEASURES, signals as engine_signals   # noqa: E402
+from core.signals import MEASURES, macd_lines, signals as engine_signals   # noqa: E402
 
 HOST = "127.0.0.1"                       # 默认回环；make_server 拒绝任何非回环地址
 
@@ -207,12 +210,36 @@ def start_refresh(slot, symbol, tf):
     threading.Thread(target=_bg_refresh, args=(slot, symbol, tf), daemon=True).start()
 
 
+MACD_PARAMS = (12, 26, 9)                # 跟引擎背驰判断用的同一组（signals.series_for / macd_hist 的缺省）
+MACD_KEY = "__macd__"                    # mbodies / variants 里副图那一份的键（跟 measure 名字不会撞）
+
+
+def _macd_body(slot, symbol, tf):
+    """副图那一份：同一格、同一份 K 线（slot.bars）上用引擎的 macd_lines 算，hist = DIF − DEA（不乘 2）。
+    跟 /api/chart 共用头部（fetched_at / stale / refreshing / span / earliest / span_max），带每根 K 线的 t
+    让前端按时间对齐；懒算一次，数据刷新就作废（跟 measure 那几份同一个口袋）。"""
+    b = slot.mbodies.get(MACD_KEY)
+    if b is None:
+        head = json.loads(slot.body)
+        dif, dea = macd_lines(slot.bars, *MACD_PARAMS)
+        b = slot.mbodies[MACD_KEY] = json.dumps(dict(
+            fetched_at=head["fetched_at"], stale=False, refreshing=False,
+            span=head["span"], earliest=head["earliest"], span_max=head["span_max"],
+            symbol=symbol, tf=tf, params=list(MACD_PARAMS), hist_def="dif-dea",
+            t=[x["t"] for x in slot.bars], dif=_clean(dif), dea=_clean(dea),
+            hist=_clean([x - y for x, y in zip(dif, dea)])),
+            ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return b
+
+
 def _measure_body(slot, symbol, tf, measure):
     """在 slot.lock 里调用 → 这一格在某种背驰看法下的 JSON。买卖点之外的一切跟默认那份是同一份：
     K 线、笔、段、中枢跟看法无关，只有 signals 两层重算（懒算、按 measure 各存一份，数据刷新就作废）。
     切看法不碰币安。"""
     if measure == "macd":
         return slot.body
+    if measure == MACD_KEY:
+        return _macd_body(slot, symbol, tf)
     b = slot.mbodies.get(measure)
     if b is None:
         d = json.loads(slot.body)
@@ -435,6 +462,23 @@ class Handler(BaseHTTPRequestHandler):
             if measure not in MEASURES:
                 return self._err(400)                     # 背驰看法只认四个名字（macd / slope / lines / peak）
             got = get_chart(symbol, tf, span, measure=measure)
+            if got is None:
+                return self._err(503)
+            return self._send(200, got[0], gz=got[1])
+        if u.path == "/api/macd":
+            try:
+                q = urllib.parse.parse_qs(u.query, keep_blank_values=True, strict_parsing=True, max_num_fields=4)
+            except ValueError:
+                return self._err(400)
+            if not {"symbol", "tf"} <= set(q) <= {"symbol", "tf", "span"} or any(len(v) != 1 for v in q.values()):
+                return self._err(400)                     # 跟 /api/chart 同一套；measure 跟副图无关，带了也 400
+            symbol, tf = q["symbol"][0].upper(), q["tf"][0]
+            if symbol not in SYMBOLS or tf not in TFS:
+                return self._err(400)
+            raw = q.get("span", ["1"])[0]
+            if raw not in {str(v) for v in SPAN_VALUES}:
+                return self._err(400)
+            got = get_chart(symbol, tf, min(int(raw), SPAN_MAX[tf]), measure=MACD_KEY)
             if got is None:
                 return self._err(503)
             return self._send(200, got[0], gz=got[1])
