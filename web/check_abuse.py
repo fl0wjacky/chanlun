@@ -35,7 +35,15 @@ ROOT = os.path.dirname(HERE)
 # 'File \\"' 是 JSON 里转义过的堆栈行：堆栈被塞进 JSON 字段时，裸的 'File "' 匹配不到
 LEAKS = [ROOT, os.path.expanduser("~"), "Traceback", 'File "', 'File \\"', "/Users/", "/home/", ".py"]
 
-BARS = json.load(open(os.path.join(ROOT, "data", "zec_4h.json"), encoding="utf-8"))
+_B = json.load(open(os.path.join(ROOT, "data", "zec_4h.json"), encoding="utf-8"))
+# 假币安的「全部历史」：zec_4h 往前接 3 份（时间往前挪、价格缩一点），共约 840 天（4h 计）——
+# 够 span 1/2/4 往左补、span 8 撞到「没有更早的了」（earliest）。
+_N = len(_B)
+BARS = []
+for _c in range(3, -1, -1):
+    _f = 0.7 ** _c
+    BARS += [dict(b, t=b["t"] - _c * _N * 14400_000, o=b["o"] * _f, h=b["h"] * _f, l=b["l"] * _f, c=b["c"] * _f)
+             for b in _B]
 calls = {"n": 0, "down": False, "inflight": 0, "peak": 0, "delay": 0.3}
 lock = threading.Lock()
 
@@ -43,6 +51,7 @@ lock = threading.Lock()
 def fake_fetch(symbol, tf, a, b):
     with lock:
         calls["n"] += 1
+        calls["last"] = (a, b)
         calls["inflight"] += 1
         calls["peak"] = max(calls["peak"], calls["inflight"])
     try:
@@ -54,9 +63,9 @@ def fake_fetch(symbol, tf, a, b):
         raise OSError("connect refused (假币安挂了) /secret/path")
     step = server.TFS[tf]
     t0 = BARS[-1]["t"]
-    # 时间戳挪到「现在」附近，免得被 DAYS 窗口截掉
+    # 时间戳挪到「现在」附近，免得被 DAYS 窗口截掉；**按请求的 [a, b] 截**（像真币安一样，往左补只给缺的那段）
     shift = (int(time.time() * 1000) // step) * step - t0
-    return [dict(b, t=b["t"] + shift) for b in BARS]
+    return [dict(x, t=x["t"] + shift) for x in BARS if a <= x["t"] + shift <= b]
 
 
 def req(port, method, path):
@@ -82,6 +91,9 @@ def burst(port, n, method, path):
 def main():
     calls.update(n=0, down=False, inflight=0, peak=0, delay=0.3)   # 每一跑从同一个起点开始（自测会连跑多臂）
     server.fetch = fake_fetch
+    real_prefetch = server.start_prefetch
+    server.start_prefetch = lambda *a: None              # 老格子（⓪–⑨）量的是单档的拉取次数：先把预拉关掉，⑪ 再专门测它
+    BASE = [k for k in server.SLOTS if k[2] == 1]
     srv = server.make_server(0)
     port = srv.server_address[1]
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -112,12 +124,10 @@ def main():
     calls["n"] = 0
     burst(port, 30, "GET", "/api/chart?symbol=AAPLUSDT&tf=30m")
     cell("⓪ 预热：每格 1 次、顺序拉、预热后访问拉 0 次",
-         pre_n == len(server.SLOTS) and pre_peak == 1 and calls["n"] == 0,
-         "预热拉=%d（应 %d）同时在拉峰值=%d 之后拉=%d" % (pre_n, len(server.SLOTS), pre_peak, calls["n"]))
+         pre_n == len(BASE) and pre_peak == 1 and calls["n"] == 0,
+         "预热拉=%d（应 %d）同时在拉峰值=%d 之后拉=%d" % (pre_n, len(BASE), pre_peak, calls["n"]))
     for sl in server.SLOTS.values():                     # 清回冷态，后面各格照原样量 ——
-        lk = sl.lock                                     # ★ 锁留原物：__init__ 会换回真锁，把「拿掉单飞锁」那条变异悄悄修好
-        sl.__init__()
-        sl.lock = lk
+        sl.reset()                                       # ★ reset 不换锁：「拿掉单飞锁」那条变异不会被悄悄修好
 
     # ②
     calls["n"] = 0
@@ -189,7 +199,7 @@ def main():
         return ms, {(m["stale"], m["refreshing"]) for m in ms}
 
     # ⑥：把 ZEC 4h 的「上次碰币安」拨回刷新期之前，再让币安挂掉
-    slot = server.SLOTS[("ZECUSDT", "4h")]
+    slot = server.SLOTS[("ZECUSDT", "4h", 1)]
     old_at = json.loads(slot.body)["fetched_at"]
     slot.tried_at -= server.REFRESH_S + 1
     calls["n"], calls["down"] = 0, True
@@ -208,10 +218,8 @@ def main():
     cell("   ⑥ 两轮并发 200 次只试 1 次（失败退避）", calls["n"] == 1, "试=%d" % calls["n"])
 
     # ⑦：一格从没成功过
-    slot7 = server.SLOTS[("AAPLUSDT", "15m")]
-    lk7 = slot7.lock
-    slot7.__init__()
-    slot7.lock = lk7
+    slot7 = server.SLOTS[("AAPLUSDT", "15m", 1)]
+    slot7.reset()
     calls["n"] = 0
     rs = burst(port, 100, "GET", "/api/chart?symbol=AAPLUSDT&tf=15m")
     lk = sorted({w for _, b in rs for w in leaks(b)})
@@ -260,11 +268,100 @@ def main():
          "调=%d 收尾=%s %s → %s" % (calls["n"], done, old9, m9["fetched_at"]))
     calls["delay"] = 0.3
 
+    # ⑩ span 契约（Nova 10-04）：不在 {1,2,4,8,16} 的一律 400、拉 0 次；在里面但超封顶的钳到封顶、如实回显
+    calls["n"] = 0
+    junk = ["0", "3", "-1", "999", "abc", "1.0", "02", "%202", "", "32", "1e1", "0x2", "2&span=4", "6"]
+    codes = [(j, req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=15m&span=" + j)[0]) for j in junk]
+    badc = [(j, c) for j, c in codes if c != 400]
+    cell("⑩ span 不在五个值里 %d 条：全 400、拉 0 次" % len(codes), not badc and calls["n"] == 0,
+         "不是 400 的：%s · 拉=%d" % (badc, calls["n"]))
+    clamp = []
+    for tf_, ask in (("15m", 8), ("15m", 16), ("30m", 16)):
+        code_, body_ = req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=%s&span=%d" % (tf_, ask))
+        try:
+            m_ = json.loads(body_) if code_ == 200 else {}
+        except ValueError:
+            m_ = {}
+        clamp.append((tf_, ask, code_, m_.get("span"), m_.get("span_max")))
+    want = [("15m", 8, 200, 4, 4), ("15m", 16, 200, 4, 4), ("30m", 16, 200, 8, 8)]
+    cell("   ⑩ 超封顶：钳到封顶、回显 span=span_max", clamp == want, "%s" % clamp)
+
+    # ⑪ 同一格同一档冷启动并发 100 次：只拉 1 次（只补更早那一段 —— 上一档已在缓存）
+    #   用 4h：假历史是 4 小时一根，拿去冒充 1h 的话 span=1 第一根离窗口左沿超过一步 ⇒ 被（如实地）判成 earliest
+    for kk in (1, 2, 4):
+        server.SLOTS[("BTCUSDT", "4h", kk)].reset()
+    req(port, "GET", "/api/chart?symbol=BTCUSDT&tf=4h")      # span=1 先进缓存（预拉还关着）
+    calls["n"] = 0
+    rs = burst(port, 100, "GET", "/api/chart?symbol=BTCUSDT&tf=4h&span=2")
+    ms = [json.loads(b) for c, b in rs if c == 200]
+    m1 = json.loads(req(port, "GET", "/api/chart?symbol=BTCUSDT&tf=4h")[1])
+    t1 = [x["t"] for x in m1["bars"]]
+    t2 = [x["t"] for x in ms[0]["bars"]] if ms else []
+    only_older = calls.get("last") is not None and t1 and calls["last"][1] < t1[0]
+    ok = (len(ms) == 100 and calls["n"] == 1 and {(m["span"], m["span_max"]) for m in ms} == {(2, 16)}
+          and len(t2) > len(t1) and t2[-len(t1):] == t1 and t2 == sorted(set(t2)) and only_older)
+    cell("⑪ span=2 冷并发 100：拉 1 次、span/span_max 回显、更早一段接在前面且时间连续不重",
+         ok, "拉=%d（只要更早那段=%s）回显=%s 根数 %d→%d 尾部对齐=%s" % (
+             calls["n"], only_older, {(m["span"], m["span_max"]) for m in ms},
+             len(t1), len(t2), t2[-len(t1):] == t1 if t2 else None))
+
+    # ⑫ 预拉：送出 span=k 之后后台单飞把 2k 拉好；之后请求 2k 拉 0 次、立刻回
+    server.start_prefetch = real_prefetch
+    for (s_, t_, kk), sl_ in server.SLOTS.items():      # 按真有的格子清，不信 spans_of（变异臂会换掉它）
+        if (s_, t_) == ("ZECUSDT", "4h"):
+            sl_.reset()
+    calls["n"] = calls["peak"] = 0
+    req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=4h")
+    s2 = server.SLOTS[("ZECUSDT", "4h", 2)]
+    t0 = time.time()
+    while time.time() - t0 < 10:
+        with s2.lock:
+            if s2.body is not None and not s2.prefetching:
+                break
+        time.sleep(0.05)
+    n_after_pre = calls["n"]
+    server.start_prefetch = lambda *a: None              # 量「再要 span=2」这一下本身拉了几次：别让它连带预拉 span=4
+    t0 = time.time()
+    code, body = req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=4h&span=2")
+    dt = time.time() - t0
+    m = json.loads(body)
+    n_req = calls["n"] - n_after_pre
+    server.start_prefetch = real_prefetch
+    cell("⑫ 预拉：送出 span=1 后后台把 span=2 拉好（共拉 2 次）；再要 span=2 拉 0 次、立刻回",
+         n_after_pre == 2 and code == 200 and m["span"] == 2 and n_req == 0 and dt < 0.1,
+         "预拉后累计拉=%d（应 2）· 再要 span=2 拉 %d 次、用了 %.0f ms" % (n_after_pre, n_req, dt * 1000))
+
+    # ⑬ 到最早 / 到封顶：earliest 为真之后不再往下预拉；到封顶那档也不再预拉
+    for kk in (4, 8, 16):
+        req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=4h&span=%d" % kk)
+        sl = server.SLOTS[("ZECUSDT", "4h", kk)]
+        settle(sl, 10)
+    time.sleep(0.5)
+    def _earliest(kk):
+        code_, body_ = req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=4h&span=%d" % kk)
+        try:
+            return json.loads(body_).get("earliest") if code_ == 200 else "HTTP %d" % code_
+        except ValueError:
+            return "不是 JSON"
+    flags_ = {kk: _earliest(kk) for kk in (1, 2, 4, 8, 16)}
+    n_before = calls["n"]
+    req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=4h&span=16")
+    req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=15m&span=4")   # 15m 封顶 4：不许去预拉 8
+    time.sleep(0.5)
+    extra = calls["n"] - n_before
+    cell("⑬ earliest 如实（约 840 天的假历史：span 1/2/4 假、8/16 真）；封顶 / 到最早后不再多拉",
+         flags_ == {1: False, 2: False, 4: False, 8: True, 16: True} and extra <= 1,
+         "earliest=%s · 之后多拉 %d 次（15m span=4 冷拉 1 次，不该再有）" % (flags_, extra))
+    server.start_prefetch = lambda *a: None
+
     # 收尾：等每一格的后台刷新都落地再返回。不等的话，上一条变异臂留下的后台线程（⑨ 里睡 5 秒的那种）
     # 会在下一条臂的 ⓪ 里继续调假币安、把计数和峰值打脏 —— 自测里「错误回堆栈」那臂 ⓪ 莫名变红就是它。
     calls["delay"] = 0.0
     for sl in server.SLOTS.values():
         settle(sl, 20)
+        t0 = time.time()
+        while sl.prefetching and time.time() - t0 < 20:
+            time.sleep(0.05)
     srv.shutdown()
     srv.server_close()
     print("%d 格不过" % len(bad) if bad else "全部通过")
@@ -303,7 +400,7 @@ def self_test():
 
     def parallel_prewarm():
         def pw():
-            ths = [threading.Thread(target=server.get_chart, args=k) for k in server.SLOTS]
+            ths = [threading.Thread(target=server.get_chart, args=k) for k in server.SLOTS if k[2] == 1]
             [t.start() for t in ths]
             [t.join() for t in ths]
         server.prewarm = pw
@@ -311,13 +408,34 @@ def self_test():
     def sync_refresh():
         server.start_refresh = lambda sl, sy, tf: server._bg_refresh(sl, sy, tf)
 
+    def any_span():
+        server.SPAN_VALUES = tuple(range(1, 1000))
+
+    def no_clamp():
+        server.SPAN_MAX = {k: 16 for k in server.SPAN_MAX}
+
+    def no_prefetch():
+        server.start_prefetch = lambda *a: None
+
+    def no_seed():
+        class _NoHalf(dict):                             # _refresh 只用 SLOTS.get 找上一档：让它永远找不到
+            def get(self, k, d=None):
+                return None
+        server.SLOTS = _NoHalf(server.SLOTS)
+
+    def never_earliest():
+        real = server._refresh
+        server._refresh = lambda slot, symbol, tf: (lambda b, body, e: (
+            b, body.replace(b'"earliest":true', b'"earliest":false', 1), False))(*real(slot, symbol, tf))
+
     def serve_source():
         server.STATIC_EXT[".py"] = "text/plain; charset=utf-8"
 
     miss = 0
     for name, f in [("拿掉单飞锁", no_lock), ("拿掉刷新节流", no_throttle), ("错误回堆栈", leaky),
                     ("静态放行 .py", serve_source), ("预热改成并发", parallel_prewarm),
-                    ("刷新挂在请求上", sync_refresh)]:
+                    ("刷新挂在请求上", sync_refresh), ("span 不设白名单", any_span), ("超封顶不钳", no_clamp), ("不预拉", no_prefetch),
+                    ("不拿上一档当底（整窗重拉）", no_seed), ("earliest 恒为假", never_earliest)]:
         importlib.reload(server)
         f()
         buf = io.StringIO()

@@ -13,10 +13,11 @@
   · 前端只看得到固定措辞的错误，**不出本机路径、密钥、堆栈**（详细原因只进 stderr）。
 
 接口：
-  GET /api/chart?symbol=ZECUSDT&tf=15m
+  GET /api/chart?symbol=ZECUSDT&tf=15m[&span=1|2|4|8|16]   （缺省 1；不在这五个值里 400；超本周期封顶钳到封顶并回显）
       → tools/make_web_fixture.shape() 的那一份（形状只在那里定义一处，前端离线样本也是它烤的），
         顶上再加 fetched_at（拉币安的时间，UTC …Z，与 updated 同一写法）/ stale（上一次拉取失败、回的是之前的结果）/
-        refreshing（缓存已过期、后台正在拉，这次先回旧的）。
+        refreshing（缓存已过期、后台正在拉，这次先回旧的）/ span（回显）/ earliest（币安没有更早的了）/
+        span_max（本周期封顶档）。span=k 看最近 k×210 天，缠论结构对整段重算，不拼接。
         结构直接是 core.analyze / core.signals 的输出，不另写算法。
   GET /api/meta            → 白名单（前端拿来做下拉）
   GET /  /<静态文件>       → web/ 下的前端文件（只送 STATIC_EXT 里的类型，.py / .md / 点文件一律 404）
@@ -50,7 +51,12 @@ HOST = "127.0.0.1"                       # 默认回环；make_server 拒绝任�
 # 品种 → config.TICK 里的前缀（精度只从 config 取一处，不在这里再写一份）
 SYMBOLS = {"ZECUSDT": "zec", "BTCUSDT": "btc", "AAPLUSDT": "aaplusdt"}
 TFS = {"15m": 15 * 60_000, "30m": 30 * 60_000, "1h": 3600_000, "2h": 7200_000, "4h": 14400_000}
-DAYS = 210                               # 每个周期都看最近 210 天（与 README 出图流程同一窗口）
+DAYS = 210                               # span=1 看最近 210 天（与 README 出图流程同一窗口）；span=k 看 k×210 天
+# 往左加载的档位封顶（Nova 10-04 按实测表定：一次计算 ≤0.5s、gzip ≤约 1.6MB；15m 到 8 档 3MB/1.7s 太重不开）。
+# span 只许 1、2、4…… 直到这里的封顶；白名单外 400。
+SPAN_MAX = {"15m": 4, "30m": 8, "1h": 16, "2h": 16, "4h": 16}
+SPAN_VALUES = (1, 2, 4, 8, 16)           # 契约（Nova 10-04）：span 只认这五个值，别的 400；在里面但超本周期封顶的钳到封顶
+IDLE_S = 600                             # span>1 的格子闲置这么久就清掉（几十万根 K 线常驻太占内存）
 REFRESH_S = 60                           # 同一（品种, 周期）至少隔这么久才再碰一次币安
 RETRY_S = 30                             # 拉失败之后，至少隔这么久才再试（失败也不许刷）
 STATIC = os.path.dirname(os.path.abspath(__file__))     # web/ 自己：前端文件就在这里
@@ -86,10 +92,23 @@ def build_payload(bars, symbol, tf):
 
 # ───────────────────────── 缓存：每个（品种, 周期）一格 ─────────────────────────
 
+def spans_of(tf):
+    k, out = 1, []
+    while k <= SPAN_MAX[tf]:
+        out.append(k)
+        k *= 2
+    return out
+
+
 class Slot:
-    def __init__(self):
+    def __init__(self, span=1):
         # RLock：后台刷新线程收尾时也要拿它；自测里把「后台刷新」换成就地同步跑（变异臂）时不能自锁死
         self.lock = threading.RLock()
+        self.span = span
+        self.reset()
+
+    def reset(self):
+        """清掉数据（闲置清理用），**锁和 span 不动** —— 清理是在持锁时做的，换锁等于把锁丢了。"""
         self.bars = None                 # 上一次成功拉到的 K 线
         self.body = None                 # 上一次成功的 JSON（头上 stale=false, refreshing=false）
         self.variants = {}               # (stale, refreshing) → (json, gzip)：每种组合只压一次
@@ -97,37 +116,62 @@ class Slot:
         self.tried_at = 0.0              # 上一次碰币安的时间（成功失败都算）
         self.failed = False              # 上一次碰币安是不是失败了 ⇒ 响应里 stale
         self.refreshing = False          # 后台正在拉这一格 ⇒ 响应里 refreshing；也是后台刷新的单飞旗
+        self.earliest = False            # 币安没有比这一份更早的数据了 ⇒ 响应里 earliest
+        self.prefetching = False         # 后台正在预拉这一格（上一档送出之后触发）—— 预拉的单飞旗
+        self.used_at = 0.0               # 上次被请求的时间（闲置清理用）
 
 
-SLOTS = {(s, t): Slot() for s in SYMBOLS for t in TFS}
+SLOTS = {(s, t, k): Slot(k) for s in SYMBOLS for t in TFS for k in spans_of(t)}
 FETCHES = {"n": 0}                       # 自计数：压测脚本拿来核「没多拉」
 
 
 def _refresh(slot, symbol, tf):
-    """拉 + 算，不动 slot。增量：已有 K 线时只从最后一根（可能未收盘）往后拉，再截回 DAYS 窗口。
-    调用方保证同一格同一时刻只有一个在跑：冷启动那条持 slot.lock，后台那条靠 slot.refreshing。"""
+    """拉 + 算，不动 slot → (bars, body, earliest)。调用方保证同一格同一时刻只有一个在跑
+    （冷启动那条持 slot.lock，后台那条靠 slot.refreshing）。
+    · 已有 K 线：只从最后一根（可能未收盘）往后拉，再截回窗口（span × DAYS 天）；
+    · 冷、span>1、上一档有 K 线：拿上一档的当底，**只向币安要更早缺的那一段**（往左加载的主路径）；
+    · 冷、其它：整个窗口拉一次。
+    earliest：要的起点之后币安才有数据（或更早那段拉回来是空的）⇒ 没有更早的了。"""
     now_ms = int(time.time() * 1000)
-    start = now_ms - DAYS * 86400_000
+    step = TFS[tf]
+    lo = now_ms - slot.span * DAYS * 86400_000
+    earliest = slot.earliest
+    half = SLOTS.get((symbol, tf, slot.span // 2)) if slot.span > 1 else None
     if slot.bars:
-        start = max(start, slot.bars[-1]["t"])
-    FETCHES["n"] += 1
-    new = fetch(symbol, tf, start, now_ms)
-    if not new:
-        raise RuntimeError("币安返回空")
-    merged = {b["t"]: b for b in (slot.bars or [])}
+        FETCHES["n"] += 1
+        new = fetch(symbol, tf, max(lo, slot.bars[-1]["t"]), now_ms)
+        if not new:
+            raise RuntimeError("币安返回空")
+        base = slot.bars
+    elif half is not None and half.bars:
+        base, new = half.bars, []
+        if half.earliest:
+            earliest = True                  # 上一档已经到最早：更大的档是同一份数据，不碰币安
+        else:
+            FETCHES["n"] += 1
+            new = fetch(symbol, tf, lo, base[0]["t"] - 1)
+            earliest = not new or new[0]["t"] > lo + step
+    else:
+        FETCHES["n"] += 1
+        base, new = [], fetch(symbol, tf, lo, now_ms)
+        if not new:
+            raise RuntimeError("币安返回空")
+        earliest = new[0]["t"] > lo + step
+    merged = {b["t"]: b for b in base}
     merged.update({b["t"]: b for b in new})              # 最后一根未收盘的那根用新值覆盖
-    lo = now_ms - DAYS * 86400_000
     bars = [merged[t] for t in sorted(merged) if t >= lo]
     # fetched_at / stale / refreshing 放最前：两个旗只在响应时替换这一处，不重算结构
-    body = json.dumps(dict(fetched_at=iso(now_ms), stale=False, refreshing=False, **build_payload(bars, symbol, tf)),
+    body = json.dumps(dict(fetched_at=iso(now_ms), stale=False, refreshing=False,
+                           span=slot.span, earliest=earliest, span_max=SPAN_MAX[tf],
+                           **build_payload(bars, symbol, tf)),
                       ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
-    return bars, body
+    return bars, body, earliest
 
 
 def _refresh_into(slot, symbol, tf):
     """拉一次并把结果（或失败）记进 slot。成功失败都在 slot.lock 里落账。"""
     try:
-        bars, body = _refresh(slot, symbol, tf)
+        bars, body, earliest = _refresh(slot, symbol, tf)
     except Exception:
         log("refresh failed", symbol, tf, traceback.format_exc().replace("\n", " | "))
         with slot.lock:
@@ -136,6 +180,10 @@ def _refresh_into(slot, symbol, tf):
         return
     with slot.lock:
         slot.bars, slot.body, slot.data_at, slot.failed = bars, body, time.time(), False
+        slot.earliest = earliest
+        # 刚填好的格子从现在起算闲置：预拉（不算「被请求」）填进来的格子 used_at 还是 0，
+        # 不补这一下，下一个请求进来先跑闲置清理 ⇒ 刚预拉好的当场被清掉、又同步拉一遍（check_abuse ⑫ 抓到的）
+        slot.used_at = max(slot.used_at, time.time())
         slot.variants = {}
 
 
@@ -168,16 +216,58 @@ def _variant(slot):
     return v
 
 
-def get_chart(symbol, tf):
+def _evict_idle(now):
+    """span>1 的格子闲置超过 IDLE_S 就清掉（锁不换；正在拉的不动）。只在请求路径上顺手扫一遍。"""
+    for (s_, t_, k), sl in SLOTS.items():
+        if k > 1 and sl.body is not None and now - sl.used_at > IDLE_S and sl.lock.acquire(blocking=False):
+            try:
+                if not sl.refreshing and not sl.prefetching and now - sl.used_at > IDLE_S:
+                    sl.reset()
+            finally:
+                sl.lock.release()
+
+
+def _prefetch(symbol, tf, span):
+    target = SLOTS[(symbol, tf, span)]
+    try:
+        get_chart(symbol, tf, span, prefetch=False, touch=False)
+    finally:
+        with target.lock:
+            target.prefetching = False
+
+
+def start_prefetch(symbol, tf, span):
+    """送出 span 之后，后台单飞把 2×span 预拉好（Nova 10-04 定的默认做法：15m 补一档要拉十几秒，
+    用户从默认视图拖到左边要滑过上万根，那段时间里它早就拉好了）。到封顶 / 已到最早 / 已有 / 正在拉 ⇒ 不拉。"""
+    nxt = span * 2
+    if nxt > SPAN_MAX[tf] or SLOTS[(symbol, tf, span)].earliest:
+        return
+    target = SLOTS[(symbol, tf, nxt)]
+    if not target.lock.acquire(blocking=False):
+        return                                           # 有人正在拉它（冷路径持锁）
+    try:
+        if target.body is not None or target.prefetching or target.refreshing:
+            return
+        target.prefetching = True
+    finally:
+        target.lock.release()
+    threading.Thread(target=_prefetch, args=(symbol, tf, nxt), daemon=True).start()
+
+
+def get_chart(symbol, tf, span=1, prefetch=True, touch=True):
     """→ (json bytes, gzip bytes) 或 None（一次都没拉成功过）。
 
     · 冷（还没有缓存）：同步拉，持锁 ⇒ 并发进来的都等这一次，不回空；
     · 有缓存、过期了（成功后 REFRESH_S / 失败后 RETRY_S）：起**一个**后台刷新，立刻回旧缓存
       （stale-while-revalidate；币安一抖不会挂到用户请求上）；
-    · 旗：stale = 上一次拉取失败；refreshing = 这次回的是旧缓存、后台正在拉。"""
-    slot = SLOTS[(symbol, tf)]
+    · 旗：stale = 上一次拉取失败；refreshing = 这次回的是旧缓存、后台正在拉；
+    · 送出之后：后台预拉下一档（start_prefetch）。"""
+    slot = SLOTS[(symbol, tf, span)]
+    now = time.time()
+    _evict_idle(now)
     with slot.lock:
-        now = time.time()
+        if touch:
+            slot.used_at = now
         due = now - slot.tried_at >= (RETRY_S if slot.failed else REFRESH_S)
         if slot.body is None:
             if due:
@@ -190,7 +280,10 @@ def get_chart(symbol, tf):
             slot.refreshing = True
             slot.variants = {}
             start_refresh(slot, symbol, tf)
-        return _variant(slot)
+        out = _variant(slot)
+    if prefetch:
+        start_prefetch(symbol, tf, span)
+    return out
 
 
 def prewarm():
@@ -199,10 +292,11 @@ def prewarm():
     有人在预热途中访问某格，要么等这格的锁、要么直接吃已有缓存，不会多拉。"""
     t0 = time.time()
     ok = 0
-    for symbol, tf in SLOTS:
-        if get_chart(symbol, tf) is not None:
+    base = [(s_, t_) for (s_, t_, k) in SLOTS if k == 1]
+    for symbol, tf in base:
+        if get_chart(symbol, tf, prefetch=False) is not None:   # 预热只管 span=1，不连带预拉（免得一起打币安）
             ok += 1
-    log("prewarm %d/%d in %.1fs" % (ok, len(SLOTS), time.time() - t0))
+    log("prewarm %d/%d in %.1fs" % (ok, len(base), time.time() - t0))
 
 
 # ───────────────────────── 静态资源版本号 ─────────────────────────
@@ -306,12 +400,16 @@ class Handler(BaseHTTPRequestHandler):
                 q = urllib.parse.parse_qs(u.query, keep_blank_values=True, strict_parsing=True, max_num_fields=4)
             except ValueError:
                 return self._err(400)
-            if set(q) != {"symbol", "tf"} or any(len(v) != 1 for v in q.values()):
+            if not {"symbol", "tf"} <= set(q) <= {"symbol", "tf", "span"} or any(len(v) != 1 for v in q.values()):
                 return self._err(400)                     # 多参数、少参数、重复参数一律不认
             symbol, tf = q["symbol"][0].upper(), q["tf"][0]
             if symbol not in SYMBOLS or tf not in TFS:
                 return self._err(400)
-            got = get_chart(symbol, tf)
+            raw = q.get("span", ["1"])[0]
+            if raw not in {str(v) for v in SPAN_VALUES}:
+                return self._err(400)                     # 只认 "1" "2" "4" "8" "16" 这五个写法（"02"、"2.0" 都不认）
+            span = min(int(raw), SPAN_MAX[tf])            # 超封顶：钳到封顶，响应里如实回显 span / span_max
+            got = get_chart(symbol, tf, span)
             if got is None:
                 return self._err(503)
             return self._send(200, got[0], gz=got[1])
@@ -319,7 +417,7 @@ class Handler(BaseHTTPRequestHandler):
             if u.query:
                 return self._err(400)
             return self._send(200, json.dumps(dict(symbols=list(SYMBOLS), tfs=list(TFS),
-                                                   days=DAYS, refresh_s=REFRESH_S)).encode())
+                                                   days=DAYS, refresh_s=REFRESH_S, span_max=SPAN_MAX)).encode())
         return self._static(u.path, u.query)
 
     def _static(self, path, query=""):

@@ -13,7 +13,8 @@
 每档：bars 根数、本档补拉耗时、计算耗时（tools/make_web_fixture.shape，即后台同一个函数）、JSON 字节 / gzip 字节。
 相邻两档（k 对 2k）的结构差异 —— 量法照 Atlas 写在卡上的（2026-10-04）：
   · 重叠区 = 两份都有的 K 线，**按时间戳对齐**（不按下标）；
-  · 比 ① 笔端点（时间戳＋顶/底）② 线段端点（时间戳＋方向）③ 类中枢、线段中枢（起止时间戳＋ZD/ZG）；
+  · 比 ① 笔端点（时间戳＋顶/底）② 线段端点（时间戳＋方向）③ 类中枢、线段中枢（起止时间戳＋ZD/ZG）
+    ④ 买卖点（时间戳＋层级＋种类＋是否已确认＋弱，Atlas 10-04 补）；
     一边有一边没有也算一处；只比**整个落在重叠区里**的东西；
   · 报：差异处数、**最右一处差异离右端几根**（0 = 最新那根；按 span=k 那份的下标数）。
 """
@@ -43,7 +44,7 @@ def structures(d):
     t = [b["t"] for b in d["bars"]]
     pens, segs = d["pens"], d["segs"]
     done = [s for s in segs if not s.get("live")]
-    out = {"笔端点": {}, "段端点": {}, "类中枢": {}, "线段中枢": {}}
+    out = {"笔端点": {}, "段端点": {}, "类中枢": {}, "线段中枢": {}, "买卖点": {}}
     for p in pens:
         for i, price, other in ((p["i0"], p["p0"], p["p1"]), (p["i1"], p["p1"], p["p0"])):
             out["笔端点"][(t[i], "顶" if price > other else "底")] = t[i]
@@ -53,6 +54,11 @@ def structures(d):
         for z in zs:
             a, b = t[host[z["PI0"]]["i0"]], t[host[z["PI1"]]["i1"]]
             out[name][(a, b, z["ZD"], z["ZG"])] = b
+    # 买卖点（Atlas 10-04 补）：线段层的三买三卖拿线段中枢的 ZD/ZG 判，线段中枢随档位变 ⇒ 买卖点也可能变。
+    # 键带 confirmed：同一个点一档「已确认」一档「待确认」，画出来实心 / 空心不同，也算画面变了。
+    for lv, sigs in (d.get("signals") or {}).items():
+        for g in sigs:
+            out["买卖点"][(t[g["bar"]], lv, g["kind"], bool(g["confirmed"]), bool(g.get("weak")))] = t[g["bar"]]
     return out
 
 
