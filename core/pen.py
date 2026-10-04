@@ -59,10 +59,43 @@ def build_pens(fx, std, rule="old", min_gap=4):
     def beyond(f, g):                        # 同类分型：f 比 g 更极端
         return f["price"] > g["price"] if f["type"] == "top" else f["price"] < g["price"]
 
+    # 区间最高 / 最低：线段树，单次 O(log n)。原来是每次切片现扫 max/min —— fix_start 往回找端点时
+    # 每一步都扫 [e.k, g.k]，修不成的时候一路扫到头 ⇒ 整体平方级（ZEC 15m：2 万根 0.25s、4 万根 1.2s）。
+    # 判据一字不改：仍是「f 的价 ≥ 区间最高 h」/「≤ 区间最低 l」，只是区间最值换了算法。
+    n_std = len(std)
+    size = 1
+    while size < max(n_std, 1):
+        size *= 2
+    tmax = [float("-inf")] * (2 * size)
+    tmin = [float("inf")] * (2 * size)
+    for i, x in enumerate(std):
+        tmax[size + i], tmin[size + i] = x["h"], x["l"]
+    for i in range(size - 1, 0, -1):
+        tmax[i] = max(tmax[2 * i], tmax[2 * i + 1])
+        tmin[i] = min(tmin[2 * i], tmin[2 * i + 1])
+
+    def span_ext(k0, k1, top):
+        """std[k0:k1+1] 的最高 h（top）/ 最低 l。切片语义照旧：k1 越界就截到末尾，空区间照旧报 ValueError。"""
+        k1 = min(k1, n_std - 1)
+        if k0 < 0 or k0 > k1:
+            raise ValueError("区间为空：[%d, %d]" % (k0, k1))
+        t, best = (tmax, float("-inf")) if top else (tmin, float("inf"))
+        pick = max if top else min
+        lo, hi = k0 + size, k1 + size + 1
+        while lo < hi:
+            if lo & 1:
+                best = pick(best, t[lo])
+                lo += 1
+            if hi & 1:
+                hi -= 1
+                best = pick(best, t[hi])
+            lo >>= 1
+            hi >>= 1
+        return best
+
     def extreme(f, k0, k1):                  # f 是不是标准化序列 [k0, k1] 上的最高（顶）/ 最低（底）
-        span = std[k0:k1 + 1]
-        return f["price"] >= max(x["h"] for x in span) if f["type"] == "top" \
-            else f["price"] <= min(x["l"] for x in span)
+        return f["price"] >= span_ext(k0, k1, True) if f["type"] == "top" \
+            else f["price"] <= span_ext(k0, k1, False)
 
     seq, pend = [], None
     fx_by_k = [None] * len(std)
