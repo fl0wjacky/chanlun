@@ -301,6 +301,34 @@ const snap = (p) => p.evaluate(() => {
     if (await page.locator(sel).isVisible()) await page.locator(sel).screenshot({ path: `${OUT}/${file}` });
     else bad.push(`截图 ${file}：${sel} 没显示出来（这一页是空的 —— 是不是截错了页？）`);
   };
+  // ★★ 像素那一格（2026-10-04 线上逮到的）：`textContent` 对、`.on` 挂着、`isVisible()` 也 true ——
+  //   三样全对，可是整块**被 lightweight-charts 的画布盖住**，屏幕上一个像素都没画出来（`#more`
+  //   的 z-index 是 auto，画布是 1／2：auto 的定位元素排在正 z-index **下面**）。
+  //   `isVisible()` 挡不住这个 —— 被盖住的元素照样 isVisible（本地截图一直是「图」，从来没人看）。
+  //   所以这一格拍**像素**：把元素那一块裁下来连拍两张 ——
+  //     ① 同一状态两张必须一模一样（**区域得是静的**；不查这条，任何抖动都能被当成「画出来了」）
+  //     ② 「在」与「不在」两张必须**不同**（不同 ⇒ 屏幕上真多了块东西 ⇒ 它没有被盖住）
+  //   ★★ 两态必须用**同一个 clip 矩形**。这条我第一版就踩了：`boundingBox()` 是**按当前 DOM 量的**，
+  //     药丸一收（`textContent=''`）宽度塌成 38px ⇒ 两张裁的是**两块不同的屏幕**，字节当然不同，
+  //     于是「画上去了」这句在**改动之前也是绿的**（假绿）。所以矩形只在「在」的那一态量一次，之后照用。
+  const clipOf = async (page, sel, pad = 8) => {
+    const b = await page.locator(sel).boundingBox();
+    if (!b) return null;
+    return { x: Math.max(0, b.x - pad), y: Math.max(0, b.y - pad), width: b.width + 2 * pad, height: b.height + 2 * pad };
+  };
+  const pixAt = async (page, clip, tag) => {
+    const a = await page.screenshot({ clip }), b = await page.screenshot({ clip });
+    for (const [buf, k] of [[a, 'a'], [b, 'b']]) if (buf) fs.writeFileSync(`${OUT}/pix_${tag}_${k}.png`, buf);
+    return { a, b, same: !!a && !!b && a.equals(b), size: `${clip.width}×${clip.height}` };
+  };
+  const pix2 = async (page, sel, tag = 'x') => {
+    const clip = await clipOf(page, sel);
+    if (!clip) return { a: null, b: null, same: false, size: '?' };
+    return await pixAt(page, clip, tag);
+  };
+  const pixSay = (x, y) => `同一块 ${x.size}：在：两张${x.same ? '一样' : '★不一样'}／不在：两张${y.same ? '一样' : '★不一样'}`
+    + `／在↔不在：${!x.a || !y.a ? '★有一张没拍着'
+        : x.a.equals(y.a) ? '★一模一样 —— 它根本没画到屏幕上' : `不同（${x.a.length}B vs ${y.a.length}B）`}`;
   // ★★ 视口只许用**真鼠标**推（2026-10-04 改）：页面现在只认「用户真动过输入设备」
   //   （pointerdown/move、wheel、touch…），**脚本摆视口一律不算**（那是对的：脚本摆一下不等于有人要看）。
   //   所以工装里原来那几处 `evaluate(setVisibleLogicalRange)` 全部换成真拖 —— 工装得跟用户走同一条路，
@@ -393,6 +421,27 @@ const snap = (p) => p.evaluate(() => {
       w4.hit ? '' : `看了一路（前4）：${JSON.stringify(w4.seen.slice(0, 4))} （后2）：${JSON.stringify(w4.seen.slice(-2))}`);
     await shot('#more', 'more_loading.png');
     await p.locator('#chart').screenshot({ path: `${OUT}/more_s2_loading.png` });   // 证据图：换档**前**这一屏
+    // ★★ 「那句话真画上去了」那一格（见 clipOf／pixAt 上面那段）：药丸正挂着（响应扣在后台）⇒ 先拍「在」，
+    //   放行、等它收掉，再拍「不在」，两张比一比。这一步是**真流程**（真拖、真请求、真药丸）。
+    //   ★ 这里**不**用 `elementsFromPoint` 判「被盖住」：`.more` 是 `pointer-events:none`，
+    //     那个函数按**命中测试**走，永远不会把药丸列进那一摞 —— 拿它当证据是量错了东西
+    //     （线上那次我就是这么写的，那条证据作废，改成下面这套拍像素的）。
+    //   ★★ 「不在」那一张**必须跟「在」那一张拍在同一份画面上**：先把 `.on` 自己收掉再拍，
+    //     不许拿「放行之后、数据换完」那一屏当基准 —— 那一屏**背景整块都重画了**（5040→7056 根），
+    //     两张的差别会把「图表自己变了」算成药丸画上去了（这格第一版就是这么绿的空转假绿）。
+    const mClip = await clipOf(p, '#more');            // 矩形只在「在」这一态量一次，两态照用
+    const moreOn = await pixAt(p, mClip, 'more_on');
+    await p.evaluate(() => document.getElementById('more').classList.remove('on'));
+    await p.waitForTimeout(350);                       // 等淡出（.15s）走完
+    const offState = await p.evaluate(() => { const m = document.getElementById('more');
+      return { on: m.classList.contains('on'), vis: getComputedStyle(m).visibility, txt: m.textContent }; });
+    const moreOff = await pixAt(p, mClip, 'more_off');
+    t('④ 那颗药丸真的画在屏幕上（不是被画布盖住）',
+      offState.on === false && moreOn.same && moreOff.same && !!moreOn.a && !!moreOff.a
+      && !moreOn.a.equals(moreOff.a),
+      pixSay(moreOn, moreOff) + `　药丸框 ${JSON.stringify(mClip)}／收掉后 ${JSON.stringify(offState)}`
+      + '（同一份画面、同一个视口：差别只可能是药丸自己画的。被盖住时两张一模一样'
+      + '　—— textContent／.on／isVisible 三样都对，挡不住这一条）');
     rel4();
     await p.waitForFunction((n) => window.__app.state.data.bars.length > n, after2.n, { timeout: 20000 })
            .catch(() => {});
@@ -667,8 +716,25 @@ const snap = (p) => p.evaluate(() => {
     const pillB = await waitPill(qB, '加载更早数据…', 8000);
     const watchB = watchNotice(qB, 4500);
     relB();
+    // ★★ 阳性对照（跟 ④ 那颗药丸配成一对）：`#notice` 是同一类东西 —— 都贴在图上、都绝对定位，
+    //   差的只有 z-index。它看得见（z-index:3）⇒ 同一套「拍像素」的方法必须能把它比出来；
+    //   比不出来的话，④ 那一格的红绿就说明不了任何事（方法本身是空转的）。
+    const noticePixOn = (async () => {
+      await qB.waitForFunction(() => document.getElementById('notice').classList.contains('on'), null,
+                               { timeout: 15000 }).catch(() => {});
+      await qB.waitForTimeout(450);   // ★ 等淡入（.25s）走完再拍：不然连拍两张拍在过渡中间，两张必然不同
+                                      //   —— 这条「区域得是静的」自检第一次跑就是这么红的（红得对）。
+      return await pix2(qB, '#notice', 'notice_on');
+    })();
     await qB.waitForFunction((n) => window.__app.state.data.bars.length > n, nB0, { timeout: 20000 }).catch(() => {});
     const B = await watchB;
+    await qB.waitForFunction(() => !document.getElementById('notice').classList.contains('on'), null,
+                             { timeout: 8000 }).catch(() => {});
+    await qB.waitForTimeout(400);                      // 等淡出（.25s）走完
+    const noticeOff = await pix2(qB, '#notice', 'notice_off');
+    const NB = await noticePixOn;
+    t('⑬ 阳性对照：#notice 那句横幅拍得出来（这套「拍像素」的探针本身不是空转）',
+      NB.same && noticeOff.same && !!NB.a && !!noticeOff.a && !NB.a.equals(noticeOff.a), pixSay(NB, noticeOff));
     t('⑬ 第二格不是空转：可视窗口里真有笔/线段', cntB.pens + cntB.segs > 0,
       `窗口里 笔 ${cntB.pens}／线段 ${cntB.segs}`);
     t('⑬ 可视窗口里结构变了 ⇒ 印那句话（一个字都不许改）',

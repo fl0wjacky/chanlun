@@ -76,6 +76,13 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
   box-shadow: 0 0 0 3px var(--panel-hi);
   opacity: 0; visibility: hidden; transition: opacity .15s;
   pointer-events: none;      /* 它盖在图上：不许把拖拽/缩放吃掉 */
+  /* ★ z-index 这个 3 是**必须的**，别顺手删（2026-10-04 线上逮到的：三句话一个像素都没画出来）。
+     机理：lightweight-charts 把画布铺成 `position:absolute; z-index:1/2` 的两个兄弟元素，
+     而 `#chart` 自己**不是**层叠上下文 ⇒ 画布跑到 `main` 那一层去比。`.more` 的 z-index 是
+     auto（＝0）的定位元素 ⇒ **排在正 z-index 下面**：位置对、文字对、`visibility:visible`，
+     但整块被画布盖住。`#notice` 一直是 3，所以只有它看得见 —— 差别就在这一个数。
+     （量这一条要拍**像素**：`.on` / `visibility` / `textContent` 被盖住时全都正常。） */
+  z-index: 3;
 }
 .more.on { opacity: 1; visibility: visible; }
 .more.end { color: var(--mu); }   /* 「已到最早」这类是收尾的话，比加载中弱一档 */
