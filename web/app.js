@@ -4,7 +4,7 @@
 //   {symbol, tf, name, updated, closed, bars[], pens[], segs[], centers[], seg_centers[], signals{seg,pen}, meta{tick,pen_rule}}
 // 取不到后台就退回 `fixtures/`（离线也能看、也能截图对账）；两边都没有就老实说取不到，不画半张图。
 import { CHART, PAGE, CANDLE, WIDTH } from './theme.js';
-import { makeBoxPrimitive, makeAnnotPrimitive } from './layers.js';
+import { makeBoxPrimitive, makeAnnotPrimitive, shownOf } from './layers.js';
 
 const LWC = window.LightweightCharts;
 
@@ -233,7 +233,13 @@ let noticeTimer = 0;
 // ★ 记哪几层 ＝ **屏幕上看得见的那几层**（Nova 2026-10-04 拍 (a)）：笔、线段、类中枢、线段中枢、买卖点。
 //   原先只记笔和线段 —— 可是换档后先变的往往正是中枢：BTC 4h 那对 1↔2 就是**只有线段中枢的 ZD 变了**
 //   （65569.2 ↔ 67300），笔和段一动没动，屏幕上的框变了却不出声。看得见的东西变了就得说。
-function structKey(d, t0, t1) {
+// ★ 再收一格（Nova 2026-10-04 定的口径）：**关着的层不算「看得见」**。类中枢、高一级、买卖点
+//   默认就是关的 —— 那些层重算了用户屏幕上什么也没动，这时候喊一句「结构重算了」就是喊狼。
+//   `shown`（＝ shownOf(opts)）由调用点传进来，**跟 layers.js 画图用的是同一个函数**：判据那边
+//   绝不另写一份过滤（两份迟早在某一格上错开）。不传 `shown` ＝ 五层全比（老口径，尺里量窗口取法的用例走这条）。
+function structKey(d, t0, t1, shown) {
+  const sh = shown || null;
+  const on = (k) => !sh || !!sh[k];        // 这一层画没画（没给开关就当作画着）
   const ts = (i) => (d.bars[i] || {}).t;
   const ov = (a, b) => a != null && b != null && b >= t0 && a <= t1;   // 区间跟窗口有重叠（含边界）
   const at = (t) => t != null && t >= t0 && t <= t1;                   // 单个时间点落在窗口里
@@ -243,17 +249,21 @@ function structKey(d, t0, t1) {
   // 中枢：取**画出来的那个框**的横跨区 ⇒ 跟 layers.js 的 boxes() 同一个取法
   //   （host[PI0].i0 ／ host[PI1].i1。类中枢 host=笔；线段中枢 host=**已完成**线段，别拿 segs 直接取。
   //    样本上 X0/X1 跟这个取法逐条相同，但「画的是哪个」以 boxes() 为准，不押在另一个字段上。）
-  const boxes = (zs, host) => (zs || []).map((z) => {
+  //   高一级的标签跟着 `up` 开关走（layers.js 里那个 if 用的就是 sh.up）。
+  const boxes = (zs, host, upOn) => (zs || []).map((z) => {
     const a = host[z.PI0], b = host[z.PI1];
     if (!a || !b) return null;
-    const up = (z.up || []).map((u) => `${u.ZD},${u.ZG}`).join(';');   // 升级标签也是画在框上的
+    const up = (upOn ? (z.up || []) : []).map((u) => `${u.ZD},${u.ZG}`).join(';');   // 升级标签也是画在框上的
     return { i0: a.i0, i1: b.i1, s: `${z.ZD},${z.ZG}${z.live ? ',live' : ''}${up ? ',' + up : ''}` };
   }).filter((o) => o && ov(ts(o.i0), ts(o.i1))).map((o) => `${ts(o.i0)}>${ts(o.i1)}@${o.s}`).join('|');
-  // 买卖点：一个点 —— 三角和它的字都画在这个 x 上
-  const sigs = (a) => (a || []).filter((s) => at(ts(s.bar)))
+  // 买卖点：一个点 —— 三角和它的字都画在这个 x 上。画不画由 shownOf 说了算
+  //   （大开关 ＋ 六个 kind 的 chip ＋ 待确认；带了 shown 就必须带 sigAt，缺了当场炸，不静默放过）
+  const sigs = (a) => (a || []).filter((s) => at(ts(s.bar)) && (!sh || sh.sigAt(s)))
     .map((s) => `${ts(s.bar)}@${s.price},${s.kind}${s.confirmed === false ? ',未确认' : ''}`).join('|');
   const done = (d.segs || []).filter((s) => !s.live);   // 线段中枢的 host（跟 layers.js doneSegs 同一条）
-  return [part(d.pens), part(d.segs), boxes(d.centers, d.pens || []), boxes(d.seg_centers, done),
+  return [on('pen') ? part(d.pens) : '', on('seg') ? part(d.segs) : '',
+          on('pc') ? boxes(d.centers, d.pens || [], on('up')) : '',
+          on('sc') ? boxes(d.seg_centers, done, on('up')) : '',
           sigs((d.signals || {}).seg), sigs((d.signals || {}).pen)].join('#');
 }
 // 可视窗口 → 时间区间。★ 换档前取一次、换档后用**同一段时间**再取一次：
@@ -452,12 +462,15 @@ async function loadEarlier(span) {
     const anchor = anchorOf(own.bars, range0);
     // ★ 基准要在**动数据之前**取：换完之后再取就没得比了（比的就是换前换后）。
     const win = windowOf(own.bars, range0);
-    const keyBefore = win && structKey(own, win.t0, win.t1);
+    // ★ 判据只比**用户当前打开的那几层**，开关照 layers.js 实际画图用的那份（shownOf）取；
+    //   前后两次用**同一个** sh：要是两次之间开关自己变了，那跟换档没关系，别算进去。
+    const sh = shownOf(state.opts);
+    const keyBefore = win && structKey(own, win.t0, win.t1, sh);
     Object.assign(paging, adopt(paging, d, own.bars.length));   // 回显说了算（钳档 / earliest / 有没有多出来）
     setUrl();
     draw(d, anchor);
     // 同一段时间、换完之后再取一次：不一样 ⇒ 用户正看着的那一屏被重算了 ⇒ 说一句，3 秒自己收
-    if (win && structKey(d, win.t0, win.t1) !== keyBefore) showNotice();
+    if (win && structKey(d, win.t0, win.t1, sh) !== keyBefore) showNotice();
     renderMore({ stop: stopReason(paging) }, 2600);
   } catch (e) {
     paging.failedAt = Date.now();

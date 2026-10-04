@@ -75,6 +75,7 @@ let requests = [], inflight = 0, maxInflight = 0;
 //   「不记中枢」的变异因此照样绿（假绿），量到的是空转。所以：**首屏那份必须一个模式都没带**。
 let servedLog = [];
 let bumped = 0;                       // ⑬ 第三格：后台真动过几个窗口内的中枢框（0 ⇒ 这一格是空转）
+let sigBumped = 0;                    // ⑬ 13d／13e：后台真动过几个窗口内的买卖点（0 ⇒ 这两格是空转）
 const PAGENAMES = new Map();          // 哪一页发的请求（多页同时开着，出问题时要能点名）
 const servedFirst = new Set();        // 哪个页名已经供过第一份了（场景对账只在第一份上做）
 // ★★★ 场景开关**只有这一份**（Atlas 2026-10-04）：原先它们是一堆平铺的 `let`，每格自己清自己那份，
@@ -103,8 +104,11 @@ const scen = (o) => { Object.assign(SCEN, DEFAULT_SCEN, o || {}); holdRelease = 
 //    两边一起动的话，页面不管拿哪儿当判据都会出提示，'out' 那格就永远是绿的（量不到东西）。
 //   SCEN.winmode：'in'＝只动跟可视窗口重叠的结构 ／ 'out'＝只动窗口外的
 let holdRelease = null;
-const holdNext = () => { let open; holdRelease = new Promise((r) => { open = r; });
-                         return () => { const h = holdRelease; holdRelease = null; if (h) open(); }; };
+// ★ 放行闭包认**自己造的那一个** promise，不去读全局变量：`scen()` 会把全局的扣留清掉
+//   （它清得对 —— 清的是**后面**那些请求的扣留），老写法在放行那一刻才去读全局，读到的已经是 null，
+//   那一趟请求就永远不放行、工装干等到超时。13d／13e 要「先拖、再盖场景」正好会撞上这一点。
+const holdNext = () => { let open; const pr = new Promise((r) => { open = r; }); holdRelease = pr;
+                         return () => { if (holdRelease === pr) holdRelease = null; open(); }; };
 
 function payload(span) {
   const extra = (span - 1) * PER, head = FULL.bars[0], older = [];
@@ -145,6 +149,19 @@ function payload(span) {
       const bump = (z) => { bumped++; return Object.assign({}, z, { ZD: z.ZD * 1.01 }); };
       d.centers = (d.centers || []).map((z) => (boxOv(z, d.pens || []) ? bump(z) : z));
       d.seg_centers = (d.seg_centers || []).map((z) => (boxOv(z, done) ? bump(z) : z));
+    } else if (SCEN.winmode === 'in-sig' || SCEN.winmode === 'in-sig-cf') {
+      //   'in-sig'    ＝ **只有窗口里的买卖点**动一下，换的是**价**（三角还在原位）
+      //   'in-sig-cf' ＝ **只有窗口里的买卖点**动一下，换的是**确认**（已确认 → 未确认：实心变空心）
+      //     Atlas 2026-10-04 点名要的第二种：换档后常见的正是「这个点还算不算数」，
+      //     而且买卖点的键里就带着 confirmed —— 两种都只该让 13d／13e 红。
+      //   ★ 只动 signals 这一层：笔/线段/中枢一个不碰，所以「那句话亮了」只可能是它点的。
+      const inWinSig = (s) => ts(s.bar) != null && ts(s.bar) >= SCEN.pageWin.t0 && ts(s.bar) <= SCEN.pageWin.t1;
+      const sigBump = (s) => { sigBumped++;
+                               return SCEN.winmode === 'in-sig' ? Object.assign({}, s, { price: s.price * 1.01 })
+                                                                : Object.assign({}, s, { confirmed: !s.confirmed }); };
+      const sg = d.signals || { seg: [], pen: [] };
+      d.signals = { seg: sg.seg.map((s) => (inWinSig(s) ? sigBump(s) : s)),
+                    pen: sg.pen.map((s) => (inWinSig(s) ? sigBump(s) : s)) };
     } else {
       const pick = SCEN.winmode === 'in' ? overlap : (o) => !overlap(o);
       d.pens = (d.pens || []).map((o) => (pick(o) ? tweak(o) : o));
@@ -557,14 +574,29 @@ const snap = (p) => p.evaluate(() => {
     //      换过一次档之后，视口底下那一屏就全是编出来的 K 线了 —— 那一段**一根笔都没有**，
     //      「窗口里的结构变没变」在那儿恒等于「没变」。第一版就是这么绿的/红的（量到的是空转，不是页面）。
     //      每格都用「第一次换档」：那一屏还是真 K 线，窗口里确实有笔有线段。
-    const mk13 = async (name) => {
+    // ★★ 图层开关要**真点 chip**，不许直接改 `window.__app.opts`：默认关着的三层（类中枢、高一级、
+    //   买卖点）现在是判据的一部分（Nova 2026-10-04 定的口径），而用户打开它们走的就是这颗 chip。
+    //   直接改 opts 的话，「chip → opts → applyToggles → 判据」这条链上断了一节也照样绿。
+    const chipClick = async (q, k) => {
+      await q.locator(`#panel button[data-key="${k}"]`).click();
+      return q.evaluate((k) => { const o = window.__app.opts;
+        return k.startsWith('sig:') ? o.sigKinds[k.slice(4)] : o[k]; }, k);
+    };
+    const mk13 = async (name, at = 40, span = 180, keys = []) => {
       // ★ 建页之前先回默认场景（⑬ 三格各自的开关在下面单独盖）：
       //   上一格留下的 winmode 会顺手改了这一页的**首屏**，那就不是「只有中枢动」的场景了。
       scen();
       const q = await openPage(name);
-      await q.goto(PAGE + '?symbol=ZECUSDT&tf=1h&at=40&span=180', { waitUntil: 'load' });
+      await q.goto(PAGE + `?symbol=ZECUSDT&tf=1h&at=${at}&span=${span}`, { waitUntil: 'load' });
       await q.waitForFunction(() => window.__app && window.__app.state.data);
       await q.waitForTimeout(700);
+      if (keys.length) {                 // 要开的层：点开、并且确认 opts 真的变了（点了没生效也算红）
+        const on = {};
+        for (const k of keys) on[k] = await chipClick(q, k);
+        t(`⑬ 第 ${name} 页：要开的那几层真点开了（并且判据看得见）`,
+          keys.every((k) => on[k] === true), JSON.stringify(on));
+        await q.waitForTimeout(200);
+      }
       // 场景干净自检：这一页**首屏**那份，后台实际用的场景 ＝ 开页时声明的那份（逐字相同）。
       //   对不上 ⇒ 有开关从上一格漏过来了，这一格量到的就不是它想量的东西（⑬ 第三格踩过）。
       const base = servedLog.find((e) => e.who === name && e.first);
@@ -596,15 +628,20 @@ const snap = (p) => p.evaluate(() => {
     }, w);
     const noticeOn = (q) => q.evaluate(() => ({ on: document.getElementById('notice').classList.contains('on'),
                                                 txt: document.getElementById('notice').textContent }));
+    // ★★ ⑬ 各格统一走这个：**先真拖，再读窗口，然后才盖场景**。
+    //   被比的那一扇窗口 ＝ 页面在**数据到手那一刻**抓的 range0，也就是「拖完之后」那一屏；
+    //   拖之前就先读，读到的右沿比它大 —— 拖这一下本身会把右沿往左推（推多少＝拖了多少根），
+    //   于是「改在缩掉那一段里的东西」根本不在被比的范围内，判据当然一动不动。
+    //   13d／13e 就是这么红的（把买卖点改在了 383／482，而那些窗口右沿只到 36x）。
+    const dragAndWin = async (q) => { const rel = holdNext(); await pushLeft(q); return { rel, w: await readWin(q) }; };
 
     // —— 第一格：窗口**外**的结构变了、窗口里一根没动 ⇒ 一个字都不许印
     const qA = await mk13('13a');
-    const wA = await readWin(qA);
-    scen({ pageWin: wA, winmode: 'out' });
-    const cntA = await winStructs(qA, wA);
     const nA0 = (await snap(qA)).n;
-    const relA = holdNext();
-    await pushLeft(qA);
+    const dA = await dragAndWin(qA);
+    scen({ pageWin: dA.w, winmode: 'out' });
+    const cntA = await winStructs(qA, dA.w);
+    const relA = dA.rel;
     const pillA = await waitPill(qA, '加载更早数据…', 8000);
     const watchA = watchNotice(qA, 2500);
     relA();
@@ -622,12 +659,11 @@ const snap = (p) => p.evaluate(() => {
 
     // —— 第二格：同一段时间窗，让变化落在窗口**里** ⇒ 那句话必须出现，而且要停满 3 秒
     const qB = await mk13('13b');
-    const wB = await readWin(qB);
-    scen({ pageWin: wB, winmode: 'in' });
-    const cntB = await winStructs(qB, wB);
     const nB0 = (await snap(qB)).n;
-    const relB = holdNext();
-    await pushLeft(qB);
+    const dB = await dragAndWin(qB);
+    scen({ pageWin: dB.w, winmode: 'in' });
+    const cntB = await winStructs(qB, dB.w);
+    const relB = dB.rel;
     const pillB = await waitPill(qB, '加载更早数据…', 8000);
     const watchB = watchNotice(qB, 4500);
     relB();
@@ -646,14 +682,13 @@ const snap = (p) => p.evaluate(() => {
     // —— 第三格（Nova 2026-10-04 补）：**只有中枢变**（笔/线段/买卖点一根不动）⇒ 也得印那句话。
     //   这一格为什么必要：原来的 structKey 只记笔和线段，中枢变了屏幕上的框明明动了却不出声；
     //   而换档后先变的往往正是中枢（BTC 4h 1↔2 只有线段中枢的 ZD 变了）。这也是最像真换档的一格。
-    const qC = await mk13('13c');
-    const wC = await readWin(qC);
-    scen({ pageWin: wC, winmode: 'in-cen' });
-    const cntC = await winStructs(qC, wC);
-    bumped = 0;
+    //   ★ 类中枢**默认是关的** —— 不点开的话，这一格在新口径下「变了也不出声」是对的，量的就成空气了。
+    const qC = await mk13('13c', 40, 180, ['pc']);
     const nC0 = (await snap(qC)).n;
-    const relC = holdNext();
-    await pushLeft(qC);
+    const dC = await dragAndWin(qC);
+    scen({ pageWin: dC.w, winmode: 'in-cen' });
+    const cntC = await winStructs(qC, dC.w);
+    const relC = dC.rel; bumped = 0;
     const pillC = await waitPill(qC, '加载更早数据…', 8000);
     const watchC = watchNotice(qC, 4500);
     relC();
@@ -667,6 +702,73 @@ const snap = (p) => p.evaluate(() => {
       `实际 ${JSON.stringify(C.txt)}，请求真发过=${pillC.hit}，采样 ${JSON.stringify(C.seen.slice(0, 5))}`);
     await qC.close();
     scen();
+
+    // —— 第四、五格（Atlas 2026-10-04 点的那个缺口）：**只有买卖点变**（笔/线段/中枢一根不动）⇒ 也得印那句话。
+    //   ★ 为什么原来没有：⑬ 前三格的窗口是 `?at=40&span=180`（bars 0..130），**那一屏里一个买卖点都没有**
+    //     （尺里报的就是「买卖点 0」）—— 不是漏了，是那扇窗口里没东西可变。
+    //   ★ 换窗口有讲究：页面只在**贴到数据左沿**时才发请求，而落地后的画面由 restoreRange 按时间锚回
+    //     同一根 K 线 ⇒ **被比的窗口永远是序列左端那一段**。所以窗口得挑「左端 ＋ 五层都有人」的：
+    //     `?at=500&span=1000` ⇒ 拖完之后被比的窗口约 bars 0..72x，笔／线段／两层中枢都在，
+    //     而且**两只真买卖点（383、482）落在里面** —— 这只手数得过来，不押在「大概还在窗口里」。
+    //   ★ 两种变：13d 换**价**（三角还在原位）／13e **已确认→未确认**（实心变空心，Atlas 点名的第二种，
+    //     换档后最常见的正是「这个点还算不算数」）。两种都只动 signals 这一层 ⇒ 那句话亮了只可能是它点的。
+    //   ★ 买卖点**默认也是关的**：这一页得先把「买卖点」点开（13e 还要开「待确认」，
+    //     不然那个点直接消失、量到的不是「实心变空心」）；chip 全是默认开着 ⇒ 六个 kind 不用点。
+    for (const [name, mode, what, keys] of [['13d', 'in-sig', '换了价', ['sig']],
+                                            ['13e', 'in-sig-cf', '已确认→未确认', ['sig', 'sigPend']]]) {
+      //   ★ 视口挑 `?at=500&span=1000`：拖完之后被比的窗口大约是 bars 0..720，**两只手数得过来的
+      //     真买卖点（383、482）都落在里面**（`?at=250&span=500` 那一扇拖完右沿只到 36x，两只全在被比的范围外）。
+      const q = await mk13(name, 500, 1000, keys);
+      const n0 = (await snap(q)).n;
+      const d = await dragAndWin(q);
+      scen({ pageWin: d.w, winmode: mode });
+      const cnt = await winStructs(q, d.w);
+      const rel = d.rel; bumped = 0; sigBumped = 0;
+      const pill = await waitPill(q, '加载更早数据…', 8000);
+      const watch = watchNotice(q, 4500);
+      rel();
+      await q.waitForFunction((n) => window.__app.state.data.bars.length > n, n0, { timeout: 20000 }).catch(() => {});
+      const R = await watch;
+      t(`⑬ 第 ${name} 格不是空转：可视窗口里五层都有人（尤其买卖点）`,
+        cnt.pens + cnt.segs + cnt.centers + cnt.segc + cnt.sigs > 0 && cnt.sigs > 0,
+        `窗口里 笔 ${cnt.pens}／线段 ${cnt.segs}／类中枢 ${cnt.centers}／线段中枢 ${cnt.segc}／买卖点 ${cnt.sigs}`);
+      t(`⑬ 第 ${name} 格场景不是空转：后台真动过窗口里的买卖点`, sigBumped > 0, `动了 ${sigBumped} 个`);
+      t(`⑬ 只有买卖点变（${what}）⇒ 也印那句话（笔/线段/中枢一根没碰）`,
+        R.hit && R.txt === NOTICE_COPY && pill.hit,
+        `实际 ${JSON.stringify(R.txt)}，请求真发过=${pill.hit}，采样 ${JSON.stringify(R.seen.slice(0, 5))}`);
+      await q.close();
+      scen();
+    }
+
+    // —— 第六格（Nova 2026-10-04 定的口径）：**关着的层变了 ⇒ 一个字都不许印**。
+    //   场景跟 13d **一模一样**（同一个窗口、同一个 winmode: 'in-sig'：后台真改窗口里的买卖点），
+    //   唯一的差别是**买卖点这一层没点开** —— 屏幕上什么都没动，喊一声就是喊狼。
+    //   ★ 这一格和 13d 是**一对**：13d 开着 ⇒ 印、13f 关着 ⇒ 不印。少了任何一半，这一对都说明不了什么
+    //     （只有 13f 的话，「判据什么都不比」也照样绿）。
+    {
+      const q = await mk13('13f', 500, 1000);        // ★ 不点任何 chip：买卖点照默认**关着**
+      const n0 = (await snap(q)).n;
+      const d = await dragAndWin(q);
+      scen({ pageWin: d.w, winmode: 'in-sig' });     // 跟 13d 同一处变化
+      const cnt = await winStructs(q, d.w);
+      const rel = d.rel; bumped = 0; sigBumped = 0;
+      const pill = await waitPill(q, '加载更早数据…', 8000);
+      const watch = watchNotice(q, 3000);
+      rel();
+      await q.waitForFunction((n) => window.__app.state.data.bars.length > n, n0, { timeout: 20000 }).catch(() => {});
+      const R = await watch;
+      const n1 = (await snap(q)).n;
+      await q.waitForTimeout(400);                   // 真出了的话它要停 3 秒，躲不过这一段
+      const R2 = await noticeOn(q);
+      t('⑬ 第六格场景跟 13d 同一处变化：后台真动过窗口里的买卖点、而且窗口里真有那只点',
+        sigBumped > 0 && cnt.sigs > 0,
+        `动了 ${sigBumped} 个，窗口里买卖点 ${cnt.sigs} 个（这一格跟 13d 成对：同一处变化只差开关）`);
+      t('⑬ 关着的层变了 ⇒ 不印那句话（屏幕上什么都没动）',
+        !R.hit && !R2.on && n1 > n0 && pill.hit,
+        `请求真发过=${pill.hit}，bars ${n0} → ${n1}，落定后 ${JSON.stringify(R2)}，采样 ${JSON.stringify(R.seen.slice(0, 5))}`);
+      await q.close();
+      scen();
+    }
 
     // ⑭ ★★ 光**悬停鼠标、一个键都不按** ⇒ 一个请求都不许发（Atlas 2026-10-04 多跑的那一格）。
     //   机理：pointermove 不管按没按键都在刷 ⇒「1.5 秒内动过输入设备」成立，视口一点变化就被当成

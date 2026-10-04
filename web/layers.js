@@ -16,6 +16,26 @@ const lighter = (h, d = 40) => '#' + hex2rgb(h).map((v) => Math.min(255, v + d).
 const FONT = '12px -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif';
 const FONT_SM = '11px -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif';
 
+// >>> SHOWN_LAYERS （tools/web_more_check.py 跟 app.js 的 EARLIER_PAGING 段一起抠出来、在 node 里真跑）
+/**
+ * 「屏幕上到底画了哪几层」。**画图**和**换档那句话的判据**共用这一份 —— 判据那边不许另写一份过滤：
+ * 两份过滤迟早在某一格上错开，那时候判据说的就不是「屏幕上变了」，而是「我心里那份算变了」。
+ *
+ * ★ 为什么判据要看开关（Nova 2026-10-04 定的口径）：关着的层变了，用户在屏幕上什么也看不见，
+ *   那时候喊一句「结构重算了」就是喊狼。判据只比当前打开的那几层。
+ * ★ 买卖点**不止一个大开关**：下面还有六个 kind 的 chip（一买…三卖）和「显示待确认」
+ *   （未确认的点默认不画）—— 高一级那层同理，跟着自己那个开关。
+ */
+export function shownOf(opts) {
+  const o = opts || {}, kinds = o.sigKinds || {};
+  return {
+    pen: !!o.pen, seg: !!o.seg, pc: !!o.pc, sc: !!o.sc, up: !!o.up,
+    // 单个买卖点画不画：跟下面画三角那一段用的是**同一条**（大开关 ＋ kind chip ＋ 待确认）
+    sigAt: (s) => !!o.sig && !!kinds[s.kind] && (!!s.confirmed || !!(o.sigPend && CHART.sig_pending)),
+  };
+}
+// <<< SHOWN_LAYERS
+
 /** 已完成线段（线段中枢只由它们算 —— 未完成段的高低点还会变，full_common 同一条） */
 export const doneSegs = (segs) => segs.filter((s) => !s.live);
 
@@ -91,11 +111,12 @@ export function makeBoxPrimitive(state) {
           draw: (target) => {
             const { data, opts } = state;
             if (!data || !this._chart) return;
+            const sh = shownOf(opts);        // 开关只在这里读一次（判据那半边走的是同一个函数）
             target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
               const W = mediaSize.width;
               const vp = viewport(this._chart, state.candleSeries || this._series, data);
               for (const tier of ['pen', 'seg']) {              // 类中枢先、线段中枢后
-                const on = tier === 'seg' ? opts.sc : opts.pc;
+                const on = tier === 'seg' ? sh.sc : sh.pc;
                 if (!on) continue;
                 const col = tier === 'seg' ? CHART.seg : CHART.pen;
                 const w = tier === 'seg' ? WIDTH.sc : WIDTH.pc;   // 框线宽跟 TradingView 调用点走（卡面口径）
@@ -106,7 +127,7 @@ export function makeBoxPrimitive(state) {
                   if (x0 === null || x1 === null || yt === null || yb === null) continue;
                   const { splitAt, solid } = boxSplit(bx.z, bx.i0, bx.i1, bx.host, bx.unfinishedJ, (i) => vp.xOfBar(i));
                   drawFrame(ctx, x0, yt, x1, yb, col, w, fill, splitAt, solid, W);
-                  if (opts.up && bx.z.up && bx.z.up.length) {
+                  if (sh.up && bx.z.up && bx.z.up.length) {
                     for (const u of bx.z.up) {                  // 高一级别：满 9 段（第 33 课）
                       const uyt = vp.yOfPrice(u.ZG), uyb = vp.yOfPrice(u.ZD);
                       if (uyt === null || uyb === null) continue;
@@ -166,6 +187,7 @@ export function makeAnnotPrimitive(state) {
           draw: (target) => {
             const { data, opts } = state;
             if (!data || !this._chart) return;
+            const sh = shownOf(opts);        // 开关只在这里读一次（判据那半边走的是同一个函数）
             target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
               const W = mediaSize.width;
               const H = mediaSize.height;   // 视口下沿 —— 夹框/避让要两头都不出画布（见 fitBox）
@@ -173,7 +195,7 @@ export function makeAnnotPrimitive(state) {
               placed.length = 0;
 
               // ① 线段端点：顶红底绿（full_common 的 ellipse，半径 9 / 描边 4）
-              if (opts.seg) {
+              if (sh.seg) {
                 for (const s of data.segs) {
                   const end = segEnd(data, s);
                   const pts = [[s.i0, s.p0], [end.i, end.p]];
@@ -197,11 +219,10 @@ export function makeAnnotPrimitive(state) {
               //      网页原来把「三角 ＋ 文字」一起放在价签**之后**画 ⇒ 三角压在价签上，价签数字被盖掉
               //      （390px 实测：倒三角把 `[1004, 1682]` 中间两位整个吃掉）。搬的时候丢了「文字走同一个注册表」这半。
               const sigs = [];
-              if (opts.sig) {
+              if (sh.sig) {
                 for (const tier of ['seg', 'pen']) {
                   for (const s of data.signals?.[tier] || []) {
-                    if (!opts.sigKinds[s.kind]) continue;
-                    if (!s.confirmed && !(opts.sigPend && CHART.sig_pending)) continue;
+                    if (!sh.sigAt(s)) continue;   // 大开关 ＋ kind chip ＋ 待确认，全在 shownOf 里
                     const x = vp.xOfBar(s.bar), y = vp.yOfPrice(s.price);
                     if (!onScreen(x, W, 40) || y === null) continue;
                     sigs.push({ x, y0: drawSignalGlyph(ctx, x, y, s, tier), s, tier });
@@ -212,14 +233,14 @@ export function makeAnnotPrimitive(state) {
               // ③ 价签：线段中枢先（优先占位），类中枢后；升级标签跟着各自的框走
               //    （跟 Python 同序：`center_labels` 里价签在前、买卖点文字在后 ⇒ 价签优先占位）
               for (const tier of ['seg', 'pen']) {
-                const on = tier === 'seg' ? opts.sc : opts.pc;
+                const on = tier === 'seg' ? sh.sc : sh.pc;
                 if (!on) continue;
                 const col = tier === 'seg' ? CHART.seg : CHART.pen;
                 for (const bx of boxes(data, tier)) {
                   const x = vp.xOfBar(bx.i0), y = vp.yOfPrice(bx.z.ZG);
                   if (!onScreen(x, W, 8) || y === null) continue;   // 框滚出去了，价签也跟着走
                   tag(ctx, placed, x + 8, y - 8, `[${fmtG(bx.z.ZD)}, ${fmtG(bx.z.ZG)}]`, col, W, H);
-                  if (opts.up && bx.z.up) {
+                  if (sh.up && bx.z.up) {
                     for (const u of bx.z.up) {
                       const uy = vp.yOfPrice(u.ZG);
                       if (uy === null) continue;

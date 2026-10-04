@@ -32,13 +32,19 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
 
 R = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JS = os.path.join(R, "web/app.js")
+LAYERS = os.path.join(R, "web/layers.js")
+THEME = os.path.join(R, "web/theme.js")
 BEGIN, END = "// >>> EARLIER_PAGING", "// <<< EARLIER_PAGING"
+# ④ 的判据要看图层开关 ⇒ 开关那份过滤在 layers.js 里，跟画图**同一份**（Nova 2026-10-04 定的：
+#   「判据要照实际画出来的那一份取，最好跟 layers.js 走同一套过滤，别另写一份」）。
+SHOWN_BEGIN, SHOWN_END = "// >>> SHOWN_LAYERS", "// <<< SHOWN_LAYERS"
 DATA = {"zec_1h": os.path.join(R, "web/fixtures/zec_1h.json"),
         "btc_4h": os.path.join(R, "web/fixtures/btc_4h.json")}
 RED, GREEN, DIM, OFF = "\033[31m", "\033[32m", "\033[2m", "\033[0m"
@@ -134,6 +140,22 @@ WANT_NOTICE = [
     ("窗口里的买卖点换了价（三角还在原位）", False),
     ("只有窗口外的中枢变了", True),
     ("只有窗口外的买卖点变了", True),
+    # ★★ 这一组是 2026-10-04 Nova 定的口径：**关着的层不算「看得见」**。类中枢、高一级、买卖点
+    #   默认就是关的 —— 那几层重算了，屏幕上什么也没动，这时候喊一句「结构重算了」就是喊狼。
+    #   ★ 每一格都配了一格**同一处变化、只有开关不同**的对照格：关着 ⇒ 相同、开着 ⇒ 不同。
+    #     只留「关着 ⇒ 相同」的话，判据退化成「什么都不比」也照样全绿（那一格就是空转的）。
+    #   ★ 买卖点**不止一个大开关**：六个 kind 的 chip ＋「显示待确认」也是开关，四个都各来一格。
+    ("【开关】买卖点关着：窗口里的点换了价", True),
+    ("【开关】买卖点开着：同一处变化（对照）", False),
+    ("【开关】类中枢关着：窗口里框的下沿变了", True),
+    ("【开关】类中枢开着：同一处变化（对照）", False),
+    ("【开关】高一级关着：框上那圈升级标签变了", True),
+    ("【开关】高一级开着：同一处变化（对照）", False),
+    ("【开关】「三卖」这个 chip 关着：三卖的点换了价", True),
+    ("【开关】六个 chip 全开：同一处变化（对照）", False),
+    ("【开关】只关了「三买」：变的是三卖的点 ⇒ 照样要比", False),
+    ("【开关】「显示待确认」关着：一个未确认的点换了价（屏上没画）", True),
+    ("【开关】「显示待确认」开着：同一处变化（对照）", False),
 ]
 WANT_NOTICE_TEXT = "已接上更早的K线，左侧的笔、线段、中枢和买卖点按新的起点重算"
 WANT_NOTICE_MS = 3000
@@ -146,7 +168,18 @@ NOTICE_KEY = {"窗口里动一处笔（改窗口里第一笔的 p0）": "same_in
               "只有窗口里的线段中枢变了（BTC 4h 那处的形状）": "same_segc",
               "窗口里的买卖点换了价（三角还在原位）": "same_sig",
               "只有窗口外的中枢变了": "same_cen_out",
-              "只有窗口外的买卖点变了": "same_sig_out"}
+              "只有窗口外的买卖点变了": "same_sig_out",
+              "【开关】买卖点关着：窗口里的点换了价": "same_sig_off",
+              "【开关】买卖点开着：同一处变化（对照）": "same_sig_on",
+              "【开关】类中枢关着：窗口里框的下沿变了": "same_pc_off",
+              "【开关】类中枢开着：同一处变化（对照）": "same_pc_on",
+              "【开关】高一级关着：框上那圈升级标签变了": "same_up_off",
+              "【开关】高一级开着：同一处变化（对照）": "same_up_on",
+              "【开关】「三卖」这个 chip 关着：三卖的点换了价": "same_kind_off",
+              "【开关】六个 chip 全开：同一处变化（对照）": "same_kind_on",
+              "【开关】只关了「三买」：变的是三卖的点 ⇒ 照样要比": "same_kind_other",
+              "【开关】「显示待确认」关着：一个未确认的点换了价（屏上没画）": "same_pend_off",
+              "【开关】「显示待确认」开着：同一处变化（对照）": "same_pend_on"}
 # 「窗口里五层各至少几个成员」才不算空转 —— 少一层，跟那一层有关的用例就说明不了任何事
 NOTICE_MIN = {"pens": 1, "segs": 1, "centers": 1, "segc": 1, "sigs": 1}
 
@@ -229,7 +262,9 @@ out.vet = P.vet.map((d) => {
                              return !!a && !!b && bars[a.i0].t <= W.t1 && bars[b.i1].t >= W.t0; };
   const sOv = (s) => bars[s.bar].t >= W.t0 && bars[s.bar].t <= W.t1;
   const take = (o) => Object.assign({}, d0, o);
-  const S = (o, w) => structKey(o, (w || W).t0, (w || W).t1);
+  // ★ 第四个参数就是**屏幕上画了哪几层**（shownOf，跟 layers.js 画图用的同一个函数）。
+  //   不传 ＝ 老口径（五层全比）—— 上面那十格量的都是窗口取法，跟开关无关，照旧。
+  const S = (o, w, sh) => structKey(o, (w || W).t0, (w || W).t1, sh);
   const base = S(d0);
   const iIn = pens.findIndex(ov), iOut = pens.findIndex((o) => !ov(o));
   const tweak = (a, i) => a.map((o, k) => (k === i ? Object.assign({}, o, { p0: o.p0 * 1.002 }) : o));
@@ -272,6 +307,46 @@ out.vet = P.vet.map((d) => {
     same_sig: S(take({ signals: { seg: sigs.seg, pen: rep(sigs.pen, sIn, px(sigs.pen[sIn])) } })) === base,
     same_sig_out: S(take({ signals: { seg: sigs.seg, pen: rep(sigs.pen, sOut, px(sigs.pen[sOut])) } })) === base,
   };
+  // ★★ 开关那一组（Nova 2026-10-04 定的口径：**只比用户打开的层**）。
+  //   开关对象由 shownOf() 生成 —— 就是 layers.js 画图用的那一个，这里只是把各个开关拧到不同的位置。
+  //   每一对都是「同一处变化、只有开关不同」：一格相同、一格不同 ⇒ 这一对**自己就是自己的非空转对照**
+  //   （判据要是退化成「什么都不比」，那格「开着 ⇒ 不同」当场红）。
+  const ALL = { pen: 1, seg: 1, pc: 1, sc: 1, up: 1, sig: 1, sigPend: 1,
+                sigKinds: { 一买: 1, 二买: 1, 三买: 1, 一卖: 1, 二卖: 1, 三卖: 1 } };
+  const shAll = shownOf(ALL);
+  const shOff = (k) => shownOf(Object.assign({}, ALL, { [k]: 0 }));
+  const shKinds = (o) => shownOf(Object.assign({}, ALL, { sigKinds: Object.assign({}, ALL.sigKinds, o) }));
+  // ① 买卖点整层：窗口里那个点换个价（跟 same_sig 同一处变化，只是把开关拧掉/拧上）
+  const dSg = take({ signals: { seg: sigs.seg, pen: rep(sigs.pen, sIn, px(sigs.pen[sIn])) } });
+  out.notice.same_sig_off = S(dSg, W, shOff('sig')) === S(d0, W, shOff('sig'));
+  out.notice.same_sig_on = S(dSg, W, shAll) === S(d0, W, shAll);
+  // ② 类中枢：窗口里那个框的下沿变一下（跟 same_cen 同一处变化）
+  const dPc = take({ centers: rep(centers, cIn, zd(centers[cIn])) });
+  out.notice.same_pc_off = S(dPc, W, shOff('pc')) === S(d0, W, shOff('pc'));
+  out.notice.same_pc_on = S(dPc, W, shAll) === S(d0, W, shAll);
+  // ③ 高一级：升级标签长在框上（同一张框、同一根 host），挂一个上去再改它的上沿。
+  //    样本里带 up 的框一个都不在第 240～420 根这一屏（别为这个换窗口：那一屏是挑过的），
+  //    所以这里**造**一个 up 标签挂在窗口里那个**真框**上 —— 变的还是真框上的真字段。
+  const cU = Object.assign({}, centers[cIn], { up: [{ up: 1, ZD: centers[cIn].ZD, ZG: centers[cIn].ZG }] });
+  const cU2 = Object.assign({}, cU, { up: [{ up: 1, ZD: cU.up[0].ZD, ZG: cU.up[0].ZG * 1.01 }] });
+  const dUp = take({ centers: rep(centers, cIn, cU) }), dUp2 = take({ centers: rep(centers, cIn, cU2) });
+  out.notice.same_up_off = S(dUp, W, shOff('up')) === S(dUp2, W, shOff('up'));
+  out.notice.same_up_on = S(dUp, W, shAll) === S(dUp2, W, shAll);
+  // ④ 六个 kind 的 chip：关着的那一个 kind 的点，画都不画 ⇒ 换了价也不该出声。
+  //    「只关了别的 kind」那格是它的反面：变的是三卖的点、关的是三买 ⇒ 照样要比。
+  const kIn = sigs.pen[sIn].kind;
+  const kOther = Object.keys(ALL.sigKinds).filter((k) => k !== kIn)[0];
+  out.notice.same_kind_off = S(dSg, W, shKinds({ [kIn]: 0 })) === S(d0, W, shKinds({ [kIn]: 0 }));
+  out.notice.same_kind_on = S(dSg, W, shAll) === S(d0, W, shAll);
+  out.notice.same_kind_other = S(dSg, W, shKinds({ [kOther]: 0 })) === S(d0, W, shKinds({ [kOther]: 0 }));
+  // ⑤ 「显示待确认」：未确认的点默认不画（CHART.sig_pending），所以待确认关着的时候
+  //    它在屏幕上根本不存在 —— 换价不该出声。开着（对照）⇒ 它画出来了 ⇒ 出声。
+  //    这一格必须**自己造一个未确认的点**：样本里一个 confirmed:false 都没有（造的是那个字段，点还是真的）。
+  const sU = Object.assign({}, sigs.pen[sIn], { confirmed: false });
+  const dPd = take({ signals: { seg: sigs.seg, pen: rep(sigs.pen, sIn, sU) } });
+  const dPd2 = take({ signals: { seg: sigs.seg, pen: rep(sigs.pen, sIn, Object.assign({}, sU, { price: sU.price * 1.01 })) } });
+  out.notice.same_pend_off = S(dPd, W, shOff('sigPend')) === S(dPd2, W, shOff('sigPend'));
+  out.notice.same_pend_on = S(dPd, W, shAll) === S(dPd2, W, shAll);
   out.notice_text = NOTICE_TEXT;
   out.notice_ms = NOTICE_MS;
 }
@@ -313,9 +388,29 @@ def payload():
             "vet": [d for _, d, _ in VET]}
 
 
-def failures(js=None, quiet=True):
-    """→ ([(判据, 用例, 实际, 期望, 说明)], node 那份原始输出)；第一项空表＝全对。"""
-    got = node_eval((js if js is not None else block()) + DRIVER, payload())
+def chart_stub():
+    """判据那半边的 shownOf 会读 `CHART.sig_pending`（未确认的点画不画）—— 从 theme.js 里**读真身**，
+    不在这把尺里另写一个 true。读不到就直接抛（待确认成了另一份口径，那这一组用例没意义）。"""
+    m = re.search(r"sig_pending:\s*(true|false)", open(THEME, encoding="utf-8").read())
+    if not m:
+        raise SystemExit(f"✗ {THEME} 里找不到 sig_pending —— 「待确认的点画不画」没处问了")
+    return "const CHART = { sig_pending: %s };\n" % m.group(1)
+
+
+def layers_fence():
+    """抠出 layers.js 里那份「画了哪几层」的过滤。`export` 在脚本里是语法错 ⇒ 只拆关键字，函数体原文照跑。"""
+    body = block(LAYERS, SHOWN_BEGIN, SHOWN_END).replace("export function shownOf", "function shownOf")
+    if "function shownOf(opts)" not in body:
+        raise SystemExit(f"✗ {LAYERS} 的 {SHOWN_BEGIN} 段里没有 shownOf 的定义 —— 标记范围被改动了")
+    return body
+
+
+def failures(js=None, quiet=True, layers=None):
+    """→ ([(判据, 用例, 实际, 期望, 说明)], node 那份原始输出)；第一项空表＝全对。
+    ★ 抠出来一起跑的：app.js 的 EARLIER_PAGING 段（① ② ③ ④ ⑤）＋ layers.js 的 SHOWN_LAYERS 段
+      （④ 的开关口径 —— 跟画图同一份过滤）＋ theme.js 的 sig_pending。量的是**真身**。"""
+    got = node_eval((js if js is not None else block()) + chart_stub()
+                    + (layers if layers is not None else layers_fence()) + DRIVER, payload())
     bad = []
     for name, u in got["uniform"].items():
         if not u["uniform"]:
@@ -512,9 +607,9 @@ PROBES = [
     # ★★ 这四格是 2026-10-04 补的：**每一层都得真在判据里**，而且**都得按窗口筛**。
     #   只留「笔/线段」两层的话，屏幕上明明变了的框和三角不出声（Nova 拍 (a) 之前就是这个洞）。
     ("④那句话：不记类中枢（框里的上下沿变了也不出声）",
-     "boxes(d.centers, d.pens || []),", "'',"),
+     "on('pc') ? boxes(d.centers, d.pens || [], on('up')) : '',", "'',"),
     ("④那句话：不记线段中枢（BTC 4h 那种情形漏掉）",
-     "boxes(d.seg_centers, done),", "'',"),
+     "on('sc') ? boxes(d.seg_centers, done, on('up')) : '',", "'',"),
     ("④那句话：不记买卖点",
      "sigs((d.signals || {}).seg), sigs((d.signals || {}).pen)]",
      "'', '']"),
@@ -523,6 +618,45 @@ PROBES = [
     ("⑤体检：把越界当合格（照画不误）", "const n = (d.bars || []).length, over = (i) => !(i >= 0 && i < n);",
      "const n = (d.bars || []).length, over = (i) => false;"),
     ("⑤体检：负下标不算越界", "!(i >= 0 && i < n)", "!(i < n)"),
+]
+
+# ★★ 开关那一组（2026-10-04 Nova 定的口径）的探针。**Atlas 说的那个反向变异就是头一条**：
+#   「判据里不看开关 ⇒ 只红『关着的层变了』那一格」。所以这一组每条都写死了**该红哪几格**，
+#   跑完对一遍 —— 红得多、红得少都算没红对地方。
+#   条目：(名字, 改什么, 改成什么, 该红的用例名（WANT_NOTICE 里的原文）)。
+SWITCH_PROBES = [
+    # 反向变异：判据根本不看开关（shown 丢掉）⇒ 关着的层也照比 ⇒ 五格「关着 ⇒ 相同」全红，
+    # 而「开着 ⇒ 不同」那几格照样绿（它们本来就在比）。红得不多不少，正好是关着的那五处。
+    ("④那句话：判据不看图层开关（shown 丢掉，五层全比）", "const sh = shown || null;", "const sh = null;",
+     ["【开关】买卖点关着：窗口里的点换了价", "【开关】类中枢关着：窗口里框的下沿变了",
+      "【开关】高一级关着：框上那圈升级标签变了", "【开关】「三卖」这个 chip 关着：三卖的点换了价",
+      "【开关】「显示待确认」关着：一个未确认的点换了价（屏上没画）"]),
+    # 买卖点那一侧的开关（大开关 ＋ kind chip ＋ 待确认）不看 ⇒ 只红跟买卖点有关的**关着**那三格；
+    # 类中枢/高一级那两格不许跟着红（它们走的是另一条路）。
+    ("④那句话：买卖点不看开关（关了也照比）", "&& (!sh || sh.sigAt(s))", "&& true",
+     ["【开关】买卖点关着：窗口里的点换了价", "【开关】「三卖」这个 chip 关着：三卖的点换了价",
+      "【开关】「显示待确认」关着：一个未确认的点换了价（屏上没画）"]),
+    # 只把「高一级」那一个开关丢掉 ⇒ **只红那一格**（最细的一刀：证明这个开关真的在起作用）
+    ("④那句话：高一级的升级标签不看开关（关着也照比）",
+     "const up = (upOn ? (z.up || []) : []).map((u) => `${u.ZD},${u.ZG}`).join(';');",
+     "const up = (z.up || []).map((u) => `${u.ZD},${u.ZG}`).join(';');",
+     ["【开关】高一级关着：框上那圈升级标签变了"]),
+    # 只把「类中枢」那一个开关丢掉 ⇒ 只红类中枢那一格
+    ("④那句话：类中枢不看开关（关着也照比）",
+     "on('pc') ? boxes(d.centers, d.pens || [], on('up')) : '',", "boxes(d.centers, d.pens || [], on('up')),",
+     ["【开关】类中枢关着：窗口里框的下沿变了"]),
+]
+
+# layers.js 那一侧的探针：**判据借用的就是画图那一份过滤**（同一份，不另写）——
+# 改那个函数，判据必须跟着变。这也正是「单源」这件事的证明：真另写了一份，这里改不动判据。
+LAYER_PROBES = [
+    ("④那句话：shownOf 不看 kind chip（关了也照画/照比）", "!!kinds[s.kind]", "true",
+     ["【开关】「三卖」这个 chip 关着：三卖的点换了价"]),
+    ("④那句话：shownOf 不看「显示待确认」（未确认的也照画/照比）",
+     "!!(o.sigPend && CHART.sig_pending)", "true",
+     ["【开关】「显示待确认」关着：一个未确认的点换了价（屏上没画）"]),
+    ("④那句话：shownOf 不看买卖点大开关", "!!o.sig && !!kinds[s.kind]", "!!kinds[s.kind]",
+     ["【开关】买卖点关着：窗口里的点换了价"]),
 ]
 
 
@@ -551,6 +685,29 @@ def selftest():
         cases.append((name, bool(bad) and bool(hit),
                       "%d 处红，其中 %d 处在 [%s]" % (len(bad), len(hit), judge),
                       judge))
+    # ★ 开关那一组：不只「红了」，而是**红的正是那几格**（多一格少一格都算没红对地方）。
+    #   量法：把红行里 ④ 的用例名收成一个集合，跟写死的期望对一遍。
+    def _switch(name, a, z, want, where):
+        try:
+            if where == "app":
+                bad, _ = failures(mutate(block(), a, z))
+            else:
+                bad, _ = failures(layers=mutate(layers_fence(), a, z))
+        except SystemExit:
+            raise
+        except Exception as e:
+            cases.append((name, False, "改完跑不起来 / 尺子炸了：%r" % (e,), "④那句话"))
+            return
+        red = sorted({b[1] for b in bad if b[0] == "④那句话" and b[1] in NOTICE_KEY})
+        ok_here = red == sorted(want)
+        cases.append((name, ok_here, "红的是 %s（要 %s）"
+                      % ("、" .join(x[:14] for x in red) or "（一格都没红）",
+                         "、".join(x[:14] for x in sorted(want))), "④那句话"))
+    for name, a, z, want in SWITCH_PROBES:
+        _switch(name, a, z, want, "app")
+    for name, a, z, want in LAYER_PROBES:
+        _switch(name, a, z, want, "layers")
+
     # 标记块被删 ⇒ 必须抛，不许静默少量一块
     try:
         src = open(JS, encoding="utf-8").read().replace(END, "// 没了")
