@@ -5,7 +5,8 @@
   D2-1  候选死点：上一个分界 b 之后、到 done[t-2] 为止，同向线段终点里最高（H）／最低（L）的那个，一样极取后一个。
         图头还不知道方向 ⇒ 先看 H 再看 L，谁先确立算谁。
   D2-2  确立：参照中枢 Z ＝ 本段走势里（从 b 起切开重算）X0 不晚于 H 那一根的最后一个中枢；
-        离开段 done[t-1] 终点 < Z.ZD 且回抽段 done[t]（向上）终点 < Z.ZD ⇒ 在 done[t] 完成时确立，刀落在 H。L 反过来（> Z.ZG）。
+        离开段 done[t-1] 终点 < Z.ZD 且回抽段 done[t]（向上）终点 < Z.ZD，且 H 之后价格没再过 H（P3，按段内 hi／lo）
+        ⇒ 在 done[t] 走完时确立，刀落在 H。L 反过来（> Z.ZG）。
   D2-3  分界一高一低交替。
   D2-4  确立以后从 H 起整段重算中枢（core.cut._centers_with_cuts，按刀分组）。
   D2-6  没确立的就是中阴；最后一段还在长。
@@ -27,7 +28,7 @@ def _is_up(s):
     return s["p1"] > s["p0"]
 
 
-def _try_confirm(done, t, ks, typ, lo):
+def _try_confirm(done, t, ks, typ, lo, no_exceed=True):
     """第 t 步、方向 typ（'H'/'L'）能不能确立 → (j, Z) 或 None。j ＝ 死点所在线段（刀落在 done[j]['i1']）。"""
     cand = range(lo, t - 1)                      # 到 t-2 为止：后面要留离开段、回抽段
     if not cand:
@@ -37,6 +38,12 @@ def _try_confirm(done, t, ks, typ, lo):
     else:
         j = max(cand, key=lambda k: (-done[k]["p1"], k))
     if _is_up(done[j]) != (typ == "H"):          # 极值得是同向线段的终点
+        return None
+    # D2-2（P3，Nova 10-05 16:42 定成条件）：H 之后价格没再过 H（L 反过来）。线段端点不一定是段内极值（L78:50-51），
+    # 所以这条推不出来、要单写：看 j 之后每条线段的 hi／lo，不只看端点
+    after = done[j + 1:t + 1]
+    if no_exceed and after and (max(a["hi"] for a in after) > done[j]["p1"] if typ == "H"
+                                else min(a["lo"] for a in after) < done[j]["p1"]):
         return None
     zs = _centers_with_cuts(done[:t + 1], ks)
     ref = [z for z in zs if z["PI0"] >= lo and z["X0"] <= done[j]["i1"]]
@@ -51,10 +58,12 @@ def _try_confirm(done, t, ks, typ, lo):
     return (j, z) if ok else None
 
 
-def find_bounds(r, regroup=True, alternate=True, check_empty=True):
-    """→ dict(bounds, retracted)。三个开关是 spec §四 的探针 P1／P2／P5（默认全开 ＝ 规则本身）。
-    bounds：[dict(seg=j, bar, kind 'H'/'L', price, confirmed_seg=t, confirmed_bar, ZD, ZG)]，按时间升序；
-    retracted：[dict(bar, kind, price, confirmed_bar, retracted_bar, blocked_bar, blocked_kind)]（D2-7）。"""
+def find_bounds(r, regroup=True, alternate=True, check_empty=True, no_exceed=True):
+    """→ dict(bounds, retracted)。四个开关是 spec §四 的探针 P1／P2／P5／P3（默认全开 ＝ 规则本身）。
+    bounds：[dict(seg=j, bar, kind 'H'/'L', price, pullback_seg=t, pullback_end_bar, ZD, ZG)]，按时间升序；
+    retracted：[dict(bar, kind, price, pullback_end_bar, retracted_bar, blocked_bar, blocked_kind)]（D2-7）。
+    ★ pullback_end_bar ＝ 回抽段 S[t] 的终点那一根，**不是**实时能确立的那一根：线段要等后面的 K 线才算走完，
+      实时确立更晚（tools/trend_check.py ④ 量出来 zec15 晚 61～184 根）。前端斜线画「极值到回抽段终点」，不标「确立」。"""
     done = _done(r)
     ks, bounds, retracted = [], [], []           # ks：切点段号（新组起点 ＝ j+1）
     want = None                                  # 下一个分界要 'H' 还是 'L'（None ＝ 两头都开）
@@ -63,7 +72,7 @@ def find_bounds(r, regroup=True, alternate=True, check_empty=True):
         for typ in ("H", "L"):
             if want and typ != want:
                 continue
-            hit = _try_confirm(done, t, ks if regroup else [], typ, lo)
+            hit = _try_confirm(done, t, ks if regroup else [], typ, lo, no_exceed)
             if hit is None:
                 continue
             j, z = hit
@@ -73,13 +82,13 @@ def find_bounds(r, regroup=True, alternate=True, check_empty=True):
                     ks.pop()
                     prev = bounds.pop()
                     retracted.append(dict(bar=prev["bar"], kind=prev["kind"], price=prev["price"],
-                                          confirmed_bar=prev["confirmed_bar"], retracted_bar=done[t]["i1"],
+                                          pullback_end_bar=prev["pullback_end_bar"], retracted_bar=done[t]["i1"],
                                           blocked_bar=done[j]["i1"], blocked_kind=typ))
                     want = prev["kind"]
                     break
             ks.append(j + 1)
-            bounds.append(dict(seg=j, bar=done[j]["i1"], kind=typ, price=done[j]["p1"], confirmed_seg=t,
-                               confirmed_bar=done[t]["i1"], ZD=z["ZD"], ZG=z["ZG"]))
+            bounds.append(dict(seg=j, bar=done[j]["i1"], kind=typ, price=done[j]["p1"], pullback_seg=t,
+                               pullback_end_bar=done[t]["i1"], ZD=z["ZD"], ZG=z["ZG"]))
             want = None if not alternate else ("L" if typ == "H" else "H")
             break
     return dict(bounds=bounds, retracted=retracted, ks=ks, done=done, want=want)
@@ -138,14 +147,14 @@ def classify(zz, reading="A"):
     return (_trend_of(units) or "盘整"), bool(up)
 
 
-def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True):
+def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_exceed=True):
     """→ dict(seg_centers, bounds, retracted, pending, segments, units, reading)。
     seg_centers：按确立的分界切开重算的线段中枢（D4，前端画框就用它），每个带 seg（属于第几段走势，跟 segments 下标对齐）；
     segments：[dict(i0, i1, type, upgraded, head, live, n_centers_level)]，首尾相接盖满整张图；
       ★ n_centers_level 是**本级别**中枢个数，跟读法无关；读法 A 的升级段，字母挂在 units 上，个数不是它；
     units：D3 合成出来的高一级中枢（只列 n>1 的），带 seg，给前端画升级框；
     reading：这一跑用的 D3 读法（A／B），前端据此决定字母挂哪一级（spec §八 第 6 条）。"""
-    res = find_bounds(r, regroup=regroup, alternate=alternate, check_empty=check_empty)
+    res = find_bounds(r, regroup=regroup, alternate=alternate, check_empty=check_empty, no_exceed=no_exceed)
     done, ks = res["done"], res["ks"]
     n = len(r["bars"])
     if not done:

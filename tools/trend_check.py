@@ -71,8 +71,8 @@ def invariants(fn):
         s = ends.get(b["bar"])
         if s is None or (s["p1"] > s["p0"]) != (b["kind"] == "H"):
             bad.append("刀 %d 不在同向线段终点" % b["bar"])
-        if b["confirmed_bar"] <= b["bar"]:
-            bad.append("刀 %d 确立不晚于刀" % b["bar"])
+        if b["pullback_end_bar"] <= b["bar"]:
+            bad.append("刀 %d 回抽段终点不晚于刀" % b["bar"])
     for a, b in zip(bs, bs[1:]):                 # D2-7：两刀之间至少一个中枢
         if not [z for z in v["seg_centers"] if a["bar"] <= z["X0"] and z["X1"] <= b["bar"]]:
             bad.append("%d→%d 之间没有中枢" % (a["bar"], b["bar"]))
@@ -119,11 +119,11 @@ def no_future(fn="zec15.json"):
     bad, lags = [], []
     for k, b in enumerate(full["bounds"]):
         want = [(x["bar"], x["kind"]) for x in full["bounds"][:k + 1]]
-        seen = first_seen(fn, k, want, bars, b["confirmed_bar"])
+        seen = first_seen(fn, k, want, bars, b["pullback_end_bar"])
         if seen is None:
             bad.append("%d 截到图尾都没有" % b["bar"])
             continue
-        lags.append(seen - b["confirmed_bar"])
+        lags.append(seen - b["pullback_end_bar"])
         for extra in (96, 672, 2880):            # 15m：1 天、1 周、1 月
             t = seen + extra
             if t >= len(bars):
@@ -164,6 +164,14 @@ def self_test():
             ("P2 拿掉 D2-3（不交替）", dict(alternate=False), lambda v: len(v["retracted"]) != len(base["retracted"])),
             ("P5 拿掉 D2-7（空段照切）", dict(check_empty=False), lambda v: len(v["bounds"]) != len(base["bounds"]))]
     miss = 0
+    # P3（「H 之后价格不再过 H」，按段内 hi／lo）：默认规则下 5 份夹具都一根不差，牙只在 zec_1h 不交替时露出来
+    # （段 8 端点 502.11→889.99、段内低点 250）：留着 P3 ⇒ 1 刀 1 撤（跟 Atlas 原型一样），拿掉 ⇒ 0 刀 3 撤
+    _, a3 = run("zec_1h.json", alternate=False)
+    _, b3 = run("zec_1h.json", alternate=False, no_exceed=False)
+    ok = (len(a3["bounds"]), len(a3["retracted"])) != (len(b3["bounds"]), len(b3["retracted"]))
+    print("%s P3 拿掉「H 之后不再过 H」（zec_1h、不交替）⇒ 分界 %d、撤回 %d（留着 %d、%d）" % (
+        "✓" if ok else "✗", len(b3["bounds"]), len(b3["retracted"]), len(a3["bounds"]), len(a3["retracted"])))
+    miss += not ok
     for name, kw, changed in arms:
         _, v = run("zec15.json", **kw)
         ok = changed(v)
