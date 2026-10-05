@@ -710,7 +710,7 @@ const shotChart = async (p, tag) => {
   //   ★ 默认视口只开在**尾巴那 ~2683 根**上 ⇒ 第一次跑只量到 **1 枚**字母，那格的绿是"一枚样本的绿"。
   //     而且**一屏装不下全部**：这份载荷上 7 枚字母散在 20160 根里，一屏最多装得下 2 枚
   //     （§4 那两枚，差 582 根）—— 这是视口封顶算出来的，不是这一层的问题。
-  //   ⇒ 不摆"一屏"，摆**若干屏**：按 2400 根一簇把字母分组，每簇开一页、把那一簇里的每一枚都量到。
+  //   ⇒ 不摆"一屏"，摆**若干屏**：按 2000 根一簇把字母分组，每簇开一页、把那一簇里的每一枚都量到。
   //     页子自己的口子（`?at=&span=`，app.js:637；外部的 fitContent 在这页上是白调的，实测过）。
   const clusters = await dN.p.evaluate(() => {
     const a = window.__app, d = a.state.data, T = d.trend;
@@ -723,11 +723,11 @@ const shotChart = async (p, tag) => {
       }
     }
     mids.sort((x, y) => x - y);
-    const W = 2400, out = [];
+    const W = 2000, PAD = 480, out = [];   // 簇宽＋两边各 240 根（PAD）≤ 2480 < 15m 一屏封顶；120 根的边在读法 B（22 枚）下会把簇最左那枚挤出屏（x<−8）
     for (let i = 0; i < mids.length;) {
       let j = i;
       while (j + 1 < mids.length && mids[j + 1] - mids[i] <= W) j++;
-      out.push({ at: Math.round((mids[i] + mids[j]) / 2), span: Math.max(240, mids[j] - mids[i] + 240) });
+      out.push({ at: Math.round((mids[i] + mids[j]) / 2), span: Math.max(PAD, mids[j] - mids[i] + PAD) });
       i = j + 1;
     }
     return { n: mids.length, out };
