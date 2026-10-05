@@ -5,7 +5,10 @@
 //   放仓里是为了**别人能复跑**（跟 tools/web_more_e2e.js 一个道理）。
 //
 // 量的是接线，不是算法（算法归 Bram 的探针）：
-//   ① 控件由 /api/meta 的 measures 驱动：四颗、**名字是大白话**、选中态走 aria-checked（不是图层那排的 aria-pressed）
+//   ① 控件由 /api/meta 的 measures 驱动：**后台给几颗就几颗**（★ 2026-10-04 改：原来写死「四颗」，
+//      后台加第五种 `macd_or_lines` 之后这两格**假红**了 —— 名字明明是大白话，红出来的话是假的。
+//      判据换成「页面名单 == /api/meta 的名单」）、**名字是大白话**（`名字 !== 代号`，且已知那四种
+//      的老名字得原样）、选中态走 aria-checked（不是图层那排的 aria-pressed）
 //   ② 点「黄白线」⇒ 那一趟请求带 measure=lines（**带的是被点的那个**，不是缺省）
 //   ③ 图脚**跟着回显**换：「背驰看法 黄白线」（回显说了算，不拿点的那颗当准）
 //   ④ 亮着的那颗也跟着回显换
@@ -40,6 +43,10 @@
 //      字段时要求**一个标都没有**）／旧形状没有 measure_orig ⇒ 不凭空冒标／**四颗全是原文 ⇒ 一个标都没有**
 //      （牙齿，抓「写死斜率带标」）／只有斜率非原文 ⇒ 只它带标、名字不受污染、悬停那句在／名单换成
 //      `[{id, orig}]` ⇒ 照吃。★ 每格都印两串（页面带标的 vs meta 说的），免得后台没字段时成为**死闸**。
+//
+//   ⑲ 后台**多一种量法**（2026-10-04 补，`macd_or_lines`，card-bead5f56-74b）：假后台给五颗 ⇒ 第五颗
+//      上得是中文名。★ 断言是 `名字 !== id` 而不是比对某个字面量 —— **改名不该红，漏名才该红**；
+//      这一格守的是「后台先上线、名字没跟上」那半天：屏幕上会是一串英文 id，不报错也认不出。
 //
 //   ★ 牙齿（2026-10-04 我补的）：把页面弄坏、看它**是红还是炸**。做法：去掉 web/app.js 里那句
 //     `b.dataset.measure = id;`（芯片照常渲染四颗按钮，只是工装点不着 `.mchip[data-measure="lines"]`）。
@@ -182,10 +189,22 @@ const shotChart = async (p, tag) => {
   console.log('1–17 打开页面、点一下「黄白线」（含 5-7 那三格：层关着时那组该置灰）');
   const { c, p, reqs } = await open(QS);
   const u0 = await ui(p);
-  ck('/api/meta 把四颗控件渲染出来了', u0.has && u0.items.length === 4, u0.items.map((i) => i.id).join('/'));
-  ck('名字是大白话（面积/斜率/黄白线/峰值），代号只在 data 里',
-     JSON.stringify(u0.items.map((i) => i.txt)) === JSON.stringify(['面积', '斜率', '黄白线', '峰值']),
-     u0.items.map((i) => i.txt).join(' '));
+  // ★ 名单**不写死条数和名字**（2026-10-04 改，Bram 加了第五种 macd_or_lines 之后这两格假红）：
+  //   后台加一种量法，是后台的事，页面照它给的渲染就是对的 —— 写死「四颗」等于把工装焊在
+  //   当时那份名单上，改一次后台就红一次，而红出来的两格说的都是**假话**（名字明明是大白话）。
+  //   判据换成「页面 == /api/meta」，这才是这一段真正要量的东西（控件由 /api/meta 驱动）。
+  const metaJson = await (await fetch(PAGE + 'api/meta')).json();
+  const wantIds = Array.isArray(metaJson.measures) ? metaJson.measures : [];
+  ck('控件的名单**就是 /api/meta 说的那个**（顺序也一样 —— 不是前端自己凑的四颗）',
+     u0.has && wantIds.length > 0 && JSON.stringify(u0.items.map((i) => i.id)) === JSON.stringify(wantIds),
+     `页面 ${u0.items.map((i) => i.id).join('/')} ／ meta ${wantIds.join('/')}`);
+  // ★ 名字仍然有牙齿：**每颗都得是中文名**（`名字 !== 代号`），而且**已知那四种的老名字没被改坏**。
+  //   后半句是关键 —— 只说「不等于代号」，把「面积」改成「MACD」也照样绿。
+  const NAME4 = { macd: '面积', slope: '斜率', lines: '黄白线', peak: '峰值' };
+  ck('每颗都是中文名、不是代号，且已知那四种的名字没被改坏',
+     u0.items.every((i) => i.txt && i.txt !== i.id)
+     && Object.keys(NAME4).every((id) => { const it = u0.items.find((x) => x.id === id); return !it || it.txt === NAME4[id]; }),
+     u0.items.map((i) => `${i.id}:${i.txt}`).join(' '));
   ck('是**单选**的形状：role=radio ＋ aria-checked，不是图层那排的 aria-pressed',
      u0.items.every((i) => i.role === 'radio' && i.pressed === null) && u0.items.filter((i) => i.on === 'true').length === 1
      && lit(u0) === 'macd');
@@ -470,6 +489,19 @@ const shotChart = async (p, tag) => {
      u8.items.length === 4 && u8.items.filter((i) => i.mark).map((i) => i.id).join() === 'slope',
      u8.has ? u8.items.map((i) => `${i.id}${i.mark ? '+' + i.mark : ''}`).join(' ') : '★ 整组没了 —— 这正是要防的静默消失');
   await d8.c.close();
+  // ㉚：后台**多一种量法**（Bram 的 `macd_or_lines`）⇒ 芯片上得是中文名，不许露代号。
+  //   ★ 这是「后台加一种看法」这类改动的常态护栏：名字还没跟上的那半天里，屏幕上就是一串英文 id
+  //     —— 不报错、也不红，但没人认得出那是什么。断言写成 `名字 !== id`（不是比对某个字面量），
+  //     所以**改了名字不算红，漏了名字才红**。
+  console.log('30 后台新加的第五种看法：名字跟上了没有');
+  const d9 = await open(QS, { meta: fakeMeta(META4.concat(['macd_or_lines']),
+    { macd: true, slope: false, lines: true, peak: true, macd_or_lines: true }) });
+  const u9 = await ui(d9.p);
+  const or9 = u9.items.find((i) => i.id === 'macd_or_lines') || {};
+  ck('后台多一种 `macd_or_lines` ⇒ 芯片上是中文名、不是代号，且它按原文**不带**「非原文」的标',
+     u9.items.length === 5 && !!or9.txt && or9.txt !== or9.id && !or9.mark,
+     u9.items.map((i) => `${i.id}:${i.txt}${i.mark ? '+' + i.mark : ''}`).join(' '));
+  await d9.c.close();
 
   await b.close();
   console.log(`\n${n - bad}/${n} 过${bad ? `，${bad} 条红` : ''}　截图：${OUT}`);
