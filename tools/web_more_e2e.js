@@ -62,7 +62,7 @@ try {
 
 const WEB = path.join(__dirname, '..', 'web');           // 仓相对：工装跟着仓走，不写死谁的家目录
 const OUT = process.argv[2] || path.join(os.tmpdir(), 'more-e2e');
-const PAGE = (process.argv[3] || 'http://127.0.0.1:8791/').replace(/\/?$/, '/');
+const PAGE = (process.env.E2E_URL || process.argv[3] || 'http://127.0.0.1:8791/').replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
 // --throttle=4：把这一页的 CPU 拖慢 4 倍（CDP）。默认 1＝不降速。
 // 为什么要有：这条工装里有一格量的是**时序竞争**（没人拖的时候会不会自己发请求）。
 // 竞争**证不了不存在**——快机器上 10/10 绿什么都不说明。要验它，就得能故意把机器拖慢。

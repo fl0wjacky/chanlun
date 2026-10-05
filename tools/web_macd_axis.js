@@ -79,8 +79,8 @@ try {
                 '再用 NODE_PATH=<那个 node_modules> 跑这个文件。');
   process.exit(2);
 }
-const PAGE = (process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2]
-  : 'http://127.0.0.1:8799/').replace(/\/?$/, '/');
+const PAGE = (process.env.E2E_URL || (process.argv[2] && !process.argv[2].startsWith('--')
+  ? process.argv[2] : 'http://127.0.0.1:8799/')).replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
 const MUT = (process.argv.find((a) => a.startsWith('--mut=')) || '--mut=none').split('=')[1];
 const arg = (k, d) => (process.argv.find((a) => a.startsWith(`--${k}=`)) || `--${k}=${d}`).split('=')[1];
 const SYMBOL = arg('symbol', 'BTCUSDT'), TF = arg('tf', '4h');   // Nova 外测那两张图是 1h 与 4h，都能量

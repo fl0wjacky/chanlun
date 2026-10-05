@@ -13,11 +13,11 @@
 //     ⑥   桌面 1280×860 上角上是**全写**（带日期），开关不在（display:none）—— 防的是「为了手机改了桌面」
 //
 // 跑法：
-//   1) cd <这个仓的一份检出> && python3 web/server.py --port 8797 --no-prewarm   （只绑回环）
+//   1) cd <这个仓的一份检出> && python3 web/server.py --port 8792 --no-prewarm   （只绑回环）
 //   2) NODE_PATH=<playwright 的 node_modules> node tools/web_mobile_share.js [页面地址]
 //   退出码：0＝六条都过；1＝有判据没过（把没过的那条连数一起印出来）；2＝环境没搭好（没用真后台/页面没起来）。
-const Page = (process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2]
-  : 'http://127.0.0.1:8792/').replace(/\/?$/, '/');
+const Page = (process.env.E2E_URL || (process.argv[2] && !process.argv[2].startsWith('--')
+  ? process.argv[2] : 'http://127.0.0.1:8792/')).replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
 let chromium;
 try {
   ({ chromium } = require('playwright'));

@@ -50,8 +50,8 @@ try {
                 '再用 NODE_PATH=<那个 node_modules> 跑这个文件。');
   process.exit(2);
 }
-const PAGE = (process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2]
-  : 'http://127.0.0.1:8792/').replace(/\/?$/, '/');
+const PAGE = (process.env.E2E_URL || (process.argv[2] && !process.argv[2].startsWith('--')
+  ? process.argv[2] : 'http://127.0.0.1:8792/')).replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
 const MUT = (process.argv.find((a) => a.startsWith('--mut=')) || '--mut=none').split('=')[1];
 // 「新数据还在飞」那段撑多久。★ 2026-10-04 从 2500 提到 6000：D 段要在**同一段窗口**里连动三下，
 //   而真后台这一页是 5040 根（比工装那份样本重得多，每次 evaluate/move 都慢）—— 2500 那次跑，第三下
