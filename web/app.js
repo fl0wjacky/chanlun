@@ -3,8 +3,8 @@
 // 数据只认一个形状（`tools/make_web_fixture.py` 就是它的可执行定义，后台卡 card-29a45ab6-0ac 照着吐）：
 //   {symbol, tf, name, updated, closed, bars[], pens[], segs[], centers[], seg_centers[], signals{seg,pen}, meta{tick,pen_rule}}
 // 取不到后台就退回 `fixtures/`（离线也能看、也能截图对账）；两边都没有就老实说取不到，不画半张图。
-import { CHART, PAGE, CANDLE, WIDTH, SUB } from './theme.js';
-import { makeBoxPrimitive, makeAnnotPrimitive, shownOf, ghostHitAt } from './layers.js';
+import { CHART, PAGE, CANDLE, WIDTH, SUB, TREND } from './theme.js';
+import { makeBoxPrimitive, makeAnnotPrimitive, makeTrendPrimitive, shownOf, ghostHitAt } from './layers.js';
 
 const LWC = window.LightweightCharts;
 
@@ -64,21 +64,31 @@ opts.macd = subParam('macd');
 // 不一样（那两颗是"手机上让图占满"），所以不走 SUB_DEF 那一套。地址栏 `?cutpv=1` 可以指名
 // （可分享、可截图复现；工装也拿它把两种画法都摆出来）。一个字没有 ⇒ 关。
 opts.cutPreview = SUB_Q.get('cutpv') === '1';
+// 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）：**默认开**（Nova 2026-10-05 17:09Z 定）——
+// 这一层就是小栋要看的那个东西，藏在 `?trend=1` 后面他打开页面根本看不见；开关留着，可以手动关掉。
+// 所以地址栏这一头是**反着写**的：`?trend=0` 才关（可分享、可截图复现 —— 跟 `cutpv` 同一条）。
+// ★ 不进 DEFAULTS：那个对象记的是「TradingView 的默认值」那一组（卡面点名的），这一颗的理由跟它无关。
+// ★ 它**只在 `cut=trend` 那份载荷上有东西可画**（`cut=extend` 那份连 `trend` 这个键都没有）——
+//   所以那一档下这一颗按灰，理由写在标题里（跟「成交量」那颗在没有 v 的数据上按灰同一条账）。
+opts.trend = SUB_Q.get('trend') !== '0';
 const state = { data: null, opts, candleSeries: null };
 const primitives = [];
 // 往左拖那套状态：span＝现在手上是第几档，spanMax＝后台给的封顶，earliest＝币安真没有了。
 // viewSet＝**我们自己摆的那个视口**（用来认事件回声，见 setView）；reqId＝在飞的那一份的号（换品种就作废）。
 const DEFAULT_MEASURE = 'macd';       // 后台的缺省也是它（core/signals.py 的 MEASURES）；地址栏里不写它
-// 中枢切法（卡 card-e346ede6-996）：`cut=extend`＝原文那套（延伸/扩展），`turn`＝横跨更大一级走势的
-// 转折点处切开。**缺省就是 turn**（小栋 2026-10-05 11:09Z 拍板，card-21fbf426-889），所以缺省的这一份
-// 地址栏一个字都不写（跟 measure 同一条账）。
+// 中枢切法（卡 card-e346ede6-996）：`cut=extend`＝原文那套（延伸/扩展），`trend`＝按 docs/spec/走势分段.md
+// 的段定义切（v3，卡 card-51571a5f-dc2）。**缺省就是 trend**（取代小栋 2026-10-05 11:09Z 拍的 turn，
+// card-21fbf426-889）⇒ 缺省的这一份地址栏一个字都不写（跟 measure 同一条账）。
 // ★★ 这一行**不许单独上**：不带 `cut` 的那一趟由**后台的缺省**说了算，回显再把 `paging.cut` 改回后台
 //   回的那个（见 load() 上面那段账）。前端先上 ⇒ 后台还回 extend ⇒ chip 亮「延伸」，白改一场。
 //   ⇒ 必须跟后台默认值（server.py 的 CUT_MODES／请求缺省／缓存主变体）**同一次部署**。
-const DEFAULT_CUT = 'turn';
+// ★ 老的 `turn`（笔层出刀）后台已删，但**当 trend 收、不报 400**（分享出去的链接不能打开就挂）——
+//   所以地址栏里那个 `?cut=turn` 只会活到 /api/meta 回来为止：回显写 trend，`:1239` 那条闸门把
+//   认不出的词摆回缺省，两下一夹，这一页就落在 trend 上。**别在前端也留一份 turn 的名字表**。
+const DEFAULT_CUT = 'trend';
 // ★ measure 的初值是**地址栏说的那个**（可分享、可截图复现），不是写死的缺省 —— 但地址栏点名的那个
 //   后台认不认只有 /api/meta 知道，所以首屏是「先等名单、再发图表那一趟」，见文件末尾的启动那几行。
-//   切法同理（`?cut=turn` 可分享），所以这两个词的初值都是**地址栏说的那个**。
+//   切法同理（`?cut=extend` 可分享），所以这两个词的初值都是**地址栏说的那个**。
 const paging = { span: 1, spanMax: null, earliest: false, nogain: false, stop: null, loading: false, failedAt: 0, reqId: 0, applying: false,
                  measure: new URLSearchParams(location.search).get('measure') || DEFAULT_MEASURE,
                  cut: new URLSearchParams(location.search).get('cut') || DEFAULT_CUT };
@@ -94,9 +104,10 @@ const paging = { span: 1, spanMax: null, earliest: false, nogain: false, stop: n
 // ★ orig：**哪些看法不是 108 课原文**由 /api/meta 说（card-6381042d-03f），前端不写死名字。
 //   `orig[id] === false` ⇒ 那颗芯片挂「非原文」那枚小标；**读不到就一个标都不挂**（不知道的事不编）。
 const measures = { list: [], orig: {} };
-// ---- 中枢切法（卡 card-e346ede6-996：横跨更大一级走势的中枢，在转折点处切开）----
-// 口径：`/api/chart?…&cut=extend|turn`（Bram 10-05 定的契约）。turn＝按转折点切、**是缺省** ⇒ 缺省那份不带就不发
-//   ；extend＝原文那套（可切的一档）。后台白名单外 400，回显顶层 `cut`，缓存键 (span, measure, cut)。
+// ---- 中枢切法（卡 card-e346ede6-996；v3 见 card-51571a5f-dc2）----
+// 口径：`/api/chart?…&cut=extend|trend`（Bram 10-05 定的契约，v3 换的这一档）。trend＝走势分段、**是缺省**
+//   ⇒ 缺省那份不带就不发；extend＝原文那套（可切的一档）。白名单外 400，回显顶层 `cut`，缓存键
+//   (span, measure, cut)。★ 老名字 `turn` 后台**当 trend 收**（不 400）、回显写 trend。
 // ★ 能切哪几种**以 /api/meta 的 `cut_modes` 为准**，前端不写死（跟 measures／图层名单同一个理由：两份名单
 //   迟早错开，那时候用户点的那颗和后台算的那份就不是一回事了）。**名单没到 ⇒ 这一组不画、这个参数
 //   一个字都不发** —— 这不是省事：后台的查询白名单里没有这个词的时候，多带一个参数就是 400，
@@ -159,7 +170,11 @@ const overlay = line({ color: 'rgba(0,0,0,0)', lineWidth: 1 });
 state.overlaySeries = overlay;
 
 state.candleSeries = candle;
-for (const [c, p] of [[candle, makeBoxPrimitive(state)], [overlay, makeAnnotPrimitive(state)]]) {
+// ★ 走势分段那一层排在标注层**后面**：它的底图带（`bottom`）和记号（`top`）住在同一个 primitive 的
+//   两个 paneView 里，挂哪条系列不影响 zOrder（`bottom` 就在 K 线底下），所以挂在**永远可见**的
+//   `overlay` 上最稳（挂线段那条的话，一关线段开关整层跟着消失 —— 跟上面那段是同一条理由）。
+for (const [c, p] of [[candle, makeBoxPrimitive(state)], [overlay, makeAnnotPrimitive(state)],
+                      [overlay, makeTrendPrimitive(state)]]) {
   c.attachPrimitive(p);
   primitives.push(p);
 }
@@ -184,9 +199,8 @@ function fixtureNames(symbol, tf) {
 //   （跟档位、看法一样），换品种／换看法／往左补一档／收盘自动重取都得**带着它**走。漏了的话那一趟
 //   不带 `cut` ⇒ 后台按缺省回「延伸」⇒ 回显把 `paging.cut` 当场改回 extend —— 用户切好的那一刀
 //   在换一次看法之后就自己弹回去了，而且屏幕上没有任何东西说过这件事。（工装 ⑰f 就是这么逮到的：
-//   深链 `?cut=turn` 打开，首屏那一趟没带参数，图脚和 chip 一起摆回「延伸」。）
-//   ★ 上面这个例子是按**当时的缺省 extend** 记的；缺省换成 turn 之后两个词对调，**机制一个字不变** ——
-//     这条仍是「load 必须带着 paging.cut 走」的理由，跟哪一档当缺省无关。
+//   深链 `?cut=extend` 打开，首屏那一趟没带参数，图脚和 chip 一起摆回当时那一档缺省。）
+//   ★ 这条理由跟**哪一档当缺省**无关，缺省从 extend 换到 turn 再换到 trend，**机制一个字不变**。
 async function load(symbol, tf, span, measure, cut = paging.cut) {
   try {
     const q = new URLSearchParams({ symbol, tf, span: String(span) });
@@ -194,7 +208,7 @@ async function load(symbol, tf, span, measure, cut = paging.cut) {
     //   走后台自己的缺省。**这不是省事**：旧后台的查询白名单里没有 measure，多带一个参数就是 400，
     //   整张图会挂在这一个词上。
     if (measures.list.length && measure) q.set('measure', measure);
-    // 切法同一条闸门、同一个理由。★ 缺省的 turn **不带**：后台缺省就是它（同一次部署），带上只是噪音，
+    // 切法同一条闸门、同一个理由。★ 缺省的 trend **不带**：后台缺省就是它（同一次部署），带上只是噪音，
     //   而且地址栏那份（setUrl）也得跟着少一个词 —— 两处对「缺省」的判断得是同一个（都用 DEFAULT_CUT）。
     if (cuts.list.length && cut && cut !== DEFAULT_CUT) q.set('cut', cut);
     const r = await fetch(`/api/chart?${q}`);
@@ -350,10 +364,28 @@ function structKey(d, t0, t1, shown) {
   const sigs = (a) => (a || []).filter((s) => at(ts(s.bar)) && (!sh || sh.sigAt(s)))
     .map((s) => `${ts(s.bar)}@${s.price},${s.kind}${s.confirmed === false ? ',未确认' : ''}`).join('|');
   const done = (d.segs || []).filter((s) => !s.live);   // 线段中枢的 host（跟 layers.js doneSegs 同一条）
+  // 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）。★ 跟别的层同一条账：**层关着就不算「看得见」**
+  //   —— 开着它却不算它的账，换档之后走势段整个换了一批、屏幕上明明白白变了，那句话却不出声。
+  // ★ 记的是**画出来的那几件事实**（分界／中阴那头／待定／撤回／背景带／升级框），不是把整个
+  //   `trend` 序列化：序列化会把"载荷里多了一个前端根本不画的键"也算成"屏幕变了"，那正是喊狼。
+  const trend = () => {
+    const T = d.trend || {};
+    const b = (T.bounds || []).filter((x) => at(ts(x.bar)))
+      .map((x) => `${ts(x.bar)}@${x.price},${x.kind}>${ts(x.pullback_end_bar)}`).join('|');
+    const pd = (T.pending || []).filter((x) => at(ts(x.bar))).map((x) => `${ts(x.bar)}@${x.price},${x.kind}`).join('|');
+    const rt = (T.retracted || []).filter((x) => at(ts(x.bar)))
+      .map((x) => `${ts(x.bar)}@${x.price},${x.kind}>${ts(x.retracted_bar)}`).join('|');
+    const sg = (T.segments || []).filter((s) => ov(ts(s.i0), ts(s.i1)))
+      .map((s) => `${ts(s.i0)}>${ts(s.i1)}@${s.type}${s.upgraded ? ',升级' : ''}${s.live ? ',live' : ''}`).join('|');
+    const un = (T.units || []).filter((u) => ov(ts(u.X0), ts(u.X1)))
+      .map((u) => `${ts(u.X0)}>${ts(u.X1)}@${u.DD},${u.GG}`).join('|');
+    return [b, pd, rt, sg, un].join('/');
+  };
   return [on('pen') ? part(d.pens) : '', on('seg') ? part(d.segs) : '',
           on('pc') ? boxes(d.centers, d.pens || [], on('up')) : '',
           on('sc') ? boxes(d.seg_centers, done, on('up')) : '',
-          sigs((d.signals || {}).seg), sigs((d.signals || {}).pen)].join('#');
+          sigs((d.signals || {}).seg), sigs((d.signals || {}).pen),
+          on('trend') ? trend() : ''].join('#');
 }
 // 可视窗口 → 时间区间。★ 换档前取一次、换档后用**同一段时间**再取一次：
 // 拿换完之后的新窗口去比，比的是「另一段时间」，那就不是「这一屏变没变」了。
@@ -1117,7 +1149,9 @@ function applyToggles() {
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
     const sigChip = k.startsWith('sig:') || k === 'sigPend';
     // 成交量那颗在**没有 v 的数据上**按灰（仓里的样本就是）：能点却画不出东西的开关是骗人的。
-    b.disabled = sigChip ? !opts.sig : k === 'vol' ? !sub.hasVol : false;
+    // 走势分段那颗同理：`cut=extend` 那份载荷没有 `trend` 这个键 ⇒ 开着也画不出东西 ⇒ 按灰。
+    b.disabled = sigChip ? !opts.sig : k === 'vol' ? !sub.hasVol
+      : k === 'trend' ? !(state.data && state.data.trend) : false;
   }
   // 「关着的层不许有能点的开关」这条账，看法那组也算：买卖点一关，它就得跟着灰（或反过来亮回来）。
   renderMeasures();
@@ -1147,6 +1181,10 @@ function buildChips() {
   add('类中枢', 'pc', CHART.pen);
   add('线段中枢', 'sc', CHART.seg);
   add('高一级', 'up', CHART.up_seg);
+  // 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）：背景带／分界／中阴／待定／撤回／升级框。
+  // 排在「高一级」后面 —— 它俩都跟"升级"沾边，挨着放；但**不是一个东西**（那颗是第 33 课"满 9 段"
+  // 升出来的框，这一层是 v3 的 D3"连续扩展合成"），标题里说清楚。
+  add('走势分段', 'trend', TREND.up);
   add('买卖点', 'sig', CHART.buy);
   for (const k of ['一买', '二买', '三买', '一卖', '二卖', '三卖']) add(k, `sig:${k}`, k.endsWith('买') ? CHART.buy : CHART.sell);
   add('待确认', 'sigPend', CHART.sell);
@@ -1353,7 +1391,7 @@ async function setMeasure(id) {
 // ---------------------------------------------------------------- 中枢切法那一组（卡 card-e346ede6-996）
 // 形态跟「背驰看法」同一套（单选：`role=radiogroup` ＋ `aria-checked`），但**另起一组**、不并进那一排 ——
 // 那一组换的是「买卖点按哪种力度比较算」，这一组换的是「中枢切在哪」，两件事各归各的；并成一排会让人
-// 以为能同时选。★ 名字也是 Nova 10-05 拍的：两颗「延伸」「按转折切」。后台哪天加了第三种 ⇒ 原样印
+// 以为能同时选。★ 名字也是 Nova 10-05 拍的：两颗「延伸」「走势分段」。后台哪天加了第三种 ⇒ 原样印
 // 代号、title 里说明白，**不吞**（跟 MEASURE_NAME 同一条规矩）。
 // ★ 措辞表 CUT_NAME 在下面 RENDER_META 那一块里（图脚也用它，一处一份），见那块开头的注释。
 function buildCuts() {
@@ -1378,8 +1416,8 @@ function buildCuts() {
   else box.prepend(g);
   // 「先看切后」：一个**开关**（`aria-pressed`），不是单选 —— 跟"切法选哪一种"不是一类东西，
   // 所以**另起一组**，不塞进上面那个 `radiogroup`（把一个开关放进单选组里，读屏会读错）。
-  // ★ 只在切法名单里有 `turn` 的时候才建：没有"按转折切"，就没有"待定的刀"，这颗永远灰着 = 摆设。
-  if (cuts.list.includes('turn')) {
+  // ★ 只在切法名单里有 `trend` 的时候才建：没有"走势分段"，就没有"待定的刀"，这颗永远灰着 = 摆设。
+  if (cuts.list.includes('trend')) {
     const pg = document.createElement('div');
     pg.className = 'mgroup'; pg.id = 'pvgroup';
     const pcap = document.createElement('span');
@@ -1391,7 +1429,7 @@ function buildCuts() {
     pb.title = '先看切后：把还没立住的那几刀**也画成切开的框**（左沿虚线 ＋ 框内左端「随切点」签）。'
       + '默认关 —— 没立住之前屏上照惯例画的还是旧框（第 88 课：中阴阶段仍借助前面那个中枢分析）。';
     pb.onclick = () => {
-      if (paging.cut !== 'turn') return;          // 置灰时点不到；真点到了也什么都不做
+      if (paging.cut !== 'trend') return;         // 置灰时点不到；真点到了也什么都不做
       opts.cutPreview = !opts.cutPreview;
       renderCuts();
       setUrl();
@@ -1420,16 +1458,16 @@ function renderCuts() {
   if (cap) cap.textContent = on ? '中枢切法' : '中枢切法 · 中枢那两层都关着';
   if (on) g.removeAttribute('title');
   else g.title = '类中枢和线段中枢那两层都关着 —— 这一组只换中枢切在哪，先打开一层';
-  // 「先看切后」那颗开关（不是单选，所以不归上面那个循环）：只有「按转折切」下才有"待定的刀"，
+  // 「先看切后」那颗开关（不是单选，所以不归上面那个循环）：只有「走势分段」下才有"待定的刀"，
   // 别的切法下点了屏幕不会变 ⇒ 置灰，并把理由写在标题那行（手机没有 hover）。
   const pg = el('pvgroup');
   if (pg) {
     const pb = el('pvchip');
-    const live = paging.cut === 'turn';
+    const live = paging.cut === 'trend';
     pb.setAttribute('aria-pressed', String(!!opts.cutPreview));
     pb.disabled = !live;
     const pcap = pg.querySelector('.mcap');
-    if (pcap) pcap.textContent = live ? '切后预览' : '切后预览 · 只在「按转折切」下有用';
+    if (pcap) pcap.textContent = live ? '切后预览' : '切后预览 · 只在「走势分段」下有用';
     if (live) pg.removeAttribute('title');
     else pg.title = '切法现在是「延伸」：没有待定的刀，也就没有"切后"可看';
   }
@@ -1780,12 +1818,15 @@ function measureText(d) {
 // **不吞**；这张表**控件和图脚共用**，所以跟 MEASURE_NAME 一样放在这一块里（见本块开头的注释）。
 const CUT_NAME = {
   extend: ['延伸', '延伸：中枢照原文的延伸/扩展判定'],
-  turn: ['按转折切', '按转折切：线段中枢横跨更大一级走势的转折点时，在那个转折点切开（默认；卡 card-e346ede6-996）'],
+  trend: ['走势分段', '走势分段：按 docs/spec/走势分段.md 的段定义切开 —— 死点之后本级别第一个反向三类点'
+    + '确立分界，只在确立的分界处断开；中阴（还没立住）的框不断、画灰点线待定（默认；卡 card-51571a5f-dc2）'],
 };
 // 图脚那一格（跟「背驰看法」同一格、同一条规矩）：**认回显**（`d.cut`）—— 用户点的那颗可能失败，
 // 屏上画的到底是哪种，只有后台回的那份说了算。旧后台和离线样本没有这个字段 ⇒ 这一格**不出现**。
-// ★ **缺省（按转折切）也印**：图脚是一张图的记录 —— 两张对照图（延伸／按转折切）就靠这一格分开，
+// ★ **缺省（走势分段）也印**：图脚是一张图的记录 —— 两张对照图（延伸／走势分段）就靠这一格分开，
 //   要是"只有换了才印"，切换前那张图上没有任何一处说得出它是哪种切法。
+// ★ 老链接 `?cut=turn` 后台当 trend 收、**回显 trend** ⇒ 图脚印的是「走势分段」。这一格认的是回显，
+//   所以**不用**在这里给 turn 留一个名字：留了反而会印出一个后台已经不用的档位。
 function cutText(d) {
   const c = d.cut;
   if (typeof c !== 'string' || !c) return '';
@@ -1892,8 +1933,10 @@ function setUrl() {
   // 看法同理：写着缺省（面积）是噪音，抹掉；只有真换了才写上去（可分享、可截图复现）。
   if (measures.list.length && paging.measure !== DEFAULT_MEASURE) q.set('measure', paging.measure);
   else q.delete('measure');
-  // 切法同理（缺省是 turn）：只有真切到「延伸」那份才写上去。★ 名单没到 ⇒ 也抹掉：
+  // 切法同理（缺省是 trend）：只有真切到「延伸」那份才写上去。★ 名单没到 ⇒ 也抹掉：
   // 那时候页面上根本没有这一组，地址栏却留着一个页面上不存在的词，是句假话（跟 load() 那条闸门对称）。
+  // ★ 顺带把老链接的 `?cut=turn` 从地址栏换掉：认得出它的是**后台**（当 trend 收），前端这一格按
+  //   `paging.cut` 重写 ⇒ 改名之后第一次 setUrl 就把它归一成 trend（或者直接抹掉）。
   if (cuts.list.length && paging.cut !== DEFAULT_CUT) q.set('cut', paging.cut);
   else q.delete('cut');
   // 副图那两颗同理：跟**这一屏的默认**（桌面开、手机关，见 SUB_DEF）不一样才写上去。
@@ -1903,6 +1946,9 @@ function setUrl() {
   }
   // 「先看切后」同理：关着是默认（这一档跟屏宽无关，见 opts.cutPreview 那行），开着才写上去。
   if (opts.cutPreview) q.set('cutpv', '1'); else q.delete('cutpv');
+  // 走势分段那一层：**默认开**（Nova 17:09Z），所以这一头反过来写 —— **关着才写上去**（`?trend=0`）。
+  // 跟上面两颗（vol/macd 缺省写不写）同一条账，方向相反而已。
+  if (opts.trend) q.delete('trend'); else q.set('trend', '0');
   history.replaceState(null, '', `?${q}`);            // 可分享、可截图复现
 }
 

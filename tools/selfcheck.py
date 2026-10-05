@@ -403,14 +403,14 @@ _adj, _brk = preprocess(zbars, adjust="none", session=None)
 count("preprocess 非恒等（不变量 C1）", 0 if (_adj == zbars and _brk == []) else 1)
 
 # ---- 中枢切分：框不跨走势分界点（card-e634f6e9-bb5，小栋问「为什么之前没发现」）----
-# 原来的检查只比单件（笔、段、框的价格），没比「框跟走势分段对不对得上」。cut=turn 下，data/ 里每份 K 线样本：
+# 原来的检查只比单件（笔、段、框的价格），没比「框跟走势分段对不对得上」。trend（走势分段）下，data/ 里每份 K 线样本：
 # 切后的框不许跨过已切成（done）的刀；预览框（provisional）不许跨过任何 done／pending 的刀。反向验证在
 # tools/cut_check.py --self-test（把「切成的刀要分组」拿掉 ⇒ 必须报出跨刀的框）。
 print("=" * 72)
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
 from cut_check import span_violations as _span_violations, kline_files as _kline_files   # noqa: E402
 _sv = _span_violations()
-count("框跨过已切成的走势分界点", len(_sv), "　← %d 份样本，cut=turn%s" % (len(_kline_files()),
+count("框跨过已切成的走势分界点", len(_sv), "　← %d 份样本，cut=trend%s" % (len(_kline_files()),
       "；例 %s" % (_sv[:2],) if _sv else ""))
 
 # ---- 走势分界 v3（docs/spec/走势分段.md v3 §三，card-51571a5f-dc2）----
