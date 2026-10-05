@@ -1354,7 +1354,20 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   //     这是**故意的**，而且比"把老名字发出去"稳：前端只认后台当场给的名单，后台哪天连别名都撤了，
   //     这条老链接照样打得开。所以这一格钉的是"**老名字一个字节都不上网** ＋ 落点是新档位 ＋ URL 归一"。
   //     ★ "后台真收别名"那句是**另一件事**，得拿真后台量、页面说了不算 —— 钉在 ⑰e2。
-  const CT = await open('cutturn', QS + `&cut=${OLD_CUT}`);
+  // ★★ 这一段（⑰e / ⑰l）的页面一律 `trend=0` —— 2026-10-06 Iris 补的一行，理由要写清楚：
+  //   v3 §八 那一层（`trend` 那个键，卡 card-c73ab37d-5a1）**默认开**之后也会画一枚「…待定」
+  //   （灰点线 ＋ `<价格> 待定`），而这一段量的是**旧的切点待定签**（`cuts[]` 那条路）——
+  //   两枚同屏时，这一段的判据数出来的就不是它要量的那件事：
+  //   · ⑰l 要求"压边那页**一枚签都不挂**" ⇒ 我那一枚把它顶红（实测真跑出来 2 枚 `1270 待定`）；
+  //   · ⑰e 要求"框内那页**有**签" ⇒ 拿 `text.includes('待定')` 那种**不锚定**的判据，我那一枚
+  //     会让它恒绿，哪怕旧的这条路整条崩掉 —— 掉牙比红更坏。
+  //   ⇒ 这一段显式关掉那一层，把旧的这条规矩**单独摆出来**量（`?trend=0` 就是用户手上那颗开关，
+  //     不是工装专用的后门）。⑰f/⑰i/⑰j 那边不去动：它们的 `uniqTags` 是**锚定**的
+  //     （`/^(待定|随切点)/`），我那一枚以价格开头，天然数不进去。
+  //   ★ 「两枚「待定」同屏」这件事本身是**真问题**、已经报上去了（归 card-c6644f52-2fa）——
+  //     这里关的是这一段的**量法**，不是那个现象。
+  const CUTQ = QS + '&trend=0';
+  const CT = await open('cutturn', CUTQ + `&cut=${OLD_CUT}`);
   const ctp = CT.p;
   await sleep(1200);
   const cg0 = await cutGeo(ctp);
@@ -1364,7 +1377,7 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   if (pendCut) await park(ctp, pendCut.bar);
   const cg1 = await cutGeo(ctp);
   const cfx = await fxOf(ctp);
-  const CV = await open('cutvoid', QS + `&cut=${OLD_CUT}`);
+  const CV = await open('cutvoid', CUTQ + `&cut=${OLD_CUT}`);
   await sleep(1200);
   const vg0 = await cutGeo(CV.p);
   if (vg0.cuts[0]) await park(CV.p, vg0.cuts[0].bar);
@@ -1414,7 +1427,7 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
              edge: c.cut_bar === i1 || c.cut_bar === i0,
              inner: i0 < c.cut_bar && c.cut_bar < i1 };
   });
-  const CE = await open('cutedge', QS + `&cut=${DEF_CUT}`);
+  const CE = await open('cutedge', CUTQ + `&cut=${DEF_CUT}`);
   await sleep(1200);
   const eg0 = await cutGeo(CE.p);
   const egCut = eg0.cuts[0];
