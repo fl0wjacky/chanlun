@@ -50,7 +50,7 @@ def kline_files():
 
 
 def span_violations(files=None, measure="macd", strict=True):
-    """card-e634f6e9-bb5：cut=turn 下，**任何框都不许跨过已切成（done）的切点** —— 框跟走势分段对得上。
+    """card-e634f6e9-bb5：cut=trend 下，**任何框都不许跨过已切成（done）的切点** —— 框跟走势分段对得上。
     跨 = 框的成员线段里，有一段在切点之前、有一段在切点之后（X0 < cut_bar < X1）。
     ★ 不等号必须**严格**：切点正好压在框沿上（cut_bar == X0 或 == X1）是故意允许的那一档（框在刀处相接，
       前端 cut-edge f3f063e 就是为它写的）。收紧成 <= 会把这一档在真数据上全报成红（--self-test 第二条量这个）。

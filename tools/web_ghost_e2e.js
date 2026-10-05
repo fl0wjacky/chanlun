@@ -87,11 +87,15 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   // 真后台的 `/api/meta` 原件（⑰h 拿它跟**页面**对账 —— 那一页只吃这一份，不吃假后台那份）。
   const RMETA = await (await fetch(`${PAGE}api/meta`)).json();
 
-  // ★★ 缺省切法 —— 必须跟 `web/app.js` 的 `DEFAULT_CUT` **一致**（2026-10-05 起两边都是 'turn'）。
+  // ★★ 缺省切法 —— 必须跟 `web/app.js` 的 `DEFAULT_CUT` **一致**（2026-10-06 起两边都是 'trend'，
+  //   取代原来的 'turn'；卡 card-d8cf5815-19f）。
   //   工装里也得有这么一行的理由：假后台"不带 cut 时回哪一档"、⑰a/⑰b/⑰h 的缺省期望，量的都是
   //   **页面按哪个缺省在活**；这一行没跟着页面翻，红的会是页面 —— 而页面其实全对。
   //   ★ 非缺省那一档（`extend`）下面一律写死：缺省只有一档，写死的那半边一眼看得出是"要去点它"的那颗。
-  const DEF_CUT = 'turn';
+  //   ★★ 老名字 `turn` **不再是一个档位**（后台删了、当 `trend` 收）⇒ 这一份里凡是"老名字"出现的地方
+  //     都是**别名**，不是第二档：深链那一趟量的是「别名收进来、回显 trend、落点在 trend」。
+  const DEF_CUT = 'trend';
+  const OLD_CUT = 'turn';        // 后台已删、当 DEF_CUT 收的别名。只许出现在"深链老链接"那几格
 
   //   ★ 这一行**自己会核**：把页面真正在用的 `DEFAULT_CUT` 从它自己的 `app.js` 里捞出来对一眼 ——
   //     哪天页面又翻了而这里没跟，这条会先炸，不用等到 ⑰a 假红、再让人去猜"到底是页面错还是工装错"。
@@ -313,7 +317,7 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
     if (which !== 'cutreal') {
       await p.route('**/api/meta', async (route) => {
         const m = await (await fetch(`${PAGE}api/meta`)).json();
-        if (which.startsWith('cut')) m.cut_modes = ['extend', 'turn'];
+        if (which.startsWith('cut')) m.cut_modes = ['extend', DEF_CUT];
         else delete m.cut_modes;
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(m) });
       });
@@ -371,8 +375,13 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
       //   ★ 「撒谎」＝回**跟请求相反**的那一档。写死"一律回 extend"是不行的：缺省那颗现在**根本不发
       //     参数**（带了跟不带是同一份载荷），⑰d 要去点的只能是 `extend` 那颗 —— 而写死的话，那一趟
       //     请求与回音一致，"回显赢了"就退化成"照请求回"，那一格绿得没有意义。
-      const asked = wantCut || DEF_CUT;                 // 后台**诚实**时该回的那一档
-      body.cut = which === 'cutlie' ? (asked === 'turn' ? 'extend' : 'turn') : asked;
+      //   ★★ 老名字 `turn` 后台**当 DEF_CUT 收**（server.py 的 CUT_ALIAS）⇒ 假后台也得归一，
+      //     否则深链那一趟量的是"假后台自己的行为"，跟线上不是一回事。
+      //     ★ 但归一这件事**假后台说了不算** —— 冒充实现在这里、"后台真有别名"那句话得拿真后台量，
+      //       所以在 ⑰h（不吃假后台的那一页）里对着真 `/api/meta` 和真请求各钉一条。
+      const ALIAS = { [OLD_CUT]: DEF_CUT };
+      const asked = ALIAS[wantCut] || wantCut || DEF_CUT;      // 后台**诚实**时该回的那一档
+      body.cut = which === 'cutlie' ? (asked === DEF_CUT ? 'extend' : DEF_CUT) : asked;
       if (which === 'cutvoid') {
         const c = mkCut(body, true);
         if (c) body.cuts = [{ cut_bar: c.cut_bar, by: '笔·三买', level: 'seg', status: 'done' },
@@ -1227,7 +1236,7 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   ck('⑰a 名单没到（假后台这一份 `/api/meta` 里没有 `cut_modes`）⇒ 切法控件**不画**、请求里'
      + '**一个 `cut` 都不带**；回显给的那一档照样印在图脚上',
      !nc0.has && NC.cutReq.length >= 1 && NC.cutReq.every((x) => x === null)
-       && nc0.cut === DEF_CUT && /中枢切法/.test(nc0.foot) && /按转折切/.test(nc0.foot),
+       && nc0.cut === DEF_CUT && /中枢切法/.test(nc0.foot) && /走势分段/.test(nc0.foot),
      `控件 ${nc0.has ? '★ 画出来了' : '没画'}｜请求带的 cut：${JSON.stringify(NC.cutReq)}`
      + `｜图脚「${footCut(nc0.foot)}」`);
 
@@ -1262,19 +1271,38 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
      + `${ru.has ? `（${ru.chips.length} 枚：${JSON.stringify(ru.chips.map((c) => c.cut))}）` : ''}`
      + `｜请求带的 cut：${JSON.stringify(RU.cutReq)}｜paging.cut=${ru.cut}｜URL「${ru.url}」`);
 
-  // ⑰b/⑰c：名单到了 ⇒ 控件出现；**缺省那颗（按转折切）**按**回显**亮着、缺省那档照样不写进 URL、
+  //   ★★ 别名那一条**必须拿真后台量** —— 假后台只是照着 `server.py` 的 CUT_ALIAS 演，"线上真收别名"
+  //     这句话它说了不算。所以这一格**不看页面**（页面那半边是 ⑰e 的事），直接问真后台三件事：
+  //     老名字当新名字收、**不 400**（分享出去的老链接打开不能挂）、**回显写新名字**，以及名单里
+  //     是**新名字**、老名字**不在名单里**（在的话页面上会多出一颗后台其实不认的旧芯片）。
+  //   ★ 这一格跟 ⑰h 那条"合并前后都跑得动"**故意不一样**：它要的就是"前端这一支跟 v3 后台**同一次上**"
+  //     那句话 —— 单独上前端、或者单独上后台，这一格就该红。`web/app.js` 的 `DEFAULT_CUT` 上面
+  //     本来也写着「这一行**不许单独上**」，这一格就是把那句话变成一次真的检查。
+  {
+    const r1 = await fetch(`${PAGE}api/chart?symbol=ZECUSDT&tf=15m&cut=${OLD_CUT}`);
+    let alias = null;
+    try { alias = await r1.json(); } catch (e) { /* 不是 JSON（比如 400 的 HTML）⇒ 下面照 rc 红 */ }
+    ck(`⑰e2 真后台：老名字 \`cut=${OLD_CUT}\` 当 \`${DEF_CUT}\` 收 —— 不 400、回显写新名字；`
+       + `\`/api/meta\` 的 \`cut_modes\` 里是**新名字**、老名字**不在名单里**`,
+       r1.status === 200 && !!alias && alias.cut === DEF_CUT
+         && realModes.includes(DEF_CUT) && !realModes.includes(OLD_CUT),
+       `GET …&cut=${OLD_CUT} ⇒ HTTP ${r1.status}｜回显 cut=${alias && alias.cut}`
+       + `｜真后台 cut_modes=${JSON.stringify(realModes)}`);
+  }
+
+  // ⑰b/⑰c：名单到了 ⇒ 控件出现；**缺省那颗（走势分段）**按**回显**亮着、缺省那档照样不写进 URL、
   //   也不发参数；点「延伸」⇒ 请求才带上 `cut=extend`（只有非缺省那一档才靠参数传，后端那边
-  //   「不带 cut ＝ 显式 turn」是逐字节等价的）。
+  //   「不带 cut ＝ 缺省那一档」是逐字节等价的）。
   const CM = await open('cutmeta');
   const cmp = CM.p;
-  await cmp.waitForSelector('#cgroup .mchip[data-cut="turn"]', { timeout: 15000 });
+  await cmp.waitForSelector(`#cgroup .mchip[data-cut="${DEF_CUT}"]`, { timeout: 15000 });
   await sleep(500);
   const cm0 = await cutUI(cmp);
-  ck('⑰b 名单到了（`cut_modes: ["extend","turn"]`）⇒ 控件出现、**缺省那颗（按转折切）**按回显亮着，'
-     + '而且**缺省不写进 URL、也不发参数**（带了跟不带是同一份载荷）；缺省就是「按转折切」⇒ '
+  ck(`⑰b 名单到了（\`cut_modes: ["extend","${DEF_CUT}"]\`）⇒ 控件出现、**缺省那颗（走势分段）**按回显亮着，`
+     + '而且**缺省不写进 URL、也不发参数**（带了跟不带是同一份载荷）；缺省就是「走势分段」⇒ '
      + '那颗预览开关是**活的**（切到「延伸」才禁用）',
      cm0.has && cm0.chips.length === 2
-       && cm0.chips.some((c) => c.cut === 'turn' && c.on) && cm0.chips.some((c) => c.cut === 'extend' && !c.on)
+       && cm0.chips.some((c) => c.cut === DEF_CUT && c.on) && cm0.chips.some((c) => c.cut === 'extend' && !c.on)
        && cm0.chips.every((c) => !c.dis)
        && cm0.cut === DEF_CUT && !/cut=/.test(cm0.url)
        && CM.cutReq.every((x) => x === null)
@@ -1288,19 +1316,19 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   await sleep(900);
   const cm1 = await cutUI(cmp);
   const cmReq = CM.cutReq.filter((x) => x !== null);
-  ck('⑰c 点「延伸」⇒ 请求才带上 `cut=extend`（缺省那颗反而不带 —— 后端"不带 cut ＝ 显式 turn"）；'
+  ck('⑰c 点「延伸」⇒ 请求才带上 `cut=extend`（缺省那颗反而不带 —— 后端"不带 cut ＝ 缺省那一档"）；'
      + 'chip 亮哪颗看的是**后台回的那一份**，图脚也报当前切法',
      cmReq.length >= 1 && cmReq.every((x) => x === 'extend')
-       && cm1.chips.some((c) => c.cut === 'extend' && c.on) && cm1.chips.some((c) => c.cut === 'turn' && !c.on)
+       && cm1.chips.some((c) => c.cut === 'extend' && c.on) && cm1.chips.some((c) => c.cut === DEF_CUT && !c.on)
        && /cut=extend/.test(cm1.url) && /延伸/.test(cm1.foot),
      `请求带的 cut：${JSON.stringify(CM.cutReq)}｜chips ${JSON.stringify(cm1.chips)}`
      + `｜图脚「${footCut(cm1.foot)}」｜URL「${cm1.url}」`);
 
-  // ⑰d：**回显是唯一的真相**。这一页后台"撒谎"：请求要的是 extend，回的却是 turn
+  // ⑰d：**回显是唯一的真相**。这一页后台"撒谎"：请求要的是 extend，回的却是缺省那一档（走势分段）
   //   （真后台不会这样，但"照点击画"和"照回显画"只有在两者不一致时才分得开）。
   //   ★ 入口带 `?cut=extend`：非缺省那一档**才会真的发参数**，这一格才量得到"请求与回音不一致"。
   //     点的那颗也是 extend —— `setCut()` 里 `id === paging.cut` 直接 return，第一趟回音已经把它改成
-  //     turn 了，点 extend 是真会重取的那一下。
+  //     缺省那一档了，点 extend 是真会重取的那一下。
   const LIE = await open('cutlie', QS + '&cut=extend');
   const liep = LIE.p;
   await liep.waitForSelector('#cgroup .mchip[data-cut="extend"]', { timeout: 15000 });
@@ -1308,17 +1336,22 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   await liep.locator('.mchip[data-cut="extend"]').click();
   await sleep(1200);
   const lie1 = await cutUI(liep);
-  ck('⑰d 请求要了 extend、后台回音却是 turn ⇒ 屏上必须摆成「按转折切」（chip ＋ 图脚），'
+  ck('⑰d 请求要了 extend、后台回音却是缺省那一档 ⇒ 屏上必须摆成「走势分段」（chip ＋ 图脚），'
      + 'URL 里那把 `cut` 也得撤掉 —— 前台不许自作主张',
-     LIE.cutReq.includes('extend') && lie1.cut === 'turn'
-       && lie1.chips.some((c) => c.cut === 'turn' && c.on) && lie1.chips.some((c) => c.cut === 'extend' && !c.on)
-       && !/cut=/.test(lie1.url) && /按转折切/.test(lie1.foot),
+     LIE.cutReq.includes('extend') && lie1.cut === DEF_CUT
+       && lie1.chips.some((c) => c.cut === DEF_CUT && c.on) && lie1.chips.some((c) => c.cut === 'extend' && !c.on)
+       && !/cut=/.test(lie1.url) && /走势分段/.test(lie1.foot),
      `请求带的 cut：${JSON.stringify(LIE.cutReq)}｜回显之后 paging.cut=${lie1.cut}`
      + `｜图脚「${footCut(lie1.foot)}」｜URL「${lie1.url}」`);
 
   // ⑰e：一刀 pending ⇒ 那一根上真画出**竖虚线**（虚线形 ＋ 高度＝旧框的 ZD…ZG）＋ 一枚「待定」签；
   //   同一份数据里 `done`/`void` 的刀**一根线都不画**（两张页面几何一样，只有 `status` 不同）。
-  const CT = await open('cutturn', QS + '&cut=turn');
+  //   ★★ 这一页的入口从"缺省那一档"变成了**老名字 `?cut=turn`**（卡 card-d8cf5815-19f）：老名字后台删了、
+  //     当 `trend` 收 ⇒ 这一格顺手把**别名**那条路钉死（以前没测过）：请求**真的带着 `turn` 发出去**、
+  //     后台回 `trend`、页面落在 trend 上、URL 归一掉那把 `cut`。
+  //     ★ 归一这一步**假后台说了不算**：它只是照着 server.py 的 CUT_ALIAS 演 —— "线上真收别名"那句话
+  //       得拿真后台量，钉在 ⑰h 里。
+  const CT = await open('cutturn', QS + `&cut=${OLD_CUT}`);
   const ctp = CT.p;
   await sleep(1200);
   const cg0 = await cutGeo(ctp);
@@ -1328,7 +1361,7 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   if (pendCut) await park(ctp, pendCut.bar);
   const cg1 = await cutGeo(ctp);
   const cfx = await fxOf(ctp);
-  const CV = await open('cutvoid', QS + '&cut=turn');
+  const CV = await open('cutvoid', QS + `&cut=${OLD_CUT}`);
   await sleep(1200);
   const vg0 = await cutGeo(CV.p);
   if (vg0.cuts[0]) await park(CV.p, vg0.cuts[0].bar);
@@ -1336,18 +1369,19 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   await park(CV.p, vg0.cuts[0].bar);
   const vg1 = await cutGeo(CV.p);
   const vfx = await fxOf(CV.p);
-  const ctU = await cutUI(ctp);              // ★ 深链那一趟到底落在哪一档（缺省那档不带参数，得看落点）
+  const ctU = await cutUI(ctp);              // ★ 深链那一趟到底落在哪一档（老名字归一之后该是 trend）
   ck('⑰e 没立住的那一刀`pending` ⇒ 在 `cut_bar` 那一根上真画出竖虚线（虚线形、高度＝包住它的旧框的 '
-     + 'ZD…ZG）＋ 一枚「待定」签；同一份数据里 `done`/`void` 的刀**一根线都不画**',
-     // ★ 缺省翻成 `turn` 之后，深链 `?cut=turn` 那趟**本来就不带 `cut`**（带参数的只有非缺省那一档）——
-     //   后台按同一个缺省回 turn，回显不会把刀弹走。这一格量的因此变成"第一趟**没有**要 extend"
-     //   ＋"落点就是 turn"；真正量"参数带没带下去"的是 ⑰g（那一格点的是非缺省那颗）。
-     CT.cutReq.length >= 1 && CT.cutReq.every((x) => x !== 'extend') && ctU.cut === 'turn'
+     + 'ZD…ZG）＋ 一枚「待定」签；同一份数据里 `done`/`void` 的刀**一根线都不画**；'
+     + `另外深链老名字 \`?cut=${OLD_CUT}\` 必须**归一**到 \`${DEF_CUT}\``,
+     // ★ 老名字归一之后，深链那一趟**真的带着参数**（`turn` ≠ 缺省 ⇒ load 发得出去）—— 这跟搬走之前
+     //   正好相反（那时它是缺省、一个字都不带）。量的是"发出去的是老名字、落点却是新档位"。
+     CT.cutReq.some((x) => x === OLD_CUT) && ctU.cut === DEF_CUT && !/cut=/.test(ctU.url)
        && !!pendCut && pendCut.x !== null && vsegAt(cfx, cg1.offs, cg1.cuts[0]).length >= 1
        && cfx.text.includes('待定')
        && vg1.cuts.length === 2 && vg1.cuts.every((c) => vsegAt(vfx, vg1.offs, c).length === 0)
        && !vfx.text.includes('待定') && !vfx.text.includes('随切点'),
-     `这一页深链落在 paging.cut=${ctU.cut}｜pending 那一刀 bar=${pendCut && pendCut.bar} 该在画布 x≈${pendCut && pendCut.x}`
+     `这一页深链落在 paging.cut=${ctU.cut}｜请求带的 cut=${JSON.stringify(CT.cutReq)}｜URL「${ctU.url}」`
+     + `｜pending 那一刀 bar=${pendCut && pendCut.bar} 该在画布 x≈${pendCut && pendCut.x}`
      + ` y=${pendCut && pendCut.y0}…${pendCut && pendCut.y1}；真画出来的竖虚线 `
      + `${JSON.stringify(cfx.vseg.filter((v) => v.dash.length >= 2))}`
      + `｜签「${cfx.text.filter((t) => /待定|随切点/.test(t)).join(' ')}」`
@@ -1375,7 +1409,7 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
              edge: c.cut_bar === i1 || c.cut_bar === i0,
              inner: i0 < c.cut_bar && c.cut_bar < i1 };
   });
-  const CE = await open('cutedge', QS + '&cut=turn');
+  const CE = await open('cutedge', QS + `&cut=${DEF_CUT}`);
   await sleep(1200);
   const eg0 = await cutGeo(CE.p);
   const egCut = eg0.cuts[0];
@@ -1421,7 +1455,7 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
 
   // ⑰f：「先看切后」是**前端开关**、默认关（切没立住之前屏上摆的还是旧框 ＋ 那条虚线）；
   //   点开 ⇒ 切后的框换上去（各带一枚「随切点」）、「待定」那组收掉（同一件事不说两遍）、URL 带 cutpv=1。
-  const CP = await open('cutpv', QS + '&cut=turn');
+  const CP = await open('cutpv', QS + `&cut=${DEF_CUT}`);
   const cpp = CP.p;
   await sleep(1200);
   const cpg = await cutGeo(cpp);
@@ -1445,7 +1479,7 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   ck('⑰f 「先看切后」默认**关**（屏上摆的还是旧框 ＋ 那条待定虚线）；点开 ⇒ 切后的框换上去'
      + '（各带一枚「随切点」）、「待定」那组收掉、URL 带 cutpv=1',
      // ★ 缺省翻成 `turn` 之后，深链那一趟不带参数了 ⇒ 这里改成"一趟都没要 extend"。
-     //   这一页必须停在「按转折切」是由上面点得动 `#pvchip` 间接钉住的：切法不是 turn 时那颗是
+     //   这一页必须停在「走势分段」是由上面点得动 `#pvchip` 间接钉住的：切法不是 trend 时那颗是
      //   `disabled` 的，`click()` 会直接超时（renderCuts 里 `pb.disabled = !live`）。
      CP.cutReq.length >= 1 && CP.cutReq.every((x) => x !== 'extend')
        && cp0.pv && cp0.pv.on === false && cp0.pvOn === false && !/cutpv=/.test(cp0.url)
