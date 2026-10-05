@@ -1952,4 +1952,4 @@ const metaReady = loadMeasures();
 // ★ `fmtPrice` 也递出去：工装要证「页头那个价跟图上那个价是**同一个数**」，只能拿页面**自己这个格式器**
 //   把图上那份印一遍去比 —— 工装自己再四舍五入一遍就是第二份规矩（`toFixed` 看二进制真值、
 //   `toLocaleString` 看最短十进制，1313.995 这种正好落在半个末位上的值会差一分，判据在**没事**的时候红）。
-window.__app = { chart, state, opts, paging, measures, cuts, sub, fmtPrice };
+window.__app = { chart, state, opts, paging, measures, cuts, sub, fmtPrice, autoReload };   // autoReload：工装 readout_swap_probe 的 F 场景直接触发自动重取

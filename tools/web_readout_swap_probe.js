@@ -34,8 +34,8 @@
 // 跑法（要**真后台**：两个品种都得有，8742 那个假后台只有一份数据）：
 //   1) python3 web/server.py --port 8792          （只绑回环）
 //   2) NODE_PATH=<playwright 的 node_modules> node tools/web_readout_swap_probe.js [页面地址]
-//        [--mut=none|paint|go|read|sub|sticky|stale]
-//   不给 --mut ⇒ 七种跑法都跑（这才是完整对照）；给了 ⇒ 只跑那一种。
+//        [--mut=none|paint|go|read|sub|sticky|sticky2|stale]
+//   不给 --mut ⇒ 八种跑法都跑（这才是完整对照）；给了 ⇒ 只跑那一种。
 //   判据两条：① **原样**那一跑得是「该收的收、该回来的回来」（BASE 那张表）；② 每一种变异**该分叉在哪一格
 //   就得在这一格分叉**（DIVERGE 那张表）—— 没分叉就是那一格没牙，探针退 1 并把哪一格没分叉印出来。
 //   退出码：0＝三种跑法都符合上面那两条预期；1＝有跑法不符合（把不符合的那条印出来）；2＝环境没搭好。
@@ -84,6 +84,10 @@ const SITES = {
   sticky: { name: '放开那一句（go() 的 finally 里的 dataStale = false）',
             re: /(它自己有始有终。\n\s*if \(id === paging\.reqId\) \{ paging\.loading = false;) dataStale = false;/,
             rep: '$1' },
+  // sticky2：同一句，**自动重取**那条路（autoReload 的 finally）—— 删了它，收盘自动重取一趟以后读数就收死（⇒ F 红）。
+  sticky2: { name: '放开那一句（自动重取 autoReload 的 finally 里的 dataStale = false）',
+             re: /(自动重取没成功[^\n]*\n\s*return null;\n\s*\} finally \{\n\s*if \(id === paging\.reqId\) \{ paging\.loading = false;) dataStale = false;/,
+             rep: '$1' },
   stale: { name: 'showRead()（字只印第一次，块照样亮）', re: /\n(function showRead\(b\) \{\n)/,
            rep: '\n$1  if (window.__ro0) { el(\'readout\').classList.add(\'on\'); readShown = true; return; }'
               + ' window.__ro0 = 1;      // ← 变异：字只印第一次\n' },
@@ -206,6 +210,17 @@ async function run(b, mode) {
   await sleep(300);
   const d2 = await read(p);
   out['D2 新图画上之后再动（⑲）'] = { 动一下: show(d2), 亮着: d2.on, 在这份里: d2.在这份里, 对得上: d2.对得上 };
+  // F：**收盘自动重取**那一趟之后再动一下（sticky2 的牙）—— 自动重取也会把读数压住，回来必须放开。
+  //   直接调 autoReload()（不等真收盘）；它跟换品种走的是两条 finally。
+  await p.mouse.move(mx, my); await sleep(300);
+  const f1 = await read(p);
+  const fr = await p.evaluate(() => window.__app.autoReload());
+  await sleep(500);
+  await p.mouse.move(Math.round(box.x + box.width * 0.55), my, { steps: 6 });
+  await sleep(300);
+  const f2 = await read(p);
+  out['F 自动重取那一趟之后再动'] = { 换前在不在: f1.on, 那一趟回: String(fr), 动一下: show(f2),
+    亮着: f2.on, 在这份里: f2.在这份里, 对得上: f2.对得上 };
   // E：**取数失败**那一趟（⑳）—— 先回 ZEC，再让下一趟 BTC 的 /api/chart 503
   await swap('symbol', 'ZECUSDT');
   await p.waitForFunction(() => window.__app.state.data.bars[0].o < 3000, null, { timeout: 30000 }).catch(() => {});
@@ -227,7 +242,7 @@ async function run(b, mode) {
 
 (async () => {
   const b = await chromium.launch();
-  const modes = MUT === 'none' ? ['none', 'paint', 'go', 'read', 'sub', 'sticky', 'stale'] : [MUT];
+  const modes = MUT === 'none' ? ['none', 'paint', 'go', 'read', 'sub', 'sticky', 'sticky2', 'stale'] : [MUT];
   const res = [];
   for (const m of modes) {
     const label = m === 'none' ? '原样' : `摘 ${SITES[m].name}`;
@@ -247,10 +262,10 @@ async function run(b, mode) {
   //   （换完之后落在相邻哪一根本来就会跳一根，见文件头：拿它当判据，红绿都在报噪声）。
   const obs = (r) => {
     const o = r.out, K = (p) => Object.keys(o).find((x) => x.startsWith(p));
-    const A = o[K('A')], B = o[K('B')], C = o[K('C')], D = o[K('D ')], D2 = o[K('D2')], E = o[K('E')];
+    const A = o[K('A')], B = o[K('B')], C = o[K('C')], D = o[K('D ')], D2 = o[K('D2')], E = o[K('E')], F = o[K('F')];
     const 对得上 = (x) => (!x.亮着 ? '没亮' : (x.在这份里 && x.对得上 ? '对得上' : '对不上'));
     return {
-      前提: !!(A.换前在不在 && B.换前在不在 && C.换前在不在 && D.换前在不在 && E.换前在不在),
+      前提: !!(A.换前在不在 && B.换前在不在 && C.换前在不在 && D.换前在不在 && E.换前在不在 && F.换前在不在),
       A: A.换后亮着 ? (A.换后在这份里 && A.换后对得上 ? '对得上' : '对不上') : '没亮',
       B: B.换后亮着 ? (B.换后在这份里 && B.换后对得上 ? '对得上' : '对不上') : '没亮',
       C: /^off/.test(C.窗口里) ? 'off' : 'on',
@@ -259,10 +274,11 @@ async function run(b, mode) {
       Dsub: D.窗口内样本数 === '3/3' ? (D.副图三格.includes('—') ? '—' : '旧数') : `窗口不够(${D.窗口内样本数})`,
       D2: 对得上(D2),
       E: 对得上(E),
+      F: 对得上(F),
     };
   };
   // 原样那一跑**该长什么样**（这几条就是工装 ⑮⑯⑰⑱⑲⑳ 的判据，在这儿量的是它们各自的前提与对照）
-  const BASE = { A: '对得上', B: '对得上', C: 'off', D: 'off', Dsub: '—', D2: '对得上', E: '对得上' };
+  const BASE = { A: '对得上', B: '对得上', C: 'off', D: 'off', Dsub: '—', D2: '对得上', E: '对得上', F: '对得上' };
   // 每一种变异**该分叉在哪一格**（★ 这就是「那一格有没有牙」的全部）：
   const DIVERGE = {
     none: [], paint: [],                       // paint：一条都不该分叉（＝「那个位置量不出来」，见文件头）
@@ -270,6 +286,7 @@ async function run(b, mode) {
     read: ['D'],                               // 摘 showRead 那道闸 ⇒ ⑰ 红
     sub: ['Dsub'],                             // 摘 refreshSubVals 那道闸 ⇒ ⑱ 红
     sticky: ['A', 'B', 'D2', 'E'],             // 永不放开 ⇒ ⑯⑲⑳ 红（⑮⑰⑱ 照旧绿：压得住但回不来）
+    sticky2: ['F'],                            // 自动重取那句不放开 ⇒ 自动重取一趟以后读数收死
     stale: ['A', 'B', 'D'],                    // ★ D 也分叉：这条变异的「字只印第一次」摆在闸**前面**，
   };                                           //   窗口里照样点亮 —— 是它自己的形状，不是 ⑰ 没牙
   const base = obs(ref);
