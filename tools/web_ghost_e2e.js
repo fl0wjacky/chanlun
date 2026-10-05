@@ -33,6 +33,14 @@
 //   ⑫ **待确认 vs 已确认→待确认**：待确认的点没了不报；已确认变回待确认**要报**（Bram 第 ② 条）
 //   ⑬ **收盘自动重取**（Nova 10-05 定）：没人碰页面，收盘后空心点**自己**出现；切到后台不发请求、
 //      切回来立刻补一次；一分钟内最多一次
+//   ⑮ **换引擎也不算重绘**（`engine` 进桶键）：core/*.py 一改、一部署，开着的页面拿到的就是点集不同的
+//      一份 —— 不许把新旧两份比成满屏「消失」。两张工装页**只差 engine 一个字段**，一张该报、一张报 0。
+//      ⑮c 是**上线那一刻**：前一趟没有 engine、后一趟有（Bram 补的）—— 缺字段是独立的桶值，不是"跟谁都相等"。
+//   ⑯ **实时跳价只动最后一根**（card-f3fffac4-83d，小栋 10-05 A）：最后一根的价跟着后台的 `/api/tick` 跳，
+//      而「结构」（笔／线段／买卖点）和**已收盘的 K 线**一个字节都不许动、不触发空心点记账、也不顺手去重取。
+//      `t` 比图上新（那一根已经收盘）⇒ 什么都不动，交给已有的自动重取；后台拉不到 ⇒ 价停住、页头写
+//      「价格停在 HH:MM」；切到后台一趟都不取、切回来立刻补一趟。★ 跳价那几张页面的 /api/chart
+//      每一趟都吐同一份（见 plan()）—— 不然"什么都没动"就分不出是跳价守住了还是别的原因。
 //   ⑭ **后台挂了那一趟不许当刷新**：收盘时取不到真数据 ⇒ load() 会悄悄退回仓里的样本，
 //      而样本是**另一份数据** —— 画上去账本当场把整屏读成"全没了"（满屏假空心点），顺带把档位也洗了
 //   ★ 假后台**按请求里的 `measure` 路由**（不是按页面变体）—— 见 plan() 那段账：⑥ 原来是个空转格。
@@ -113,6 +121,9 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
       d.bars.push({ ...last, t: last.t + STEP_MS, o: last.c, h: last.c, l: last.c, c: last.c });
     }
     if (opt.refreshing) d.refreshing = true;
+    // ⑮：引擎版本（后台带在 /api/chart 顶层那个字段）。用 `in` 不用真值判断 —— 「这一份**没有** engine」
+    //   是一个要显式摆出来的状态（`engine: null`），不能靠"底那份刚好没有"（那样换成带 engine 的后台就假红）。
+    if ('engine' in opt) d.engine = opt.engine;
     if (opt.pend) d.signals[PEND_PT.level].push(clone(PEND_PT));
     for (const tier of ['seg', 'pen']) {
       d.signals[tier] = (d.signals[tier] || []).filter((s) => !drop.has(`${tier}|${s.kind}|${s.bar}`));
@@ -130,6 +141,12 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   const D_EDGE = new Set([`pen|三买|${EDGE_BAR}`]);
   const D_LINES = new Set([K(target.level || 'seg', target), K(control.level || 'pen', control)]);
   const NOTHING = { drop: new Set() };
+  // ⑮：两把假「尺」（形状跟真的一样：10 位 hex）。真值是 core/*.py 的 sha256 前 10 位，由后台算
+  //   （Bram 的 agent/bram/engine-version）—— 工装这里只需要「两个不同的值」。
+  const ENG1 = 'e1e1e1e1e1', ENG2 = 'e2e2e2e2e2';
+  // ⑮ 少掉的那一片：真实换引擎会少一大片，这里用目标＋对照＋左沿那个。
+  //   ★ 左沿那个（bar 100）本来就被左沿守卫吃掉（⑦ 量过）⇒ 这张页面上该报的是 D_LINES.size 个。
+  const D_ROUND = new Set([...D_LINES, ...D_EDGE]);
   // 正片每一趟吐什么：序号从 1 起（每张页面自己数自己的请求数）。
   // ★ 第 2 趟**还是全给**：这不是为了看鬼，是先空转一圈把图的几何站稳（见正片里那段账）——
   //   两次像素读数都得在"已经落定"的状态下取，否则量到的是图自己挪了 1px。
@@ -139,6 +156,9 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   //    只是 D_LINES.size 这个常量，根本没在页面上量过）。现在 `m==='lines'` 一律吐 D_LINES，
   //    并且 ⑥ 里先断言「黄白线那份 `state.data.signals` 真比面积那份少 2 个」再判有没有鬼。
   const plan = (which, i, m, sp) => {
+    // ⑯：跳价那几张页面的 /api/chart **每一趟都吐同一份全给**（跟 'same' 一个道理）：那一套量的是
+    //   "跳价只动最后一根"，图上要是同时还有点在一个个少，"什么都没动"就分不出是谁的功劳了。
+    if (which.startsWith('tick')) return NOTHING;
     if (which !== 'same' && m === 'lines') return { drop: D_LINES };
     if (which === 'same') return NOTHING;                                  // ⑨：每一趟都吐一模一样的
     if (which === 'span') return sp >= 2 ? { drop: D_TARGET } : NOTHING;   // ⑪：换档后重叠区里少掉一个
@@ -153,7 +173,42 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
     //   这就是"后台一直没把新那根拉回来"那种情形：页面该补（⑬g），但**不许无限补**（补到上限就停，
     //   然后 ③ 那道闸要拦住可见性来回切）(⑬i)。
     if (which === 'swr') return i === 1 ? NOTHING : { drop: D_TARGET, opt: { refreshing: true } };
+    // ⑮：换引擎 ≈ 换了一把尺。下面两张页面**只差 engine 这一个字段**（同样少那一片点、同样把新那根带回来）
+    //   —— 差别只有这一个 ⇒ 报不报只能归因于它。'engsame' 是**对照**：先证明这一套在这张页面上真报得出来，
+    //   否则 'engine' 那张报 0 也可能只是"这一套根本没工作"（空转格）。
+    if (which === 'engsame' || which === 'engine') {
+      const eng = which === 'engine' && i >= 2 ? ENG2 : ENG1;
+      return i <= 1 ? { opt: { engine: eng } } : { drop: D_ROUND, opt: { engine: eng, grow: true } };
+    }
+    // ⑮c：**上线那一刻**（Bram 10-05 补的那条）。线上后台现在**没有**这个字段，加上的那一瞬间，
+    //   开着的页面从「没有 engine」变成「有 engine」—— 这本身**就是一次换引擎**。
+    //   ⇒「缺字段」必须是**独立的桶值**（`''`），不能当成「跟谁都相等」，否则第一次上线就踩你要防的那个坑。
+    if (which === 'engmiss') {
+      return i <= 1 ? { opt: { engine: null } } : { drop: D_ROUND, opt: { engine: ENG1, grow: true } };
+    }
     return { drop: i < SEQ.length ? SEQ[i] : new Set() };
+  };
+
+  // ⑯：跳价那一路的假后台。真后台那一半是 Bram 的 `agent/bram/live-tick`（38938b2），契约：
+  //   `{symbol, tf, t, o, h, l, c, v, fetched_at, stale, engine}`，`t` ＝ 那根的**开盘时间**。
+  //   ★ 收价在 [低, 高] **里面**动（五个值轮着来）：价格轴一点都不会被撑动 —— 不然"已收盘那根一个
+  //     像素没动"那一格，会被我们自己把整幅图挪了而假红。
+  const TICK_BASE = base.bars[base.bars.length - 1];
+  const tickC = (k) => TICK_BASE.l + (TICK_BASE.h - TICK_BASE.l) * (0.2 + 0.1 * (k % 5));
+  const tickBody = (which, k, shift) => {
+    const t = TICK_BASE.t + shift;            // ＝图上最后一根的开盘时间（工装把整份数据平移过）
+    const good = (fetched, kk) => ({ symbol: base.symbol, tf: base.tf, t, o: TICK_BASE.o, h: TICK_BASE.h,
+                                     l: TICK_BASE.l, c: tickC(kk), v: TICK_BASE.v,
+                                     fetched_at: fetched, stale: false, engine: ENG1 });
+    // ⑯f：后台说**这一根已经收盘、新的一根开盘了**（t 比图上新）⇒ 页面该一个字都不动
+    //   （收盘那一刻交给已有的自动重取）。收价给个一眼认得出的离谱值：真动了就看得见。
+    if (which === 'tickroll') {
+      return { ...good('2026-10-05T03:41:00.000Z', 0), t: t + STEP_MS, c: TICK_BASE.c + 500 };
+    }
+    // ⑯g：前两趟好着，之后后台**拉不到币安**了 ⇒ 回上一次的值 ＋ stale=true ＋ fetched_at
+    //   **冻在**上次成功那一刻（03:41）。页面该：价停住、页头写「价格停在 03:41」、角上认账。
+    if (which === 'tickstale' && k >= 3) return { ...good('2026-10-05T03:41:00.000Z', 2), stale: true };
+    return good('2026-10-05T03:41:00.000Z', k);
   };
 
   const b = await chromium.launch();
@@ -175,7 +230,8 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
     //   （定的定时器早就过点了，跟"切到后台不发请求"这道闸没关系）。
     const NOWP = Date.now();
     const lastT = base.bars[base.bars.length - 1].t;
-    const soon = which === 'auto' || which === 'swr' || which === 'fallback';
+    const soon = which === 'auto' || which === 'swr' || which === 'fallback'
+               || which === 'engsame' || which === 'engine' || which === 'engmiss';
     const shift = (soon ? NOWP - STEP_MS + 3000 : NOWP) - lastT;      // soon：还差 3 秒收盘
     const reqAt = [];                                                 // 每次取数的时刻（⑬ 量错峰用）
     await p.route('**/api/chart*', async (route) => {
@@ -191,10 +247,24 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
       const body = mk(m, drop, shift, opt, sp);
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     });
+    // ⑯ 跳价那一路：**所有**页面都挂上（页面自己每 5 秒就会来问一次）。
+    //   · 跳价那几张吐上面那份；
+    //   · 'tick503' 那页吐 **503**（后台从来没取成功过 —— 这一颗还没有任何可用的价）；
+    //   · 别的页面吐一份**正常但"不是我们手上那根"**的（t 比图上新 7 根）：这是**真会发生**的一种
+    //     ——我们手上那份旧了。页面照样该一个字都不动（t 对不上就不许就地换）。
+    //     ★ 别拿 404 当默认：浏览器会把每一条 404 记成 console error，5 秒一条，日志当场被刷满。
+    const tick = { n: 0 };
+    await p.route('**/api/tick*', async (route) => {
+      tick.n++;
+      if (which === 'tick503') { await route.fulfill({ status: 503, body: 'never fetched' }); return; }
+      const body = which.startsWith('tick') ? tickBody(which, tick.n, shift)
+                                            : { ...tickBody('tick', tick.n, shift), t: TICK_BASE.t + shift + 7 * STEP_MS };
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+    });
     await p.goto(PAGE + qs, { waitUntil: 'domcontentloaded' });
     await p.waitForFunction(() => window.__app && window.__app.state && window.__app.state.data, null, { timeout: 60000 });
     await sleep(1200);                     // 等 /api/meta 那一趟（控件由它驱动）
-    return { c, p, hits, reqAt, closeAt: NOWP + 3000 };
+    return { c, p, hits, reqAt, tick, closeAt: NOWP + 3000 };
   };
 
   /** 切看法并等它落地（等的是**页面上那份数据**的 measure，不是请求 —— 请求回来之前那次不算数）。
@@ -225,7 +295,16 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
              gc: g ? { txt: (t || {}).textContent || '', on: g.classList.contains('on'),
                        svg: !!g.querySelector('svg') } : null,
              measure: d.measure, span: d.span,
-             src: d.source, nBars: (d.bars || []).length,
+             src: d.source, nBars: (d.bars || []).length, eng: d.engine,
+             lastTxt: (document.getElementById('last') || {}).textContent || '',
+             updated: (document.getElementById('updated') || {}).textContent || '',
+             // 「画在图上」的最后一根：读的是**系列自己**那份数据（跟十字线读数同一个出处，不是读 state）
+             drawn: (() => { const a = window.__app.chart.panes()[0].getSeries()[0].data();
+                             return a && a.length ? { ...a[a.length - 1] } : null; })(),
+             // 同一根、用**页面自己那个格式器**印一遍（⑯b 比字不比数：工装不四舍五入）
+             drawnTxt: (() => { const a = window.__app.chart.panes()[0].getSeries()[0].data();
+                                return a && a.length
+                                  ? window.__app.fmtPrice(a[a.length - 1].close, d.meta && d.meta.tick) : ''; })(),
              tip: (document.getElementById('ghosttip') || {}).textContent || '' };
   });
   const tipState = (p) => p.evaluate(() => {
@@ -281,6 +360,61 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
       return { full, ghost, ink };
     });
   }, [bs, cols]);
+
+  /** ⑯ 第 i 根 K 线在**屏上**占的那一小块（走图自己的 logicalToCoordinate/priceToCoordinate —— 跟记号
+   *  那一套同一个出处）。★ 给的是**K 线那一根**（高→低那一竖条的宽度），不是记号。 */
+  const barBox = async (p, i) => {
+    const box = await p.locator('#chart').boundingBox();
+    return p.evaluate(([i, box]) => {
+      const b = window.__app.state.data.bars[i];
+      if (!b) return null;
+      const ch = window.__app.chart, ts = ch.timeScale(), s0 = ch.panes()[0].getSeries()[0];
+      const x = ts.logicalToCoordinate(i), y1 = s0.priceToCoordinate(b.h), y2 = s0.priceToCoordinate(b.l);
+      if (x === null || y1 === null || y2 === null) return null;
+      const top = Math.min(y1, y2), bot = Math.max(y1, y2);
+      return { x: Math.round(box.x + x - 3), y: Math.round(box.y + top - 1),
+               w: 6, h: Math.max(3, Math.round(bot - top + 2)) };
+    }, [i, box]);
+  };
+  /** 那一小块像素的**指纹**（每张画布都读，FNV 走一遍）。判"一个像素都没动"用它 ——
+   *  ★ 只覆盖给的那一块，别拿它当"整幅图没变"的判据。`ink` ＝ 落了墨的点数（诊断用）。 */
+  const pxHash = (p, bx) => p.evaluate((bx) => {
+    if (!bx) return { h: null, ink: 0, hit: 0 };
+    const cvs = [...document.querySelectorAll('#chart canvas')].map((c) => ({ c, r: c.getBoundingClientRect() }));
+    let h = 0x811c9dc5, ink = 0, hit = 0;
+    for (const { c, r } of cvs) {
+      const x = Math.round(bx.x - r.left), y = Math.round(bx.y - r.top);
+      if (x < 0 || y < 0 || x + bx.w > c.width || y + bx.h > c.height) continue;
+      hit++;
+      const px = c.getContext('2d').getImageData(x, y, bx.w, bx.h).data;
+      for (let i = 0; i < px.length; i += 4) {
+        if (px[i + 3] > 24) ink++;
+        h ^= px[i]; h = Math.imul(h, 0x01000193); h ^= px[i + 1]; h = Math.imul(h, 0x01000193);
+        h ^= px[i + 2]; h = Math.imul(h, 0x01000193); h ^= px[i + 3]; h = Math.imul(h, 0x01000193);
+      }
+    }
+    return { h: (h >>> 0).toString(16), ink, hit };
+  }, bx);
+  /** ⑯：把视口摆成「最后一根贴着右沿」（用户平时看的样子 —— `park` 是 ±150 收在中间）。 */
+  const tickPark = async (p, i) => {
+    await p.evaluate((n) => window.__app.chart.timeScale().setVisibleLogicalRange({ from: n - 160, to: n + 8 }), i);
+    await sleep(700);
+  };
+  /** 结构那一层（笔／线段／买卖点／账本）＋**已收盘那一段 K 线**的指纹：一串 JSON 的 FNV。
+   *  ★ 不是"看着差不多"：跳价只许动 bars 的**最后一根**，这几样一个字节都不许变（卡上 ①⑤ 两条）。 */
+  const structHash = (p) => p.evaluate(() => {
+    const d = window.__app.state.data;
+    const fp = (x) => { const s = JSON.stringify(x); let h = 0x811c9dc5;
+      for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+      return s.length + ':' + (h >>> 0).toString(16); };
+    return { pens: fp(d.pens), segs: fp(d.segs), signals: fp(d.signals), ghosts: fp(d.ghosts || []),
+             head: fp(d.bars.slice(0, -1)), nBars: d.bars.length };
+  });
+  /** 页头那一格里的**那串字**（摘掉「最新 」和「｜ 价格停在 …」的尾巴）—— 跟图上那份比，比的是字。 */
+  // ★ 工装里**不许再四舍五入一遍**：`toFixed` 看的是二进制真值、页面用的 `toLocaleString` 看的是最短十进制，
+  //   `1313.995` 这种正落在半个末位上的值两边差一分 ⇒ 判据在**没事**的时候红（m16 那一刀就这么假红过 ⑯b）。
+  //   两边都由页面自己那个格式器印（`window.__app.fmtPrice`），工装只比字、一次都不算。
+  const bare = (s) => String(s || '').replace(/^最新\s*/, '').split('｜')[0].trim();
 
   // 视图**每次都重新摆一遍再量**：切一次看法，可见区可能差一格（anchored 还原不是逐位精确的），
   // 上一次量好的框就压在记号边上了 —— 读数随之变，看着像"整屏重绘"，其实是工装自己没站稳。
@@ -634,6 +768,190 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   ck('⑭b 而且一个假鬼都没有（样本跟手上这份是两回事，画上去就是满屏空心点）',
      fb1.ghosts.length === 0 && (!fb1.gc || !fb1.gc.on),
      `页面报 ${fb1.ghosts.length} 个｜那一格：「${fb1.gc ? fb1.gc.txt : '（没有）'}」`);
+
+  // ---- ⑮ 换引擎（core/*.py 一改、部署）≈ 换了一把尺：不许拿新旧两份比出「消失」
+  //      两张页面**只差 `engine` 这一个字段**：同样的点、同样少那一片、同样把新那根带回来。
+  //      差别只有这一个 ⇒ 报不报只能归因于它。'engsame' 是对照组 —— 没有它，'engine' 报 0
+  //      也可能只是"这一套在这张页面上根本没工作"（空转格）。
+  console.log('\n15 换引擎（部署那一刻）不许比出「消失」—— 桶键里得有 engine');
+  const ES = await open('engsame');
+  const es = ES.p;
+  await es.locator('.chip[data-key="sig"]').click();
+  { const t = Date.now(); while (ES.hits.macd < 2 && Date.now() - t < 40000) await sleep(500); }
+  await sleep(1500);
+  const esS = await snap(es);
+  ck('⑮a 对照：引擎没变、同样少那一片 ⇒ **照报**（先证明这一套在这张页面上报得出来）',
+     esS.eng === ENG1 && esS.ghosts.length === D_LINES.size,
+     `引擎 ${esS.eng}｜该少 ${D_LINES.size} 个（左沿那个被守卫吃掉，照 ⑦），页面报 ${esS.ghosts.length} 个`);
+  const EG = await open('engine');
+  const eg = EG.p;
+  await eg.locator('.chip[data-key="sig"]').click();
+  { const t = Date.now(); while (EG.hits.macd < 2 && Date.now() - t < 40000) await sleep(500); }
+  await sleep(1500);
+  const egS = await snap(eg);
+  ck('⑮b 引擎变了（E1→E2）、点少得一模一样 ⇒ **一个都不许报**（换了把尺，不是重绘）',
+     egS.eng === ENG2 && egS.ghosts.length === 0 && (!egS.gc || !egS.gc.on),
+     `引擎 ${esS.eng} → ${egS.eng}｜页面报 ${egS.ghosts.length} 个｜那一格：「${egS.gc ? egS.gc.txt : '（没有）'}」`);
+
+  // ⑮c **上线那一刻**（Bram 10-05 补）：线上现在没有 engine，加上的那一瞬间，开着的页面从「没有」
+  //   变成「有」—— 这本身就是一次换引擎。缺字段要当**独立的桶值**，不能当「跟谁都相等」。
+  const ET = await open('engmiss');
+  const et = ET.p;
+  await et.locator('.chip[data-key="sig"]').click();
+  const et0 = await snap(et);                                  // 打开那趟：这份**没有** engine
+  { const t = Date.now(); while (ET.hits.macd < 2 && Date.now() - t < 40000) await sleep(500); }
+  await sleep(1500);
+  const et1 = await snap(et);
+  ck('⑮c 上线那一刻：前一趟不带 engine、后一趟带 ⇒ **一个都不许报**（缺字段是独立的桶值，不是"跟谁都相等"）',
+     et0.eng == null && et1.eng === ENG1 && et1.ghosts.length === 0 && (!et1.gc || !et1.gc.on),
+     `引擎 ${et0.eng === null ? '（没有这个字段）' : et0.eng} → ${et1.eng}｜页面报 ${et1.ghosts.length} 个`
+     + `｜那一格：「${et1.gc ? et1.gc.txt : '（没有）'}」`);
+
+  // ---- ⑯ 实时跳价：只动最后一根（card-f3fffac4-83d，小栋 10-05 A）
+  console.log('\n16 实时跳价：只动最后一根 —— 已收盘的 K 线和结构层一个字节都不许动（card-f3fffac4-83d）');
+  const eq = (a, b) => a != null && b != null && Math.abs(a - b) < 1e-9;
+  const LASTI = base.bars.length - 1;
+  const TICKVALS = [1, 2, 3, 4, 5].map(tickC);
+  // 结构记号那一块：挑**靠尾巴**的一个已确认点（真数据 bar<200 没有点，尾巴上该有 —— 挑不到就报出来，
+  // 别让那一格变成"空转格"）。★ 离最后一根留出 4 根：记号那一块横着能盖住两三根，别蹭到要动的那一根。
+  const tailPts = ['seg', 'pen'].flatMap((tier) => ((base.signals || {})[tier] || []).map((s) => ({ ...s, tier })))
+                  .filter((s) => s.confirmed === true && s.bar > LASTI - 140 && s.bar <= LASTI - 4);
+  const NEAR = tailPts[tailPts.length - 1];
+
+  const TK = await open('tick');
+  const tp = TK.p;
+  await tp.locator('.chip[data-key="sig"]').click();       // 买卖点那一层开着：⑤ 要量的正是它记不记账
+  await tickPark(tp, LASTI);
+  await sleep(1500);
+  const k0 = await snap(tp);
+  const sh0 = await structHash(tp);
+  const closedBox = await barBox(tp, LASTI - 4);
+  const cl0 = await pxHash(tp, closedBox);
+  const nbBox = NEAR ? await boxAt(tp, NEAR) : null;
+  const nb0 = nbBox ? await pxHash(tp, nbBox) : null;
+  { const t = Date.now(); while (TK.tick.n < 3 && Date.now() - t < 40000) await sleep(400); }
+  await sleep(800);
+  const k1 = await snap(tp);
+  const sh1 = await structHash(tp);
+  const cl1 = await pxHash(tp, closedBox);                 // ★ 仍用**原来那个框**：位置动一点都会变
+  const nb1 = nbBox ? await pxHash(tp, nbBox) : null;
+
+  ck('⑯a 跳价真的落在**画在图上**的那一根上（先证明这一套在这张页面上工作，否则下面几格全是空转）',
+     TK.tick.n >= 3 && !!k1.drawn && !eq(k1.drawn.close, k0.drawn.close)
+       && TICKVALS.some((v) => eq(v, k1.drawn.close)),
+     `跳价 ${TK.tick.n} 趟｜图上最后一根的收价 ${k0.drawn && k0.drawn.close} → ${k1.drawn && k1.drawn.close}`);
+  ck('⑯b 页头那个价跟**画在图上**的**是同一个数**（接线接对了，不是各写各的）',
+     !!k1.drawnTxt && bare(k1.lastTxt) === k1.drawnTxt,
+     `图上那一根印出来「${k1.drawnTxt}」（原值 ${k1.drawn && k1.drawn.close}）｜页头「${k1.lastTxt}」`);
+  ck('⑯c 已收盘的 K 线**一个字节都不许改**：那一段 JSON 的指纹一样 ＋ 那一根那块像素一样',
+     sh0.head === sh1.head && cl0.h === cl1.h && cl0.ink > 0,
+     `已收盘那段 ${sh0.head} → ${sh1.head}｜第 ${LASTI - 4} 根那块 ${cl0.h}/${cl0.ink}点墨 → ${cl1.h}/${cl1.ink}点墨`);
+  ck('⑯d 结构那一层（笔／线段／买卖点）**一个字节**都没动 —— 结构仍然收盘才重算',
+     sh0.pens === sh1.pens && sh0.segs === sh1.segs && sh0.signals === sh1.signals,
+     `笔 ${sh0.pens} → ${sh1.pens}｜线段 ${sh0.segs} → ${sh1.segs}｜买卖点 ${sh0.signals} → ${sh1.signals}`);
+  ck('⑯d2 那个买卖点记号那一块**像素一模一样**（不是"数据没变"，是屏上真没动）',
+     !!nb0 && !!nb1 && nb0.h === nb1.h && nb0.ink > 0,
+     NEAR ? `${NEAR.tier}|${NEAR.kind}@${NEAR.bar} 那块 ${nb0 && nb0.h}/${nb0 && nb0.ink}点墨 → ${nb1 && nb1.h}/${nb1 && nb1.ink}点墨`
+          : '★ 尾巴 140 根里没挑到已确认的点 —— 这一格**没量到东西**');
+  ck('⑯e 跳价**不触发空心点记账**：账本空着、那一格没亮 ＋ `/api/chart` 还是 1 趟（没顺路去重取）',
+     k1.ghosts.length === 0 && sh1.ghosts === sh0.ghosts && k1.gc.txt === '' && !k1.gc.on
+       && (TK.hits.macd || 0) === 1,
+     `账本 ${k1.ghosts.length} 个｜那一格「${k1.gc.txt}」(on=${k1.gc.on})｜chart 取数 ${JSON.stringify(TK.hits)}`
+     + `｜跳价 ${TK.tick.n} 趟`);
+
+  // ⑯i：十字线停在最后一根上 ⇒ 读数也得跟着跳（图上在动、块里冻着，两个数指着同一根 K 线就是一句谎）
+  const cbx = await tp.locator('#chart').boundingBox();
+  // 指针**真的**移到最后一根那一列上（走鼠标这条路，不是直接调 API 摆十字线）
+  const lastX = await tp.evaluate(() => {
+    const ch = window.__app.chart, d = window.__app.state.data;
+    return document.getElementById('chart').getBoundingClientRect().x
+         + ch.timeScale().logicalToCoordinate(d.bars.length - 1);
+  });
+  await tp.mouse.move(lastX, cbx.y + cbx.height / 2);
+  await sleep(700);
+  // 四样**一次读完**（读数那个数、页头那个数、图上那个数）—— 分几次读，中间落进来一趟跳价就又对不上了。
+  const rd = (pp) => pp.evaluate(() => {
+    const a = window.__app.chart.panes()[0].getSeries()[0].data();
+    return { on: document.getElementById('readout').classList.contains('on'),
+             time: (document.getElementById('ro-time') || {}).textContent || '',
+             cTxt: (document.getElementById('ro-close') || {}).textContent || '',
+             badgeTxt: String((document.getElementById('last') || {}).textContent || '')
+                         .replace(/^最新\s*/, '').split('｜')[0].trim(),
+             drawnTxt: window.__app.fmtPrice(a[a.length - 1].close,
+                                            window.__app.state.data.meta && window.__app.state.data.meta.tick),
+             drawn: a[a.length - 1].close };
+  });
+  const rd0 = await rd(tp);
+  { const t = Date.now(); while (TK.tick.n < 5 && Date.now() - t < 40000) await sleep(400); }
+  await sleep(800);
+  const rd1 = await rd(tp);
+  ck('⑯i 十字线停在最后一根上 ⇒ 读数跟着跳（图上在动、块里冻着就是一句谎）',
+     rd0.on && rd1.on && rd0.time === rd1.time && rd1.cTxt !== rd0.cTxt
+       && rd1.cTxt === rd1.drawnTxt && rd1.cTxt === rd1.badgeTxt,
+     `读数 ${rd0.on ? '亮着' : '没亮'}｜同一根 ${rd0.time}｜收价 ${rd0.cTxt} → ${rd1.cTxt}`
+     + `（页头 ${rd1.badgeTxt}、图上印出来 ${rd1.drawnTxt}｜原值 ${rd1.drawn}）`);
+
+  // ⑯h：切到后台一趟都不取，切回来立刻补一趟（跟自动重取同一条口径）
+  await setVisible(tp, 'hidden');
+  await sleep(900);                                       // 等在飞的那一趟落地，再数
+  const hv0 = TK.tick.n;
+  await sleep(12000);                                     // 两个半周期
+  const hv1 = TK.tick.n;
+  await setVisible(tp, 'visible');
+  await sleep(2500);
+  ck('⑯h 切到后台**一趟都不取**；切回来**立刻**补一趟（跟自动重取同一条口径）',
+     hv1 === hv0 && TK.tick.n > hv1,
+     `切后台前 ${hv0} 趟 → 12 秒后 ${hv1} 趟（该一样）→ 切回来 ${TK.tick.n} 趟`);
+
+  // ⑯f：`t` 比图上新（那一根已经收盘、新的一根开盘了）⇒ 页面一个字都不动，交给已有的自动重取
+  const TR = await open('tickroll');
+  const rp = TR.p;
+  await sleep(1200);
+  const rl0 = await snap(rp);
+  const rH0 = await structHash(rp);
+  { const t = Date.now(); while (TR.tick.n < 2 && Date.now() - t < 30000) await sleep(400); }
+  await sleep(800);
+  const rl1 = await snap(rp);
+  const rH1 = await structHash(rp);
+  ck('⑯f 后台说**新的一根已经开盘**（t 比图上新）⇒ 一个字都不动（收盘那一刻交给已有的自动重取）',
+     TR.tick.n >= 2 && rl1.nBars === rl0.nBars && rH0.head === rH1.head
+       && rl1.drawn.time === rl0.drawn.time && eq(rl1.drawn.close, rl0.drawn.close)
+       && !/价格停在/.test(rl1.lastTxt),
+     `跳价 ${TR.tick.n} 趟（每趟都说 t 比图上新）｜K 线 ${rl0.nBars} → ${rl1.nBars} 根｜图上最后一根 `
+     + `${rl0.drawn.time} → ${rl1.drawn.time}｜收价 ${rl0.drawn.close} → ${rl1.drawn.close}`);
+
+  // ⑯g：后台拉不到新的 ⇒ 价**停住**，页头写出来停在哪一刻；角上也得认账
+  const TS = await open('tickstale');
+  const stp = TS.p;
+  await sleep(1200);
+  { const t = Date.now(); while (TS.tick.n < 4 && Date.now() - t < 40000) await sleep(400); }
+  await sleep(800);
+  const g1 = await snap(stp);
+  { const t = Date.now(); while (TS.tick.n < 6 && Date.now() - t < 40000) await sleep(400); }
+  await sleep(800);
+  const g2 = await snap(stp);
+  ck('⑯g 后台拉不到新的（stale=true、fetched_at 冻住）⇒ 价**停住**，页头写出来停在哪一刻',
+     TS.tick.n >= 6 && eq(g1.drawn.close, tickC(2)) && eq(g2.drawn.close, g1.drawn.close)
+       && /价格停在 03:41/.test(g2.lastTxt),
+     `跳价 ${TS.tick.n} 趟｜图上收价 ${g1.drawn.close} → ${g2.drawn.close}（该停在第 2 趟那个 ${tickC(2)}）`
+     + `｜页头「${g2.lastTxt}」`);
+  ck('⑯g2 价停住的时候角上也得承认（`★ 旧数据`），而且「数据 … 刷新」印的**必须**是后台冻住的那个时刻',
+     /旧数据/.test(g2.updated) && /数据 2026-10-05 03:41 刷新/.test(g2.updated), `角上「${g2.updated}」`);
+
+  // ⑯j：后台**从来没取成功过**（503）⇒ 屏上那份一个字都不改，页头也不许编一个"停在几点"
+  const T5 = await open('tick503');
+  const np = T5.p;
+  await sleep(1200);
+  const p0 = await snap(np);
+  const ph0 = await structHash(np);
+  { const t = Date.now(); while (T5.tick.n < 2 && Date.now() - t < 30000) await sleep(400); }
+  await sleep(800);
+  const p1 = await snap(np);
+  const ph1 = await structHash(np);
+  ck('⑯j 后台**从来没成功过**（503）⇒ 屏上一个字都不改，也不编一个「停在几点」给它',
+     T5.tick.n >= 2 && eq(p1.drawn.close, p0.drawn.close) && ph0.head === ph1.head
+       && /^最新 /.test(p1.lastTxt) && !/价格停在|价格停了/.test(p1.lastTxt),
+     `跳价 ${T5.tick.n} 趟全 503｜图上收价 ${p0.drawn.close} → ${p1.drawn.close}｜页头「${p1.lastTxt}」`);
 
   await b.close();
   console.log(`\n${n - bad}/${n} 过　截图：${OUT}`);

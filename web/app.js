@@ -397,7 +397,14 @@ function ghostConfirmed(d) {
 /** 新的一份数据到了：跟同一个桶里上一份比，少掉的点记成「已经消失」。结果挂在 `d.ghosts` 上
  *  （图脚和图都从 `d` 上读 —— 不留中间变量，跟 sourceLabel 那条同一条理由）。 */
 function ghostReconcile(d) {
-  const key = [d.symbol, d.tf, d.measure || paging.measure, d.span ?? paging.span].join('|');
+  // ★ `engine`（core/*.py 的版本，Bram 10-05 加在 /api/chart 顶层）**也进键**：引擎一换就是**换了一把尺**，
+  //   不能拿新旧两份比出「消失」。不并的话，部署那一刻**所有开着的页面**会当场把整屏读成「全没了」——
+  //   满屏假空心点，而用户什么都没做（跟我刚修掉的「取不到后台退回样本」是同一个病：把另一份数据当成
+  //   「同一份数据刷新了」）。
+  //   ★ 读 **chart 自己那份**，不读 /api/meta：meta 只在页面打开时取一次，部署之后开着的页面手里还是旧 meta
+  //   （Bram 指出的）。旧后台/样本没有这个字段 ⇒ 取 `''`，跟今天的行为一模一样。
+  //   往回滚也一样：E1→E2→E1 各算各的桶，不会拿 E2 那份去比 E1 的本子。
+  const key = [d.symbol, d.tf, d.measure || paging.measure, d.span ?? paging.span, d.engine ?? ''].join('|');
   const prev = ghostBuckets.get(key);
   const now = ghostConfirmed(d);
   if (prev) {
@@ -478,8 +485,33 @@ el('chart').addEventListener('wheel', ghostHide, { passive: true });
 // ---------------------------------------------------------------- 画一张
 // ★ 画（paint）和**摆视口**（draw 里那一段）分开了：往左补数据之后重画，**不能**再走「摆视口」
 //   那一段（它要么 fitContent 缩成一团、要么按 ?last/?at 跳走）—— 补数据时视口由 place() 按**时间**放回原位。
+/** 页头「最新 …」**唯一**的一处写法。paint（新数据落地）和跳价（card-f3fffac4-83d）都从这儿走 ——
+ *  两处各写一遍就会分家（图上写着 A、页头写着 B，那种账这一屏上已经栽过）。
+ *  ★ 价**停住**的时候必须写出来停在哪一刻：跳价那一趟后台没拉到新的（回的 `stale=true`，
+ *    `fetched_at` 冻在上次成功那一刻）⇒ 「最新」两个字不加注明就是一句假话（跟角上那句同一个道理）。 */
+function renderLast() {
+  const d = state.data;
+  const last = d && d.bars && d.bars.length ? d.bars[d.bars.length - 1] : null;
+  const badge = el('last');
+  if (!last) { badge.textContent = ''; badge.className = 'badge'; badge.removeAttribute('title'); return; }
+  // ★ 收价取 `bars` 那份的 `c`（短键）：`d.bars` 是**源**（跳价改的就是它），图上那份是它的映射
+  //   （paint 里 `d.bars.map(...)`）。两处口径一样，但字段名不一样 —— 写成 `.close` 就是 undefined，
+  //   而 fmtPrice 会当场抛（`v.toLocaleString`）⇒ paint 半路炸掉，后面的 stamp/autoPlan 全没了。
+  const px = `最新 ${fmtPrice(last.c, d.meta?.tick)}`;
+  if (!tickStale) { badge.textContent = px; badge.className = 'badge'; badge.removeAttribute('title'); return; }
+  const at = clockUtc(tickAt);
+  badge.textContent = at ? `${px} ｜ 价格停在 ${at}` : `${px} ｜ 价格停了`;
+  badge.className = 'badge warn';
+  badge.title = at
+    ? `跳价这一趟没拉到新的（后台回的 stale=true）—— ${px} 是 ${at}（UTC）那一次的，之后就停在那儿了`
+    : '跳价这一趟没拉到新的（后台回的 stale=true），这个价之后就停在那儿了';
+}
+
 function paint(d) {
   state.data = d;
+  // ★ 新的一份数据落地 = 价的"新鲜度"重新从这一份算：跳价记着的那两笔（取数时刻、有没有卡住）
+  //   是**上一份**的账，不清掉页头会拿旧戳冒充新数据（见 tickApply 那段）。反正下一趟跳价（≤5 秒）就来。
+  tickAt = null; tickStale = false;
   // ★ 记账要在**画之前**：记出来的东西挂在 d 上（d.ghosts），layers.js 和图脚都是从 d 上读的
   //   —— 顺序反了屏上就是上一份的记号（跟 renderMeta 那条"不留中间变量"是同一类账）。
   ghostReconcile(d);
@@ -523,8 +555,7 @@ function paint(d) {
   syncSub();                 // 副图跟着主图一起换（同一份 K 线、同一个档位）；关着就一个请求都不发
   applyToggles();
   renderMeta(d);
-  const last = bars.at(-1);
-  el('last').textContent = last ? `最新 ${fmtPrice(last.close, d.meta?.tick)}` : '';
+  renderLast();
   stamp(d);
   // 数据一落地就按**这一份**重排自动重取（见那一节）。放这儿是因为 paint 是**所有**数据的唯一落点
   // ——首屏、换品种、换看法、往左补数据、自动重取自己，全从这儿过，不用在每个入口各排一次。
@@ -734,15 +765,32 @@ let readShown = false;
 //     屏上那份的刻度没作废（换看法后台契约里 K 线逐字节不变），压住只会让读数白闪两下。
 let dataStale = false;
 
+/** 一根 K 线摊成读数那一块的**形状**。★ 只有这一处：十字线停在哪一根、跳价改了哪一根，说的是同一个形状。
+ *  `tSec` 是**秒**（跟 LWC 的 param.time 同一个单位 —— 时间轴和读数都从这儿念数）。
+ *  `prevClose` 缺（最左边那根、或者还没有前一根）⇒ 涨跌幅写「不知道」，不编一个数给它。 */
+const readBox = (o, h, l, c, tSec, tick, prevClose) => ({
+  t: tSec, o, h, l, c, tick,
+  pct: prevClose ? (c - prevClose) / prevClose * 100 : null,
+});
 function readAt(param) {
   const s = param.seriesData && param.seriesData.get(candle);
   if (param.time == null || !s) return null;
   const bars = (state.data && state.data.bars) || [];
   const i = timeIndex(bars, param.time * 1000);        // ★ 按时间找（换档是往数组头上插，下标会错位）
   const prev = i != null && i > 0 ? bars[i - 1] : null;
-  return { t: param.time, o: s.open, h: s.high, l: s.low, c: s.close,
-           tick: state.data.meta && state.data.meta.tick,
-           pct: prev && prev.c ? (s.close - prev.c) / prev.c * 100 : null };
+  return readBox(s.open, s.high, s.low, s.close, param.time,
+                 state.data.meta && state.data.meta.tick, prev && prev.c);
+}
+/** 跳价改的是**画在图上**的那一根 ⇒ 十字线要是正停在这根上，读数也得跟着换（card-f3fffac4-83d）。
+ *  不换的话，图上那个价在动、块里那个数冻着 —— 两个数指着同一根 K 线，就是一句谎
+ *  （跟 paint() 里 hideRead() 那条是同一笔账：屏上和读数必须是同一份）。
+ *  `subHover` 就是十字线停在哪一根（秒，跟 param.time 同一个单位）；读数收着、或者停在别处，就不动它。 */
+function readTick(d) {
+  const bars = d.bars, i = bars.length - 1;
+  if (!readShown || subHover == null || i < 1) return;
+  if (Math.round(subHover * 1000) !== bars[i].t) return;
+  showRead(readBox(bars[i].o, bars[i].h, bars[i].l, bars[i].c, bars[i].t / 1000,
+                   d.meta && d.meta.tick, bars[i - 1].c));
 }
 // 涨跌幅那一格：符号 ＋ 两位小数。★ `-0.00%` 不许出现（-0.001 会印成它）—— 那是句假话：
 // 四舍五入到 0 就直接写 `0.00%`，而且**药丸的颜色跟着印出来的字走**（不是跟着没印出来的小数走）。
@@ -1358,8 +1406,96 @@ async function autoReload() {
     if (id === paging.reqId) { paging.loading = false; dataStale = false; }
   }
 }
+// ---------------------------------------------------------------- 实时跳价：只动最后一根（卡 card-f3fffac4-83d）
+// 小栋 10-05 定的 A：最后一根 K 线的**价**跟着走，「结构」（笔/线段/中枢/买卖点）仍然**收盘才重算**。
+// 后台那一半是 Bram 的 `/api/tick`（`agent/bram/live-tick` = 38938b2，契约见卡）：
+//   `GET /api/tick?symbol=&tf=` —— **只认这两个参数**（多一个、少一个都 400）；
+//   回 `{symbol, tf, t, o, h, l, c, v, fetched_at, stale, engine}`，`t` ＝ 这根的**开盘时间**；
+//   按 (品种, 周期) 缓存 2.5 秒、**单飞**（几个页面同时来也只打币安一次 ⇒ 币安的请求数不随页面数涨，
+//   这条是后台那半的账，前端只管"每个页面自己 5 秒问一次"）；
+//   拉取失败 ⇒ 回上一次的值 ＋ `stale=true` ＋ `fetched_at` **冻在**上次成功那一刻；从来没成功过 ⇒ 503。
+//
+// ★★ 这一节最要紧的一条：**一次都不许走 paint()**。paint() 里有 ghostReconcile()（空心点记账）和
+//   setData()（整份重画）—— 从那儿走就等于把「这是一份新数据」说了一遍：收盘前最后一根还在动，
+//   点集按理一个没变，但账本会拿两份去比、整幅图跟着重画。所以这里**只有一个动作**：
+//   改手上这份数据的最后一根，然后 `candle.update()` 那**一根** —— LWC 的 update 给的时间跟最后一根
+//   一样就是"就地换掉这一根"，只重画那一小段；给早了/给晚了它才会 append，而那种情况根本不该发生。
+const TICK_MS = 5000;                 // 每 5 秒一次（小栋定的）
+let tickTimer = 0, tickBusy = false, tickWarned = false;
+// 跳价这一趟的账：`tickAt` ＝ 价是**哪一刻**取回来的（stale 时后台冻着它 ⇒ 正好是"停在那一刻"），
+// `tickStale` ＝ 这一趟没拉到新的。**不进 state.data**：那是后台那份 payload 的字段，跳价是另一笔账
+// （页头/角上要的是"屏上这个价有多新"，见 renderLast / stamp）。paint() 一来就清掉（新的一份重新算）。
+let tickAt = null, tickStale = false;
+
+/** 排下一趟。**看不见就不排**（在后台偷偷取数既不划算也不礼貌 —— 跟自动重取同一条口径）；
+ *  切回来由 visibilitychange 立刻补一次，不用等这 5 秒。 */
+function tickPlan() {
+  clearTimeout(tickTimer);
+  if (document.visibilityState !== 'visible') return;
+  tickTimer = setTimeout(tickFire, TICK_MS);
+}
+/** 取一趟。**每一道闸都在这里**：看不见不取、手上那份不是真后台的不取、图正在换的不取、上一趟还在飞的不取。
+ *  （`source !== 'api'` 那条跟自动重取同一个道理：屏上是仓里的样本时，不存在"这个品种的价"这回事。） */
+async function tickFire() {
+  clearTimeout(tickTimer);
+  const d = state.data;
+  if (document.visibilityState !== 'visible' || tickBusy || paging.loading
+      || !d || d.source !== 'api' || !d.symbol || !d.tf) { tickPlan(); return; }
+  tickBusy = true;
+  try {
+    // 问的是**画在图上那一份**的品种/周期，不是下拉框里选的：换品种的那半秒里屏上还是旧那份图，
+    // 要跳的就该是旧那份的价（新选的那个等它画上去再说）。**多一个参数少一个都 400**，别顺手多带。
+    const q = `?symbol=${encodeURIComponent(d.symbol)}&tf=${encodeURIComponent(d.tf)}`;
+    const r = await fetch('/api/tick' + q, { cache: 'no-store' });
+    if (!r.ok) {
+      // 503 ＝ 后台从来没取成功过（这一颗还没有任何可用的价）；别的非 2xx 也一样：
+      // **屏上那份一个字都不改** —— 没有数就别编一个。这不是页面坏了，别写在角上吓人，
+      // 每"连着失败一串"只嘀咕一句（不然 5 秒一句，控制台全是它）。
+      if (!tickWarned) { console.warn('跳价没取到（屏上照旧）：HTTP ' + r.status); tickWarned = true; }
+      return;
+    }
+    if (tickApply(await r.json())) tickWarned = false;
+  } catch (e) {
+    if (!tickWarned) { console.warn('跳价没取到（屏上照旧）：', e); tickWarned = true; }
+  } finally {
+    tickBusy = false;
+    tickPlan();
+  }
+}
+/** 把这一趟的价按上去。**只改最后一根**，别的一律不碰。返回 true ＝ 真按上去了。 */
+function tickApply(j) {
+  const d = state.data;
+  if (!d || d.source !== 'api' || !d.bars || !d.bars.length) return false;
+  // 这一趟问的和屏上这份**不是同一份**（问出去这几秒里换了品种/周期）⇒ 什么都不做
+  if (j.symbol !== d.symbol || j.tf !== d.tf) return false;
+  const last = d.bars[d.bars.length - 1];
+  // ★★ `t` 是这根的**开盘时间**，跟图上最后一根**必须一样**才谈得上"就地换这一根"：
+  //   · 比图上**新** ⇒ 那一根已经收盘、新的一根开盘了：**收盘那一刻交给已有的自动重取**
+  //     （它本来就是按「最后一根 + 一个周期」排的，收盘后 2–10 秒自己会来，来了才发现得了结构），
+  //     这儿抢着画一根结构还没的 K 线没有意义 —— 而且那是"往图上加一根"，不是这一节该干的事；
+  //   · 比图上**旧** ⇒ 后台那份是旧的（缓存/时钟对不齐），更不能拿它往回改。
+  //   两边都**一个字都不动**，屏上那份照旧。
+  if (j.t !== last.t) return false;
+  const o = Number(j.o), h = Number(j.h), l = Number(j.l), c = Number(j.c);
+  if (![o, h, l, c].every(Number.isFinite)) return false;   // 后台换了形状 ⇒ 这一趟当没跑，别往图上写 NaN
+  // ★ `v` **不动**：这一节只管**价**。量柱挂在另一条系列上（副图那三格也是按收盘算的）——
+  //   顺手把它们一起刷就成了"跳价把量柱也重画了"，那是没人要的动静，要动是另一件事。
+  last.o = o; last.h = h; last.l = l; last.c = c;
+  candle.update({ time: last.t / 1000, open: o, high: h, low: l, close: c });
+  // 价是这一趟拿回来的 ⇒ 页头和角上那两格跟着换（两处各有**一处**写法，见 renderLast / stamp）
+  tickAt = j.fetched_at || tickAt;
+  tickStale = j.stale === true;
+  renderLast();
+  stamp(d);
+  readTick(d);              // 十字线正停在这根上的话，读数跟着换（图上动了、块里冻着就是一句谎）
+  return true;
+}
+
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible' || !state.data) return;
+  // 看不见了就都停：跳价那一串**清掉定时器**（tickPlan 在看不见时不排），跟自动重取同一条口径。
+  if (document.visibilityState !== 'visible') { tickPlan(); return; }
+  tickFire();                    // 切回来**立刻**跳一次价（它自己会重排下一趟）
+  if (!state.data) return;
   // 切回来**立刻**补一次（⑤ 的错峰只管收盘那一刻：人都回来了，再随机等几秒就是白让用户看旧图）。
   if (autoDue(state.data)) autoFire(); else autoPlan();
 });
@@ -1499,12 +1635,18 @@ function renderMeta(d) {
 //   fetched_at 缺（离线样本、旧后台）就**只说本根** —— 不知道的事不编。
 function stamp(d) {
   const t = d.updated ? new Date(d.updated) : null;
-  const f = d.fetched_at ? new Date(d.fetched_at) : null;
+  // ★ 跳价那一趟也是**取数**（card-f3fffac4-83d）：价是它拿回来的，所以「数据 … 刷新」说的是**最新那一次**。
+  //   照旧只写 chart 那份的时间，角上就成了一句假话（价是刚取的、戳却是几分钟前的）。
+  const src = tickAt || d.fetched_at;
+  const f = src ? new Date(src) : null;
   const bar = t && !isNaN(t) ? `本根 ${shortUtc(d.updated)} 开盘` : '数据时间未知';
-  const fresh = f && !isNaN(f) ? ` ｜ 数据 ${shortUtc(d.fetched_at)} 刷新` : '';   // 秒在角上只是噪音
+  // ★ 印的就是上面判过的那个 `src` —— 判据用 `src`、印的却是 `d.fetched_at`，这一格就成了"两处各写一遍"
+  //   （跳价取的价、配着 chart 那份的戳）。秒在角上只是噪音，所以只印到分。
+  const fresh = f && !isNaN(f) ? ` ｜ 数据 ${shortUtc(src)} 刷新` : '';
   // 后台这轮没拉到币安、回的是上一次的结果时会带 stale=true：那这格的取数时间说的是**上一次**，
   // 不标出来它就是一句假话 —— 角上必须自己承认。字段没有 / 为 false 就照常。
-  const st = !!d.stale;
+  // ★ 跳价那一趟的 stale 也算：价卡住不动的时候，角上跟页头那一格（「价格停在 …」）说的是同一件事。
+  const st = !!d.stale || tickStale;
   const base = bar + fresh;
   el('updated').textContent = st ? `${base} ｜ ★ 旧数据（本轮拉取失败）` : base;
   el('updated').className = 'badge' + (st ? ' warn' : '');
@@ -1515,6 +1657,12 @@ function stamp(d) {
     ? `这是上一次的结果：本轮拉取没成功（后台 stale=true）；「数据 … 刷新」说的是那一次的取数时间（UTC）${rel}`
     : `本根＝最后一根 K 线的开盘时间（UTC）；数据＝后台从币安取数的时间（UTC）${rel}，价格随它更新`;
 }
+/** "2026-09-29T14:50:00Z" → "14:50"（UTC）。形状不对就返回空串 —— **不知道的事不编**
+ *  （页头那一格写「价格停了」也不写一个瞎编的时刻）。跟 shortUtc 同一处口径。 */
+const clockUtc = (s) => {
+  const t = shortUtc(s);
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(t) ? t.slice(-5) : '';
+};
 /** "2026-09-29T00:00:00Z" → "2026-09-29 00:00"；形状不是 ISO（后台换了格式）就原样返回，不猜 */
 const shortUtc = (s) => {
   const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(String(s));
@@ -1594,6 +1742,10 @@ async function go(span = 1) {
 buildPickers();
 buildChips();
 applyToggles();
+// 跳价那一串**现在就开始数**（每 5 秒一趟）：头几趟手上还没有数据、或者图还没画上，
+// tickFire 自己那几道闸会当没到点（见那一节），不用在这儿等首屏 —— 这样"打开页面到第一跳"
+// 最多 5 秒，不会因为首屏慢就往后拖。
+tickPlan();
 // 看法那份名单跟首屏的图表请求**并行**发（不为一个小请求把首屏推后）。只有一个例外见下面：
 const metaReady = loadMeasures();
 (async () => {
@@ -1609,4 +1761,7 @@ const metaReady = loadMeasures();
 // 给验收工装一个**只读**入口：并排截图要把网页这一格切到跟 Python 出图同一段 K 线、同一价格带，
 // 那就得问图自己「第 i 根在哪个 x、这个价在哪个 y」（timeToCoordinate / priceToCoordinate）。
 // 不是功能开关，页面上没有任何东西读它；去掉它，验收那两张图就没法对齐。
-window.__app = { chart, state, opts, paging, measures, sub };
+// ★ `fmtPrice` 也递出去：工装要证「页头那个价跟图上那个价是**同一个数**」，只能拿页面**自己这个格式器**
+//   把图上那份印一遍去比 —— 工装自己再四舍五入一遍就是第二份规矩（`toFixed` 看二进制真值、
+//   `toLocaleString` 看最短十进制，1313.995 这种正好落在半个末位上的值会差一分，判据在**没事**的时候红）。
+window.__app = { chart, state, opts, paging, measures, sub, fmtPrice };
