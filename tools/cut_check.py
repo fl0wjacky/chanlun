@@ -10,7 +10,7 @@
   ③ 规则 5：每一刀的 status 按「切点后头三段已完成线段重叠」独立重算一遍，必须对上；
   ④ 规则 6：只动线段中枢 —— 笔、线段、类中枢、两层买卖点不变（cut_centers 不改 r）；
   探针 A（规格第三节第 4 条）：把『头三段重叠』改成『头一段走完就算』⇒ 切成数必须变；
-  探针 B：转折点改在线段层认 ⇒ 线上那两个横跨的框（若在这份数据里）必须切不开 —— 这里量成『线段层认出的刀里没有一刀
+  探针 B：转折点改在线段层认 ⇒ 最低点那个框（405.9–423）必须切不开（10-05 往回落以后最高点那个能被线段层三卖切到）。旧注：『线段层认出的刀里没有一刀
          落在 405.9–423 / 523.24–549.65 两个框的内部』。
 """
 import copy
@@ -73,24 +73,31 @@ def main():
     cell("④ 只动线段中枢（r 原样、买卖点不变）", same and S.signals(r, "pen", "macd") == sig
          and S.signals(r, "seg", "macd") == S.signals(before, "seg", "macd"))
 
-    # ⑤ 规则 2/3 独立重算切点：不调 _turn_bar / _snap。三类点的离开笔＝终点正好是回试笔起点的那一笔。
-    pens = r["pens"]
+    # ⑤ 规则 2/3 独立重算切点（不调 _turn_bar / _snap / _backdate）：
+    #    一类＝极值那根落最近端点；三类＝离开笔（终点正好是回试笔起点的那笔）起点之前、上一刀之后的
+    #    端点里，三买取最低、三卖取最高（一样极取后一个）—— 10-05 改的「往回落到前一走势结束点」。
+    pens, bars = r["pens"], r["bars"]
     end_list = sorted(ends)
-    want = set()
-    for g in sig:
+    want, prev = set(), end_list[0]
+    for g in sorted(sig, key=lambda g: g["bar"]):
         if not g["confirmed"] or g["kind"] not in C.TURN_KINDS:
             continue
         if g["kind"] in ("一买", "一卖"):
-            tb = g["bar"]
+            e = min(end_list, key=lambda x: (abs(x - g["bar"]), -x))
         else:
-            back = pens[g["unit"]]
-            leave = [p for p in pens if p["i1"] == back["i0"]]
-            tb = leave[0]["i0"]
-        e = min(end_list, key=lambda x: (abs(x - tb), -x))
+            leave = [p for p in pens if p["i1"] == pens[g["unit"]]["i0"]][0]
+            win = [x for x in end_list if prev < x <= leave["i0"]]
+            if not win:
+                continue
+            if g["kind"] == "三买":
+                e = sorted(win, key=lambda x: (bars[x]["l"], -x))[0]
+            else:
+                e = sorted(win, key=lambda x: (-bars[x]["h"], -x))[0]
         if e != end_list[0]:
             want.add(e)
+            prev = max(prev, e)
     got = {c["cut_bar"] for c in cuts}
-    cell("⑤ 切点位置独立重算（一类＝极值那根、三类＝离开笔起点，落最近端点）", got == want,
+    cell("⑤ 切点位置独立重算（一类＝极值、三类＝往回取上一刀以来的最低/最高端点）", got == want,
          "多 %s 少 %s" % (sorted(got - want)[:3], sorted(want - got)[:3]))
 
     # ⑥ 规则 4：被切点截断的组，最后那个框不许还标「仍在延续」—— 只有全图最后一个框可以是 live
@@ -99,19 +106,30 @@ def main():
          and any(z["term"] == "转折点切开" for z in cur), "live 的下标 %s" % lives)
 
     # ⑦ 钉死（规格第三节第 1 条）：data/zec15.json 上那两个横跨的框，各被谁切、切在哪根
-    PIN = {(10811, 11859): [(10811, "笔·三卖", "done"), (11097, "笔·三卖", "void"), (11314, "笔·三买", "done"),
-                            (11859, "笔·三买", "done")],
-           (12632, 13528): [(12751, "笔·三买", "done"), (12906, "笔·一卖", "done"), (13369, "笔·三卖", "done")]}
+    # 10-05 往回落以后：最低点 367.77（11314）、最高点 588.8（12906）都成了切成的刀
+    PIN = {(10811, 11859): [(11097, "笔·三卖", "void"), (11314, "笔·三买", "done")],
+           (12632, 13528): [(12906, "笔·一卖", "done"), (13273, "笔·三卖", "done"), (13403, "笔·三卖", "done")]}
     if os.path.basename(path) == "zec15.json":
         pin_bad = []
         for (x0, x1), exp in PIN.items():
             have = [(c["cut_bar"], c["by"], c["status"]) for c in cuts if x0 <= c["cut_bar"] <= x1]
             if have != exp:
                 pin_bad.append(((x0, x1), have))
-        cell("⑦ 钉死 zec15 那两个框的切点（谁切、切在哪根、状态）", not pin_bad, "不符 %s" % pin_bad[:1])
+        lo_hi_in = [(z["X0"], z["X1"]) for z in cur for x in (11314, 12906) if z["X0"] < x < z["X1"]]
+        cell("⑦ 钉死 zec15 那两个框的切点（谁切、切在哪根、状态），且两个极值不在任何框里面", not pin_bad and not lo_hi_in,
+             "不符 %s · 极值仍在框内 %s" % (pin_bad[:1], lo_hi_in))
     else:
         skipped.append("⑦")
         print("· ⑦ 未执行（只钉 data/zec15.json；这份是 %s）—— 不算绿" % os.path.basename(path))
+
+    # ⑧ 验收格（Nova 10-05）：线上 ZEC 30m 那份（存成 data/zec30_cut.json）上，最低点 367.77（5354）、最高点 588.8（6150）
+    #    都是切成的刀，且都不在任何切后的框里面 —— 朋友说的「上下两个转折不能在同一个框里」。
+    r30 = analyze(load(os.path.join(ROOT, "data", "zec30_cut.json")), tick=0.01)
+    cur30, cuts30 = C.cut_centers(r30, S.signals(r30, "pen", "macd"))
+    st = {c["cut_bar"]: c["status"] for c in cuts30}
+    inside30 = [(x, z["X0"], z["X1"]) for x in (5354, 6150) for z in cur30 if z["X0"] < x < z["X1"]]
+    cell("⑧ ZEC 30m：5354、6150 两个极值都切成，且不在任何框里面", st.get(5354) == "done" and st.get(6150) == "done"
+         and not inside30, "状态 5354=%s 6150=%s · 仍在框内 %s" % (st.get(5354), st.get(6150), inside30))
 
     real = C._status
     C._status = lambda done_, k: "done" if k + 1 <= len(done_) else "pending"     # 头一段走完就算
@@ -125,9 +143,12 @@ def main():
     seg_sig = S.signals(r, "seg", "macd")
     _, cuts_b = C.cut_centers(r, seg_sig, units=r["segs"])
     targets = [z for z in r["seg_centers"] if round(z["ZD"], 2) in (405.90, 523.24)]
-    inside = [c for c in cuts_b for z in targets if z["X0"] < c["cut_bar"] < z["X1"]]
-    cell("探针 B：线段层认 ⇒ 那两个框切不开", not inside,
-         "（这份数据里找到 %d 个目标框；线段层认出 %d 刀）" % (len(targets), len(cuts_b)))
+    hit = {(z["X0"], z["X1"]): [c["cut_bar"] for c in cuts_b if z["X0"] < c["cut_bar"] < z["X1"]] for z in targets}
+    # 10-05 往回落以后，线段层的三卖也会往回落到最高点上 ⇒ 规格原先「线段层认、两个框都切不开」不再成立。
+    # 现在守的是还成立的那一半：最低点那个框（405.9–423）在线段层仍切不开（线段层在那儿没有能往回落到低点的三买）。
+    low_box = [v for (x0, x1), v in hit.items() if any(round(z["ZD"], 2) == 405.90 and z["X0"] == x0 for z in targets)]
+    cell("探针 B：线段层认 ⇒ 最低点那个框切不开（最高点那个现在能被线段层三卖往回切到，见卡）",
+         bool(low_box) and not low_box[0], "（目标框 %d 个；各框里线段层的刀 %s）" % (len(targets), hit))
     print(("全部通过" + ("（%s 未执行）" % "、".join(skipped) if skipped else "")) if not bad else "%d 格不过" % len(bad))
     return 1 if bad else 0
 

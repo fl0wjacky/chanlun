@@ -4,7 +4,8 @@
 r["seg_centers"] 算（规则 6，否则成环）。
 
   规则 1  转折点在**笔层**认（L29:3「站在次级别图形中」）——笔层买卖点不读线段中枢，没有循环。
-  规则 2  笔层已确认的 一买/一卖 ⇒ 切在极值那根（C 段终点）；三买/三卖 ⇒ 切在离开笔的起点。
+  规则 2  笔层已确认的 一买/一卖 ⇒ 切在极值那根（C 段终点）；三买/三卖 ⇒ **往回**落到上一刀以来（到离开笔起点为止）
+          最低（三买）/最高（三卖）的线段端点 —— 前一个走势的结束点（10-05 改）。
           二买/二卖不当转折点。
   规则 3  切点落到最近的**已完成**线段端点上（一样近取后一个）。
   规则 4  切点前后各自从头 find_centers；切点之后整段重新划分。
@@ -19,10 +20,22 @@ TURN_KINDS = ("一买", "一卖", "三买", "三卖")
 
 
 def _turn_bar(g, pens):
-    """规则 2：笔层买卖点 → 转折点所在的 K 线下标。"""
+    """一类点：极值那根（C 段终点）；三类点：离开笔（回试笔的前一笔）的起点 —— 三类的切点不在这里，见 _backdate。"""
     if g["kind"] in ("一买", "一卖"):
-        return g["bar"]                                  # 极值那根（C 段终点）
-    return pens[g["unit"] - 1]["i0"]                     # 三类：离开笔（回试笔的前一笔）的起点
+        return g["bar"]
+    return pens[g["unit"] - 1]["i0"]
+
+
+def _backdate(kind, leave_bar, prev_k, ends, bars):
+    """规则 2（10-05 改，L38:104 / L52:89 / L88:19-21）：三类点**往回**落到前一个走势的结束点。
+    窗口 = 上一刀之后（没有就从图头）到离开笔起点（含）的已完成线段端点；三买取最低、三卖取最高，一样极取后一个。
+    窗口里一个端点都没有 ⇒ None（这一刀不切）。"""
+    cand = [k for k in range(prev_k + 1, len(ends)) if ends[k] <= leave_bar]
+    if not cand:
+        return None
+    if kind == "三买":
+        return min(cand, key=lambda k: (bars[ends[k]]["l"], -k))
+    return min(cand, key=lambda k: (-bars[ends[k]]["h"], -k))
 
 
 def _snap(bar, ends):
@@ -71,13 +84,19 @@ def cut_centers(r, pen_signals, units=None):
         return r["seg_centers"], []
     ends = [done[0]["i0"]] + [s["i1"] for s in done]     # 端点 ends[k] = 第 k 段的起点（k == len(done) 是最后一段终点）
     pens = r["pens"] if units is None else units
-    cuts = {}
+    cuts, prev_k = {}, 0                                 # prev_k：上一刀落在哪个端点（0 ＝ 图头）
     for g in sorted(pen_signals, key=lambda g: g["bar"]):
         if not g["confirmed"] or g["kind"] not in TURN_KINDS:
             continue
-        k = _snap(_turn_bar(g, pens), ends)
+        if g["kind"] in ("一买", "一卖"):
+            k = _snap(_turn_bar(g, pens), ends)
+        else:
+            k = _backdate(g["kind"], _turn_bar(g, pens), prev_k, ends, r["bars"])
+            if k is None:
+                continue
         if k == 0:
             continue                                     # 切在第一段起点上 ＝ 没切
+        prev_k = max(prev_k, k)
         c = cuts.setdefault(k, dict(level="seg", cut_bar=ends[k], by="笔·" + g["kind"], signal_bar=g["bar"], n=0))
         c["n"] += 1
     ks = sorted(cuts)
