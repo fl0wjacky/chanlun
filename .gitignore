@@ -30,3 +30,6 @@ workspace/wm-*/
 
 # 临时拉的实时数据（改图自核用，2026-10-03）：一律 --out <标的前缀>…_tmp.json，不入库
 data/*_tmp.json
+
+# 回测加数据（card-3c7f0ccf-7b7）：按 tools/bt_manifest.json 拉的公开 K 线，只进清单和 sha1
+data/bt
