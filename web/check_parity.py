@@ -101,7 +101,8 @@ def running(bars_by_key):
 
 
 def get(port, symbol, tf, span=None):
-    req = urllib.request.Request("http://127.0.0.1:%d/api/chart?symbol=%s&tf=%s%s"
+    # 结构对账比的是引擎原样那份（不切）⇒ 显式要 cut=extend；默认（turn）那份另有 run_default 核
+    req = urllib.request.Request("http://127.0.0.1:%d/api/chart?symbol=%s&tf=%s%s&cut=extend"
                                  % (port, symbol, tf, "&span=%d" % span if span else ""),
                                  headers={"Accept-Encoding": "gzip"})
     with urllib.request.urlopen(req, timeout=60) as r:
@@ -285,6 +286,49 @@ def run_macd(quiet=False):
     return bad
 
 
+def run_default(quiet=False):
+    """默认切法（小栋 10-05 11:09Z：按转折切设成默认，card-21fbf426-889）：
+    ① /api/meta 的 cut_default 是 turn、且在 cut_modes 里；② 不带 cut 的 /api/chart 回显 cut=turn、带 cuts；
+    ③ 不带 cut 那份 ＝ 显式 cut=turn 那份（结构逐字段同）；④ 它的 seg_centers ＝ 引擎 cut_centers 在同一份 K 线上的结果；
+    ⑤ 「延伸」还在：cut=extend 回显 extend、不带 cuts。"""
+    import core.cut as _cut
+    eng = sys.modules["core.signals"]
+    files = sorted(os.path.basename(p) for p in glob.glob(data("*.json")))
+    cases = [(fn, dataset(fn)) for fn in files if dataset(fn)]
+    bars_by_key = {key: json.load(open(data(fn), encoding="utf-8")) for fn, key in cases}
+    bad = 0
+    with running(bars_by_key) as port:
+        m = get_path(port, "/api/meta")
+        if m.get("cut_default") != "turn" or "turn" not in (m.get("cut_modes") or []) or "extend" not in (m.get("cut_modes") or []):
+            bad += 1
+            if not quiet:
+                print("✗ /api/meta cut_default=%r cut_modes=%r" % (m.get("cut_default"), m.get("cut_modes")))
+        for fn, (sym, tf) in cases:
+            dflt = get_path(port, "/api/chart?symbol=%s&tf=%s" % (sym, tf))
+            turn = get_path(port, "/api/chart?symbol=%s&tf=%s&cut=turn" % (sym, tf))
+            ext = get_path(port, "/api/chart?symbol=%s&tf=%s&cut=extend" % (sym, tf))
+            bars = [dict(t=x["t"], o=x["o"], h=x["h"], l=x["l"], c=x["c"]) for x in dflt["bars"]]
+            r = analyze(bars, tick=tick_of(fn))
+            cur, cuts = _cut.cut_centers(r, eng.signals(r, "pen", "macd"))
+            strip = lambda d: {k: v for k, v in d.items() if k not in ("fetched_at", "stale", "refreshing")}
+            diffs = []
+            if dflt.get("cut") != "turn" or "cuts" not in dflt:
+                diffs.append("不带 cut 回显 %r、cuts %s" % (dflt.get("cut"), "有" if "cuts" in dflt else "没有"))
+            if strip(dflt) != strip(turn):
+                diffs.append("不带 cut ≠ cut=turn")
+            if json.loads(json.dumps(server._clean(cur))) != dflt.get("seg_centers"):
+                diffs.append("默认的 seg_centers ≠ 引擎 cut_centers")
+            if ext.get("cut") != "extend" or "cuts" in ext:
+                diffs.append("cut=extend 回显 %r" % ext.get("cut"))
+            bad += bool(diffs)
+            if not quiet:
+                print("%s %-18s %s %-3s 默认切法%s" % ("✗" if diffs else "✓", fn, sym, tf,
+                                                    "  ← " + " ｜ ".join(diffs) if diffs else " turn（刀 %d）" % len(cuts)))
+    if not quiet:
+        print("默认切法 %d 份：不一致 %d 份" % (len(cases), bad))
+    return bad
+
+
 def run_meta(quiet=False):
     """/api/meta：measures 仍是字符串列表（前端按字符串过滤，换成对象整组会消失）；measure_orig 跟 measures
     一一对应、全是布尔，且只有 slope 是 false（小栋 10-04 ①A：斜率不是 108 课原文的判法）。"""
@@ -429,6 +473,15 @@ def self_test():
             server._macd_body = orig
     arms.append(("副图头部引擎版本是旧的", arm_engine_stale))
 
+    def arm_default_extend():
+        real = server.DEFAULT_CUT
+        server.DEFAULT_CUT = "extend"                      # 后台缺省退回延伸（前端改了、后台没跟上的那种）
+        try:
+            return run_default(quiet=True)
+        finally:
+            server.DEFAULT_CUT = real
+    arms.append(("后台缺省仍是 extend", arm_default_extend))
+
     miss = 0
     for name, f in arms:
         n = f()
@@ -445,4 +498,5 @@ if __name__ == "__main__":
     rc = rc or (1 if run_span() else 0)
     rc = rc or (1 if run_macd() else 0)
     rc = rc or (1 if run_meta() else 0)
+    rc = rc or (1 if run_default() else 0)
     sys.exit(rc)

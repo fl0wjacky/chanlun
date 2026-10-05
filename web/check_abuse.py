@@ -377,7 +377,7 @@ def main():
     calls["n"] = 0
     got = {}
     for m in _S.MEASURES:
-        code_, body_ = req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=15m&measure=" + m)
+        code_, body_ = req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=15m&cut=extend&measure=" + m)   # 结构逐字节同只在不切那份上成立（turn 的切点跟着看法走）
         got[m] = json.loads(body_) if code_ == 200 else {}
     BARS = saved_bars
     bars_ = [dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"]) for b in got["macd"].get("bars", [])]
