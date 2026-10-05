@@ -48,9 +48,12 @@ def kline_files():
     return out
 
 
-def span_violations(files=None, measure="macd"):
+def span_violations(files=None, measure="macd", strict=True):
     """card-e634f6e9-bb5：cut=turn 下，**任何框都不许跨过已切成（done）的切点** —— 框跟走势分段对得上。
     跨 = 框的成员线段里，有一段在切点之前、有一段在切点之后（X0 < cut_bar < X1）。
+    ★ 不等号必须**严格**：切点正好压在框沿上（cut_bar == X0 或 == X1）是故意允许的那一档（框在刀处相接，
+      前端 cut-edge f3f063e 就是为它写的）。收紧成 <= 会把这一档在真数据上全报成红（--self-test 第二条量这个）。
+    X0/X1 跟前端画框用的是同一条式子（web/layers.js：host[PI0].i0 .. host[PI1].i1），所以这里守的是屏幕上画出来的框。
     pending / void 的刀不算：待定时旧框照画是规则页定的（L88:14），作废的刀本来就不切。
     返回 [(文件, cut_bar, 切点的 by, 框 X0, 框 X1)]，应为空。"""
     from config import tick_of
@@ -62,7 +65,8 @@ def span_violations(files=None, measure="macd"):
             if c["status"] != "done":
                 continue
             for z in cur:
-                if z["X0"] < c["cut_bar"] < z["X1"]:
+                inside = (z["X0"] < c["cut_bar"] < z["X1"]) if strict else (z["X0"] <= c["cut_bar"] <= z["X1"])
+                if inside:
                     bad.append((fn, c["cut_bar"], c["by"], z["X0"], z["X1"]))
         # 预览框（cuts[i].boxes，provisional）是「待定的刀也切了」那一版：它们不许跨过任何 done 或 pending 的刀
         live_cuts = [c["cut_bar"] for c in cuts if c["status"] in ("done", "pending")]
@@ -83,7 +87,10 @@ def span_self_test():
     finally:
         C._centers_with_cuts = real
     print("%s 变异「切成的刀不分组」⇒ 跨刀的框 %d 个" % ("✓" if n else "✗", n))
-    return 0 if n else 3
+    m = len(span_violations(strict=False))
+    print("%s 收紧成 <=（框沿也算跨）⇒ 真数据上报 %d 个 —— 证明「压在框沿」这一档真实存在，不等号必须严格"
+          % ("✓" if m else "✗", m))
+    return 0 if n and m else 3
 
 
 def main():
