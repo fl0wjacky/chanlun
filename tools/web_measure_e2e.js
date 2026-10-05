@@ -519,7 +519,7 @@ const shotChart = async (p, tag) => {
   // ★ 为什么落在这套里：这一层**只有真后台给得出** —— `trend` 那个对象是 Bram 在 dbda139 里新加的，
   //   `web_more_e2e.js` 那一套的假后台（仓里的 fixtures）里没有它。这套是唯一一套跑真后台的。
   // ★ 判据一律**跟载荷对、跟 `theme.js` 对**，不跟"我看着像"对：色号和不透明度都从 `/theme.js`
-  //   现读（`await import('/theme.js')`），所以哪天有人改 `TREND.bandA`，这几格跟着走 ——
+  //   现读（`await import('/theme.js')`），所以哪天有人改 `TREND.bandUp`／`bandDn`，这几格跟着走 ——
   //   写死一个 16% 混出来的色号当准，改一次配色就红一次，红出来的还是假话。
   // ★ 这一层自带一个只读出口 `window.__app.state.trendDrawn`（跟 `state.boxesDrawn` 同性质：
   //   **这一帧**交给这一层的清单，每帧开头重写）—— 画了一条带它上面就有一条。量它，比截图找颜色稳，
@@ -623,7 +623,7 @@ const shotChart = async (p, tag) => {
     }
     return n;
   }, [want, 6]);
-  const upGreen = blend(TREND.up, TREND.bandA);
+  const upGreen = blend(TREND.up, TREND.bandUp);
   const dOff = await open(TQ + '&trend=0');
   const OFF = await trendState(dOff.p);
   const nOn = await bandPixels(dA.p, upGreen), nOff = await bandPixels(dOff.p, upGreen);
