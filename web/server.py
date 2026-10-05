@@ -26,10 +26,11 @@
   GET /api/tick?symbol=&tf=  → 最后一根（未收盘）K 线 {t,o,h,l,c,v} ＋ fetched_at / stale / engine。同一格 2.5 秒内只碰
         一次币安（单飞，多人同看不放大）；失败回上次成功的值、stale=true；从没成功过 503。**不碰结构**（小栋 10-05 A：
         最后一根实时跳价，笔段中枢买卖点仍收盘才由 /api/chart 整份重算）。
-  GET /api/chart …&cut=extend|turn  → 线段中枢的切法（docs/spec/中枢切分.md）。**默认 turn**（小栋 10-05 拍板）：在笔层转折点切开：seg_centers 回当前状态（待定的刀照回旧框），顶层多
-        cuts:[{level:"seg", cut_bar, by, status:pending|done|void, signal_bar, n, boxes?}]，boxes 只在 pending 时有、
-        跟 seg_centers 同形、带 provisional:true。线段层买卖点仍按不切的中枢算。extend＝延伸/扩展（可切换的一档，
-        载荷＝不切的那份）。白名单外 400。/api/meta 回 cut_default。
+  GET /api/chart …&cut=extend|trend  → 线段中枢的切法。**默认 trend**（docs/spec/走势分段.md v3，card-51571a5f-dc2）：
+        在本级别确立的走势分界处切开，seg_centers 回切开重算的那套（D4），顶层多 trend:{bounds, retracted, pending,
+        segments, units}（形状见 core/trend.py::trend_v3）。只用线段、不读背驰 ⇒ 换 measure 框和刀都不变。
+        extend＝延伸/扩展（可切换的一档，载荷＝不切的那份）。旧的 turn（笔层出刀）删了：老链接 ?cut=turn 当 trend 收、
+        回显 trend。白名单外 400。/api/meta 回 cut_default。
   GET /api/meta            → 白名单（前端拿来做下拉）
         engine = 引擎版本（core/*.py＋config.py 的 sha256 前 10 位，启动时算），/api/chart、/api/macd 头部也带同一个；
         measures 仍是字符串列表（契约不变）；measure_orig = {看法: 是否 108 课原文的判法}，slope 为 false（小栋 10-04 ①A）。
@@ -60,7 +61,7 @@ from config import tick_of                              # noqa: E402
 from fetch_klines import BASE as BINANCE_KLINES, UA, fetch as binance_fetch   # noqa: E402
 from make_web_fixture import iso, shape                 # noqa: E402
 from core.analyze import analyze                        # noqa: E402
-from core.cut import cut_centers                       # noqa: E402
+from core.trend import trend_v3                         # noqa: E402
 from core.signals import MEASURES, MEASURE_ORIG, macd_lines, signals as engine_signals   # noqa: E402
 import core.signals as _engine_signals_mod              # noqa: E402,F401  （见下行：模块对象从 sys.modules 取）
 _ENGINE = sys.modules["core.signals"]                    # core/__init__ 把 signals 导成了函数，模块要从这里拿
@@ -336,12 +337,11 @@ def _macd_body(slot, symbol, tf):
     return b
 
 
-CUT_MODES = ("extend", "turn")           # 线段中枢的切法（docs/spec/中枢切分.md）：extend＝延伸/扩展（可切换的一档）／turn＝转折点切开
-DEFAULT_CUT = "turn"                     # 小栋 10-05 11:09Z 拍板：默认画法改成按转折切（card-21fbf426-889）；不带 cut 就是它
-
-
-CUT_MEASURE = "macd"                     # 转折点用哪种看法认：固定面积，不跟请求的 measure 走（spec 中枢切分.md「编者口径」）
-CUT_KEY = "__cut__"                      # mbodies 里切法结果那一份的键（一格只算一次，各看法共用）
+CUT_MODES = ("extend", "trend")          # 线段中枢的切法：extend＝延伸/扩展（可切换的一档）／trend＝走势分界 v3（docs/spec/走势分段.md）
+DEFAULT_CUT = "trend"                    # v3 上线后的默认（Nova 10-05 16:1x）；不带 cut 就是它
+CUT_ALIAS = {"turn": "trend"}            # 旧的笔层出刀删了，老链接照收（回显新名字）
+TREND_READING = "A"                      # D3 读法（A＝整段升一级／B＝升级中枢留在本级别一起数），等小栋拍
+CUT_KEY = "__cut__"                      # mbodies 里切法结果那一份的键（一格只算一次，各看法共用：v3 不读背驰）
 
 
 def _measure_body(slot, symbol, tf, measure, cut=DEFAULT_CUT):
@@ -349,16 +349,18 @@ def _measure_body(slot, symbol, tf, measure, cut=DEFAULT_CUT):
     K 线、笔、段、中枢跟看法无关，只有 signals 两层重算（懒算、按 measure 各存一份，数据刷新就作废）。
     切看法不碰币安。"""
     if measure == MACD_KEY:
-        return _macd_body(slot, symbol, tf)              # 副图跟切法无关（默认改 turn 以后这一句必须在切法之前）
+        return _macd_body(slot, symbol, tf)              # 副图跟切法无关（默认不是 extend，这一句必须在切法之前）
     if cut != "extend":
         b = slot.mbodies.get((measure, cut))
         if b is None:
             d = json.loads(_measure_body(slot, symbol, tf, measure, "extend"))   # 从不切的那份派生
             cc = slot.mbodies.get(CUT_KEY)
-            if cc is None:                                # 切点固定按默认看法（面积）认（Nova 10-05 选 A）：换看法只换买卖点，框不动
+            if cc is None:                                # v3 只用线段 ⇒ 跟看法无关，一格算一次
                 r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"))
-                cc = slot.mbodies[CUT_KEY] = cut_centers(r, engine_signals(r, "pen", CUT_MEASURE))
-            d["seg_centers"], d["cuts"], d["cut"] = _clean(cc[0]), _clean(cc[1]), cut
+                v = trend_v3(r, reading=TREND_READING)
+                cc = slot.mbodies[CUT_KEY] = (v["seg_centers"], {k: v[k] for k in
+                                              ("bounds", "retracted", "pending", "segments", "units")})
+            d["seg_centers"], d["trend"], d["cut"] = _clean(cc[0]), _clean(cc[1]), cut
             b = slot.mbodies[(measure, cut)] = json.dumps(d, ensure_ascii=False, separators=(",", ":"),
                                                           allow_nan=False).encode("utf-8")
         return b
@@ -588,8 +590,9 @@ class Handler(BaseHTTPRequestHandler):
             if measure not in MEASURES:
                 return self._err(400)                     # 背驰看法只认四个名字（macd / slope / lines / peak）
             cut = q.get("cut", [DEFAULT_CUT])[0]
+            cut = CUT_ALIAS.get(cut, cut)
             if cut not in CUT_MODES:
-                return self._err(400)                     # 切法只认 extend / turn
+                return self._err(400)                     # 切法只认 extend / trend（turn 当 trend 收）
             got = get_chart(symbol, tf, span, measure=measure, cut=cut)
             if got is None:
                 return self._err(503)
