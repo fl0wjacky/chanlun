@@ -542,6 +542,16 @@ const shotChart = async (p, tag) => {
       chip: (() => { const c = document.querySelector('.chip[data-key="trend"]');
         return c ? { pressed: c.getAttribute('aria-pressed'), disabled: c.disabled } : null; })(),
       bands: D.bands || [], strips: D.bounds || [], units: D.units || [], labels: D.labels || [],
+      // 框编号那一层（㊴）：它记的是**每段有几个中枢**（`n`）和**实际画上去几枚**（`drawn`）。
+      // `letters` 从价签那张表里挑出单个字母（这一层的字只有它和「升级」是一两个字的，
+      // 而字母一定是 A–H 的单个字符 —— 段号不画，所以不会跟别的字撞）。
+      num: D.num || [],
+      letters: (D.labels || []).filter((L) => /^[A-H]$/.test(L[4])).map((L) => L[4]).join(''),
+      // ★ 图层画字用的是**主图那一格的画布**尺寸（`useMediaCoordinateSpace` 给的 mediaSize），
+      //   不是 `#chart` 的 clientWidth/clientHeight —— 后者连价格轴和副图一起算进去了
+      //   （实测 1410×809 vs 那一格 1348×584）。判据要跟画图用**同一把尺**，所以另取一份。
+      pane: (() => { const c = document.querySelector('#chart canvas');
+        if (!c) return null; const r = c.getBoundingClientRect(); return { w: r.width, h: r.height }; })(),
       segs: (T || {}).segments || [],
       bounds: ((T || {}).bounds || []).map((b) => Object.assign({}, b, at(b.bar))).filter(vis),
       pending: ((T || {}).pending || []).map((b) => Object.assign({}, b, at(b.bar))).filter(vis),
@@ -643,6 +653,138 @@ const shotChart = async (p, tag) => {
        && E.on === true && E.bands.length === 0,
      `有 trend 键=${E.hasTrendKey}　chip=${JSON.stringify(E.chip)}　带子=${E.bands.length}`);
   await dE.c.close();
+
+  // ㊴ 框编号那一层（§八 6，卡 card-c6644f52-2fa）：**默认关**、开关指名才开、字母挂哪一级听载荷的
+  //   ★ 这一格真正的牙是**读法**：`trend_reading` 说 A 就挂合成出来的高一级中枢（`units`）、
+  //     说 B 就一律挂本级别（`seg_centers`）。把读法**写死**（或两边画反）⇒ 当场红。
+  //     **两边都算出来**：哪天的数据上 A 和 B 恰好一样，格还是绿的但牙没了 —— 那得看得见（跟 ㉞ 同一条账）。
+  console.log('\n39–42 框编号那一层：默认关、指名才开、字母挂哪一级听 `trend_reading` 的、钉在中枢自己的中心');
+  // 期望值在**页内**算：坐标一律问这一页自己的换算（`timeToCoordinate` / `priceToCoordinate`），
+  // 工装自己不推 —— 推的那套迟早跟图上错开半格，然后红出来的是一句假话。
+  const numExpect = (pg, rd) => pg.evaluate((force) => {
+    const a = window.__app, d = a.state.data, T = d.trend;
+    const ts = a.chart.timeScale(), bars = d.bars, LET = 'ABCDEFGH';
+    const reading = force || (d.trend_reading === 'B' ? 'B' : 'A');
+    const per = [], boxes = [];
+    for (let i = 0; i < T.segments.length; i++) {
+      const s = T.segments[i];
+      const zs = ((reading === 'A' && s.upgraded) ? T.units : d.seg_centers).filter((z) => z.seg === i);
+      per.push(zs.length);
+      zs.slice(0, LET.length).forEach((z, k) => {
+        const lo = z.ZD !== undefined ? z.ZD : z.DD, hi = z.ZG !== undefined ? z.ZG : z.GG;
+        const bar = bars[Math.round((z.X0 + z.X1) / 2)];
+        boxes.push({ i, ch: LET[k], x: bar ? ts.timeToCoordinate(bar.t / 1000) : null,
+          y: a.state.candleSeries.priceToCoordinate((lo + hi) / 2) });
+      });
+    }
+    return { reading, payloadReading: d.trend_reading, per, boxes };
+  }, rd || null);
+  const midX = (L) => (L[0] + L[2]) / 2;
+  const dN = await open(TQ + '&trendnum=1');
+  await waitBand(dN.p);
+  const N = await trendState(dN.p);
+  const expN = await numExpect(dN.p), expB = await numExpect(dN.p, 'B');
+  const nChip = await dN.p.evaluate(() => {
+    const c = document.querySelector('.chip[data-key="trendNum"]');
+    return c ? { pressed: c.getAttribute('aria-pressed'), disabled: c.disabled } : null;
+  });
+  ck('框编号那一层：`?trendnum=1` 开了它就画（开关亮、地址栏留着参数、真画出字母）',
+     !!nChip && nChip.pressed === 'true' && nChip.disabled === false
+       && /trendnum=1/.test(N.url) && N.letters.length >= 1 && N.num.length >= 1,
+     `chip=${JSON.stringify(nChip)}　地址栏=${N.url}　屏上字母「${N.letters}」　`
+     + `每段（载荷 ${expN.reading}）：${JSON.stringify(N.num.map((r) => r.n))}`);
+
+  // ★★ 这一格是这张卡的牙：**每一段的中枢数按 `trend_reading` 算出来，跟层里记的逐段比**
+  const same = (x, y) => x.length === y.length && x.every((v, i) => v === y[i]);
+  const abSame = same(expN.per, expB.per);
+  ck('字母挂哪一级**听载荷的 `trend_reading`**（A⇒升级段挂 `units`／B⇒挂本级别）：每段的中枢数逐段对上',
+     N.num.length >= 1 && same(N.num.map((r) => r.n), expN.per),
+     `载荷说 ${expN.reading}（原始值 ${expN.payloadReading}）　该是 ${JSON.stringify(expN.per)}　`
+     + `层里是 ${JSON.stringify(N.num.map((r) => r.n))}　`
+     + `★ 另一种读法（${expN.reading === 'A' ? 'B' : 'A'}）在这份数据上是 ${JSON.stringify(expN.reading === 'A' ? expB.per : expN.per)}`
+     + `　⇒ ${abSame ? '两种读法在这份数据上**恰好一样，这一格的牙现在是空的**（得换一份数据）'
+       : '两种读法在这份数据上**确实不一样，牙是实的**'}`);
+
+  // ㊶ **钉在枢自己的范围中心**（不是段的左上角 —— 那是「升级」二字的锚法）
+  //   牙齿：把锚改成 `s.i0`（"标在段头上"读起来很顺）⇒ 当场红。
+  //   ★ 默认视口只开在**尾巴那 ~2683 根**上 ⇒ 第一次跑只量到 **1 枚**字母，那格的绿是"一枚样本的绿"。
+  //     而且**一屏装不下全部**：这份载荷上 7 枚字母散在 20160 根里，一屏最多装得下 2 枚
+  //     （§4 那两枚，差 582 根）—— 这是视口封顶算出来的，不是这一层的问题。
+  //   ⇒ 不摆"一屏"，摆**若干屏**：按 2400 根一簇把字母分组，每簇开一页、把那一簇里的每一枚都量到。
+  //     页子自己的口子（`?at=&span=`，app.js:637；外部的 fitContent 在这页上是白调的，实测过）。
+  const clusters = await dN.p.evaluate(() => {
+    const a = window.__app, d = a.state.data, T = d.trend;
+    const reading = d.trend_reading === 'B' ? 'B' : 'A';
+    const mids = [];
+    for (let i = 0; i < T.segments.length; i++) {
+      const s = T.segments[i];
+      for (const z of ((reading === 'A' && s.upgraded) ? T.units : d.seg_centers).filter((q) => q.seg === i)) {
+        mids.push(Math.round((z.X0 + z.X1) / 2));
+      }
+    }
+    mids.sort((x, y) => x - y);
+    const W = 2400, out = [];
+    for (let i = 0; i < mids.length;) {
+      let j = i;
+      while (j + 1 < mids.length && mids[j + 1] - mids[i] <= W) j++;
+      out.push({ at: Math.round((mids[i] + mids[j]) / 2), span: Math.max(240, mids[j] - mids[i] + 240) });
+      i = j + 1;
+    }
+    return { n: mids.length, out };
+  });
+  const pin = { want: clusters.n, got: 0, hits: 0, pages: clusters.out.length, offY: 0, offY_B: 0 };
+  for (const w of clusters.out) {
+    const dw = await open(`${TQ}&trendnum=1&at=${w.at}&span=${w.span}`);
+    await waitBand(dw.p);
+    const W_ = await trendState(dw.p);
+    const expW = await numExpect(dw.p);
+    const pane = W_.pane || { w: W_.W, h: 1e6 };
+    // 跟图层同一个判据：**x 和 y 都得在那一格里**（pad 8，见 layers.js 那两行）
+    const onW = expW.boxes.filter((b) => b.x !== null && b.y !== null
+      && b.x >= -8 && b.x <= pane.w + 8 && b.y >= -8 && b.y <= pane.h + 8);
+    // ★ 「横着在屏上、纵着出去了」—— 读法 A 下真的会发生（高一级中枢的价格中点跑到视野外）。
+    //   这一格**要把它数出来**：不然它长得跟"这一段本来就没字母"一模一样，红都红不出来。
+    const winOff = (boxes) => boxes.filter((b) => b.x !== null && b.x >= -8 && b.x <= pane.w + 8
+      && (b.y === null || b.y < -8 || b.y > pane.h + 8)).length;
+    pin.offY += winOff(expW.boxes);
+    // ★★ **把「B 会怎样」也算出来**（只是算，不是画 —— 画哪种由后台的 `trend_reading` 定）。
+    //    不然"读法 A 的锚点太大所以画不出来"就只是我一句推测。同一个窗口、同一套换算，两边各数一遍。
+    pin.offY_B += winOff((await numExpect(dw.p, 'B')).boxes);
+    pin.got += onW.length;
+    pin.hits += onW.filter((b) => W_.letters.includes(b.ch)
+      && W_.labels.some((L) => L[4] === b.ch && Math.abs(midX(L) - b.x) <= 1.5)).length;
+    await dw.c.close();
+  }
+  ck('每枚字母钉在**它说的那个中枢**的横向中心（`(X0+X1)/2` 那一根的 x，±1.5px）：逐枚都量到',
+     pin.want >= 1 && pin.got === pin.want - pin.offY && pin.hits === pin.got,
+     `载荷里 ${pin.want} 枚字母，分 ${pin.pages} 屏摆完（一屏封顶装不下全部，见上面那段账）　`
+     + `量到 ${pin.got} 枚，对上 ${pin.hits} 枚　`
+     + `★ 另有 ${pin.offY}/${pin.want} 枚**横向在屏上、但落点的价在视野外** ⇒ 按这一层的规矩不画（不夹回画布）　`
+     + `★★ 同样的窗口**照读法 B 算一遍**：只有 ${pin.offY_B}/${pin.want} 枚会落出视野`
+     + `（B 的锚是本级别中枢，价格带就在眼前；A 的锚是横跨几千根的高一级中枢 —— 这是**算出来的**，不是推的）　`
+     + `（默认视口下屏上只有 ${N.letters.length} 枚，那点样本不作准）`);
+
+  // ㊷ **默认关** ＋ 走势那层关掉时它按灰（能点却画不出东西的开关是骗人的）
+  const dN0 = await open(TQ);
+  await waitBand(dN0.p);
+  const N0 = await trendState(dN0.p);
+  const n0Chip = await dN0.p.evaluate(() => {
+    const c = document.querySelector('.chip[data-key="trendNum"]');
+    return c ? { pressed: c.getAttribute('aria-pressed'), disabled: c.disabled } : null;
+  });
+  const dNT = await open(TQ + '&trendnum=1&trend=0');
+  const NT = await trendState(dNT.p);
+  const ntChip = await dNT.p.evaluate(() => {
+    const c = document.querySelector('.chip[data-key="trendNum"]');
+    return c ? { pressed: c.getAttribute('aria-pressed'), disabled: c.disabled } : null;
+  });
+  ck('框编号**默认关**（不带参数：开关灭、地址栏没有它、一枚字母都不画）；`trend=0` 时那颗开关**按灰**',
+     !!n0Chip && n0Chip.pressed === 'false' && !/trendnum/.test(N0.url)
+       && N0.letters.length === 0 && N0.num.length === 0
+       && !!ntChip && ntChip.disabled === true && NT.letters.length === 0,
+     `默认：chip=${JSON.stringify(n0Chip)}　地址栏=${N0.url || '(空)'}　字母「${N0.letters}」　`
+     + `／ 把走势那层关掉（trend=0）：chip=${JSON.stringify(ntChip)}　字母「${NT.letters}」`);
+  await dN0.c.close(); await dNT.c.close(); await dN.c.close();
   await dA.c.close();
 
   await b.close();

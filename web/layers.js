@@ -15,6 +15,23 @@ const lighter = (h, d = 40) => '#' + hex2rgb(h).map((v) => Math.min(255, v + d).
 
 const FONT = '12px -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif';
 const FONT_SM = '11px -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif';
+// 框编号那几个字母（§八 6，card-c6644f52-2fa）：**加粗、比这一层别的字大半档（14px）**。
+// ★★ 这是**看过图之后改的**，改了两处，理由都写在这儿：
+//   ① **不用段的方向色**（第一版用绿／红）。绿字母落在 16% 的绿带上、红字母落在 16% 的红带上，
+//      混出来的对比度低到看不清 —— 屏上就是一团暗红里几个更暗的红点。字母是**读图的记号**，
+//      不是那一段的颜色编码（颜色已经由背景带说了）；这一层里"看得清"的参照是分界那个价格
+//      —— 它是**墨色 ＋ 描边**。⇒ 字母跟它同一套：墨色 ＋ 描边。要区分"字母 ≠ 价格数字"靠
+//      **加粗 ＋ 大一号**，不靠换个颜色。
+//   ② 12px 太小：一枚编号要在满屏 K 线里被一眼找到，跟价格注释一样大就等于没有主次。
+// ★ 字号变了 ⇒ `haloText` 那张包围盒表也得跟着变，所以下面那个函数要多收一个 `size`
+//   （默认 12，老调用点一个字都不用改）。
+const FONT_LET = 'bold 14px -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif';
+const SIZE_LET = 14;
+// 字母表：§八 6 的原文语汇是 `a+A+b+B+c`（一句里最多见两个大写），拿 A…H 够用还有富余。
+// ★ 一段里的中枢**超过 8 个**怎么办 —— 这一版**不发明记号**（原文里没有第九个字母这回事）：
+//   画满 8 枚就停，超出的部分记在 `state.trendDrawn.num[].over` 里，让工装能看见，等人定。实测
+//   ZEC 30m 上每段最多 3 个，这个口子现在够不着。
+const TREND_LET = 'ABCDEFGH';
 
 // >>> SHOWN_LAYERS （tools/web_more_check.py 跟 app.js 的 EARLIER_PAGING 段一起抠出来、在 node 里真跑）
 /**
@@ -34,6 +51,9 @@ export function shownOf(opts) {
     // **一个大开关**管全部 —— 它们是一件事（"这一段怎么走的"）的六个面，拆成六个芯片没人找得齐。
     // ★ 它跟 `cut`（中枢切法）不是一回事，别混：切法决定**中枢**切在哪儿，这一层画的是**走势段**。
     trend: !!o.trend,
+    // 框编号（§八 6，card-c6644f52-2fa）：**默认关**的独立一层，但它画在走势那一层里面
+    // ⇒ 走势层关着时它也没地方挂（字母说的是"这一段里的第几个中枢"）。两个都开才算画了。
+    trendNum: !!o.trend && !!o.trendNum,
     // 单个买卖点画不画：跟下面画三角那一段用的是**同一条**（大开关 ＋ kind chip ＋ 待确认）
     sigAt: (s) => !!o.sig && !!kinds[s.kind] && (!!s.confirmed || !!(o.sigPend && CHART.sig_pending)),
   };
@@ -544,7 +564,7 @@ function trendBandView(target, state, prim) {
     const vp = viewport(prim._chart, state.candleSeries || prim._series, data);
     // 只读出口（跟 `state.boxesDrawn` 同性质：**这一帧**交给这一层的清单，每帧开头重写）——
     // 「这一层到底画了哪几段、铺的什么色」要**量**，不能靠眼睛。
-    state.trendDrawn = { bands: [], bounds: [], pending: [], retracted: [], units: [] };
+    state.trendDrawn = { bands: [], bounds: [], pending: [], retracted: [], units: [], num: [] };
 
     // ① 走势背景（§八 1）。★★ 颜色**跟着分界点的类型走，不跟段的 `type` 走** ——
     //    分界点是**低**（kind='L'）⇒ 这一段是"低 → 高" ⇒ 绿；是**高** ⇒ 红。于是一个
@@ -627,7 +647,7 @@ function hatchFill(ctx) {
   return ctx.createPattern(hatchTile, 'repeat');
 }
 
-/** top：分界（§八 2）＋ 待定（§八 3）＋ 撤回（§八 4）＋「升级」二字（§八 5）。 */
+/** top：分界（§八 2）＋ 待定（§八 3）＋ 撤回（§八 4）＋ 框编号（§八 6，默认关）＋「升级」二字（§八 5）。 */
 function trendMarkView(target, state, prim) {
   const { data, opts } = state;
   const T = trendOf(data);
@@ -644,11 +664,12 @@ function trendMarkView(target, state, prim) {
   target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
     const W = mediaSize.width, H = mediaSize.height;
     const vp = viewport(prim._chart, state.candleSeries || prim._series, data);
-    const D = state.trendDrawn || (state.trendDrawn = { bands: [], bounds: [], pending: [], retracted: [], units: [] });
+    const D = state.trendDrawn || (state.trendDrawn = { bands: [], bounds: [], pending: [], retracted: [], units: [], num: [] });
     D.labels = [];
-    // 这一层**自己**那张占位表：不跟别的层互相避让（理由见上），但自己这四类字之间得让开 ——
+    // 这一层**自己**那张占位表：不跟别的层互相避让（理由见上），但自己这几类字之间得让开 ——
     // 分界那条贴着极值写，段的左上角又紧挨着同一个分界，不避让就是几个数字叠一坨。
-    // 谁最"钉死"谁先占位：分界价格 → 待定 → 撤回（都钉在一个价上，不许挪）→「升级」（管一整段，可以挪）。
+    // 谁最"钉死"谁先占位：分界价格 → 待定 → 撤回（都钉在一个价上，不许挪）→ 框编号（钉在某个中枢上）
+    // →「升级」（管一整段，可以挪）。**这条链就是画的顺序**，改顺序就得连这里一起改。
     const mine = [];
 
     // ① 分界（§八 2）：竖虚线 ＋ 极值处一个实心点 ＋ 标价格。画在 K 线**之上** —— 理由跟切点记号
@@ -700,14 +721,69 @@ function trendMarkView(target, state, prim) {
       D.labels.push(haloText(ctx, x + 8, y + 4, `${fmtG(r.price)} 撤回`, TREND.mut, 'left', mine));
     }
 
-    // ④ 升级（§八 5 的前半）：段上标「升级」二字。框在下层（③ 那一节），这一句是给"这一段按
+    // ④ 框编号 A／B／C（§八 6，card-c6644f52-2fa）：**段内按时间排，换一段重新从 A 起**。
+    //    图上的记号只有字母，**段号不画**（段号是给人对表用的，画上去这一层就变成两个体系）。
+    //    ★ 挂哪一级**不许猜**：载荷的 `trend_reading` 说了算（`docs/spec/走势分段.md:280`）——
+    //      A ⇒ 升级段的字母挂**合成出来的高一级中枢**（`units`）、别的段挂本级别（`seg_centers`）；
+    //      B ⇒ 一律挂本级别。★ D3 换边是**后台一个字段**的事，这一层一个字都不用改 ——
+    //      A 和 B 两种排法这里都写好了，切的是数据不是代码。
+    //    ★ 钉在**中枢自己的范围中心**（x 取 `X0..X1` 中点、y 取价格带中点）：字母要能一眼认出
+    //      "这一枚说的是哪一个中枢"。钉在段的左上角就没有这个对应 —— 那是「升级」二字的锚法，
+    //      它管的是"这一整段"，字母管的是"段里这一个中枢"，两种锚法不能混。
+    //    ★ 颜色**用墨色**（跟分界那个价格同一套：墨 ＋ 描边），**不跟段的方向色走** ——
+    //      第一版跟方向走，绿字母落在 16% 的绿带上、红字母落在红带上，看图当场就废了
+    //      （一团暗红里几个更暗的红点）。理由写在 `FONT_LET` 上面那一段。**唯一的例外**：
+    //      **还在长的那一段用灰** —— 它中枢数还会变、字母将来要重排，不该跟定下来的字母一样亮；
+    //      那是"未定"的记号，"这一段往哪儿去"已经由背景带说了。
+    if (shownOf(opts).trendNum) {
+      // 缺字段按 A —— 后台的缺省就是 A（core/trend.py），而"猜不出来就画 B"会静默换掉一套口径
+      const reading = data.trend_reading === 'B' ? 'B' : 'A';
+      const lv = data.seg_centers || [], uni = T.units || [];
+      const capMid = Math.round(SIZE_LET * 0.36);   // 把字母的**中线**摆到 y 上（haloText 的 y 是基线）
+      for (let i = 0; i < T.segments.length; i++) {
+        const s = T.segments[i];
+        const zs = ((reading === 'A' && s.upgraded) ? uni : lv).filter((z) => z.seg === i);
+        const col = s.live ? TREND.mut : TREND.edge;
+        let drawn = 0, offY = 0;
+        for (let k = 0; k < zs.length && k < TREND_LET.length; k++) {
+          const z = zs[k];
+          const lo = z.ZD !== undefined ? z.ZD : z.DD;      // 本级别是 ZD..ZG，高一级是 DD..GG
+          const hi = z.ZG !== undefined ? z.ZG : z.GG;
+          const x = vp.xOfBar(Math.round((z.X0 + z.X1) / 2)), y = vp.yOfPrice((lo + hi) / 2);
+          // ★★ **x 和 y 都得在屏上** —— 这一处跟这一层别的字**不一样**，是踩过才知道的：
+          //    分界／待定／撤回那几个是"一根竖线 ＋ 一个价"，纵着贯穿整屏 ⇒ 只看 x 就够了。
+          //    字母是一个**钉在某个价上的点**，而读法 A 下那个价是**高一级中枢**的价格中点 ——
+          //    那个中枢可以横跨大半段历史、上下几百点，它的中点**经常落在当前视野之外**。
+          //    只判 x 的话，字母会被画到画布外面去（实测：y = −182，屏幕上一个字都看不见，
+          //    而 `trendDrawn` 里照样记着它画了）——**账上有、屏上没有**，正是最难查的那种。
+          //    ★ 不夹回画布（跟上面 `onScreen` 那条账同一条）：落点看不见就不画，别把它拖到边上
+          //      假装它在那儿。代价是：读法 A 下这一层可能只画得出一部分字母 —— 这是**要报的**，
+          //      不是要藏的（见卡 card-c6644f52-2fa 上那张图）。
+          if (x === null || y === null || !onScreen(x, W, 8) || !onScreen(y, H, 8)) {
+            // 「横着在屏上、纵着出去了」单独记一笔：这不是"滚到别处去了"（那种是正常的），
+            // 是**这一枚的价当前看不见** —— 读法 A 下会真的发生，得让它量得出来。
+            if (x !== null && onScreen(x, W, 8) && (y === null || !onScreen(y, H, 8))) offY++;
+            continue;
+          }
+          D.labels.push(haloText(ctx, x, y + capMid, TREND_LET[k], col, 'center', mine, FONT_LET, SIZE_LET));
+          drawn++;
+        }
+        // ★ **每一段都记一笔，包括 0 枚的那些**。第一版是"有字母才记"，工装立刻逮到：
+        //   出口里少了图头那一段 ⇒ 看的人分不清"这一段没有字母"和"这一段压根没算" ——
+        //   而"图头 0 中枢 ⇒ 无字母"正是这一层最要说清的一件事之一。**零也要有行**。
+        D.num.push({ seg: i, n: zs.length, drawn, offY, over: Math.max(0, zs.length - TREND_LET.length) });
+      }
+    }
+
+    // ⑤ 升级（§八 5 的前半）：段上标「升级」二字。框在下层（③ 那一节），这一句是给"这一段按
     //    高一级读"这件事挂个名。锚在段的**左上角** —— 段可以横跨整屏，锚中间会让字落在半空中。
     //    ★ 颜色借 `up_seg`（品红那一族）：它跟框层那个「↑高N级」是同一套语汇，一个新色都不造。
+    //    ★ 画在最后 ⇒ 也**让位**（它管的是"这一整段"，挪一挪不丢信息；上面那四种挪了就不是那个东西了）：
+    //      分界价格钉在一个价上、待定／撤回钉在一根 bar 上、编号钉在某个中枢上，只有它能挪。
     for (const s of T.segments) {
       if (!s.upgraded) continue;
       const x = vp.xOfBar(s.i0), x1 = vp.xOfBar(s.i1);
       if (x === null || x1 === null || x1 < 0 || x > W) continue;
-      // 「升级」放在最后画、也**让位**：它管的是"这一整段"，挪一挪不丢信息；上面那三种挪了就不是那个价了。
       const lx = Math.max(x, 4) + 6;
       D.labels.push(haloText(ctx, lx, fitLabel(ctx, lx, 4 + 14, '升级', mine, H), '升级', CHART.up_seg, 'left', mine));
     }
@@ -715,9 +791,13 @@ function trendMarkView(target, state, prim) {
 }
 
 /** 带描边的一行字（参考图的 `paint-order: stroke` ＋ 3 px 白边，这边那圈是页面底色）。
- *  → 返回 [x0, y0, x1, y1, 字]：**只记不避让**，给工装去量（见 trendMarkView 开头那段账）。 */
-function haloText(ctx, x, y, text, col, align, mine) {
-  ctx.font = FONT;
+ *  → 返回 [x0, y0, x1, y1, 字]：**只记不避让**，给工装去量（见 trendMarkView 开头那段账）。
+ *  ★ `font` / `size` **必须是一套的**（`FONT_LET` 配 `SIZE_LET`）：包围盒是按 `size` 算的
+ *    （基线上 `0.92×`／下 `0.25×`，12px 时正好是 11／3，跟老调用点一字不差）。
+ *    ⇒ 光换 `font` 不给 `size`，量出来的框就是假的 —— 那种错不会红，只会让人量到错的东西。 */
+function haloText(ctx, x, y, text, col, align, mine, font, size) {
+  ctx.font = font || FONT;
+  const sz = size || 12;
   ctx.textAlign = align || 'left';
   ctx.lineWidth = 3; ctx.strokeStyle = TREND.halo; ctx.lineJoin = 'round';
   ctx.strokeText(text, x, y);
@@ -726,7 +806,7 @@ function haloText(ctx, x, y, text, col, align, mine) {
   const w = ctx.measureText(text).width;
   ctx.textAlign = 'left';
   const x0 = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;
-  const box = [x0, y - 11, x0 + w, y + 3, text];   // 12px 那档字的上下沿：基线上方 11、下方 3
+  const box = [x0, y - Math.round(sz * 0.92), x0 + w, y + Math.round(sz * 0.25), text];
   if (mine) mine.push(box.slice(0, 4));            // 占位（只占位、不避让；避让见 fitLabel）
   return box;
 }

@@ -71,6 +71,13 @@ opts.cutPreview = SUB_Q.get('cutpv') === '1';
 // ★ 它**只在 `cut=trend` 那份载荷上有东西可画**（`cut=extend` 那份连 `trend` 这个键都没有）——
 //   所以那一档下这一颗按灰，理由写在标题里（跟「成交量」那颗在没有 v 的数据上按灰同一条账）。
 opts.trend = SUB_Q.get('trend') !== '0';
+// 框编号 A／B／C（v3 §八 6，卡 card-c6644f52-2fa）：**默认关**（小栋 10-05 12:3xZ 拍的；
+// 这一条跟「走势分段」那颗反着来，理由也是反的：那层是小栋要看的东西、藏着等于没有；
+// 编号是**加在它上面的一层细读**，默认糊在图上会把主图的字挤满）。地址栏 `?trendnum=1` 可以指名
+// （可分享、可截图复现），一个字没有 ⇒ 关。
+// ★ 字母挂哪一级**这一层不猜**：载荷的 `trend_reading` 说了算（A 挂合成出来的高一级中枢、
+//   B 挂本级别）。⇒ D3 保持 A 还是换 P6，是**后台一个字段**的事，前端这一行一个字都不用改。
+opts.trendNum = SUB_Q.get('trendnum') === '1';
 const state = { data: null, opts, candleSeries: null };
 const primitives = [];
 // 往左拖那套状态：span＝现在手上是第几档，spanMax＝后台给的封顶，earliest＝币安真没有了。
@@ -1151,7 +1158,10 @@ function applyToggles() {
     // 成交量那颗在**没有 v 的数据上**按灰（仓里的样本就是）：能点却画不出东西的开关是骗人的。
     // 走势分段那颗同理：`cut=extend` 那份载荷没有 `trend` 这个键 ⇒ 开着也画不出东西 ⇒ 按灰。
     b.disabled = sigChip ? !opts.sig : k === 'vol' ? !sub.hasVol
-      : k === 'trend' ? !(state.data && state.data.trend) : false;
+      : k === 'trend' ? !(state.data && state.data.trend)
+        // 框编号画在走势那一层**里面**（字母说的是"这一段里的第几个中枢"）⇒ 那一层关着时它按灰：
+        // 能点却画不出东西的开关是骗人的（跟上面那条同一条账，不是新规矩）。
+        : k === 'trendNum' ? !(state.data && state.data.trend) || !opts.trend : false;
   }
   // 「关着的层不许有能点的开关」这条账，看法那组也算：买卖点一关，它就得跟着灰（或反过来亮回来）。
   renderMeasures();
@@ -1185,6 +1195,10 @@ function buildChips() {
   // 排在「高一级」后面 —— 它俩都跟"升级"沾边，挨着放；但**不是一个东西**（那颗是第 33 课"满 9 段"
   // 升出来的框，这一层是 v3 的 D3"连续扩展合成"），标题里说清楚。
   add('走势分段', 'trend', TREND.up);
+  // 框编号那一层（v3 §八 6，卡 card-c6644f52-2fa）：**紧挨着「走势分段」放** —— 它俩是同一件事的
+  // 粗读和细读（那一层说"走势怎么切的"，这一颗说"每段里那几个中枢排第几"）。**默认关**。
+  // 点色借 `TREND.edge`（结构墨色）：字母本身按段的方向上绿／红／灰，拿哪一个当点色都是半句谎。
+  add('框编号', 'trendNum', TREND.edge);
   add('买卖点', 'sig', CHART.buy);
   for (const k of ['一买', '二买', '三买', '一卖', '二卖', '三卖']) add(k, `sig:${k}`, k.endsWith('买') ? CHART.buy : CHART.sell);
   add('待确认', 'sigPend', CHART.sell);
@@ -1949,6 +1963,8 @@ function setUrl() {
   // 走势分段那一层：**默认开**（Nova 17:09Z），所以这一头反过来写 —— **关着才写上去**（`?trend=0`）。
   // 跟上面两颗（vol/macd 缺省写不写）同一条账，方向相反而已。
   if (opts.trend) q.delete('trend'); else q.set('trend', '0');
+  // 框编号：**默认关**（跟 cutpv 同一头）⇒ 开着才写上去。
+  if (opts.trendNum) q.set('trendnum', '1'); else q.delete('trendnum');
   history.replaceState(null, '', `?${q}`);            // 可分享、可截图复现
 }
 
