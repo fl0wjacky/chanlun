@@ -454,9 +454,12 @@ const ghostTime = (ms) => new Date(ms).toISOString().slice(11, 16);             
 function ghostShow(e, g) {
   if (g !== ghostOn) {
     ghostOn = g;
+    // ★ 措辞按 Atlas 2026-10-05 核的那条改过一版：原来写「这个点 04-02 13:30 出现过」，可那是
+    //   **极值那根**的时间，点在这之后才确认 —— 那一刻它还没「出现」。别让一句话把时间说错：
+    //   `g.t` 是极值那根，`g.at` 才是我们**看着它没掉**的那一刻。
     ghostTip.textContent =
-      `${g.kind} · 这个点 ${ghostDate(g.t)} UTC 出现过、后来消失了\n`
-      + `（本次打开 ${ghostTime(g.at)} UTC 那次取数里它已经不在了 —— 只在页面上记着，重开就清空）`;
+      `极值在 ${ghostDate(g.t)} UTC 的这个${g.kind}，之前确认过 —— 本次打开 ${ghostTime(g.at)} UTC 那次取数时它已经不在了\n`
+      + `（只在页面上记着，重开就清空）`;
   }
   ghostTip.classList.add('on');
   const r = ghostTip.getBoundingClientRect();
@@ -523,6 +526,9 @@ function paint(d) {
   const last = bars.at(-1);
   el('last').textContent = last ? `最新 ${fmtPrice(last.close, d.meta?.tick)}` : '';
   stamp(d);
+  // 数据一落地就按**这一份**重排自动重取（见那一节）。放这儿是因为 paint 是**所有**数据的唯一落点
+  // ——首屏、换品种、换看法、往左补数据、自动重取自己，全从这儿过，不用在每个入口各排一次。
+  autoPlan();
 }
 
 // 装一张新数据：**先画，再摆视口**。keep 是补数据前抓的锚点（见 paging）；给了它就走「按时间放回原位」。
@@ -1228,6 +1234,135 @@ async function setMeasure(id) {
     if (id0 === paging.reqId) paging.loading = false;
   }
 }
+
+// ---------------------------------------------------------------- 每根 K 线收盘自动重取
+// （card-cf3ed018-795，Nova 2026-10-05 定；小栋要的是「当场看得见」）
+//
+// ★ 为什么非有它不可：「确认后又消失」**只有重新取数才看得见**。在那之前，页面上唯一的定时器是
+//   底下那句 `setInterval(… stamp(state.data) …, 30000)` —— 它只刷新角上那行时间标签，**不发请求**
+//   （Atlas 10-05 核实过）。也就是说用户开着不动，这个功能几乎永远不会自己触发，等于没有。
+//   ⇒ 那一句留着（它是"多久之前"那句话的事），自动重取是**另加**的一条。
+//
+// 口径（四条，一条都不许省）：
+//   ① 当前周期**每收盘一根**取一次。收盘时刻 = 手上这份数据**最后一根的开盘时间 ＋ 一个周期**，
+//      再加 10 秒余量等后台把新那根拉进来。
+//      ★ 按**最后一根**算，不按钟表算：数据旧了（后台卡住、离线样本、切回来时过了好几根）
+//        钟表会去追一个已经过去的时刻，那才是真的空转 —— 按最后一根算，它自己会落到"下一根"。
+//   ② **只在标签页可见时取**（切到后台就停）：没人在看的那些取数，白白敲后台，页面也不会因此多知道
+//      什么（图在那儿谁也没看）。切回来**立刻补一次** —— 那时候已经过了一根就马上取。
+//   ③ 一分钟内最多一次：周期算出来的时刻挨得太近、或者可见性来回切，都不许敲出连发。
+//   ④ 走**同一条**取数＋绘制路径（跟 setMeasure 那份对齐）：档位/看法照旧带着、读数压住
+//      （dataStale —— 数据在飞的时候屏上还是旧图，读数写着新数就是一句谎）、视口按**时间**放回原位。
+//      ★ 少了 ④ 这一条，自动重取就会变成"图自己跳一下"——那比不刷新还烦人。
+//   ⑤ **错峰**（Bram 10-05 量的）：收盘那一刻大家都来取，第一个请求才会让后台去币安拉新的那根，
+//      而且它这次回的**还是旧**数据（SWR，头里 refreshing=true）。所以收盘后**随机**等 2–10 秒再取
+//      （人分散开），并且回来看见 refreshing=true、或者最后一根还不是刚收的那根 ⇒ **这一趟当没跑**，
+//      过几秒再补一次（有次数上限），而不是等一个整周期。
+const TF_SEC = { '15m': 900, '30m': 1800, '1h': 3600, '2h': 7200, '4h': 14400 };
+const AUTO_LAG_MIN = 2000;           // 收盘之后随机等这段时间再取（下界也是「过没过期」那道判据）
+const AUTO_LAG_MAX = 10000;          // 上界（后台那一趟拉取不是瞬时的，10 秒够了）
+const AUTO_MIN_GAP_MS = 60000;       // 一分钟内最多一次（③）
+const AUTO_RETRY_MS = 5000;          // 回来的是旧数据 ⇒ 过几秒再补（②）
+const AUTO_RETRY_MAX = 4;            // 补的次数上限：别把后台的一次卡顿敲成连环请求
+let autoTimer = 0, autoAt = 0, autoTries = 0;   // autoAt ＝ 上一次**发起**自动取数的时刻
+
+/** 手上这份数据里最后一根**该收盘的时刻**（ms）；算不出来（没数据、周期不认识）返回 null。 */
+function autoCloseAt(d) {
+  const step = (TF_SEC[d && d.tf] || 0) * 1000;
+  const last = d && d.bars && d.bars.length ? d.bars[d.bars.length - 1].t : null;
+  return step && last != null ? last + step : null;
+}
+/** 手上这份**已经过期**了吗：最后一根之后的那一根，按时间早该出来了（切回来补一次用这一条）。 */
+function autoDue(d) {
+  const at = autoCloseAt(d);
+  return at != null && at + AUTO_LAG_MIN <= Date.now();
+}
+/** 刚取回来的这份**是不是真的换了一份新的**（⑤：SWR 的第一趟回的还是旧的）。
+ *  两条判据（Bram 10-05）：①头里 `refreshing` ⇒ 后台还在去币安拿，这一趟不算；
+ *  ②最后一根得**走到我们等的那一根**（≥ 上一份的"下一根该开盘"时刻）—— 连新那根都没有，
+ *  这一趟就等于什么都没发生，不该为它等一个整周期。 */
+function autoFresh(own, d) {
+  if (d.refreshing === true) return false;
+  const expect = autoCloseAt(own);
+  const last = d.bars && d.bars.length ? d.bars[d.bars.length - 1].t : null;
+  return expect == null || last == null ? true : last >= expect;
+}
+/** 排下一次。（每次 paint 都重排一次：数据一换，收盘时刻就该按**新那份**重算。） */
+function autoPlan() {
+  clearTimeout(autoTimer);
+  const step = (TF_SEC[state.data && state.data.tf] || 0) * 1000;
+  let at = autoCloseAt(state.data);
+  if (at == null) return;
+  // ★ 那个时刻**已经过去**了（切回来过了一根、后台卡着没动）⇒ 往前推到**下一根**再排。
+  //   不推的话 `Math.max(1000, 过去 - 现在)` 会变成"每秒来一次"的空转 —— 一次取数都不发
+  //   （③ 那道闸拦着），但一秒一个定时器白烧电，而且它掩盖了真正该问的问题：这一根到底取到没有。
+  while (at + AUTO_LAG_MIN <= Date.now()) at += step;
+  // ⑤ 错峰：每一根**重新摇一次**（不记住上一根摇的数 —— 记住了大家还是会在同一秒撞上）。
+  const lag = AUTO_LAG_MIN + Math.random() * (AUTO_LAG_MAX - AUTO_LAG_MIN);
+  // 看不见的时候到点了也**什么都不做**：这一次不是跳过，是留给 visibilitychange 那次补
+  // （在后台偷偷取数既不划算也不礼貌）。
+  autoTimer = setTimeout(() => { if (document.visibilityState === 'visible') autoFire(); },
+                         Math.max(1000, at + lag - Date.now()));
+}
+/** 定时器到点 / 切回来补一次，都从这儿进（③ 那道闸只在这里判）。 */
+function autoFire() {
+  if (Date.now() - autoAt < AUTO_MIN_GAP_MS) { autoPlan(); return; }
+  autoAt = Date.now();
+  autoGo();
+}
+async function autoGo() {
+  const fresh = await autoReload();
+  // false ＝ 回的还是旧的（SWR 头一趟）⇒ 几秒后再补，别为它等一个整周期。
+  if (fresh === false && autoTries < AUTO_RETRY_MAX) {
+    autoTries++;
+    clearTimeout(autoTimer);
+    autoTimer = setTimeout(() => { if (document.visibilityState === 'visible') autoGo(); }, AUTO_RETRY_MS);
+    return;
+  }
+  autoTries = 0;
+  autoPlan();                        // 取到没取到都要排下一次：失败就当这一根没发生，下一根再来
+}
+/** 同一个桶（品种/周期/档位/看法）重取一份。**它换的不是桶，是"刷新"** —— 账本就是拿它跟前一份比的。
+ *  返回：true ＝ 真换了一份新的；false ＝ 回的还是旧的（SWR）；null ＝ 这一趟没成（不补，等下一根）。 */
+async function autoReload() {
+  const own = state.data;
+  if (!own || paging.loading) return null;    // 有别的请求在飞 ⇒ 让它把话说完，这一根让给它
+  const id = ++paging.reqId;                  // 跟首屏/换看法/往左加载共用同一个号：谁后发谁算数
+  paging.loading = true;
+  dataStale = true;                           // 数据在飞：读数压住（跟换品种那条同一笔账）
+  try {
+    const anchor = own ? anchorOf(own.bars, chart.timeScale().getVisibleLogicalRange()) : null;
+    const d = await load(el('symbol').value, el('tf').value, paging.span, paging.measure);
+    if (id !== paging.reqId) return null;
+    // ★ 取不到真后台时 load() 会**悄悄退回仓里的样本**（source 是「样本 x.json」，而且顺手把 span
+    //   摁回 1、说自己「到最早」）。这一趟**绝不能当刷新画上去**：样本是另一份数据，账本会把它读成
+    //   「屏上这些点全没了」—— 满屏假空心点；顺带还把档位和窗口一起洗掉（adopt 会吃它的 span/earliest）。
+    //   宁可什么都不做：屏上这份照旧，下个收盘再说。（`source` 只有 load() 那头挂，页面别自己猜。）
+    if (d.source !== 'api') {
+      console.warn('自动重取没拿到真数据（退回样本），这一趟当没跑：', d.source);
+      return null;
+    }
+    const fresh = autoFresh(own, d);
+    // prevLen 传 undefined：这不是补数据，「要了却一根没多」那条判据在这儿不成立（同 setMeasure）。
+    Object.assign(paging, adopt(paging, d));
+    setUrl();
+    if (anchor) draw(d, anchor); else draw(d);
+    el('state').textContent = d.closed ? '已收盘' : '未收盘（最后一根还在走）';
+    el('state').className = 'badge ' + (d.closed ? '' : 'live');
+    return fresh;
+  } catch (e) {
+    // ★ 失败**不打扰用户**：屏上那份还是好的，角上那句也不改（别把一次后台抖动写成页面的错误）。
+    console.warn('自动重取没成功（屏上这份照旧）：', e);
+    return null;
+  } finally {
+    if (id === paging.reqId) { paging.loading = false; dataStale = false; }
+  }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !state.data) return;
+  // 切回来**立刻**补一次（⑤ 的错峰只管收盘那一刻：人都回来了，再随机等几秒就是白让用户看旧图）。
+  if (autoDue(state.data)) autoFire(); else autoPlan();
+});
 
 function renderLegend() {
   const items = [];
