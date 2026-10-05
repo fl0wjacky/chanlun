@@ -145,8 +145,8 @@ import sys as _sys                                               # noqa: E402
 _S = _sys.modules["core.signals"]                                # core/__init__ 把 signals 导成了函数，模块要从这里拿
 print("=" * 72)
 _bvi = sum(len(_S.check_signals(_S.signals(r_, lv_, m_), r_, lv_, m_))
-           for r_ in R.values() for lv_ in ("seg", "pen") for m_ in ("lines", "peak"))
-count("背驰新看法 signals≠独立复核", _bvi, "　← lines / peak 两种，两层")
+           for r_ in R.values() for lv_ in ("seg", "pen") for m_ in ("lines", "peak", "macd_or_lines"))
+count("背驰新看法 signals≠独立复核", _bvi, "　← lines / peak / macd_or_lines 三种，两层")
 
 
 def _probe(measure, patch_name, fake):
@@ -173,6 +173,17 @@ def _rev_lines(real):
     return f
 
 
+def _or_flip_lines(real):
+    # 「或」里黄白线那半比较方向反了 ⇒ 多发出不该发的点，独立复核必须抓到。
+    # 不用「或写成且」：那只会少发点，而这道门是单侧的（只核发出来的点合不合规，card-bbfd7719），少发抓不到。
+    def f(A, C, want_down, data, measure, ratio):
+        if measure == "macd_or_lines":
+            return (real(A, C, want_down, data["macd"], "macd", ratio)
+                    or real(A, C, not want_down, data["lines"], "lines", ratio))
+        return real(A, C, want_down, data, measure, ratio)
+    return f
+
+
 def _mean_peak(real):
     def f(u, hist, measure="macd"):
         if measure == "peak":                                    # 峰值换成均值
@@ -183,7 +194,8 @@ def _mean_peak(real):
 
 
 for _name, _m, _pn, _fk in (("黄白线比较方向反过来", "lines", "_diverges", _rev_lines),
-                            ("峰值换成均值", "peak", "strength", _mean_peak)):
+                            ("峰值换成均值", "peak", "strength", _mean_peak),
+                            ("面积或黄白线里黄白线方向反了", "macd_or_lines", "_diverges", _or_flip_lines)):
     _mv, _ct = _probe(_m, _pn, _fk)
     if _mv == 0:
         skip("背驰探针（%s）没红" % _name, "这几份数据上变异没改动任何输出，探针空转")
