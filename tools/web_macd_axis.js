@@ -55,6 +55,9 @@
 //        才认「量不出来」；用的哪一屏、两次各量到几根、各多高，都印在那一行里。
 //   ⑦ **重建也管用**：点一次「MACD」那颗 chip（关 ⇒ 窗格收回去；开 ⇒ 重新建格、重新要数据），
 //      回来之后 ①②③④ 必须照样绿 —— 修法长在 `buildSub()` 里，这条防的是「只在第一次打开生效」。
+//      ★ 量之前先 `waitLayoutSettle()` 等页头贴住那一格的上沿（见那个函数的注释）——
+//        ⑦ 原来会**偶发飘红**就是量在「页头还没被摆到位」那一拍上（页面那边也真有这一拍，
+//        已在 `web/app.js` 的 `placeSubhead()` 里堵掉；这条是量之前的第二道）。
 //   ⇒ 轴上刻度是从这根比例尺生成的，所以「轴的范围」就是「刻度的范围」：
 //      ① 红＝刻度不是正经刻度，② 红＝刻度对不上数据的最大最小（Atlas 的原话）。
 //
@@ -402,7 +405,47 @@ async function readHeadBand(page) {
   });
 }
 
+// ★ 量之前先等版面落定（卡-9b0fe913-758 · Nova 派的「量早了一格」）。
+//   ⑦ 重建那一格原来**偶发飘红**，读数长这样：绿的时候「页头 y=[6,27]」，红的时候「页头 y=[178,199]」
+//   —— 正好**下移一格高**（同一条读数里就印着 `格高 172`）。看着像页头盖住了数据，其实是
+//   **量在了页面还没把页头摆到位的那一拍上** —— 那一拍页面自己也确实是错的（下一段），两件事都要治：
+//   页面那边堵掉「照错的格高摆」(`web/app.js` 的 `placeSubhead()`)，这边保证「不量没落定的版面」。
+//
+//   真身（2026-10-05 探针量出来的，不是猜的）：点开 MACD 时 `app.js` 的 `syncSub()` 是
+//   `buildSub()`（建窗格）**紧接着**就 `paintSubData()`（里面叫 `placeSubhead()`）——
+//   那一刻 LWC **还没把新窗格排出来**，`pane.getHeight()` 是 **0**，于是：
+//     · `reserveSubhead()` 头一句 `if (!h) return;` ⇒ 让白那一趟整个没跑；
+//     · `placeSubhead()` 按「格高 0」算 top ⇒ 页头被写到**低一整格**的地方。
+//   探针实测三趟调用：`h=0 → top 686px`、`h=0 → top 686px`、`h=172 → top 514px`（686−514 ＝ 172 ＝ 格高）。
+//   ⇒ **修回来的那一趟是后面才到的**（换格/取数那一趟 paint）。工装原来只 `sleep(800)` 就量，
+//     落在 686 那一段上就红、落在 514 之后才绿 —— 这就是"飘"的来源。
+//
+//   ★ 等的**不是**「几何不动了」：686 那个状态是**稳的**，稳着不动地错。等的是**页面自己把页头摆到位**：
+//     页头得贴住副图那一格的上沿（`SUBHEAD_TOP=4`，实测 6px）。等不到就照量 —— **红了就是真红**，
+//     绝不因为「等超时」就当绿（判据一个字没改，见下面 ⑨）。
+const 页头贴住了 = (page) => page.evaluate(() => {
+  const A = window.__app;
+  const pane = A && A.chart && A.chart.panes()[1];
+  const sh = document.getElementById('subhead');
+  if (!pane || !sh || !sh.classList.contains('on')) return true;   // 没开／没那一格 ⇒ 不归这条等
+  const pr = pane.getHTMLElement().getBoundingClientRect();
+  if (!pr.height) return false;                                     // 窗格还没排出来（就是 getHeight()===0 那一拍）
+  const sr = sh.getBoundingClientRect();
+  return Math.abs(sr.top - pr.top) <= 24;                           // 贴着上沿；错的时候是 178（一整格高）
+});
+
+async function waitLayoutSettle(page, { 最多 = 5000 } = {}) {
+  const t0 = Date.now();
+  for (;;) {
+    if (await 页头贴住了(page)) return { ok: true, 等了: Date.now() - t0 };
+    if (Date.now() - t0 >= 最多) return { ok: false, 等了: Date.now() - t0 };
+    await sleep(50);
+  }
+}
+
 async function judge(page, tag) {
+  const settle = await waitLayoutSettle(page);
+  if (!settle.ok) console.error(`⚠ ${tag}：页头 ${settle.等了}ms 内没贴住副图上沿 —— 照量（量到的是没落定的版面，红了是真红）`);
   const a = await readAxis(page);
   // ⑨ 页头那条带子：压在上面就不许盖住数据（每一趟都量 —— 它跟缩放到哪一屏无关）。
   const hb = await readHeadBand(page);
