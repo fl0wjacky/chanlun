@@ -40,7 +40,7 @@ def main():
     cur, cuts = C.cut_centers(r, sig)
     done = [s for s in r["segs"] if not s.get("live")]
     ends = {done[0]["i0"]} | {s["i1"] for s in done}
-    bad = []
+    bad, skipped = [], []
 
     def cell(name, ok, note=""):
         print("%s %s %s" % ("✓" if ok else "✗", name, note))
@@ -110,6 +110,7 @@ def main():
                 pin_bad.append(((x0, x1), have))
         cell("⑦ 钉死 zec15 那两个框的切点（谁切、切在哪根、状态）", not pin_bad, "不符 %s" % pin_bad[:1])
     else:
+        skipped.append("⑦")
         print("· ⑦ 未执行（只钉 data/zec15.json；这份是 %s）—— 不算绿" % os.path.basename(path))
 
     real = C._status
@@ -127,7 +128,7 @@ def main():
     inside = [c for c in cuts_b for z in targets if z["X0"] < c["cut_bar"] < z["X1"]]
     cell("探针 B：线段层认 ⇒ 那两个框切不开", not inside,
          "（这份数据里找到 %d 个目标框；线段层认出 %d 刀）" % (len(targets), len(cuts_b)))
-    print("全部通过" if not bad else "%d 格不过" % len(bad))
+    print(("全部通过" + ("（%s 未执行）" % "、".join(skipped) if skipped else "")) if not bad else "%d 格不过" % len(bad))
     return 1 if bad else 0
 
 
