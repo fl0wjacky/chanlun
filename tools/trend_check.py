@@ -21,6 +21,11 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 from core.analyze import analyze                              # noqa: E402
 import core.trend as T                                        # noqa: E402
 from cut_check import load, kline_files                      # noqa: E402
+import re                                                     # noqa: E402
+
+# 线上用哪种 D3 读法以 web/server.py 的 TREND_READING 为准（不 import server，免得起它那一摊）；这里的格子都按它跑
+_m = re.search(r'^TREND_READING = "([AB])"', open(os.path.join(ROOT, "web", "server.py"), encoding="utf-8").read(), re.M)
+READING = _m.group(1) if _m else None
 
 # spec §三（agent/atlas/spec-v3 22e0570 起）：(bar, 高低, 确立那一根)
 BASE = {
@@ -28,6 +33,8 @@ BASE = {
     "zec30_cut.json": [(134, "L", None), (3476, "H", None), (4219, "L", None), (6150, "H", None), (6805, "L", None)],
 }
 BASE_PRICE = {"btc_4h.json": [("H", 97932.1)], "zec_1h.json": [("L", 205.07)], "aaplusdt_30m.json": [("L", 300.50)]}
+# spec D3（小栋 10-05 定 B）：升级中枢留在本级别一起数 ⇒ zec15 第 1、5 段读「上涨」（A 读法下是「升级·盘整」）
+TYPES = {"zec15.json": ["盘整", "上涨", "盘整", "盘整", "下跌", "上涨"]}
 RETRACT = {"zec15.json": [(15295, "H")], "zec30_cut.json": []}
 _R = {}
 
@@ -37,6 +44,7 @@ def run(fn, bars=None, **kw):
     key = (fn, len(bars) if bars else None)
     if key not in _R:
         _R[key] = analyze(bars or load(os.path.join(ROOT, "data", fn)), tick=tick_of(fn))
+    kw.setdefault("reading", READING)
     return _R[key], T.trend_v3(_R[key], **kw)
 
 
@@ -157,6 +165,8 @@ def main():
     in_box = [z for z in v["seg_centers"] if z["X0"] < 11314 < z["X1"]]
     cell("③ 367.77（bar 11314）不是分界、落在框里",
          [] if 11314 not in [b["bar"] for b in v["bounds"]] and in_box else ["11314 是分界或不在框里"])
+    cell("⑤ 段类型按线上读法 B（spec D3，server.TREND_READING）", [] if v["reading"] == "B" and [s["type"] for s in v["segments"]] == TYPES["zec15.json"]
+         else ["读法 %s 段类型 %s" % (v["reading"], [s["type"] for s in v["segments"]])])
     cell("④ 不看未来（zec15：最早能确立那一根起，之后一直在、不变）", no_future())
     print("全部通过" if not bad else "%d 处不过" % len(bad))
     return 1 if bad else 0
@@ -167,7 +177,9 @@ def self_test():
     _, base = run("zec15.json")
     arms = [("P1 拿掉 D2-4（不重算中枢）", dict(regroup=False), lambda v: len(v["bounds"]) != len(base["bounds"])),
             ("P2 拿掉 D2-3（不交替）", dict(alternate=False), lambda v: len(v["retracted"]) != len(base["retracted"])),
-            ("P5 拿掉 D2-7（空段照切）", dict(check_empty=False), lambda v: len(v["bounds"]) != len(base["bounds"]))]
+            ("P5 拿掉 D2-7（空段照切）", dict(check_empty=False), lambda v: len(v["bounds"]) != len(base["bounds"])),
+            ("D3 换回读法 A（⑤ 那一格必须看得见）", dict(reading="A"),
+             lambda v: [s["type"] for s in v["segments"]] != [s["type"] for s in base["segments"]])]
     miss = 0
     # P3（「H 之后价格不再过 H」，按段内 hi／lo）：默认规则下 5 份夹具都一根不差，牙只在 zec_1h 不交替时露出来
     # （段 8 端点 502.11→889.99、段内低点 250）：留着 P3 ⇒ 1 刀 1 撤（跟 Atlas 原型一样），拿掉 ⇒ 0 刀 3 撤
