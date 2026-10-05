@@ -73,6 +73,43 @@ def main():
     cell("④ 只动线段中枢（r 原样、买卖点不变）", same and S.signals(r, "pen", "macd") == sig
          and S.signals(r, "seg", "macd") == S.signals(before, "seg", "macd"))
 
+    # ⑤ 规则 2/3 独立重算切点：不调 _turn_bar / _snap。三类点的离开笔＝终点正好是回试笔起点的那一笔。
+    pens = r["pens"]
+    end_list = sorted(ends)
+    want = set()
+    for g in sig:
+        if not g["confirmed"] or g["kind"] not in C.TURN_KINDS:
+            continue
+        if g["kind"] in ("一买", "一卖"):
+            tb = g["bar"]
+        else:
+            back = pens[g["unit"]]
+            leave = [p for p in pens if p["i1"] == back["i0"]]
+            tb = leave[0]["i0"]
+        e = min(end_list, key=lambda x: (abs(x - tb), -x))
+        if e != end_list[0]:
+            want.add(e)
+    got = {c["cut_bar"] for c in cuts}
+    cell("⑤ 切点位置独立重算（一类＝极值那根、三类＝离开笔起点，落最近端点）", got == want,
+         "多 %s 少 %s" % (sorted(got - want)[:3], sorted(want - got)[:3]))
+
+    # ⑥ 规则 4：被切点截断的组，最后那个框不许还标「仍在延续」—— 只有全图最后一个框可以是 live
+    lives = [k for k, z in enumerate(cur) if z["live"]]
+    cell("⑥ 只有最后一个框可以是 live（组尾被截断的标『转折点切开』）", all(k == len(cur) - 1 for k in lives)
+         and any(z["term"] == "转折点切开" for z in cur), "live 的下标 %s" % lives)
+
+    # ⑦ 钉死（规格第三节第 1 条）：data/zec15.json 上那两个横跨的框，各被谁切、切在哪根
+    PIN = {(10811, 11859): [(10811, "笔·三卖", "done"), (11097, "笔·三卖", "void"), (11314, "笔·三买", "done"),
+                            (11859, "笔·三买", "done")],
+           (12632, 13528): [(12751, "笔·三买", "done"), (12906, "笔·一卖", "done"), (13369, "笔·三卖", "done")]}
+    if os.path.basename(path) == "zec15.json":
+        pin_bad = []
+        for (x0, x1), exp in PIN.items():
+            have = [(c["cut_bar"], c["by"], c["status"]) for c in cuts if x0 <= c["cut_bar"] <= x1]
+            if have != exp:
+                pin_bad.append(((x0, x1), have))
+        cell("⑦ 钉死 zec15 那两个框的切点（谁切、切在哪根、状态）", not pin_bad, "不符 %s" % pin_bad[:1])
+
     real = C._status
     C._status = lambda done_, k: "done" if k + 1 <= len(done_) else "pending"     # 头一段走完就算
     try:
