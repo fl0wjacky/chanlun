@@ -141,7 +141,14 @@ function pendingCuts(data) {
     const level = c.level === 'pen' ? 'pen' : 'seg';
     if (c.level !== 'seg' && c.level !== 'pen') warnCut(`cuts[].level 缺了/不认识（${JSON.stringify(c.level)}）：按 seg 画，请后台补 level`);
     const bx = (level === 'seg' ? seg : pen).find((b) => b.i0 <= bar && bar <= b.i1);
-    if (bx) out.push({ bar, tier: level, bx });
+    // ★ `inner`：这一刀是不是**真的切在这个框的肚子里**（i0 < bar < i1）。闭区间只管"这刀归哪个框画线"，
+    //   「挂不挂签」是另一件事：切点正好压在框的**右沿**上时（线上 ZEC 15m 就是：cut_bar=19911 ＝ 框
+    //   19698..19911 的右端），这一刀**不改这个框**，改的是它**后面那一组从哪儿重算**（Bram/Atlas 10-05
+    //   的规则解释）。在这种框上挂「待定」＝告诉人"这个框快要被切了"，正好是反的 ⇒ 只画线、不挂签
+    //   （Nova 10-05 08:58 拍的）。要求"严格落在框内"**不是**把这种刀丢掉：线照画、刀照样进 `cuts`。
+    if (!bx) continue;
+    const inner = bx.i0 < bar && bar < bx.i1;
+    out.push({ bar, tier: level, bx, inner });
   }
   return out;
 }
@@ -393,6 +400,9 @@ export function makeAnnotPrimitive(state) {
               //     顺手就把这枚签也量了。**签是主判据** —— 站点最远 0.53 px/根 时一条细虚线基本看不见。
               //   ★ **一个框上只挂一枚签**、签里带刀数（「待定 ×3」）：一刀一枚签的话，笔层三类点一多
               //     （Bram 10-05 提醒过会切碎）屏上就只剩小签，读不出"哪个框待定"这件事了。
+              //   ★ **切点压在框的右沿（或左沿）上时只画线、不挂签**：那一刀不改这个框（改的是它后面
+              //     那一组从哪儿重算，Bram/Atlas 10-05），挂签会读成"这个框要被切" —— 正好是反的。
+              //     Nova 10-05 08:58 拍。签里的刀数也只数框内那几刀。
               //   ★ 闸门跟价签同一条（框所在那一层开着才画）：层关着还往外画，那就不是开关的语义了。
               //   ★ 预览开着时不画这一组：那时候屏上摆的就是切开后的框（各带「随切点」），
               //     再把待定的竖线画上去，等于同一件事说两遍。
@@ -407,24 +417,29 @@ export function makeAnnotPrimitive(state) {
                   const byBox = new Map();                      // 框 → 它身上那几刀（顺序＝载荷给的顺序）
                   for (const c of byTier[tier]) {
                     if (!byBox.has(c.bx)) byBox.set(c.bx, []);
-                    byBox.get(c.bx).push(c.bar);
+                    byBox.get(c.bx).push(c);
                   }
-                  for (const [bx, bars] of byBox) {
+                  for (const [bx, cuts] of byBox) {
                     const yt = vp.yOfPrice(bx.z.ZG), yb = vp.yOfPrice(bx.z.ZD);
                     if (yt === null || yb === null) continue;
                     const yTop = Math.min(yt, yb), yBot = Math.max(yt, yb);
                     ctx.setLineDash(DASH.box); ctx.strokeStyle = rgba(col, 235);
                     ctx.lineWidth = WIDTH[tier === 'seg' ? 'sc' : 'pc'];
-                    let xr = null;                              // 签挂**看得见的**最右那一刀上
-                    for (const bar of bars) {
-                      const x = vp.xOfBar(bar);
+                    // ★ 线归「刀」，签归「框内的刀」——两件事分开数：
+                    //   压在框沿上的那一刀（`inner === false`）**线照画**（切点是真事、位置也在那儿），
+                    //   但**不进签的账**：它不改这个框，挂「待定」会读成"这个框要被切"（见 `pendingCuts`）。
+                    let xr = null;                              // 签挂**看得见的、框内**最右那一刀上
+                    for (const c of cuts) {
+                      const x = vp.xOfBar(c.bar);
                       if (x === null || !onScreen(x, W, 8)) continue;
                       ctx.beginPath(); ctx.moveTo(x, yTop); ctx.lineTo(x, yBot); ctx.stroke();
+                      if (!c.inner) continue;
                       if (xr === null || x > xr) xr = x;
                     }
                     ctx.setLineDash([]);
-                    if (xr !== null) {
-                      const txt = bars.length > 1 ? `待定 ×${bars.length}` : '待定';
+                    const nIn = cuts.filter((c) => c.inner).length;   // 签里的刀数＝**框内**那几刀
+                    if (xr !== null && nIn) {
+                      const txt = nIn > 1 ? `待定 ×${nIn}` : '待定';
                       tagRight(ctx, placed, xr - 4, yTop + 4 + TAG_H, txt, col, W, H);
                     }
                   }
