@@ -84,6 +84,8 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   // 真后台只在这一处被用到：取一份真数据当模子。
   const base = await (await fetch(`${PAGE}api/chart?symbol=ZECUSDT&tf=15m`)).json();
   if (!base.signals || !base.signals.seg) { console.error('✗ 真后台没回 signals —— 先确认后台起在 ' + PAGE); process.exit(2); }
+  // 真后台的 `/api/meta` 原件（⑰h 拿它跟**页面**对账 —— 那一页只吃这一份，不吃假后台那份）。
+  const RMETA = await (await fetch(`${PAGE}api/meta`)).json();
 
   // ★ 兜底那一条**必须**离左沿够远：模子是**真后台**给的，窗口会滑、点位会挪（实测两次跑差过 1600 根），
   //   万一兜底挑到 bar<1000 的点，左沿守卫（200 根）会把它按住 ⇒ ④ 那一格变成假红，
@@ -148,10 +150,21 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
       const z = zs[n];
       const a = done[z.PI0], b = done[z.PI1];
       if (!a || !b || !(z.PI1 > z.PI0 + 1)) continue;      // 至少要三根成员才锯得开
-      const mid = z.PI0 + 1;
-      const bar = Math.max(a.i0 + 1, Math.min(b.i1 - 1, Math.floor((a.i0 + b.i1) / 2)));
+      // ★ 切点得是**真的线段端点**（Bram 的 core/cut.py：`ends[k]` = 第 k 段的起点，`cut_bar = ends[k]`）。
+      //   拿"框的中点那一根 bar"当刀，两个临时框的缝和切点竖线就落在两个地方 —— 屏上看着像两件事，
+      //   而且这一格自己算出来的期望值也会跟着偏（第一版模子就是这么错的）。
+      const mid = z.PI0 + 1 + Math.floor((z.PI1 - z.PI0) / 2);
+      const bar = done[mid].i0;
       const c = { cut_bar: bar, by: '笔·三买', level: 'seg', status: 'pending' };
-      if (withBoxes) c.boxes = [{ ...z, PI0: z.PI0, PI1: mid }, { ...z, PI0: mid, PI1: z.PI1 }];
+      if (withBoxes) {
+        // ★ 真引擎给的是**整组**的框，不只被切的那一个（`cut_centers`：`prev <= PI0 < next` 全收）——
+        //   线上那一刀就是这样：两个临时框里有一个跟旧框**一模一样**（组里没被切到的那个）。
+        //   把这个形状照抄进来，才能量到「同一组的框换上去、不许叠着画两遍」这件事（⑰i）。
+        const pv = n > 0 ? zs[n - 1] : null;
+        const okPv = pv && done[pv.PI0] && done[pv.PI1];
+        c.boxes = [...(okPv ? [{ ...pv }] : []),
+                   { ...z, PI0: z.PI0, PI1: mid - 1 }, { ...z, PI0: mid, PI1: z.PI1 }];
+      }
       return c;
     }
     return null;
@@ -262,13 +275,19 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
     const shift = (soon ? NOWP - STEP_MS + 3000 : NOWP) - lastT;      // soon：还差 3 秒收盘
     const reqAt = [];                                                 // 每次取数的时刻（⑬ 量错峰用）
     // ⑰：切法那几张页面（card-e346ede6-996）。控件是**名单驱动**的（`/api/meta` 的 `cut_modes`）——
-    //   真后台现在**还没有**这一项（Bram 那一半还没合），所以这里把名单造出来喂给页面；
-    //   `nocut` 那页照用真后台那一份（**没有** cut_modes）⇒ ⑰a 量的正是「名单没到 ⇒ 不画控件、也不发参数」。
-    //   ★ 假后台只加这一个键，别的字段全是真后台的 —— 免得"控件出现了"这件事被别的东西带偏。
-    if (which.startsWith('cut')) {
+    //   名单到没到，在这一层由工装说了算：`nocut` 那页量的是「名单没到 ⇒ 不画控件、也不发参数」，
+    //   ⑰b–⑰g 那几张量的是名单到了之后的事。
+    //   ★ 假后台只动这一个键，别的字段全是真后台的 —— 免得"控件出现了"这件事被别的东西带偏。
+    //   ★ 这一层假后台**所有页面都挂**，而且默认把 `cut_modes` **拿掉**，只有切法那几张（⑰b–⑰g）才把它造出来。
+    //     为什么非得"所有页面"：Bram 的 server.py 合进 main 之后，真后台**每一项都带 cut_modes** ⇒
+    //     不挡的话别的格子（④c 量图高、⑤ 量那一小块）会凭空多出一排 chip，量的东西当场就不是原来那个了。
+    //     工装得**合并前后都能跑**：「名单到没到」这件事在这里由我们说了算，不由碰巧连到哪个后台说了算。
+    //   ★ `cutreal` 那一页**不挂**（⑰h 要的就是真后台那份原件，见那一格）。
+    if (which !== 'cutreal') {
       await p.route('**/api/meta', async (route) => {
         const m = await (await fetch(`${PAGE}api/meta`)).json();
-        m.cut_modes = ['extend', 'turn'];
+        if (which.startsWith('cut')) m.cut_modes = ['extend', 'turn'];
+        else delete m.cut_modes;
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(m) });
       });
     }
@@ -1115,7 +1134,30 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
              foot: (document.getElementById('meta') || {}).textContent || '' };
   });
   const fxReset = (p) => p.evaluate(() => { window.__fx.text.length = 0; window.__fx.vseg.length = 0; });
+  /** 画面上那一组签，**按落笔位置去重**：同一枚签不会被数成两枚（见 `fxOf` 里 `at` 那段注释）。
+   *  返回 `文字@x,y`，所以读数本身就带证据 —— 数出来的几枚，各自画在哪儿，一眼能核。 */
+  /** 这一刀给的**临时框**，各自在屏上的哪儿。`vis` ＝「露在屏上一截」（跟标注层 ③.6 挂签的判据同一件事：
+   *  整只在屏外才不挂）—— 所以「该有几枚『随切点』」＝ `filter(b => b.vis).length`。 */
+  const pvBoxes = (p) => p.evaluate(() => {
+    const app = window.__app, d = app.state.data, ts = app.chart.timeScale();
+    const done = (d.segs || []).filter((s) => !s.live);
+    const c = (d.cuts || []).find((x) => x && x.status === 'pending');
+    const W = document.getElementById('chart').getBoundingClientRect().width;
+    return ((c && c.boxes) || []).map((z) => {
+      const x0 = done[z.PI0] ? ts.logicalToCoordinate(done[z.PI0].i0) : null;
+      const x1 = done[z.PI1] ? ts.logicalToCoordinate(done[z.PI1].i1) : null;
+      return { PI: `${z.PI0}..${z.PI1}`, i0: done[z.PI0] && done[z.PI0].i0,
+        x: x0 === null ? null : Math.round(x0),
+        vis: x0 !== null && x1 !== null && x1 >= 0 && x0 <= W };
+    });
+  });
+  const uniqTags = (fx) => [...new Set(fx.at.filter((s) => /^(待定|随切点)/.test(s)))];
+  const rawTagN = (fx) => fx.text.filter((t) => /待定|随切点/.test(t)).length;
   const fxOf = (p) => p.evaluate(() => ({ text: window.__fx.text.map((x) => x.t),
+                                          // 文字 ＋ 落笔位置。★ 为什么要有 `at`：LWC 一个视口变化可能**重画好几趟**
+                                          //   （挪视口那一趟 + 跟着来的补画），同一枚签会被记好几遍 —— 只数 `text`
+                                          //   会把「画了几个」数成「画了几笔」。按位置去重才是屏上真有几个。
+                                          at: window.__fx.text.map((x) => `${x.t}@${x.x},${x.y}`),
                                           vseg: window.__fx.vseg.slice() }));
   /** 那一刀**该在屏上的哪儿**（x 走 timeScale，y 走包住它的旧框的 ZG/ZD），外加每张画布自己的偏移。
    *  ★ 记录器记的是**画布坐标**（ctx 那一层），跟页面坐标差一张画布的偏移 —— readBoxes 也是这么对的。 */
@@ -1147,16 +1189,40 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
       && Math.abs(v.y0 - (g.y0 + o.dy)) <= 3 && Math.abs(v.y1 - (g.y1 + o.dy)) <= 3));
   const footCut = (txt) => (txt.match(/中枢切法[^｜]*/) || ['（没有这一格）'])[0].trim();
 
-  // ⑰a：名单没到（真后台现在还没有 `cut_modes`）⇒ 控件不画、请求一个 `cut` 都不带。
+  // ⑰a：名单没到（这一页的假后台把 `cut_modes` 拿掉了）⇒ 控件不画、请求一个 `cut` 都不带。
   const NC = await open('nocut');
   await sleep(600);
   const nc0 = await cutUI(NC.p);
-  ck('⑰a 名单没到（真后台还没有 `cut_modes`）⇒ 切法控件**不画**、请求里**一个 `cut` 都不带**；'
-     + '回显给的那一档照样印在图脚上',
+  ck('⑰a 名单没到（假后台这一份 `/api/meta` 里没有 `cut_modes`）⇒ 切法控件**不画**、请求里'
+     + '**一个 `cut` 都不带**；回显给的那一档照样印在图脚上',
      !nc0.has && NC.cutReq.length >= 1 && NC.cutReq.every((x) => x === null)
        && nc0.cut === 'extend' && /中枢切法/.test(nc0.foot) && /延伸/.test(nc0.foot),
      `控件 ${nc0.has ? '★ 画出来了' : '没画'}｜请求带的 cut：${JSON.stringify(NC.cutReq)}`
      + `｜图脚「${footCut(nc0.foot)}」`);
+
+  // ⑰h：**跟真后台对一次账** —— 这一页**不挂** meta 假后台，屏上是真后台那份 `cut_modes` 说了算。
+  //   ★ 这一格是"合并前后都跑得动"的那种：它不假设后台有没有这一项，只钉**页面跟真后台说的是同一件事**
+  //     （名单 ≥2 ⇒ 控件在、chip 数＝名单长度、`?cut=turn` 真发得出去；名单没到/只有一项 ⇒ 控件不在、
+  //     一个 `cut` 都不发）。center-cut 合进 main 之后，这一格会**自己从"两边都没有"翻到"两边都有"**，
+  //     翻不过去就是名字对不上（`cut_modes` 这个键、或者里头的两个词）——那种错只在合并后出现，
+  //     而 ⑰b–⑰g 全是假后台喂的，永远逮不到它。
+  const realModes = (() => RMETA && Array.isArray(RMETA.cut_modes)
+    ? RMETA.cut_modes.filter((x) => typeof x === 'string' && x) : [])();
+  const RU = await open('cutreal', QS + '&cut=turn');
+  await sleep(1200);
+  const ru = await cutUI(RU.p);
+  const wantCtl = realModes.length >= 2;
+  ck('⑰h 跟**真后台**对账（这一页不吃 meta 假后台）：屏上有没有那组控件、`cut` 发没发出去，必须跟 '
+     + '`/api/meta` 真回的那份 `cut_modes` 一致 —— 名单 ≥2 ⇒ 控件在（chip 数＝名单长度、默认那颗亮着）'
+     + '且 `?cut=turn` 真的发出去了；名单没到或只有一项 ⇒ 控件不在、一个 `cut` 都不发',
+     ru.has === wantCtl
+       && (wantCtl
+         ? ru.chips.length === realModes.length && ru.chips.some((c) => c.cut === 'extend' && c.on)
+           && RU.cutReq.includes('turn') && /cut=turn/.test(ru.url)
+         : RU.cutReq.every((x) => x === null) && ru.cut === 'extend' && !/cut=/.test(ru.url)),
+     `真后台 cut_modes=${JSON.stringify(realModes)}｜控件 ${ru.has ? '在' : '不在'}`
+     + `${ru.has ? `（${ru.chips.length} 枚：${JSON.stringify(ru.chips.map((c) => c.cut))}）` : ''}`
+     + `｜请求带的 cut：${JSON.stringify(RU.cutReq)}｜paging.cut=${ru.cut}｜URL「${ru.url}」`);
 
   // ⑰b/⑰c：名单到了 ⇒ 控件出现；默认那颗按**回显**亮着、默认照样不写进 URL；
   //   点「按转折切」⇒ 请求才带上 `cut=turn`。
@@ -1285,17 +1351,106 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   await fxReset(cpp);
   await park(cpp, cpg.cuts[0].bar + 3);
   const cp1fx = await fxOf(cpp);
+  // 「随切点」是**按框**发的，临时框有几个就该有几枚 —— 屏上少一枚就是少一枚，读数里得能看出少的是哪个。
+  const cp1pv = await pvBoxes(cpp);
   ck('⑰f 「先看切后」默认**关**（屏上摆的还是旧框 ＋ 那条待定虚线）；点开 ⇒ 切后的框换上去'
      + '（各带一枚「随切点」）、「待定」那组收掉、URL 带 cutpv=1',
      CP.cutReq[0] === 'turn' && cp0.pv && cp0.pv.on === false && cp0.pvOn === false && !/cutpv=/.test(cp0.url)
-       && cp0fx.text.includes('待定') && !cp0fx.text.includes('随切点')
+       && uniqTags(cp0fx).some((s) => s.startsWith('待定')) && !uniqTags(cp0fx).some((s) => s.startsWith('随切点'))
        && cp1.pvOn === true && cp1.pv.dis === false && cp1.pv.on === true
-       && cp1fx.text.filter((t) => t === '随切点').length >= 1
-       && !cp1fx.text.includes('待定') && /cutpv=1/.test(cp1.url),
-     `关着：pvOn=${cp0.pvOn} 签「${cp0fx.text.filter((t) => /待定|随切点/.test(t)).join(' ')}」`
-     + ` 预览框 ${cpg.cuts[0] ? cpg.cuts[0].boxes : '?'} 个`
-     + `‖ 点开：pvOn=${cp1.pvOn} 签「${cp1fx.text.filter((t) => /待定|随切点/.test(t)).join(' ')}」`
-     + `｜URL「${cp1.url}」`);
+       && uniqTags(cp1fx).filter((s) => s.startsWith('随切点')).length === cp1pv.filter((b) => b.vis).length
+       && !uniqTags(cp1fx).some((s) => s.startsWith('待定')) && /cutpv=1/.test(cp1.url),
+     `关着：pvOn=${cp0.pvOn} 签「${uniqTags(cp0fx).join(' ')}」`
+     + `‖ 点开：pvOn=${cp1.pvOn} 签「${uniqTags(cp1fx).join(' ')}」`
+     + `（签后头是落笔位置；按位置去重前 ${rawTagN(cp0fx)}／${rawTagN(cp1fx)} 笔）`
+     + `｜临时框 ${cp1pv.length} 个，露在屏上的 ${cp1pv.filter((b) => b.vis).length} 个`
+     + `（${cp1pv.map((b) => `PI ${b.PI} i0=${b.i0} x≈${b.x}${b.vis ? '' : ' 屏外'}`).join('、')}）`
+     + ` ⇒ 签必须一枚不少地跟露出来的框对得上｜URL「${cp1.url}」`);
+
+  // ⑰i：预览那一趟**换上去**，不是"叠着画两遍"。真引擎的 `cuts[i].boxes` 是**整组**重算的结果 ——
+  //   组里没被切到的那个框也在里头（线上那一刀就是这样：两个临时框里有一个跟旧框一模一样）。
+  //   前端要是只换掉"包住 cut_bar 的那个旧框"，那个没变过的框就会**画两遍**（一遍旧的一遍临时的，
+  //   左沿一实一虚、还多挂一枚「随切点」）——屏上看就是同一个框摞着两条边。
+  //   ★ 量的是 `state.boxesDrawn`（这一帧真交给画框函数的那份清单，只读出口，跟 `state.labelBoxes`
+  //     同性质）：**每画一帧重写一次**，所以不存在画布记录器那种"多帧累积"的假红。
+  const cpd = await cpp.evaluate(() => (window.__app.state.boxesDrawn || [])
+    .map((b) => ({ t: b.tier, i0: b.i0, i1: b.i1, pv: !!b.provisional })));
+  const cPend = await cpp.evaluate(() => {
+    const c = ((window.__app.state.data.cuts) || []).find((x) => x && x.status === 'pending');
+    return c && Array.isArray(c.boxes) ? c.boxes.length : 0;
+  });
+  const uniq = new Set(cpd.map((b) => `${b.t}|${b.i0}|${b.i1}`)).size;
+  const prov = cpd.filter((b) => b.pv).length;
+  // 旧框只要跟某个临时框**真的**交叠（不是只共一个端点）就是没被换掉 —— 那正是「画两遍」。
+  const stale = cpd.filter((b) => !b.pv
+    && cpd.some((q) => q.pv && q.t === b.t && b.i0 < q.i1 && q.i0 < b.i1));
+  ck('⑰i 预览那一趟是**换掉**同一组的旧框，不是叠着画两遍：这一帧交给画框函数的清单里，'
+     + '同一个 (层, i0, i1) 只许出现一次；临时框的条数＝载荷给的那一组；跟临时框交叠的旧框一个都不许留',
+     cpd.length > 0 && uniq === cpd.length && prov === cPend && stale.length === 0,
+     `这一帧画了 ${cpd.length} 个框（临时 ${prov} / 旧 ${cpd.length - prov}），载荷那一组 ${cPend} 个；`
+     + `去重之后 ${uniq} 个${uniq === cpd.length ? '' : ' ★ 有重复'}`
+     + `｜没被换掉的旧框 ${stale.length} 个 ${JSON.stringify(stale)}`);
+
+  // ⑰j：临时框**半只在屏外**时，那枚「随切点」照样得挂出来。切点前后那一组里，前面那个没被切到的框
+  //   可以很长（线上那组：i0 在左边界外一千多像素）—— 判据要是写成"左沿在屏上才挂"，屏上就会出现一个
+  //   **看得见、却没记号**的临时框：跟已经定了的框分不出来，正好把这一卡要解决的问题反过来。
+  //   这一枪把视口左边界**挪进**左边那个临时框的肚子里：它露一半，签锚到看得见的那一端。
+  const cp2w = await cpp.evaluate(() => {
+    const app = window.__app, d = app.state.data, ts = app.chart.timeScale();
+    const done = (d.segs || []).filter((s) => !s.live);
+    const c = (d.cuts || []).find((x) => x && x.status === 'pending');
+    const z = (c.boxes || []).find((b) => done[b.PI0] && done[b.PI1] && done[b.PI1].i1 - done[b.PI0].i0 > 20);
+    if (!z) return null;
+    const from = done[z.PI0].i0 + Math.floor((done[z.PI1].i1 - done[z.PI0].i0) / 2);
+    const to = Math.min(from + 200, d.bars.length - 1);
+    ts.setVisibleLogicalRange({ from, to });
+    return { i0: done[z.PI0].i0, i1: done[z.PI1].i1, from, to };
+  });
+  await sleep(900);
+  // 清账之后**再挪一根**（同一个区间摆两次 LWC 可能一趟都不画），挪的是刚设的那个窗口本身，
+  // 不是 `park`（`park` 会把窗口整个换成 ±150，正好把"半只露在外头"这个情形抹掉）。
+  await fxReset(cpp);
+  if (cp2w) await cpp.evaluate((w) => window.__app.chart.timeScale()
+    .setVisibleLogicalRange({ from: w.from + 1, to: w.to + 1 }), cp2w);
+  await sleep(800);
+  const cp2fx = await fxOf(cpp);
+  const cp2pv = await pvBoxes(cpp);
+  const cp2need = cp2pv.filter((b) => b.vis).length;
+  const cp2got = uniqTags(cp2fx).filter((s) => s.startsWith('随切点')).length;
+  ck('⑰j 临时框**只露半只**（左沿在屏外、身子进屏）时，「随切点」也得挂在**看得见的那一端**：'
+     + '签数照样＝露在屏上的临时框数，不许因为"左沿不在屏上"就整个跳过（那样屏上会有个没记号的临时框）',
+     !!cp2w && cp2pv.some((b) => b.x !== null && b.x < 0 && b.vis) && cp2got === cp2need && cp2need >= 1,
+     `视口挪到 bar ${cp2w ? `${cp2w.from}..${cp2w.to}` : '(没挪成)'}：临时框 ${cp2pv.length} 个，露在屏上 ${cp2need} 个`
+     + `（${cp2pv.map((b) => `i0=${b.i0} x≈${b.x}${b.vis ? '' : ' 屏外'}`).join('、')}）；`
+     + `真画出来的「随切点」${cp2got} 枚「${uniqTags(cp2fx).join(' ')}」`
+     + `${cp2pv.some((b) => b.x !== null && b.x < 0 && b.vis) ? '' : ' ★ 这一枪没造出"半只在屏外"的框（量了个空）'}`);
+
+  // ⑰k：换框规则**直接量纯函数**（不经过画布、不经过后台）。⑰i 量的是"这一屏画出来的东西"，
+  //   钉得住"画两遍"，但钉不住两条边界：① 两个框**只共一个端点**算不算交叠（算的话会把挨着的那组
+  //   旧框误撤掉 —— 模子那份数据里两个框不共端点，屏上量不出来）；② 同一组被两刀同时切到时只摆第一刀。
+  //   这两条都只在 `boxes()` 里，所以拿一份手写的小数据直呼它 —— `import('/layers.js')` 走的是页面
+  //   自己加载的那份模块（跟屏上画的**同一份字节**）。
+  const unit = await cpp.evaluate(async () => {
+    const L = await import('/layers.js');
+    // 四个线段**相邻**（9 那一根是共用的转折点）—— 中枢框按 PI 取成员，所以"共端点"这个情形
+    // 只有数据这么排才造得出来。
+    const segs = [{ i0: 0, i1: 9 }, { i0: 9, i1: 19 }, { i0: 19, i1: 29 }, { i0: 29, i1: 41 }];
+    const mk = (PI0, PI1) => ({ PI0, PI1, ZG: 10, ZD: 5 });
+    const base = { segs, seg_centers: [mk(0, 0), mk(1, 3)] };   // 旧框：0–9 与 9–41
+    const half1 = mk(1, 1), half2 = mk(2, 3);                  // 待定那一刀切出来的两半：9–19、19–41
+    const cut = (boxes) => ({ cut_bar: 19, by: 'x', level: 'seg', status: 'pending', boxes });
+    const pick = (a) => a.map((b) => `${b.i0}-${b.i1}${b.z.provisional ? '*' : ''}`);
+    return { old: pick(L.boxes(base, 'seg', false)),
+             one: pick(L.boxes({ ...base, cuts: [cut([half1, half2])] }, 'seg', true)),
+             two: pick(L.boxes({ ...base, cuts: [cut([half1, half2]), cut([half1, half2])] }, 'seg', true)) };
+  });
+  ck('⑰k 换框规则（直呼 `boxes()`）：① 预览关着 ⇒ 两个旧框照旧；② 预览开着 ⇒ 被切的那个换上两半、'
+     + '**只共一个端点**的邻居（0–9）留着；③ 同一组被两刀同时切到 ⇒ 只摆第一刀（不是摆两遍）',
+     JSON.stringify(unit.old) === JSON.stringify(['0-9', '9-41'])
+       && JSON.stringify(unit.one) === JSON.stringify(['0-9', '9-19*', '19-41*'])
+       && JSON.stringify(unit.two) === JSON.stringify(unit.one),
+     `旧框「${unit.old.join(' ')}」‖ 预览「${unit.one.join(' ')}」‖ 同一组两刀「${unit.two.join(' ')}」`
+     + `（带 * 的是临时框；跟两半**共端点**的邻居 0–9 必须留着）`);
 
   await b.close();
   console.log(`\n${n - bad}/${n} 过　截图：${OUT}`);

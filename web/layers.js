@@ -78,21 +78,38 @@ export function boxes(data, tier, preview) {
   // 也摆出来（载荷顶层 `cuts[i].boxes`）。开了预览就是"先看切后那个样子" ⇒ 被切的那个旧框**换掉**，
   // 不是新旧两层框叠着画 —— 叠着画读起来像两个中枢，那是另一回事（用户会以为图上真有这么两个框）。
   // ★ 只换**线段中枢**这一层：契约里只有 `seg_centers` 是"当前状态"那一份（Bram 10-05）。
-  // ★ 「一个旧框里两刀」时预览只摆**第一刀**切出来的样子（`killed` 只记第一刀）：预览是给人看一眼的，
-  //   不是让人在预览里比较两种切法的；两刀的分叉是 `cuts[]` 里的事实，不归这一层表达。
+  // ★ 「同一组里两刀」时预览只摆**第一刀**切出来的样子（`cuts[]` 里按序取，后一刀的组跟先收下的组
+  //   交叠就跳过）：预览是给人看一眼的，不是让人在预览里比较两种切法；两刀的分叉是 `cuts[]` 里的事实，
+  //   不归这一层表达。
+  // ★ 「换掉哪些旧框」的判据是**载荷给的临时框自己的地盘**，不是"哪一刀切在框里"：
+  //   真引擎给的是**整组**重算的结果（`cut_centers`：`prev <= PI0 < next` 全收），组里**没被切到**的
+  //   框也在里头 —— 线上 ZEC 15m 那一刀的两个临时框里就有一个跟旧框一模一样。只换"包住 `cut_bar`
+  //   的那个"的话，那个没变过的框会**画两遍**（旧的一遍 ＋ 临时的一遍，左沿一实一虚、还多挂一枚
+  //   「随切点」）——屏上是同一个框摞着两条边。工装 ⑰i 钉的就是这个。
+  //   ★ 交叠判据用**严格**不等号：两个框只共一个端点（前一个的右沿＝后一个的左沿）不算交叠，
+  //     算的话会把挨着的那一组框误撤掉、还补不回来。
   if (preview && tier === 'seg') {
     const pend = cutsOf(data).filter((c) => c && c.status === 'pending' && Array.isArray(c.boxes) && c.boxes.length);
-    const killed = new Map();                       // 被切的旧框 → 切它的那一刀
+    const spans = [];                               // 收下的那一刀，整组临时框的地盘（PI 只指向成员，拿 host 换成 bar）
+    const taken = [];                               // 已经收下的是哪几刀
     for (const c of pend) {
-      const bar = Number(c.cut_bar);
-      if (!Number.isFinite(bar)) continue;
-      const old = out.find((x) => x.i0 <= bar && bar <= x.i1);
-      if (old && !killed.has(old)) killed.set(old, c);
+      const sp = [];
+      for (const z of c.boxes) {
+        const a = host[z.PI0], b = host[z.PI1];
+        if (a && b) sp.push([a.i0, b.i1]);
+      }
+      if (!sp.length) continue;
+      // 后一刀的组跟前一刀的组交叠 ⇒ 同一组被切了两次 ⇒ 只留先的那一刀（见上面那条注释）。
+      if (spans.some(([s0, s1]) => sp.some(([t0, t1]) => t0 < s1 && s0 < t1))) continue;
+      spans.push(...sp); taken.push(c);
     }
-    if (killed.size) {
-      const keep = out.filter((b) => !killed.has(b));
-      out.length = 0; out.push(...keep);
-      for (const c of killed.values()) {
+    if (spans.length) {
+      const overlaps = (x) => spans.some(([s0, s1]) => x.i0 < s1 && s0 < x.i1);
+      const keep = out.filter((b) => !overlaps(b));
+      if (keep.length !== out.length) {
+        out.length = 0; out.push(...keep);
+      }
+      for (const c of taken) {
         for (const z of c.boxes) {
           const a = host[z.PI0], b = host[z.PI1];
           if (!a || !b) continue;
@@ -190,6 +207,10 @@ export function makeBoxPrimitive(state) {
         zOrder: () => 'bottom',
         renderer: () => ({
           draw: (target) => {
+            // 验收用只读出口（跟 `state.labelBoxes` 同性质，只读不改画）：**这一帧**交给画框函数的清单。
+            // ★ 每帧开头**重写**（不是 push）：一次 draw 可能因为多窗格/重绘跑好几趟，累积着记的话
+            //   同一个框会被记好几遍 —— 工装量「同一个 (层,i0,i1) 只许出现一次」时会**假红**。
+            state.boxesDrawn = [];
             const { data, opts } = state;
             if (!data || !this._chart) return;
             const sh = shownOf(opts);        // 开关只在这里读一次（判据那半边走的是同一个函数）
@@ -212,6 +233,9 @@ export function makeBoxPrimitive(state) {
                   // 「待定」那根切点和签**不在这儿画** —— 它们在标注层（画在 K 线之上），见那一层 ③.5。
                   const openL = !!bx.z.provisional;
                   drawFrame(ctx, x0, yt, x1, yb, col, w, fill, splitAt, solid, W, openL);
+                  // 只记**底下那个框**：升级框跟它同 i0/i1，记进去会让「同一格只许出现一次」这把尺子
+                  // 把自己量红（它们本来就是同一个框的另一种说法，不是画了两遍）。
+                  state.boxesDrawn.push({ tier, i0: bx.i0, i1: bx.i1, provisional: openL });
                   if (sh.up && bx.z.up && bx.z.up.length) {
                     for (const u of bx.z.up) {                  // 高一级别：满 9 段（第 33 课）
                       const uyt = vp.yOfPrice(u.ZG), uyb = vp.yOfPrice(u.ZD);
@@ -419,9 +443,15 @@ export function makeAnnotPrimitive(state) {
                 const col = tier === 'seg' ? CHART.seg : CHART.pen;
                 for (const bx of boxes(data, tier, pv)) {
                   if (!bx.z.provisional) continue;
-                  const yt = vp.yOfPrice(bx.z.ZG), yb = vp.yOfPrice(bx.z.ZD), x0 = vp.xOfBar(bx.i0);
-                  if (yt === null || yb === null || x0 === null || !onScreen(x0, W, 8)) continue;
-                  tag(ctx, placed, x0 + 4, Math.min(yt, yb) + 4 + TAG_H, '随切点', col, W, H);
+                  const yt = vp.yOfPrice(bx.z.ZG), yb = vp.yOfPrice(bx.z.ZD);
+                  const x0 = vp.xOfBar(bx.i0), x1 = vp.xOfBar(bx.i1);
+                  if (yt === null || yb === null || x0 === null || x1 === null) continue;
+                  // ★ 判据是「**这个框有没有露在屏上**」，不是「它的左沿在不在屏上」。切点前面那个没被切到的
+                  //   框可以很长（线上那一组就是这样：i0 在左边界外 1067px，一直伸进屏里）—— 按左沿判的话
+                  //   它会被整条跳过，屏上就是一个**看得见、却没记号**的临时框，跟已经定了的框分不出来。
+                  //   露着就挂，签锚在**看得见的那一头**（左沿在屏外就锚到左边界上）。
+                  if (x1 < 0 || x0 > W) continue;                 // 整只在屏外：没地方挂，也不该挂
+                  tag(ctx, placed, Math.max(x0, 4) + 4, Math.min(yt, yb) + 4 + TAG_H, '随切点', col, W, H);
                 }
               }
 
