@@ -4,7 +4,7 @@
 //   {symbol, tf, name, updated, closed, bars[], pens[], segs[], centers[], seg_centers[], signals{seg,pen}, meta{tick,pen_rule}}
 // 取不到后台就退回 `fixtures/`（离线也能看、也能截图对账）；两边都没有就老实说取不到，不画半张图。
 import { CHART, PAGE, CANDLE, WIDTH, SUB } from './theme.js';
-import { makeBoxPrimitive, makeAnnotPrimitive, shownOf } from './layers.js';
+import { makeBoxPrimitive, makeAnnotPrimitive, shownOf, ghostHitAt } from './layers.js';
 
 const LWC = window.LightweightCharts;
 
@@ -346,11 +346,143 @@ function paintVol(d) {
   volSeries.setData(pts);
 }
 
+// ---------------------------------------------------------------- 「消失的点」（卡 card-cf3ed018-795）
+// 小栋 10-05 ②A：**确认过的**买卖点，后来又没了 —— 在图上把它标出来（空心 ＋ 划一刀，悬停说一句）。
+//
+// ★ 这件事**只在有人看着的时候才成立**。谁也没看的那些小时里它没了几次，这张图不知道，也不该装作
+//   知道（那是第二步那个离线标注文件的活）。所以底下就是一个**页面内存里的账本**：每次新数据回来，
+//   跟同一个桶里上一份比一比，少掉的记下来；**重开页面就清零**。因为只在内存里，它天生就是
+//   「本次打开」—— 不需要后台留历史（Bram 10-05 那个「要存每个点的首次确认时刻」的估价当场收回了）。
+//
+// ★ 桶 = (品种, 周期, 看法, 档位)。**少一样就会造鬼**：
+//   · 换看法（面积 ↔ 黄白线）不是重画，是**换了一把尺**。拿新尺子量出来的点去比旧尺子那份，
+//     旧尺子的点全都「少了」，屏幕上当场刷出一片空心三角 —— 而那件事根本没发生。
+//   · 往左加载同一条：档位一变，后台是**整段重算**，靠左那一段本来就会变（span_measure 量过）。
+//   ⇒ 这两个动作**换桶**，不是「喂给同一个桶比」。这跟「加字段别换形状」是同一族毛病：
+//     把「状态变了」和「换了一把尺」当成了一件事。
+//
+// ★ 点的身份 = (层级, 种类, 极值那根的时间戳)。**不许用下标**（Bram 10-05 第 ③ 条）：
+//   往左补数据是往数组头上插，同一个下标当场就指向另一根 K 线（跟 anchorOf / structKey 同一条账）。
+//
+// ★ 只比**已确认**的点（Bram 第 ② 条）：待确认的点本来就会变，它变了不算「消失」；
+//   但「已确认 → 变回待确认」**要算** —— 那种点确实从图上被拿掉了。做法是这份账本**只把已确认的
+//   收进基准**，所以它下次没出现在已确认那份名单里，就自然算成消失，不用另写一条判据。
+//
+// ★ 左沿守卫（Atlas 10-05 提的）：线上窗口是定长的（210 天），起点自己会往后滑。起点一动，
+//   靠左沿那一段的结构本来就会被重算 —— 那里的点掉掉不是「被推翻」，是**尺子从左边收了一格**。
+//   拿 tools/span_measure.py 那套量法（同一档位、只把窗口往后滑），在 ZECUSDT 15m span=1
+//   （20161 根）上量了三档：
+//       滑  1 根（15 分钟）⇒ 重叠区 **0 处**差异
+//       滑 16 根（4 小时） ⇒ 5 处，最靠右那处在**离左沿第 2009 根**
+//       滑 96 根（1 天）   ⇒ 10 处，最靠右那处在**离左沿第 5463 根**
+//   比值 126 / 57 不稳（只有一份品种、三档滑动），所以倍数往上取 200 留足余量、下限 200 根。
+//   这道闸**宁可少报也不误报**：它吃掉的只是窗口最左边那一段（用户基本不看那儿）；
+//   误报一个「消失的点」，是拿一句假话去解释一件没发生的事 —— 那比漏报贵得多。
+const GHOST_SLIDE_MUL = 200, GHOST_SLIDE_MIN = 200;
+const ghostBuckets = new Map();      // 桶 → { pts: 上一份的已确认点, gone: 记下来的消失, first: 上一份的窗口起点 }
+
+function ghostConfirmed(d) {
+  const m = new Map();
+  for (const tier of ['seg', 'pen']) {
+    for (const s of (d.signals || {})[tier] || []) {
+      if (s.confirmed !== true) continue;                    // 待确认的不进基准（见上）
+      const t = (d.bars[s.bar] || {}).t;
+      if (t == null) continue;                               // 点落在数据外面 ⇒ 身份都组不出来，跳过
+      m.set(`${tier}|${s.kind}|${t}`, { tier, kind: s.kind, t, price: s.price });
+    }
+  }
+  return m;
+}
+
+/** 新的一份数据到了：跟同一个桶里上一份比，少掉的点记成「已经消失」。结果挂在 `d.ghosts` 上
+ *  （图脚和图都从 `d` 上读 —— 不留中间变量，跟 sourceLabel 那条同一条理由）。 */
+function ghostReconcile(d) {
+  const key = [d.symbol, d.tf, d.measure || paging.measure, d.span ?? paging.span].join('|');
+  const prev = ghostBuckets.get(key);
+  const now = ghostConfirmed(d);
+  if (prev) {
+    const start = (d.bars[0] || {}).t;
+    const stepMs = Math.max(1, ((d.bars[1] || {}).t - start) || 1);
+    const slide = prev.first != null && start != null && start > prev.first
+      ? Math.round((start - prev.first) / stepMs) : 0;
+    const guardT = (d.bars[Math.min(Math.max(GHOST_SLIDE_MIN, slide * GHOST_SLIDE_MUL), d.bars.length - 1)] || {}).t;
+    for (const [k, p] of prev.pts) {
+      if (now.has(k)) continue;                              // 还在 ⇒ 什么都没发生
+      if (p.t < guardT) continue;                            // 离左沿太近：尺子动过，不算（见上）
+      if (prev.gone.has(k)) continue;                        // 早记过了 —— 第一次丢失的时刻才算，别被后面的刷新改写
+      prev.gone.set(k, { ...p, at: Date.now() });
+    }
+    // ★ 又回来了 ⇒ 记号收掉：它现在就在图上，两个记号并列是自相矛盾。
+    //   这一句**必须**扫 gone 自己，不能挂在上面那个循环里 —— 一个点进了 gone，就是因为它**不在**
+    //   `now` 里，而 `b.pts = now` 又把它的键从 pts 里抹掉了；它回来的时候 pts 里已经没有这个键，
+    //   上面那个循环根本看不见它。（2026-10-05 工装 ⑧ 那一格抓到的就是这一条：macd 第 3 趟
+    //   明明把点给回来了，记号还挂在图上。）
+    for (const k of [...prev.gone.keys()]) if (now.has(k)) prev.gone.delete(k);
+  }
+  const b = prev || { pts: new Map(), gone: new Map() };
+  b.pts = now;
+  b.first = (d.bars[0] || {}).t;
+  ghostBuckets.set(key, b);
+  // 记号要画在**当前这份**数据上：按时间戳找回下标（下标会随往左补数据整体平移，不能用旧的）。
+  // 找不回（它那根已经滑出窗口了）就**不画** —— 位置画不出来的时候宁可不画，也不能挪个地方画：
+  // 位置本身就是这句话的一半。
+  const idx = new Map();
+  for (let i = 0; i < d.bars.length; i++) idx.set(d.bars[i].t, i);
+  d.ghosts = [...b.gone.values()].map((g) => {
+    const i = idx.get(g.t);
+    // `confirmed: true` 不是给它脸上贴金：它当初就是已确认的（本子只收已确认的），
+    // 而 layers.js 那边画不画它走的是**同一个** sigAt（大开关 ＋ kind 芯片）——
+    // 少这个字段，芯片一关它自己就没了，跟别的点两种待遇。
+    return i == null ? null : { bar: i, price: g.price, kind: g.kind, tier: g.tier, t: g.t, at: g.at, confirmed: true };
+  }).filter(Boolean);
+}
+
+// 悬停说明：画布上的记号没有 DOM，自己挂一层。命中判定在 layers.js（窗格坐标系只有那一处知道），
+// 这儿只管把鼠标位置递进去、把话摆出来。`fixed` 跟着指针走；`pointer-events:none`（见 style.css）
+// 它是说明、不是按钮，不许把拖拽/缩放吃掉（跟 .more / .readout 同一条账）。
+const ghostTip = document.createElement('div');
+ghostTip.id = 'ghosttip';
+ghostTip.className = 'ghosttip';
+ghostTip.setAttribute('role', 'tooltip');
+document.body.appendChild(ghostTip);
+let ghostOn = null;          // 现在指着哪一个（换了才重写文字，不然每动一下都重排）
+// 两个时刻**都要带 UTC**：时间轴的刻度就是 UTC（localization.timeFormatter 是 timeLabel），
+// 悬停里省掉这两个字母，用户就会拿本地时间去对轴上的刻度，然后怀疑图上标错了位置。
+const ghostDate = (ms) => new Date(ms).toISOString().slice(5, 16).replace('T', ' ');   // 10-05 12:43
+const ghostTime = (ms) => new Date(ms).toISOString().slice(11, 16);                    // 12:43
+
+function ghostShow(e, g) {
+  if (g !== ghostOn) {
+    ghostOn = g;
+    // ★ 措辞按 Atlas 2026-10-05 核的那条改过一版：原来写「这个点 04-02 13:30 出现过」，可那是
+    //   **极值那根**的时间，点在这之后才确认 —— 那一刻它还没「出现」。别让一句话把时间说错：
+    //   `g.t` 是极值那根，`g.at` 才是我们**看着它没掉**的那一刻。
+    ghostTip.textContent =
+      `极值在 ${ghostDate(g.t)} UTC 的这个${g.kind}，之前确认过 —— 本次打开 ${ghostTime(g.at)} UTC 那次取数时它已经不在了\n`
+      + `（只在页面上记着，重开就清空）`;
+  }
+  ghostTip.classList.add('on');
+  const r = ghostTip.getBoundingClientRect();
+  ghostTip.style.left = `${Math.max(8, Math.min(e.clientX + 14, innerWidth - r.width - 8))}px`;
+  ghostTip.style.top = `${Math.max(8, Math.min(e.clientY + 14, innerHeight - r.height - 8))}px`;
+}
+function ghostHide() { ghostOn = null; ghostTip.classList.remove('on'); }
+el('chart').addEventListener('mousemove', (e) => {
+  const g = ghostHitAt(e.clientX, e.clientY);
+  if (g) ghostShow(e, g); else ghostHide();
+});
+el('chart').addEventListener('mouseleave', ghostHide);
+// 图在动（滚轮/拖拽缩放）时记号会跟着挪，指针底下那个可能已经不是它了 ⇒ 收掉，等下一次 mousemove 再说。
+el('chart').addEventListener('wheel', ghostHide, { passive: true });
+
 // ---------------------------------------------------------------- 画一张
 // ★ 画（paint）和**摆视口**（draw 里那一段）分开了：往左补数据之后重画，**不能**再走「摆视口」
 //   那一段（它要么 fitContent 缩成一团、要么按 ?last/?at 跳走）—— 补数据时视口由 place() 按**时间**放回原位。
 function paint(d) {
   state.data = d;
+  // ★ 记账要在**画之前**：记出来的东西挂在 d 上（d.ghosts），layers.js 和图脚都是从 d 上读的
+  //   —— 顺序反了屏上就是上一份的记号（跟 renderMeta 那条"不留中间变量"是同一类账）。
+  ghostReconcile(d);
   // 手上换了**另一份**数据（换档/换品种/换看法）⇒ 读数收起：十字线没动，但它底下那一根已经不是
   // 刚才那一根了，留着就是一行**过期的数**（光标一动它自己会回来）。手机上抬着手看的时候尤其要收。
   // ★★ 2026-10-04 实测（tools/web_readout_swap_probe.js）：**光这一句在这个位置量不出来** ——
@@ -394,6 +526,9 @@ function paint(d) {
   const last = bars.at(-1);
   el('last').textContent = last ? `最新 ${fmtPrice(last.close, d.meta?.tick)}` : '';
   stamp(d);
+  // 数据一落地就按**这一份**重排自动重取（见那一节）。放这儿是因为 paint 是**所有**数据的唯一落点
+  // ——首屏、换品种、换看法、往左补数据、自动重取自己，全从这儿过，不用在每个入口各排一次。
+  autoPlan();
 }
 
 // 装一张新数据：**先画，再摆视口**。keep 是补数据前抓的锚点（见 paging）；给了它就走「按时间放回原位」。
@@ -1100,6 +1235,135 @@ async function setMeasure(id) {
   }
 }
 
+// ---------------------------------------------------------------- 每根 K 线收盘自动重取
+// （card-cf3ed018-795，Nova 2026-10-05 定；小栋要的是「当场看得见」）
+//
+// ★ 为什么非有它不可：「确认后又消失」**只有重新取数才看得见**。在那之前，页面上唯一的定时器是
+//   底下那句 `setInterval(… stamp(state.data) …, 30000)` —— 它只刷新角上那行时间标签，**不发请求**
+//   （Atlas 10-05 核实过）。也就是说用户开着不动，这个功能几乎永远不会自己触发，等于没有。
+//   ⇒ 那一句留着（它是"多久之前"那句话的事），自动重取是**另加**的一条。
+//
+// 口径（四条，一条都不许省）：
+//   ① 当前周期**每收盘一根**取一次。收盘时刻 = 手上这份数据**最后一根的开盘时间 ＋ 一个周期**，
+//      再加 10 秒余量等后台把新那根拉进来。
+//      ★ 按**最后一根**算，不按钟表算：数据旧了（后台卡住、离线样本、切回来时过了好几根）
+//        钟表会去追一个已经过去的时刻，那才是真的空转 —— 按最后一根算，它自己会落到"下一根"。
+//   ② **只在标签页可见时取**（切到后台就停）：没人在看的那些取数，白白敲后台，页面也不会因此多知道
+//      什么（图在那儿谁也没看）。切回来**立刻补一次** —— 那时候已经过了一根就马上取。
+//   ③ 一分钟内最多一次：周期算出来的时刻挨得太近、或者可见性来回切，都不许敲出连发。
+//   ④ 走**同一条**取数＋绘制路径（跟 setMeasure 那份对齐）：档位/看法照旧带着、读数压住
+//      （dataStale —— 数据在飞的时候屏上还是旧图，读数写着新数就是一句谎）、视口按**时间**放回原位。
+//      ★ 少了 ④ 这一条，自动重取就会变成"图自己跳一下"——那比不刷新还烦人。
+//   ⑤ **错峰**（Bram 10-05 量的）：收盘那一刻大家都来取，第一个请求才会让后台去币安拉新的那根，
+//      而且它这次回的**还是旧**数据（SWR，头里 refreshing=true）。所以收盘后**随机**等 2–10 秒再取
+//      （人分散开），并且回来看见 refreshing=true、或者最后一根还不是刚收的那根 ⇒ **这一趟当没跑**，
+//      过几秒再补一次（有次数上限），而不是等一个整周期。
+const TF_SEC = { '15m': 900, '30m': 1800, '1h': 3600, '2h': 7200, '4h': 14400 };
+const AUTO_LAG_MIN = 2000;           // 收盘之后随机等这段时间再取（下界也是「过没过期」那道判据）
+const AUTO_LAG_MAX = 10000;          // 上界（后台那一趟拉取不是瞬时的，10 秒够了）
+const AUTO_MIN_GAP_MS = 60000;       // 一分钟内最多一次（③）
+const AUTO_RETRY_MS = 5000;          // 回来的是旧数据 ⇒ 过几秒再补（②）
+const AUTO_RETRY_MAX = 4;            // 补的次数上限：别把后台的一次卡顿敲成连环请求
+let autoTimer = 0, autoAt = 0, autoTries = 0;   // autoAt ＝ 上一次**发起**自动取数的时刻
+
+/** 手上这份数据里最后一根**该收盘的时刻**（ms）；算不出来（没数据、周期不认识）返回 null。 */
+function autoCloseAt(d) {
+  const step = (TF_SEC[d && d.tf] || 0) * 1000;
+  const last = d && d.bars && d.bars.length ? d.bars[d.bars.length - 1].t : null;
+  return step && last != null ? last + step : null;
+}
+/** 手上这份**已经过期**了吗：最后一根之后的那一根，按时间早该出来了（切回来补一次用这一条）。 */
+function autoDue(d) {
+  const at = autoCloseAt(d);
+  return at != null && at + AUTO_LAG_MIN <= Date.now();
+}
+/** 刚取回来的这份**是不是真的换了一份新的**（⑤：SWR 的第一趟回的还是旧的）。
+ *  两条判据（Bram 10-05）：①头里 `refreshing` ⇒ 后台还在去币安拿，这一趟不算；
+ *  ②最后一根得**走到我们等的那一根**（≥ 上一份的"下一根该开盘"时刻）—— 连新那根都没有，
+ *  这一趟就等于什么都没发生，不该为它等一个整周期。 */
+function autoFresh(own, d) {
+  if (d.refreshing === true) return false;
+  const expect = autoCloseAt(own);
+  const last = d.bars && d.bars.length ? d.bars[d.bars.length - 1].t : null;
+  return expect == null || last == null ? true : last >= expect;
+}
+/** 排下一次。（每次 paint 都重排一次：数据一换，收盘时刻就该按**新那份**重算。） */
+function autoPlan() {
+  clearTimeout(autoTimer);
+  const step = (TF_SEC[state.data && state.data.tf] || 0) * 1000;
+  let at = autoCloseAt(state.data);
+  if (at == null) return;
+  // ★ 那个时刻**已经过去**了（切回来过了一根、后台卡着没动）⇒ 往前推到**下一根**再排。
+  //   不推的话 `Math.max(1000, 过去 - 现在)` 会变成"每秒来一次"的空转 —— 一次取数都不发
+  //   （③ 那道闸拦着），但一秒一个定时器白烧电，而且它掩盖了真正该问的问题：这一根到底取到没有。
+  while (at + AUTO_LAG_MIN <= Date.now()) at += step;
+  // ⑤ 错峰：每一根**重新摇一次**（不记住上一根摇的数 —— 记住了大家还是会在同一秒撞上）。
+  const lag = AUTO_LAG_MIN + Math.random() * (AUTO_LAG_MAX - AUTO_LAG_MIN);
+  // 看不见的时候到点了也**什么都不做**：这一次不是跳过，是留给 visibilitychange 那次补
+  // （在后台偷偷取数既不划算也不礼貌）。
+  autoTimer = setTimeout(() => { if (document.visibilityState === 'visible') autoFire(); },
+                         Math.max(1000, at + lag - Date.now()));
+}
+/** 定时器到点 / 切回来补一次，都从这儿进（③ 那道闸只在这里判）。 */
+function autoFire() {
+  if (Date.now() - autoAt < AUTO_MIN_GAP_MS) { autoPlan(); return; }
+  autoAt = Date.now();
+  autoGo();
+}
+async function autoGo() {
+  const fresh = await autoReload();
+  // false ＝ 回的还是旧的（SWR 头一趟）⇒ 几秒后再补，别为它等一个整周期。
+  if (fresh === false && autoTries < AUTO_RETRY_MAX) {
+    autoTries++;
+    clearTimeout(autoTimer);
+    autoTimer = setTimeout(() => { if (document.visibilityState === 'visible') autoGo(); }, AUTO_RETRY_MS);
+    return;
+  }
+  autoTries = 0;
+  autoPlan();                        // 取到没取到都要排下一次：失败就当这一根没发生，下一根再来
+}
+/** 同一个桶（品种/周期/档位/看法）重取一份。**它换的不是桶，是"刷新"** —— 账本就是拿它跟前一份比的。
+ *  返回：true ＝ 真换了一份新的；false ＝ 回的还是旧的（SWR）；null ＝ 这一趟没成（不补，等下一根）。 */
+async function autoReload() {
+  const own = state.data;
+  if (!own || paging.loading) return null;    // 有别的请求在飞 ⇒ 让它把话说完，这一根让给它
+  const id = ++paging.reqId;                  // 跟首屏/换看法/往左加载共用同一个号：谁后发谁算数
+  paging.loading = true;
+  dataStale = true;                           // 数据在飞：读数压住（跟换品种那条同一笔账）
+  try {
+    const anchor = own ? anchorOf(own.bars, chart.timeScale().getVisibleLogicalRange()) : null;
+    const d = await load(el('symbol').value, el('tf').value, paging.span, paging.measure);
+    if (id !== paging.reqId) return null;
+    // ★ 取不到真后台时 load() 会**悄悄退回仓里的样本**（source 是「样本 x.json」，而且顺手把 span
+    //   摁回 1、说自己「到最早」）。这一趟**绝不能当刷新画上去**：样本是另一份数据，账本会把它读成
+    //   「屏上这些点全没了」—— 满屏假空心点；顺带还把档位和窗口一起洗掉（adopt 会吃它的 span/earliest）。
+    //   宁可什么都不做：屏上这份照旧，下个收盘再说。（`source` 只有 load() 那头挂，页面别自己猜。）
+    if (d.source !== 'api') {
+      console.warn('自动重取没拿到真数据（退回样本），这一趟当没跑：', d.source);
+      return null;
+    }
+    const fresh = autoFresh(own, d);
+    // prevLen 传 undefined：这不是补数据，「要了却一根没多」那条判据在这儿不成立（同 setMeasure）。
+    Object.assign(paging, adopt(paging, d));
+    setUrl();
+    if (anchor) draw(d, anchor); else draw(d);
+    el('state').textContent = d.closed ? '已收盘' : '未收盘（最后一根还在走）';
+    el('state').className = 'badge ' + (d.closed ? '' : 'live');
+    return fresh;
+  } catch (e) {
+    // ★ 失败**不打扰用户**：屏上那份还是好的，角上那句也不改（别把一次后台抖动写成页面的错误）。
+    console.warn('自动重取没成功（屏上这份照旧）：', e);
+    return null;
+  } finally {
+    if (id === paging.reqId) { paging.loading = false; dataStale = false; }
+  }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !state.data) return;
+  // 切回来**立刻**补一次（⑤ 的错峰只管收盘那一刻：人都回来了，再随机等几秒就是白让用户看旧图）。
+  if (autoDue(state.data)) autoFire(); else autoPlan();
+});
+
 function renderLegend() {
   const items = [];
   if (opts.pen) items.push(['line', CHART.pen, 1, '笔'], ['line-dash', CHART.pen, 1, '未完成的笔']);
@@ -1196,6 +1460,21 @@ function measureText(d) {
   if (typeof m !== 'string' || !m) return '';
   return ` ｜ 背驰看法 ${(MEASURE_NAME[m] || [m])[0]}`;
 }
+// 「消失的点」那个数（卡 card-cf3ed018-795）。★ 它是**单独一格浮层**（#ghostc），不并进图脚那行：
+//   图脚是流内布局，这一格一出来就把 #chart 挤矮（1440 实量：foot 60→77、#chart 760→743，
+//   整张图往下挪 3px —— 而它偏偏就是"消失的点刚出现"的那一刻，用户会看见图跳一下）；
+//   窄屏那一档 `.foot` 整个 display:none，手机上这个数根本不存在。
+// ★ 「本次打开」四个字不许省：回测那边报的是「150 个确认里 41 个被改掉」，分母是整段历史、起点固定；
+//   这个数的分母是**这一次打开、有人看着的那段时间**，而且窗口还在往后滑。
+//   两个数长得像 —— 混起来就是拿两个分母比大小，而屏幕上不会有任何一处会红。
+// ★ 走 `el()` 而不是直接摸 document：`tools/web_footer_check.py` 把 renderMeta 抠出来配假 DOM 真跑
+//   （它的 el 桩带 textContent / className 的 setter）—— 直接摸 document 那一格当场 ReferenceError。
+function ghostText(d) {
+  const g = d.ghosts;
+  const n = Array.isArray(g) ? g.length : 0;
+  el('ghostc-tx').textContent = n ? `消失的点 ${n}（本次打开）` : '';
+  el('ghostc').className = n ? 'ghostc on' : 'ghostc';
+}
 
 function renderMeta(d) {
   const done = d.segs.filter((s) => !s.live).length;
@@ -1206,6 +1485,7 @@ function renderMeta(d) {
     + ` ｜ 买卖点 线段中枢层 ${sigTierText(d.signals?.seg || [])} · 类中枢层 ${sigTierText(d.signals?.pen || [])}`
     + measureText(d)
     + ` ｜ 数据源 ${sourceLabel(d.source, d.stale)}`;
+  ghostText(d);          // 那一格是浮层（见上），不在这句话里 —— 两处各写一遍就会分家
 }
 // <<< RENDER_META
 

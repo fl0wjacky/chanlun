@@ -96,6 +96,23 @@ function viewport(chart, series, data) {
 const onScreen = (x, W, pad = 0) => x !== null && x >= -pad && x <= W + pad;
 
 // ---------------------------------------------------------------------------
+// 幽灵点的**命中格**（卡 card-cf3ed018-795）。画布上的东西没有 DOM，悬停得自己做 ——
+// 这一处只管「指针在不在某个幽灵上」，坐标换算留在**知道画布坐标系的地方**：
+// `ctx.canvas` 是这个窗格的画布，`useMediaCoordinateSpace` 给的 mediaSize 就是它的 CSS 像素，
+// 所以「客户端坐标 − getBoundingClientRect」正好落在同一个系里。app.js 那边只管把鼠标位置递进来、
+// 把说明摆出来，一行换算都不做（换算抄两份，迟早在某一格上错开）。
+// 每次画完由 `makeAnnotPrimitive` 重填；没有幽灵时是空数组 ⇒ 恒不命中。
+export const ghostHits = { boxes: [], canvas: null };
+export function ghostHitAt(clientX, clientY) {
+  const c = ghostHits.canvas;
+  if (!c) return null;
+  const r = c.getBoundingClientRect();
+  const x = clientX - r.left, y = clientY - r.top;
+  for (const b of ghostHits.boxes) if (x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]) return b[4];
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // 框层：类中枢（与笔同色）→ 线段中枢（与线段同色）→ 各自的「↑高N级」框
 // 挂在 K 线系列上、zOrder=bottom ⇒ 画在 K 线底下，跟 Python 的落笔次序一致（框先、K 线后）。
 // ---------------------------------------------------------------------------
@@ -230,6 +247,22 @@ export function makeAnnotPrimitive(state) {
                   if (!onScreen(x, W, 40) || y === null) continue;
                   sigs.push({ x, y0: drawSignalGlyph(ctx, x, y, s, tier), s, tier });
                 }
+              }
+
+              // ②.5 幽灵点（卡 card-cf3ed018-795）：本次打开期间**确认过、后来又没了**的买卖点。
+              //   ★ 名单是 app.js 比的（它才知道上一份是什么、桶是什么），这儿只管画 —— 画图这一层
+              //     不许自己判断"少没少"：判据一处就够，两份迟早在某一格上错开。
+              //   ★ 画在活点**之后**：两批点按构造不会重合（幽灵的定义就是"活的那份里没有它"），
+              //     但万一引擎在同一个 bar 上换了个 kind，后画的活点应当压过作废的那个。
+              //   ★ 幽灵也走 `sigAt`：买卖点整层关着、或者某一类 kind 的芯片关了、就不画它 ——
+              //     层关着还往外画东西，那就不是开关的语义了（跟「关着的层不算看得见」同一条账）。
+              ghostHits.canvas = ctx.canvas;
+              ghostHits.boxes = [];
+              for (const g of data.ghosts || []) {
+                if (!sh.sigAt(g)) continue;
+                const x = vp.xOfBar(g.bar), y = vp.yOfPrice(g.price);
+                if (!onScreen(x, W, 40) || y === null) continue;
+                ghostHits.boxes.push([...drawSignalGhost(ctx, x, y, g, g.tier), g]);
               }
 
               // ③ 价签：线段中枢先（优先占位），类中枢后；升级标签跟着各自的框走
@@ -422,6 +455,42 @@ function drawSignalGlyph(ctx, x, y, s, tier) {
   if (tier === 'seg') { ctx.fillStyle = rgba(base, a); ctx.fill(); }
   else { ctx.strokeStyle = rgba(base, a); ctx.lineWidth = 1.5; ctx.stroke(); }
   return y0;                                                             // 文字要挂在三角的底边
+}
+
+/** 「曾经有过、后来没了」的那个点（卡 card-cf3ed018-795）：**空心三角 ＋ 划一刀**。
+ *
+ *  为什么不是「把三角调淡一点」：这个图上**空心三角已经名花有主**了 —— 空心的那支是
+ *  「类中枢层（·笔）」（见图例）。再让幽灵也空心、只靠深浅分，屏幕上就有三种点共用两种形状，
+ *  而深浅差是最先消失的那种差别（缩略图、手机、弱光）。所以幽灵必须有一个**别人没有的形状**：
+ *  三角上划一刀。它读作「这个标记作废了」，而且**实心那支（线段中枢层）的幽灵也会变空心** ——
+ *  「曾经是什么」和「现在是什么」不许长得一样。
+ *
+ *  位置就画在它**当初被画的**那个 (时间, 价格) 上，不挪到别处：
+ *  这不是重放的点（第二步那个离线标注文件才是），它就是**这一张图、这一次打开**里画过又撤掉的那一个，
+ *  画回原位才是它（「我刚才在这儿看见一个卖点」—— 用户认的是那个位置）。
+ *  代价是它落在价格轴上，看起来像句「这里能交易」的断言 —— 所以旁边三样东西一起兜着：
+ *  形状（划掉了）、图例里那一格、悬停那句「这个点 … 出现过、后来消失了」，以及图脚「本次打开」那个数。
+ *
+ *  没有文字（不像真的买卖点带「一买」/「·笔」）：文字要走 `placed` 跟价签互相避让，
+ *  让一批作废的点去挤价签不值得；它是谁、什么时候没的，悬停里说。 */
+function drawSignalGhost(ctx, x, y, s, tier) {
+  const buy = s.kind.endsWith('买');
+  const base = buy ? CHART.buy : CHART.sell;
+  const sz = tier === 'seg' ? SIG.segSize * 0.55 : SIG.penSize * 0.55;   // 大小仍按层级分：它当初是哪个层级，还认得出
+  const d = buy ? 1 : -1;
+  const tip = y + d * (SIG.tip * 0.6), y0 = y + d * (SIG.tip * 0.6 + 2 * sz);
+  ctx.strokeStyle = rgba(base, SIG.ghostAlpha);
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x, tip); ctx.lineTo(x - sz, y0); ctx.lineTo(x + sz, y0); ctx.closePath();
+  ctx.stroke();
+  // 那一刀：从左下划到右上，**两头各探出 2px** —— 探出去才读得成「划掉」，停在顶点上读起来像三角自己的一条边。
+  // 方向**不跟着买/卖翻**（买卖那一对三角是上下镜像的）：同一个记号在整张图上得长一个样。
+  const top = Math.min(tip, y0) - 2, bot = Math.max(tip, y0) + 2;
+  ctx.beginPath();
+  ctx.moveTo(x - sz - 2, bot); ctx.lineTo(x + sz + 2, top);
+  ctx.stroke();
+  return [x - sz - 3, top - 1, x + sz + 3, bot + 1];                     // 命中格：整个记号 ＋ 一点余量
 }
 
 /** 买卖点的**文字**：底色跟 Python 的默认那支一样是 `BG + (215,)` ——
