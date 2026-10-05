@@ -11,6 +11,7 @@
   ③ 规则 5：每一刀的 status 按「切点后头三段已完成线段重叠」独立重算一遍，必须对上；
   ④ 规则 6：只动线段中枢 —— 笔、线段、类中枢、两层买卖点不变（cut_centers 不改 r）；
   探针 A（规格第三节第 4 条）：把『头三段重叠』改成『头一段走完就算』⇒ 切成数必须变；
+  探针 C：三类往回落不分高低点（只收同类端点之前的样子）⇒ zec15 上刀位置必须变（19164 那把回来）；
   探针 B：转折点改在线段层认 ⇒ 最低点那个框（405.9–423）必须切不开（10-05 往回落以后最高点那个能被线段层三卖切到）。旧注：『线段层认出的刀里没有一刀
          落在 405.9–423 / 523.24–549.65 两个框的内部』。
 """
@@ -152,10 +153,12 @@ def main():
 
     # ⑤ 规则 2/3 独立重算切点（不调 _turn_bar / _snap / _backdate）：
     #    一类＝极值那根落最近端点；三类＝离开笔（终点正好是回试笔起点的那笔）起点之前、上一刀之后的
-    #    端点里，三买取最低、三卖取最高（一样极取后一个）—— 10-05 改的「往回落到前一走势结束点」。
+    #    **同类**端点里，三买取最低、三卖取最高（一样极取后一个）—— 10-05 改的「往回落到前一走势结束点」。
     pens, bars = r["pens"], r["bars"]
     end_list = sorted(ends)
     want, prev = set(), end_list[0]
+    fin = [x for x in r["segs"] if not x.get("live")]
+    lows = {x["i1"] for x in fin if x["dir"] == "down"} | {x["i0"] for x in fin if x["dir"] == "up"}
     for g in sorted(sig, key=lambda g: g["bar"]):
         if not g["confirmed"] or g["kind"] not in C.TURN_KINDS:
             continue
@@ -163,7 +166,9 @@ def main():
             e = min(end_list, key=lambda x: (abs(x - g["bar"]), -x))
         else:
             leave = [p for p in pens if p["i1"] == pens[g["unit"]]["i0"]][0]
-            win = [x for x in end_list if prev < x <= leave["i0"]]
+            # 只收同类端点（Nova 10-05 12:47）：低点＝向下线段的终点或向上线段的起点，高点反过来
+            want_low = g["kind"] == "三买"
+            win = [x for x in end_list if prev < x <= leave["i0"] and (x in lows) == want_low]
             if not win:
                 continue
             if g["kind"] == "三买":
@@ -220,6 +225,18 @@ def main():
         C._status = real
     n0, na = sum(c["status"] == "done" for c in cuts), sum(c["status"] == "done" for c in cuts_a)
     cell("探针 A：『头一段走完就算』⇒ 切成数变", n0 != na, "%d → %d" % (n0, na))
+
+    class _AnyKind:                                       # 变异：三类往回落不分高低点（10-05 12:47 之前的样子）
+        def __eq__(self, other):
+            return True
+    real_low = C._is_low
+    C._is_low = lambda done_, k: _AnyKind()
+    try:
+        _, cuts_c = C.cut_centers(r, sig)
+    finally:
+        C._is_low = real_low
+    diff_c = sorted({c["cut_bar"] for c in cuts_c} ^ {c["cut_bar"] for c in cuts})
+    cell("探针 C：三类往回落不分高低点 ⇒ 刀位置变（⑤ 得跟着红）", bool(diff_c), "差 %s" % diff_c[:5])
 
     seg_sig = S.signals(r, "seg", "macd")
     _, cuts_b = C.cut_centers(r, seg_sig, units=r["segs"])
