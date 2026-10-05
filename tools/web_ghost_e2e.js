@@ -200,6 +200,10 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
     const good = (fetched, kk) => ({ symbol: base.symbol, tf: base.tf, t, o: TICK_BASE.o, h: TICK_BASE.h,
                                      l: TICK_BASE.l, c: tickC(kk), v: TICK_BASE.v,
                                      fetched_at: fetched, stale: false, engine: ENG1 });
+    // ⑯k：跳价**在飞的那两秒里换了品种**（Atlas 10-05 的建议）。这一趟回的是**老品种**的价，收价给一个
+    //   一眼认得出的离谱值（真动了就看得见）；而它的 `t` 与新图上最后一根**一模一样**（同周期、同一份平移）
+    //   —— 所以能挡住它的**只有**「symbol/tf 对不上就不动」那道闸。拆掉那道闸，这一格必须红。
+    if (which === 'tickslow') return { ...good('2026-10-05T03:41:00.000Z', 1), c: TICK_BASE.c + 500 };
     // ⑯f：后台说**这一根已经收盘、新的一根开盘了**（t 比图上新）⇒ 页面该一个字都不动
     //   （收盘那一刻交给已有的自动重取）。收价给个一眼认得出的离谱值：真动了就看得见。
     if (which === 'tickroll') {
@@ -245,6 +249,9 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
       if (which === 'fallback' && hits[m] >= 2) { await route.abort(); return; }
       const { drop, opt } = plan(which, hits[m], m, sp);
       const body = mk(m, drop, shift, opt, sp);
+      // ⑯k：这一页认 `symbol` 入参 —— 换品种之后**手上那份数据的 symbol 真变了**（真后台本来就该这样）。
+      //   不认的话，"换品种"在页面看来什么都没发生，那一格就成了空转（而且是看不出来的空转）。
+      if (which === 'tickslow') body.symbol = u.searchParams.get('symbol') || body.symbol;
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     });
     // ⑯ 跳价那一路：**所有**页面都挂上（页面自己每 5 秒就会来问一次）。
@@ -253,13 +260,20 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
     //   · 别的页面吐一份**正常但"不是我们手上那根"**的（t 比图上新 7 根）：这是**真会发生**的一种
     //     ——我们手上那份旧了。页面照样该一个字都不动（t 对不上就不许就地换）。
     //     ★ 别拿 404 当默认：浏览器会把每一条 404 记成 console error，5 秒一条，日志当场被刷满。
-    const tick = { n: 0 };
+    // ★ n 在**请求进来那一下**就加（不是回完才加）：⑯k 要的就是"还在飞"这个中间态，靠它才看得见。
+    //   done/doneAt 是**回完**那一下 —— ⑯k 用它证「那一趟落地的时候新图已经画上了」。
+    const tick = { n: 0, done: 0, doneAt: 0, reqAt: [] };
     await p.route('**/api/tick*', async (route) => {
       tick.n++;
+      tick.reqAt.push(Date.now());
       if (which === 'tick503') { await route.fulfill({ status: 503, body: 'never fetched' }); return; }
+      // ⑯k：这一页的跳价**扣在手里 2 秒**才回 —— 要的就是"响应还在飞"的那一段（真网络抖一下就有，
+      //   不是编出来的）：这 2 秒里把品种换掉，看那一趟回来会不会动**新图**的最后一根。
+      if (which === 'tickslow') await sleep(2000);
       const body = which.startsWith('tick') ? tickBody(which, tick.n, shift)
                                             : { ...tickBody('tick', tick.n, shift), t: TICK_BASE.t + shift + 7 * STEP_MS };
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+      tick.done++; tick.doneAt = Date.now();
     });
     await p.goto(PAGE + qs, { waitUntil: 'domcontentloaded' });
     await p.waitForFunction(() => window.__app && window.__app.state && window.__app.state.data, null, { timeout: 60000 });
@@ -296,6 +310,9 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
                        svg: !!g.querySelector('svg') } : null,
              measure: d.measure, span: d.span,
              src: d.source, nBars: (d.bars || []).length, eng: d.engine,
+             // ⑯k：手上这份是**哪个品种**（换品种那一格要证"屏上真的已经是新的那份了"）＋ 数据那侧的最后一根
+             symbol: d.symbol,
+             lastBar: (d.bars && d.bars.length) ? { ...d.bars[d.bars.length - 1] } : null,
              lastTxt: (document.getElementById('last') || {}).textContent || '',
              updated: (document.getElementById('updated') || {}).textContent || '',
              // 「画在图上」的最后一根：读的是**系列自己**那份数据（跟十字线读数同一个出处，不是读 state）
@@ -952,6 +969,43 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
      T5.tick.n >= 2 && eq(p1.drawn.close, p0.drawn.close) && ph0.head === ph1.head
        && /^最新 /.test(p1.lastTxt) && !/价格停在|价格停了/.test(p1.lastTxt),
      `跳价 ${T5.tick.n} 趟全 503｜图上收价 ${p0.drawn.close} → ${p1.drawn.close}｜页头「${p1.lastTxt}」`);
+
+  // ⑯k：跳价**在飞的时候换品种**（Atlas 10-05 的建议）。那一趟回来时屏上已经是**另一个品种**的图，
+  //   它带的是老品种的价，`t` 又跟新图上最后一根**完全一致** —— 能挡住它的只有 symbol/tf 那道闸。
+  //   ★ 假后台认 `symbol` 入参（见 chart 路由）：不认的话"换品种"在页面看来什么都没发生 = 空转。
+  const SL = await open('tickslow', QS);
+  const slp = SL.p;
+  await sleep(1200);
+  // 先证明这张页面上跳价**真的**会落上去 —— 否则下面量到的"没被动"是"页面根本没在跳"冒充的
+  { const t = Date.now(); while (SL.tick.done < 1 && Date.now() - t < 30000) await sleep(50); }
+  await sleep(400);
+  const sl0 = await snap(slp);
+  // ★ 这一页的收价是**故意**给到区间外面的（`base.c + 500`，见 tickBody）：所以"落上去了"要拿**这个**值认，
+  //   不能拿 TICKVALS 认 —— 第一次跑就是拿 TICKVALS 认的，`pre` 假红、⑯k 跟着红（那一格当时是假的）。
+  const SLOWC = TICK_BASE.c + 500;
+  const pre = eq(sl0.drawn && sl0.drawn.close, SLOWC) && eq(sl0.lastBar && sl0.lastBar.c, SLOWC);
+  // 等**第二趟**在飞（n 已经加、done 还没加）—— 就在这 2 秒里换品种
+  { const t = Date.now(); while (!(SL.tick.n >= 2 && SL.tick.done >= 1) && Date.now() - t < 30000) await sleep(50); }
+  const nSwap = SL.tick.n, doneSwap = SL.tick.done, tSwap = Date.now();
+  const flew = tSwap - (SL.tick.reqAt[nSwap - 1] || tSwap);
+  await slp.evaluate((v) => { const s = document.getElementById('symbol'); s.value = v;
+    s.dispatchEvent(new Event('change', { bubbles: true })); }, 'BTCUSDT');
+  await slp.waitForFunction(() => window.__app.state.data && window.__app.state.data.symbol === 'BTCUSDT',
+                            null, { timeout: 30000 });
+  const swAt = Date.now();
+  { const t = Date.now(); while (SL.tick.done < nSwap && Date.now() - t < 30000) await sleep(50); }
+  await sleep(900);                        // 那一趟回来之后，页面该做的都做完了
+  const sl1 = await snap(slp);
+  ck('⑯k 跳价**还在飞**的时候换了品种 ⇒ 那一趟回来一个字都不许动（老品种的价、t 还跟新图对得上）',
+     pre && flew < 2000 && doneSwap === nSwap - 1 && sl1.symbol === 'BTCUSDT' && SL.tick.doneAt > swAt
+       && sl1.nBars === sl0.nBars
+       && eq(sl1.drawn && sl1.drawn.close, TICK_BASE.c)
+       && eq(sl1.lastBar && sl1.lastBar.c, TICK_BASE.c),
+     `换的那一下：第 ${nSwap} 趟飞了 ${flew}ms（已回 ${doneSwap} 趟）｜换成 ${sl1.symbol} 画上用了 ${swAt - tSwap}ms`
+     + `｜那一趟 ${SL.tick.doneAt > swAt ? '在新图画上**之后**才落地' : '★ 落得太早，这一格没量到东西'}`
+     + `｜图上最后一根 ${sl1.drawn && sl1.drawn.time} 收价 ${sl1.drawn && sl1.drawn.close}`
+     + `｜换之前那一下：${sl0.drawn && sl0.drawn.close}（＝老品种那一趟给的值，证明这张页面上跳价**真的**会落上去）`
+     + `（数据那边 ${sl1.lastBar && sl1.lastBar.c}；老品种那一趟想写的是 ${SLOWC}）`);
 
   await b.close();
   console.log(`\n${n - bad}/${n} 过　截图：${OUT}`);
