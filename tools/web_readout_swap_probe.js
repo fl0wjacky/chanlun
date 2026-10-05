@@ -79,7 +79,11 @@ const SITES = {
   //           （⑮⑰⑱ 照旧绿：压得住但回不来，正是「收死了」那个 bug 的形状）。
   read:   { name: 'showRead 里那道闸（dataStale）', re: /\n(  if \(dataStale\) return;\n)/, rep: '\n' },
   sub:    { name: 'refreshSubVals 里那道闸（dataStale）', re: /\n(  if \(dataStale\) \{ subDom\.cells[^\n]*\n)/, rep: '\n' },
-  sticky: { name: '放开那一句（finally 里的 dataStale = false）', re: /paging\.loading = false; dataStale = false;/, rep: 'paging.loading = false;' },
+  // ★ sticky 只认 go() 那一句：app.js 里「自动重取」那条路的 finally 也有一句一模一样的（后加的），
+  //   不锚的话命中 2 处、这一跑整个不算数（Iris 10-05 判：工装老红，跟页面无关）。锚在 go() 那句头上的注释。
+  sticky: { name: '放开那一句（go() 的 finally 里的 dataStale = false）',
+            re: /(它自己有始有终。\n\s*if \(id === paging\.reqId\) \{ paging\.loading = false;) dataStale = false;/,
+            rep: '$1' },
   stale: { name: 'showRead()（字只印第一次，块照样亮）', re: /\n(function showRead\(b\) \{\n)/,
            rep: '\n$1  if (window.__ro0) { el(\'readout\').classList.add(\'on\'); readShown = true; return; }'
               + ' window.__ro0 = 1;      // ← 变异：字只印第一次\n' },
