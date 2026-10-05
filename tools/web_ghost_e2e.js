@@ -143,7 +143,7 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
    *  的 `boxes()` **同一个出处**（host ＝ 已完成线段、`i0 = host[PI0].i0`、`i1 = host[PI1].i1`），
    *  这样"切点在框里"这件事不是工装自己编的。`boxes` 里的两个小框按 Bram 的契约拼：PI 指向
    *  已完成线段那一份，左边那个到切点为止、右边那个从切点起（右边那个就是「随切点」说的那种）。 */
-  const mkCut = (d, withBoxes) => {
+  const mkCut = (d, withBoxes, edge) => {
     const done = (d.segs || []).filter((s) => !s.live);
     const zs = d.seg_centers || [];
     for (let n = zs.length - 1; n >= 0; n--) {
@@ -154,7 +154,11 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
       //   拿"框的中点那一根 bar"当刀，两个临时框的缝和切点竖线就落在两个地方 —— 屏上看着像两件事，
       //   而且这一格自己算出来的期望值也会跟着偏（第一版模子就是这么错的）。
       const mid = z.PI0 + 1 + Math.floor((z.PI1 - z.PI0) / 2);
-      const bar = done[mid].i0;
+      // ★ `edge`：切点**正好压在框的右沿**上（＝线上 ZEC 15m 那一刀：`cut_bar=19911`、框 19698..19911）。
+      //   这种刀不改这个框、改的是它后面那一组从哪儿重算（Bram/Atlas 10-05）⇒ **只画线、不挂「待定」**
+      //   （Nova 10-05 08:58 拍的）。工装必须能造出这个形状，否则这条规则没有尺子量。
+      //   取 `done[z.PI1].i1` ＝ 框的右端（`boxes()` 里 `i1 = host[PI1].i1`，同一个出处）。
+      const bar = edge ? done[z.PI1].i1 : done[mid].i0;
       const c = { cut_bar: bar, by: '笔·三买', level: 'seg', status: 'pending' };
       if (withBoxes) {
         // ★ 真引擎给的是**整组**的框，不只被切的那一个（`cut_centers`：`prev <= PI0 < next` 全收）——
@@ -346,8 +350,8 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
         const c = mkCut(body, true);
         if (c) body.cuts = [{ cut_bar: c.cut_bar, by: '笔·三买', level: 'seg', status: 'done' },
                             { cut_bar: c.cut_bar + 12, by: '笔·三买', level: 'seg', status: 'void' }];
-      } else if (which === 'cutturn' || which === 'cutpv') {
-        const c = mkCut(body, which === 'cutpv');
+      } else if (which === 'cutturn' || which === 'cutpv' || which === 'cutedge') {
+        const c = mkCut(body, which === 'cutpv', which === 'cutedge');
         if (c) body.cuts = [c];
       }
       // ⑯k：这一页认 `symbol` 入参 —— 换品种之后**手上那份数据的 symbol 真变了**（真后台本来就该这样）。
@@ -1314,6 +1318,47 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
      + `（x≈${vg1.cuts.map((c) => c.x).join(',')}）对上切点的虚线 `
      + `${vg1.cuts.reduce((k, c) => k + vsegAt(vfx, vg1.offs, c).length, 0)} 条、签 `
      + `${vfx.text.filter((t) => /待定|随切点/.test(t)).length} 枚`);
+
+  // ⑰l：切点**压在框的右沿**上（线上 ZEC 15m 就是这一刀：`cut_bar=19911` ＝ 框 19698..19911 的右端）
+  //   ⇒ **只画那条竖线、不挂「待定」**（Nova 10-05 08:58 拍：挂上去会让人以为那个框要被切，而那一刀
+  //   **不改这个框**，改的是它后面那一组从哪儿重算）。
+  //   ★ 这一格必须在**同一格**里同时量到两件：压边那页没有签、框内那页（⑰e 的 `cutturn`）照样有签。
+  //     只量"没有签"的话，「签整条路崩了」也会让它绿 —— 那是假绿，这一卡最早就是这么假红过的。
+  //   ★ 还要工装自己核一遍"这一刀**真**压在框沿上"（`edge`），否则模子哪天挪了，这一格会变成空转。
+  const cutGeom = (p) => p.evaluate(() => {
+    const d = window.__app.state.data;
+    const done = (d.segs || []).filter((s) => !s.live);
+    const c = (Array.isArray(d.cuts) ? d.cuts : [])[0];
+    if (!c) return null;
+    const z = (d.seg_centers || []).find((zz) => done[zz.PI0] && done[zz.PI1]
+      && done[zz.PI0].i0 <= c.cut_bar && c.cut_bar <= done[zz.PI1].i1);
+    if (!z) return null;
+    const i0 = done[z.PI0].i0, i1 = done[z.PI1].i1;
+    return { bar: c.cut_bar, i0, i1,
+             edge: c.cut_bar === i1 || c.cut_bar === i0,
+             inner: i0 < c.cut_bar && c.cut_bar < i1 };
+  });
+  const CE = await open('cutedge', QS + '&cut=turn');
+  await sleep(1200);
+  const eg0 = await cutGeo(CE.p);
+  const egCut = eg0.cuts[0];
+  if (egCut) await park(CE.p, egCut.bar);
+  await fxReset(CE.p);
+  if (egCut) await park(CE.p, egCut.bar);
+  const eg1 = await cutGeo(CE.p);
+  const efx = await fxOf(CE.p);
+  const egG = await cutGeom(CE.p);
+  const cgG = await cutGeom(ctp);                    // ⑰e 那一页（框内那一刀）做对照
+  ck('⑰l 切点**压在框沿**上时（线上 ZEC 15m 那一刀：`cut_bar` ＝ 框的右端）⇒ **只画竖线、不挂「待定」**；'
+     + '同一格拿框内的那一刀对照（照样挂签）',
+     !!egG && egG.edge && !egG.inner && !!egCut && egCut.x !== null
+       && vsegAt(efx, eg1.offs, eg1.cuts[0]).length >= 1 && rawTagN(efx) === 0
+       && !!cgG && cgG.inner && cfx.text.includes('待定'),
+     `压边那一刀 bar=${egG && egG.bar}（框 ${egG && egG.i0}..${egG && egG.i1}，工装自核 edge=${egG && egG.edge}）`
+     + `｜真画出来的竖虚线 ${vsegAt(efx, eg1.offs, eg1.cuts[0]).length} 条、签 ${rawTagN(efx)} 枚`
+     + `（签 ${JSON.stringify(efx.text.filter((t) => /待定|随切点/.test(t)))}）`
+     + `‖ 对照（框内那一刀 bar=${cgG && cgG.bar}，inner=${cgG && cgG.inner}）签 `
+     + `${JSON.stringify(cfx.text.filter((t) => /待定|随切点/.test(t)))}`);
 
   // ⑰g：切法是**这一屏**的属性 —— 换看法（换一次尺子）那几趟也得带着它走。
   //   ★ 这一格钉的是上面修掉的那个真 bug 最常踩的那条路：`setMeasure()` 原来没把 `cut` 传给 load()
