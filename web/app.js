@@ -70,8 +70,12 @@ const primitives = [];
 // viewSet＝**我们自己摆的那个视口**（用来认事件回声，见 setView）；reqId＝在飞的那一份的号（换品种就作废）。
 const DEFAULT_MEASURE = 'macd';       // 后台的缺省也是它（core/signals.py 的 MEASURES）；地址栏里不写它
 // 中枢切法（卡 card-e346ede6-996）：`cut=extend`＝原文那套（延伸/扩展），`turn`＝横跨更大一级走势的
-// 转折点处切开。**缺省就是 extend，所以缺省的这一份地址栏一个字都不写**（跟 measure 同一条账）。
-const DEFAULT_CUT = 'extend';
+// 转折点处切开。**缺省就是 turn**（小栋 2026-10-05 11:09Z 拍板，card-21fbf426-889），所以缺省的这一份
+// 地址栏一个字都不写（跟 measure 同一条账）。
+// ★★ 这一行**不许单独上**：不带 `cut` 的那一趟由**后台的缺省**说了算，回显再把 `paging.cut` 改回后台
+//   回的那个（见 load() 上面那段账）。前端先上 ⇒ 后台还回 extend ⇒ chip 亮「延伸」，白改一场。
+//   ⇒ 必须跟后台默认值（server.py 的 CUT_MODES／请求缺省／缓存主变体）**同一次部署**。
+const DEFAULT_CUT = 'turn';
 // ★ measure 的初值是**地址栏说的那个**（可分享、可截图复现），不是写死的缺省 —— 但地址栏点名的那个
 //   后台认不认只有 /api/meta 知道，所以首屏是「先等名单、再发图表那一趟」，见文件末尾的启动那几行。
 //   切法同理（`?cut=turn` 可分享），所以这两个词的初值都是**地址栏说的那个**。
@@ -91,8 +95,8 @@ const paging = { span: 1, spanMax: null, earliest: false, nogain: false, stop: n
 //   `orig[id] === false` ⇒ 那颗芯片挂「非原文」那枚小标；**读不到就一个标都不挂**（不知道的事不编）。
 const measures = { list: [], orig: {} };
 // ---- 中枢切法（卡 card-e346ede6-996：横跨更大一级走势的中枢，在转折点处切开）----
-// 口径：`/api/chart?…&cut=extend|turn`（Bram 10-05 定的契约）。extend＝原文那套、是缺省 ⇒ **不带就不发**
-//   ；turn＝按转折点切。后台白名单外 400，回显顶层 `cut`，缓存键 (span, measure, cut)。
+// 口径：`/api/chart?…&cut=extend|turn`（Bram 10-05 定的契约）。turn＝按转折点切、**是缺省** ⇒ 缺省那份不带就不发
+//   ；extend＝原文那套（可切的一档）。后台白名单外 400，回显顶层 `cut`，缓存键 (span, measure, cut)。
 // ★ 能切哪几种**以 /api/meta 的 `cut_modes` 为准**，前端不写死（跟 measures／图层名单同一个理由：两份名单
 //   迟早错开，那时候用户点的那颗和后台算的那份就不是一回事了）。**名单没到 ⇒ 这一组不画、这个参数
 //   一个字都不发** —— 这不是省事：后台的查询白名单里没有这个词的时候，多带一个参数就是 400，
@@ -181,6 +185,8 @@ function fixtureNames(symbol, tf) {
 //   不带 `cut` ⇒ 后台按缺省回「延伸」⇒ 回显把 `paging.cut` 当场改回 extend —— 用户切好的那一刀
 //   在换一次看法之后就自己弹回去了，而且屏幕上没有任何东西说过这件事。（工装 ⑰f 就是这么逮到的：
 //   深链 `?cut=turn` 打开，首屏那一趟没带参数，图脚和 chip 一起摆回「延伸」。）
+//   ★ 上面这个例子是按**当时的缺省 extend** 记的；缺省换成 turn 之后两个词对调，**机制一个字不变** ——
+//     这条仍是「load 必须带着 paging.cut 走」的理由，跟哪一档当缺省无关。
 async function load(symbol, tf, span, measure, cut = paging.cut) {
   try {
     const q = new URLSearchParams({ symbol, tf, span: String(span) });
@@ -188,7 +194,7 @@ async function load(symbol, tf, span, measure, cut = paging.cut) {
     //   走后台自己的缺省。**这不是省事**：旧后台的查询白名单里没有 measure，多带一个参数就是 400，
     //   整张图会挂在这一个词上。
     if (measures.list.length && measure) q.set('measure', measure);
-    // 切法同一条闸门、同一个理由。★ 缺省的 extend **不带**：后台缺省就是它，带上只是噪音，
+    // 切法同一条闸门、同一个理由。★ 缺省的 turn **不带**：后台缺省就是它（同一次部署），带上只是噪音，
     //   而且地址栏那份（setUrl）也得跟着少一个词 —— 两处对「缺省」的判断得是同一个（都用 DEFAULT_CUT）。
     if (cuts.list.length && cut && cut !== DEFAULT_CUT) q.set('cut', cut);
     const r = await fetch(`/api/chart?${q}`);
@@ -1757,12 +1763,12 @@ function measureText(d) {
 // 中枢切法：代号 → 人话（Nova 10-05 拍的）。跟 MEASURE_NAME 同一条规矩：后台加了第三种 ⇒ 原样印代号、
 // **不吞**；这张表**控件和图脚共用**，所以跟 MEASURE_NAME 一样放在这一块里（见本块开头的注释）。
 const CUT_NAME = {
-  extend: ['延伸', '延伸：中枢照原文的延伸/扩展判定（默认）'],
-  turn: ['按转折切', '按转折切：线段中枢横跨更大一级走势的转折点时，在那个转折点切开（卡 card-e346ede6-996）'],
+  extend: ['延伸', '延伸：中枢照原文的延伸/扩展判定'],
+  turn: ['按转折切', '按转折切：线段中枢横跨更大一级走势的转折点时，在那个转折点切开（默认；卡 card-e346ede6-996）'],
 };
 // 图脚那一格（跟「背驰看法」同一格、同一条规矩）：**认回显**（`d.cut`）—— 用户点的那颗可能失败，
 // 屏上画的到底是哪种，只有后台回的那份说了算。旧后台和离线样本没有这个字段 ⇒ 这一格**不出现**。
-// ★ **缺省（延伸）也印**：图脚是一张图的记录 —— 两张对照图（延伸／按转折切）就靠这一格分开，
+// ★ **缺省（按转折切）也印**：图脚是一张图的记录 —— 两张对照图（延伸／按转折切）就靠这一格分开，
 //   要是"只有换了才印"，切换前那张图上没有任何一处说得出它是哪种切法。
 function cutText(d) {
   const c = d.cut;
@@ -1870,7 +1876,7 @@ function setUrl() {
   // 看法同理：写着缺省（面积）是噪音，抹掉；只有真换了才写上去（可分享、可截图复现）。
   if (measures.list.length && paging.measure !== DEFAULT_MEASURE) q.set('measure', paging.measure);
   else q.delete('measure');
-  // 切法同理（缺省是 extend）：只有真切到转折点那份才写上去。★ 名单没到 ⇒ 也抹掉：
+  // 切法同理（缺省是 turn）：只有真切到「延伸」那份才写上去。★ 名单没到 ⇒ 也抹掉：
   // 那时候页面上根本没有这一组，地址栏却留着一个页面上不存在的词，是句假话（跟 load() 那条闸门对称）。
   if (cuts.list.length && paging.cut !== DEFAULT_CUT) q.set('cut', paging.cut);
   else q.delete('cut');

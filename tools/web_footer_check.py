@@ -275,7 +275,8 @@ def measure_check(quiet=False):
 
 # 「中枢切法」那格（card-e346ede6-996，2026-10-05 加）：跟「背驰看法」那格**同一套规矩** ——
 # 认的是 **d.cut（后台的回显）**，不是用户点的那颗、也不是 /api/meta 给的那份名单。
-# ★ 一处**故意不一样**，钉在探针 ⑰：**缺省（延伸）也要印**。这是一张图的记录 ——
+# ★ 一处**故意不一样**，钉在探针 ⑰：**缺省那一档也要印**（缺省 2026-10-05 起是「按转折切」，
+#   见 `web/app.js` 的 `DEFAULT_CUT`）。这是一张图的记录 ——
 #   「延伸」「按转折切」两张对照图就靠这一格分开；要是"只在换了才印"，切换前那张图上
 #   没有任何一处说得出它是哪种切法（那就成了两张长得一样、含义不同的图）。
 CUT_RE = re.compile(r"｜\s*中枢切法\s*(\S+)")
@@ -291,7 +292,7 @@ def cut_cell(meta):
 def cut_check(quiet=False):
     """判据：图脚那格＝**它自己给的那份回显**，四态（跟 measure_check 同形）。
 
-    回显 turn ⇒「按转折切」／回显 extend ⇒「延伸」（**缺省也印**）／后台新加的名字**原样印**（不吞）
+    回显 turn ⇒「按转折切」／回显 extend ⇒「延伸」（**两档都印，缺省那档也不例外**）／后台新加的名字**原样印**（不吞）
     ／没有这个字段 ⇒ **整格不出现**（旧后台、离线样本：不知道的事不编）。
     另加一验：这一格插在「数据源」前面，不许把它挤坏。"""
     got = (cut_cell(footer_text(dict(PAYLOAD, cut="turn"))),
@@ -303,7 +304,7 @@ def cut_check(quiet=False):
     src_ok = src_got == "币安实时"
     ok = got == want and src_ok
     if not quiet:
-        for name, g, w in zip(("回显 turn", "回显 extend（缺省也要印）", "名单外的新名字（原样印）", "没有这个字段（旧后台/样本）"), got, want):
+        for name, g, w in zip(("回显 turn（现缺省）", "回显 extend（另一档，也印）", "名单外的新名字（原样印）", "没有这个字段（旧后台/样本）"), got, want):
             print("  中枢切法那格：%-28s ⇒ %-10r（要 %r）" % (name, g, w))
         print("  中枢切法那格：%-28s ⇒ %r（要 '币安实时'）" % ("它后面那格「数据源」", src_got))
     return got, src_got, ok
@@ -522,7 +523,7 @@ process.stdout.write(JSON.stringify({t: sigTierText([
         got = _crun(b, dict(PAYLOAD, cut="turn"))
         cases.append(("⑭ 模板不再调 cutText ⇒ 印成 %r，判据必须不认" % got, got != "按转折切"))
 
-    # ⑮ ★ 写死成缺省（不认回显）：回显说是 turn，格子却印「延伸」⇒ 判据必须不认
+    # ⑮ ★ 写死成某一档（不认回显）：回显说是 turn，格子却印「延伸」⇒ 判据必须不认
     b = _mut("const c = d.cut;", "const c = 'extend';")
     if b is not None:
         got = _crun(b, dict(PAYLOAD, cut="turn"))
@@ -534,13 +535,16 @@ process.stdout.write(JSON.stringify({t: sigTierText([
         got = _crun(b, PAYLOAD)
         cases.append(("⑯ 缺字段也硬印 ⇒ 印成 %r，判据必须不认（要的是整格不出现）" % got, got is not None))
 
-    # ⑰ ★ 本格特有的那一条：**只在不等于缺省时才印**（"少印一格是省事"的写法）⇒ 回显 extend 时必须印不出来
-    b = _mut("const c = d.cut;", "const c = d.cut === 'extend' ? '' : d.cut;")
+    # ⑰ ★ 本格特有的那一条：**只在不等于缺省时才印**（"少印一格是省事"的写法）⇒ 缺省那档必须印不出来。
+    #   ★★ 探的既然是**缺省那一档**，这个字面量就得跟 `web/app.js` 的 `DEFAULT_CUT` 一起翻
+    #      （2026-10-05 起缺省＝turn）。拿 extend 当"缺省"来探的话，在 turn 当缺省的世界里它照样
+    #      红得挺像样，其实探的是**另一档** —— "缺省被吞掉"这件事就没人钉了。
+    b = _mut("const c = d.cut;", "const c = d.cut === 'turn' ? '' : d.cut;")
     if b is not None:
-        got = _crun(b, dict(PAYLOAD, cut="extend"))
-        # 这一格的"红"是**那一格消失**（判据要的是「延伸」两个字都在）—— 跟 ⑯ 正好相反：
+        got = _crun(b, dict(PAYLOAD, cut="turn"))
+        # 这一格的"红"是**那一格消失**（判据要的是「按转折切」四个字都在）—— 跟 ⑯ 正好相反：
         # ⑯ 是"不该有的却在"，这一格是"该在的却没了"。两个方向都得钉住。
-        cases.append(("⑰ 缺省那档不印（延伸时整格消失）⇒ 印成 %r，判据必须不认" % got, got != "延伸"))
+        cases.append(("⑰ 缺省那档不印（按转折切时整格消失）⇒ 印成 %r，判据必须不认" % got, got != "按转折切"))
 
     print("探针（每一格都必须红）：")
     for name, red in cases:
