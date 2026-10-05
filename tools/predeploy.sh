@@ -31,9 +31,15 @@ for chk in tools/selfcheck.py web/check_parity.py web/check_abuse.py web/check_a
   log=$(mktemp)
   "$PY" "$chk" >"$log" 2>&1
   rc=$?
+  # Python 崩了（缺包、Traceback）退的也是 1，跟「比了、红了」同码 ⇒ 先看日志分开（Iris 核 167a32a 时逮到）
+  if [ $rc = 1 ] && grep -qE '^Traceback|ModuleNotFoundError|ImportError' "$log"; then rc=99; fi
+  # selfcheck 自己有一栏「查不了 / 跑不了」（缺字体、缺版式工具）而引擎违规是 0 ⇒ 那是环境没备齐，不是红
+  if [ $rc = 1 ] && grep -E '^退出原因' "$log" | grep -q '总违规=0' && grep -E '^退出原因' "$log" | grep -qE '查不了|跑不了'; then rc=98; fi
   case $rc in
     0) record "$chk" 绿 "" ;;
     1) record "$chk" 红 "$(grep -E '✗|不过|退出原因' "$log" | tail -1 | cut -c1-80)" ;;
+    99) record "$chk" 没比成 "崩了：$(grep -E 'Error' "$log" | tail -1 | cut -c1-70)" ;;
+    98) record "$chk" 没比成 "环境没备齐：$(grep -E '^退出原因' "$log" | grep -oE '[^ ]+=(查不了|跑不了)' | tr '\n' ' ')" ;;
     *) record "$chk" 没比成 "rc=$rc $(tail -1 "$log" | cut -c1-70)" ;;
   esac
   rm -f "$log"
