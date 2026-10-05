@@ -420,6 +420,41 @@ def main():
          and mc.get("hist_def") == "dif-dea" and mc.get("span") == 2,
          "冷拉=%d 热拉=%d 头部同=%s t 同=%s span=%s" % (n_cold, n_warm, head_ok, t_ok, mc.get("span")))
 
+    # ⑯ /api/tick（小栋 10-05 A：最后一根实时跳价）：乱参 400 拉 0 次；冷并发 100 只拉 1 次、全 200；
+    #    2.5 秒内再来 100 拉 0 次；币安挂了 ⇒ 200 + stale=true、fetched_at 停在上次成功、不漏堆栈；
+    #    整个过程 /api/chart 那一格的字节不变（跳价不碰结构）
+    calls.update(n=0, delay=0.3, down=False)
+    for ts_ in server.TICKS.values():
+        ts_.bar, ts_.tried_at, ts_.failed, ts_.ok_at = None, 0.0, False, 0.0
+    junk_t = ["symbol=ZECUSDT", "tf=15m", "symbol=ZECUSDT&tf=15m&span=2", "symbol=ZECUSDT&tf=15m&measure=macd",
+              "symbol=ETHUSDT&tf=15m", "symbol=ZECUSDT&tf=1d", "symbol=ZECUSDT&tf=15m&tf=4h", ""]
+    badt = [j for j in junk_t if req(port, "GET", "/api/tick?" + j)[0] != 400]
+    cell("⑯ /api/tick 乱参 %d 条全 400、拉 0 次" % len(junk_t), not badt and calls["n"] == 0,
+         "不是 400 的：%s · 拉=%d" % (badt, calls["n"]))
+    before = req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=4h")[1]
+    calls["n"] = 0
+    rs = burst(port, 100, "GET", "/api/tick?symbol=ZECUSDT&tf=4h")
+    n1 = calls["n"]
+    rs2 = burst(port, 100, "GET", "/api/tick?symbol=ZECUSDT&tf=4h")
+    n2 = calls["n"] - n1
+    tk = json.loads(rs[0][1]) if rs[0][0] == 200 else {}
+    shape_ok = set(tk) == {"symbol", "tf", "t", "o", "h", "l", "c", "v", "fetched_at", "stale", "engine"} \
+        and tk.get("t") == BARS[-1]["t"] + ((int(time.time() * 1000) // 14400_000) * 14400_000 - BARS[-1]["t"])
+    cell("   ⑯ 冷并发 100 拉 1 次、全 200；2.5 秒内再 100 拉 0 次；字段对、t 是最后一根",
+         {c for c, _ in rs + rs2} == {200} and n1 == 1 and n2 == 0 and shape_ok,
+         "冷拉=%d 再拉=%d 字段=%s" % (n1, n2, sorted(tk)))
+    calls["down"] = True
+    time.sleep(server.TICK_S + 0.1)
+    c3, b3 = req(port, "GET", "/api/tick?symbol=ZECUSDT&tf=4h")
+    d3 = json.loads(b3) if c3 == 200 else {}
+    calls["down"] = False
+    after = req(port, "GET", "/api/chart?symbol=ZECUSDT&tf=4h")[1]
+    strip = lambda b: {k: v for k, v in json.loads(b).items() if k not in ("fetched_at", "stale", "refreshing")}
+    cell("   ⑯ 币安挂了：200、stale=true、fetched_at 停在上次、不漏；图那一格结构没被碰",
+         c3 == 200 and d3.get("stale") is True and d3.get("fetched_at") == tk.get("fetched_at")
+         and not leaks(b3) and strip(before) == strip(after),
+         "code=%s stale=%s 漏=%s 结构同=%s" % (c3, d3.get("stale"), leaks(b3), strip(before) == strip(after)))
+
     # 收尾：等每一格的后台刷新都落地再返回。不等的话，上一条变异臂留下的后台线程（⑨ 里睡 5 秒的那种）
     # 会在下一条臂的 ⓪ 里继续调假币安、把计数和峰值打脏 —— 自测里「错误回堆栈」那臂 ⓪ 莫名变红就是它。
     calls["delay"] = 0.0
@@ -454,6 +489,9 @@ def self_test():
 
     def no_throttle():
         server.REFRESH_S = server.RETRY_S = 0
+
+    def tick_no_cache():
+        server.TICK_S = 0
 
     def leaky():
         orig = server.Handler._err
@@ -529,7 +567,8 @@ def self_test():
                     ("刷新挂在请求上", sync_refresh), ("span 不设白名单", any_span), ("超封顶不钳", no_clamp), ("不预拉", no_prefetch),
                     ("不拿上一档当底（整窗重拉）", no_seed), ("earliest 恒为假", never_earliest),
                     ("忽略 measure（全按 macd 算、只改回显）", ignore_measure),
-                    ("副图不认 span（总给 1 档）", macd_ignores_span), ("副图自己另去拉币安", macd_own_fetch)]:
+                    ("副图不认 span（总给 1 档）", macd_ignores_span), ("副图自己另去拉币安", macd_own_fetch),
+                    ("跳价不缓存（每趟都打币安）", tick_no_cache)]:
         importlib.reload(server)
         f()
         buf = io.StringIO()
