@@ -14,7 +14,7 @@ import json
 from config import data
 from core import analyze, analyze_file, summarize, check_standardized, check_fractals_alternate
 from core.pen import check_pens, nonextreme_pens, unsplit_violations, build_pens_v1
-from core.segment import check_segments, verify_by_definition, nonextreme_endpoints
+from core.segment import check_segments, verify_by_definition, nonextreme_endpoints, nonextreme_startpoints
 from core.center import check_centers
 from core.extend import check_hierarchy
 from core.signals import signals, check_signals, zero_axis, ZA_THRESHOLD
@@ -102,7 +102,8 @@ for tag, r in R.items():
     S, P = r["segs"], r["pens"]
     count("线段不变量违规", len(check_segments(S, P)))
     count("线段定义复核违规", len(verify_by_definition(S, P)),
-          "　｜ 诊断：终点非段内极值 %d（原文未要求，只报数）" % len(nonextreme_endpoints(S)))
+          "　｜ 诊断：终点非段内极值 %d、起点非段内极值 %d（L78:50-51 标准化，只报数）"
+          % (len(nonextreme_endpoints(S)), len(nonextreme_startpoints(S))))
     # 中枢层
     count("类中枢不变量违规", len(check_centers(r["centers"], P, stops=[s["PI1"] + 1 for s in S])))
     count("类中枢起笔与段同向", same_dir_starts(r["centers"], P, S),

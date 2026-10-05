@@ -38,6 +38,7 @@
     check_segments()            不变量（笔数单数、首尾相接、方向交替、开头三笔有公共重叠）
     verify_by_definition()      独立复核：逐段按原文定义重算终点，并确认它是第一个满足的分界点
     nonextreme_endpoints()      诊断：终点不是段内极值的线段（原文未要求，只报数）
+    nonextreme_startpoints()    诊断：起点不是段内极值的线段（第一种情况收尾后新段冲过旧端点 / 图头；只报数）
 """
 
 from .kline import fractals
@@ -414,6 +415,17 @@ def nonextreme_endpoints(segs):
     """
     return [s for s in segs if not s.get("live") and
             ((s["dir"] == "up" and s["p1"] < s["hi"]) or (s["dir"] == "down" and s["p1"] > s["lo"]))]
+
+
+def nonextreme_startpoints(segs):
+    """诊断：起点不是段内极值的已完成线段（向上段段内最低 < 起点，或向下段段内最高 > 起点）。
+
+    card-f53ce60a-1c3（Atlas 10-05 逐条核）：上一段以第一种情况收尾、先破第一笔结束位置就定了（L71:27），
+    新段开头一笔反向冲过旧端点不会让旧段复活 ⇒ 这是原文程序本来就会出的结果；原文给的办法是按区间用、
+    「把该线段标准化为最高或最低点都在端点」（L78:50-51）。图头那一段的起点也不是真转折点。所以只报数、不算违规。
+    """
+    return [s for s in segs if not s.get("live") and
+            ((s["dir"] == "up" and s["lo"] < s["p0"]) or (s["dir"] == "down" and s["hi"] > s["p0"]))]
 
 
 def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
