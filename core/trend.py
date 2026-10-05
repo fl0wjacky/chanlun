@@ -60,7 +60,8 @@ def _try_confirm(done, t, ks, typ, lo, no_exceed=True):
 
 def find_bounds(r, regroup=True, alternate=True, check_empty=True, no_exceed=True):
     """→ dict(bounds, retracted)。四个开关是 spec §四 的探针 P1／P2／P5／P3（默认全开 ＝ 规则本身）。
-    bounds：[dict(seg=j, bar, kind 'H'/'L', price, pullback_seg=t, pullback_end_bar, ZD, ZG)]，按时间升序；
+    bounds：[dict(line_seg=j, bar, kind 'H'/'L', price, pullback_line_seg=t, pullback_end_bar, ZD, ZG)]，按时间升序；
+      ★ line_seg／pullback_line_seg 是**已完成线段**的下标（不是走势段号）—— 对外 `seg` 只指 segments[] 下标（Iris 10-05 17:51）；
     retracted：[dict(bar, kind, price, pullback_end_bar, retracted_bar, blocked_bar, blocked_kind)]（D2-7）。
     ★ pullback_end_bar ＝ 回抽段 S[t] 的终点那一根，**不是**实时能确立的那一根：线段要等后面的 K 线才算走完，
       实时确立更晚（tools/trend_check.py ④ 量出来 zec15 晚 61～184 根）。前端斜线画「极值到回抽段终点」，不标「确立」。"""
@@ -87,7 +88,7 @@ def find_bounds(r, regroup=True, alternate=True, check_empty=True, no_exceed=Tru
                     want = prev["kind"]
                     break
             ks.append(j + 1)
-            bounds.append(dict(seg=j, bar=done[j]["i1"], kind=typ, price=done[j]["p1"], pullback_seg=t,
+            bounds.append(dict(line_seg=j, bar=done[j]["i1"], kind=typ, price=done[j]["p1"], pullback_line_seg=t,
                                pullback_end_bar=done[t]["i1"], ZD=z["ZD"], ZG=z["ZG"]))
             want = None if not alternate else ("L" if typ == "H" else "H")
             break
