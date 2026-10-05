@@ -579,9 +579,11 @@ function trendBandView(target, state, prim) {
       let col, a;
       if (s.head || g === 0) { col = TREND.head; a = TREND.headA; }
       else {
-        const kind = (bnd[g - 1] || {}).kind;
-        col = kind === 'L' ? TREND.up : TREND.dn;
-        a = s.live ? TREND.bandLive : TREND.bandA;
+        // ★ 绿和红**不是同一个 alpha**：同一个 16% 在白纸上红本来就比绿实（ΔL* 8.55 vs 6.93），
+        //   近黑底上要保住这个差，红得给得比绿多。`theme.js` 里那五个数逐个反解过，别拉齐。
+        const up = (bnd[g - 1] || {}).kind === 'L';
+        col = up ? TREND.up : TREND.dn;
+        a = s.live ? (up ? TREND.liveUp : TREND.liveDn) : (up ? TREND.bandUp : TREND.bandDn);
       }
       ctx.fillStyle = rgba(col, Math.round(a * 255));
       ctx.fillRect(x0, 0, x1 - x0, H);
