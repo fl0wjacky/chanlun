@@ -54,7 +54,7 @@
 
 跑法：
   python3 tools/web_footer_check.py            # 主跑：拿实时规模的样本量 ＋ 数据源/背驰看法那两格
-  python3 tools/web_footer_check.py --selftest # 探针：十三格都得变红（尺子自己先证明会红）
+  python3 tools/web_footer_check.py --selftest # 探针：十七格都得变红（尺子自己先证明会红）
 """
 import json
 import os
@@ -273,6 +273,42 @@ def measure_check(quiet=False):
     return got, src_got, ok
 
 
+# 「中枢切法」那格（card-e346ede6-996，2026-10-05 加）：跟「背驰看法」那格**同一套规矩** ——
+# 认的是 **d.cut（后台的回显）**，不是用户点的那颗、也不是 /api/meta 给的那份名单。
+# ★ 一处**故意不一样**，钉在探针 ⑰：**缺省（延伸）也要印**。这是一张图的记录 ——
+#   「延伸」「按转折切」两张对照图就靠这一格分开；要是"只在换了才印"，切换前那张图上
+#   没有任何一处说得出它是哪种切法（那就成了两张长得一样、含义不同的图）。
+CUT_RE = re.compile(r"｜\s*中枢切法\s*(\S+)")
+
+
+def cut_cell(meta):
+    """从整句图脚里切出「｜ 中枢切法」后面那个名字。切不到 ⇒ None（跟 measure_cell 同一条：
+    **切不到不是错** —— 没有这个字段时这一格本来就不该出现）。"""
+    m = CUT_RE.search(meta)
+    return m.group(1).strip() if m else None
+
+
+def cut_check(quiet=False):
+    """判据：图脚那格＝**它自己给的那份回显**，四态（跟 measure_check 同形）。
+
+    回显 turn ⇒「按转折切」／回显 extend ⇒「延伸」（**缺省也印**）／后台新加的名字**原样印**（不吞）
+    ／没有这个字段 ⇒ **整格不出现**（旧后台、离线样本：不知道的事不编）。
+    另加一验：这一格插在「数据源」前面，不许把它挤坏。"""
+    got = (cut_cell(footer_text(dict(PAYLOAD, cut="turn"))),
+           cut_cell(footer_text(dict(PAYLOAD, cut="extend"))),
+           cut_cell(footer_text(dict(PAYLOAD, cut="zigzag"))),
+           cut_cell(footer_text(PAYLOAD)))
+    want = ("按转折切", "延伸", "zigzag", None)
+    src_got = source_of(footer_text(dict(PAYLOAD, cut="turn")))
+    src_ok = src_got == "币安实时"
+    ok = got == want and src_ok
+    if not quiet:
+        for name, g, w in zip(("回显 turn", "回显 extend（缺省也要印）", "名单外的新名字（原样印）", "没有这个字段（旧后台/样本）"), got, want):
+            print("  中枢切法那格：%-28s ⇒ %-10r（要 %r）" % (name, g, w))
+        print("  中枢切法那格：%-28s ⇒ %r（要 '币安实时'）" % ("它后面那格「数据源」", src_got))
+    return got, src_got, ok
+
+
 def mutate(js, old, new):
     """探针里改源码用。**改动必须真落到抠出来的那段上** —— 落不上就抛，不许白捡一个红：
     Atlas 2026-10-03 那格探针就是这么假红的（他删的是标记块里那一行，块因为空了才红，
@@ -471,6 +507,41 @@ process.stdout.write(JSON.stringify({t: sigTierText([
         got = _mrun(b, PAYLOAD)
         cases.append(("⑬ 缺字段也硬印 ⇒ 印成 %r，判据必须不认（要的是整格不出现）" % got, got is not None))
 
+    # ⑭–⑰ 「中枢切法」那格的四格探针（2026-10-05 加这一格时配的）。
+    #     判据是「名字＝**d.cut 那份回显**」⇒ 四件事都得钉住：接线在不在、认不认回显、缺字段编不编、
+    #     **缺省那一态印不印**（这一条是本格特有的，见 CUT_RE 上面那段）。
+    def _crun(bjs, payload):
+        try:
+            return cut_cell(footer_text(payload, block_js=bjs))
+        except SystemExit:
+            return None
+
+    # ⑭ 接线被摘掉（模板里不再调 cutText）⇒ 必须印不出名字
+    b = _mut("+ cutText(d)", "+ ''")
+    if b is not None:
+        got = _crun(b, dict(PAYLOAD, cut="turn"))
+        cases.append(("⑭ 模板不再调 cutText ⇒ 印成 %r，判据必须不认" % got, got != "按转折切"))
+
+    # ⑮ ★ 写死成缺省（不认回显）：回显说是 turn，格子却印「延伸」⇒ 判据必须不认
+    b = _mut("const c = d.cut;", "const c = 'extend';")
+    if b is not None:
+        got = _crun(b, dict(PAYLOAD, cut="turn"))
+        cases.append(("⑮ 写死缺省、不认回显 ⇒ 印成 %r，判据必须不认" % got, got != "按转折切"))
+
+    # ⑯ 缺字段那态塌成一态：没有 cut 也硬印一个 ⇒ 判据必须不认
+    b = _mut("if (typeof c !== 'string' || !c) return '';", "if (false) return '';")
+    if b is not None:
+        got = _crun(b, PAYLOAD)
+        cases.append(("⑯ 缺字段也硬印 ⇒ 印成 %r，判据必须不认（要的是整格不出现）" % got, got is not None))
+
+    # ⑰ ★ 本格特有的那一条：**只在不等于缺省时才印**（"少印一格是省事"的写法）⇒ 回显 extend 时必须印不出来
+    b = _mut("const c = d.cut;", "const c = d.cut === 'extend' ? '' : d.cut;")
+    if b is not None:
+        got = _crun(b, dict(PAYLOAD, cut="extend"))
+        # 这一格的"红"是**那一格消失**（判据要的是「延伸」两个字都在）—— 跟 ⑯ 正好相反：
+        # ⑯ 是"不该有的却在"，这一格是"该在的却没了"。两个方向都得钉住。
+        cases.append(("⑰ 缺省那档不印（延伸时整格消失）⇒ 印成 %r，判据必须不认" % got, got != "延伸"))
+
     print("探针（每一格都必须红）：")
     for name, red in cases:
         print("  %s %s" % ("✓" if red else "✗ 没红", name))
@@ -487,11 +558,12 @@ if __name__ == "__main__":
         _, ok = measure()
         _ds, ds_ok = data_source_check()
         _mc, _ms, m_ok = measure_check()
+        _cc, _cs, c_ok = cut_check()
     except SystemExit as e:
         print(str(e))
         sys.exit(1)
-    if ok and ds_ok and m_ok:
-        print("✓ 两个层级都在一行内，且「数据源」「背驰看法」两格印得出真实的值（%s）" % os.path.relpath(JS, ROOT))
+    if ok and ds_ok and m_ok and c_ok:
+        print("✓ 两个层级都在一行内，且「数据源」「背驰看法」「中枢切法」三格印得出真实的值（%s）" % os.path.relpath(JS, ROOT))
         sys.exit(0)
     if not ok:
         print("✗ 有一段放不下一行 —— 图脚在手机上是几行糊在一起的字（见上面的 ≈px）")
@@ -499,4 +571,6 @@ if __name__ == "__main__":
         print("✗ 「数据源」那格印出来的值不对 —— 实际值印在上面每一行里，照那个看，别猜原因")
     if not m_ok:
         print("✗ 「背驰看法」那格印出来的值不对 —— 实际值印在上面每一行里，照那个看，别猜原因")
+    if not c_ok:
+        print("✗ 「中枢切法」那格印出来的值不对 —— 实际值印在上面每一行里，照那个看，别猜原因")
     sys.exit(1)

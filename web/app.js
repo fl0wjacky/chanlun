@@ -60,15 +60,24 @@ const el = (id) => document.getElementById(id);
 const opts = { ...DEFAULTS, sigKinds: { ...DEFAULTS.sigKinds } };
 opts.vol = subParam('vol');
 opts.macd = subParam('macd');
+// 「先看切后」预览（卡 card-e346ede6-996）：**默认关**，而且不按屏宽定 —— 它跟 vol/macd 那两颗的理由
+// 不一样（那两颗是"手机上让图占满"），所以不走 SUB_DEF 那一套。地址栏 `?cutpv=1` 可以指名
+// （可分享、可截图复现；工装也拿它把两种画法都摆出来）。一个字没有 ⇒ 关。
+opts.cutPreview = SUB_Q.get('cutpv') === '1';
 const state = { data: null, opts, candleSeries: null };
 const primitives = [];
 // 往左拖那套状态：span＝现在手上是第几档，spanMax＝后台给的封顶，earliest＝币安真没有了。
 // viewSet＝**我们自己摆的那个视口**（用来认事件回声，见 setView）；reqId＝在飞的那一份的号（换品种就作废）。
 const DEFAULT_MEASURE = 'macd';       // 后台的缺省也是它（core/signals.py 的 MEASURES）；地址栏里不写它
+// 中枢切法（卡 card-e346ede6-996）：`cut=extend`＝原文那套（延伸/扩展），`turn`＝横跨更大一级走势的
+// 转折点处切开。**缺省就是 extend，所以缺省的这一份地址栏一个字都不写**（跟 measure 同一条账）。
+const DEFAULT_CUT = 'extend';
 // ★ measure 的初值是**地址栏说的那个**（可分享、可截图复现），不是写死的缺省 —— 但地址栏点名的那个
 //   后台认不认只有 /api/meta 知道，所以首屏是「先等名单、再发图表那一趟」，见文件末尾的启动那几行。
+//   切法同理（`?cut=turn` 可分享），所以这两个词的初值都是**地址栏说的那个**。
 const paging = { span: 1, spanMax: null, earliest: false, nogain: false, stop: null, loading: false, failedAt: 0, reqId: 0, applying: false,
-                 measure: new URLSearchParams(location.search).get('measure') || DEFAULT_MEASURE };
+                 measure: new URLSearchParams(location.search).get('measure') || DEFAULT_MEASURE,
+                 cut: new URLSearchParams(location.search).get('cut') || DEFAULT_CUT };
 
 // ---- 背驰看法（卡 card-84091d2d-c97：四选一、默认不动、图脚标明当前用的是哪种）----
 // 口径在 docs/spec/背驰.md 第六节，四个名字的出处是 core/signals.py 的 MEASURES 上面那一行。
@@ -81,6 +90,15 @@ const paging = { span: 1, spanMax: null, earliest: false, nogain: false, stop: n
 // ★ orig：**哪些看法不是 108 课原文**由 /api/meta 说（card-6381042d-03f），前端不写死名字。
 //   `orig[id] === false` ⇒ 那颗芯片挂「非原文」那枚小标；**读不到就一个标都不挂**（不知道的事不编）。
 const measures = { list: [], orig: {} };
+// ---- 中枢切法（卡 card-e346ede6-996：横跨更大一级走势的中枢，在转折点处切开）----
+// 口径：`/api/chart?…&cut=extend|turn`（Bram 10-05 定的契约）。extend＝原文那套、是缺省 ⇒ **不带就不发**
+//   ；turn＝按转折点切。后台白名单外 400，回显顶层 `cut`，缓存键 (span, measure, cut)。
+// ★ 能切哪几种**以 /api/meta 的 `cut_modes` 为准**，前端不写死（跟 measures／图层名单同一个理由：两份名单
+//   迟早错开，那时候用户点的那颗和后台算的那份就不是一回事了）。**名单没到 ⇒ 这一组不画、这个参数
+//   一个字都不发** —— 这不是省事：后台的查询白名单里没有这个词的时候，多带一个参数就是 400，
+//   整张图会挂在这一个词上（跟 measure 那次是同一个洞，见 load() 里那段注释）。
+// ★ 名单没到就自己编一对名字发出去，是这里最坏的做法：看着能用，直到后台把那颗点成 400。
+const cuts = { list: [] };
 let viewSet = null;
 let settleTimer = 0;
 const SETTLE_MS = 40;      // 「自己摆视口」的认回声窗口，见 holdView()
@@ -158,13 +176,21 @@ function fixtureNames(symbol, tf) {
 // span = 数据档（后端白名单 1、2、4、8……）：1 档 210 天，每翻一档往前多要同样长的一段。
 // ★ 这个 **`span` 是发给后台的参数**，跟地址栏里 `?at=N&span=M` 那个「看多少根」**不是一回事**
 //   —— 同一个词两个意思，所以地址栏里那个数据档我另叫 `?load=`（见 go()），别混。
-async function load(symbol, tf, span, measure) {
+// ★ 切法的**缺省是「当前那个」**（`paging.cut`），不是 `undefined`：切法是**看的这一屏**的一个属性
+//   （跟档位、看法一样），换品种／换看法／往左补一档／收盘自动重取都得**带着它**走。漏了的话那一趟
+//   不带 `cut` ⇒ 后台按缺省回「延伸」⇒ 回显把 `paging.cut` 当场改回 extend —— 用户切好的那一刀
+//   在换一次看法之后就自己弹回去了，而且屏幕上没有任何东西说过这件事。（工装 ⑰f 就是这么逮到的：
+//   深链 `?cut=turn` 打开，首屏那一趟没带参数，图脚和 chip 一起摆回「延伸」。）
+async function load(symbol, tf, span, measure, cut = paging.cut) {
   try {
     const q = new URLSearchParams({ symbol, tf, span: String(span) });
     // ★ 名单还没到手（离线样本、旧后台、或者首屏那个并行的 /api/meta 还没回来）⇒ measure 一个字都不带，
     //   走后台自己的缺省。**这不是省事**：旧后台的查询白名单里没有 measure，多带一个参数就是 400，
     //   整张图会挂在这一个词上。
     if (measures.list.length && measure) q.set('measure', measure);
+    // 切法同一条闸门、同一个理由。★ 缺省的 extend **不带**：后台缺省就是它，带上只是噪音，
+    //   而且地址栏那份（setUrl）也得跟着少一个词 —— 两处对「缺省」的判断得是同一个（都用 DEFAULT_CUT）。
+    if (cuts.list.length && cut && cut !== DEFAULT_CUT) q.set('cut', cut);
     const r = await fetch(`/api/chart?${q}`);
     if (r.ok) return vetted({ ...(await r.json()), source: 'api' });
   } catch (e) { /* 静态打开（file:// 或本地 http.server）时没有后台，走样本 */ }
@@ -237,6 +263,8 @@ function ladderSpan(v) {
 // 纯函数：给「现在手上那份的状态 cur」和「后台回的一份 d」，算出手上该变成什么；调用方 Object.assign 回去。
 function adopt(cur, d, prevLen) {
   const s = { measure: typeof d.measure === 'string' && d.measure ? d.measure : cur.measure,
+              // 切法也认回显（跟 measure 同一格）：点的那颗可能失败，屏幕上画的到底是哪种只有后台那份说了算
+              cut: typeof d.cut === 'string' && d.cut ? d.cut : cur.cut,
               span: Number.isFinite(d.span) ? d.span : cur.span,          // 回显的档位就是真档位
               spanMax: Number.isFinite(d.span_max) ? d.span_max : cur.spanMax,
               // 三个字段同一条规矩：**回了就听回显的，没回就维持现状**。
@@ -1071,6 +1099,8 @@ function applyToggles() {
   }
   // 「关着的层不许有能点的开关」这条账，看法那组也算：买卖点一关，它就得跟着灰（或反过来亮回来）。
   renderMeasures();
+  // 切法那组同理：中枢两层都关着时它得跟灰（判据在 renderCuts 一处，别在这儿再写一遍）。
+  renderCuts();
 }
 
 function buildChips() {
@@ -1176,20 +1206,34 @@ function readMeasures(m) {
   return { list, orig };
 }
 
+// 一次 `/api/meta` 拿两张名单（看法、切法）—— 不是图省一次请求，是**只有一份「名单到没到」**：
+// 分两次请求就有两个 ready 门，首屏那个 `?measure=`/`?cut=` 的等待、失败回退、离线样本那三条路
+// 都得各写一遍，迟早一处漏掉（漏掉的那次就是带着白名单外的词发请求 ⇒ 400 ⇒ 整张图挂掉）。
+// ★ 两张名单**各判各的**：看法只有一种（不画那一组）不等于切法也只有一种，两件事别互相带着 return。
 async function loadMeasures() {
   try {
     const r = await fetch('/api/meta');
     if (!r.ok) return;
     const m = await r.json();
     const { list, orig } = readMeasures(m);
-    if (list.length < 2) return;         // 只有一种看法＝没什么可切的；不画一个只有一个选项的开关
-    measures.list = list;
-    measures.orig = orig;
-    // 地址栏点名的那个后台认不认：名单外的一律退回缺省（缺省不在名单里才拿第一个）
-    const want = new URLSearchParams(location.search).get('measure');
-    if (want && !list.includes(want)) paging.measure = list.includes(DEFAULT_MEASURE) ? DEFAULT_MEASURE : list[0];
-    buildMeasures();
-  } catch (e) { /* 没后台（离线样本）或没这个接口：没有看法可切，页面上不多一个字 */ }
+    if (list.length >= 2) {              // 只有一种看法＝没什么可切的；不画一个只有一个选项的开关
+      measures.list = list;
+      measures.orig = orig;
+      // 地址栏点名的那个后台认不认：名单外的一律退回缺省（缺省不在名单里才拿第一个）
+      const want = new URLSearchParams(location.search).get('measure');
+      if (want && !list.includes(want)) paging.measure = list.includes(DEFAULT_MEASURE) ? DEFAULT_MEASURE : list[0];
+      buildMeasures();
+    }
+    // 名单叫 `cut_modes`（Bram 10-05）：不叫 `cuts` —— 那个名字是**图表载荷**顶层那份切点清单的，
+    // 两个接口里同名不同物，混起来就是把一张表的字段名当另一张表的用。
+    const cl = Array.isArray(m.cut_modes) ? m.cut_modes.filter((x) => typeof x === 'string' && x) : [];
+    if (cl.length >= 2) {                // 同上：只有一个切法＝没什么可切的，不画这一组、也不发这个参数
+      cuts.list = cl;
+      const want = new URLSearchParams(location.search).get('cut');
+      if (want && !cl.includes(want)) paging.cut = cl.includes(DEFAULT_CUT) ? DEFAULT_CUT : cl[0];
+      buildCuts();
+    }
+  } catch (e) { /* 没后台（离线样本）或没这个接口：没有看法/切法可切，页面上不多一个字 */ }
 }
 
 // 「非原文」那枚小标（card-6381042d-03f，小栋 2026-10-04 定 ①A：**留着，标明**）。
@@ -1272,12 +1316,126 @@ async function setMeasure(id) {
     setUrl();
     if (anchor) draw(d, anchor); else draw(d);
     renderMeasures();
+    renderCuts();                      // 切法这一趟也带着走（load 的缺省就是 paging.cut）⇒ chip 跟回显对齐
     el('state').textContent = d.closed ? '已收盘' : '未收盘（最后一根还在走）';
     el('state').className = 'badge ' + (d.closed ? '' : 'live');
   } catch (e) {
     if (id0 !== paging.reqId) return;
     el('state').textContent = String(e.message || e); el('state').className = 'badge bad';
     renderMeasures();                  // 没换成 ⇒ 亮回原来那一颗
+  } finally {
+    if (id0 === paging.reqId) paging.loading = false;
+  }
+}
+
+// ---------------------------------------------------------------- 中枢切法那一组（卡 card-e346ede6-996）
+// 形态跟「背驰看法」同一套（单选：`role=radiogroup` ＋ `aria-checked`），但**另起一组**、不并进那一排 ——
+// 那一组换的是「买卖点按哪种力度比较算」，这一组换的是「中枢切在哪」，两件事各归各的；并成一排会让人
+// 以为能同时选。★ 名字也是 Nova 10-05 拍的：两颗「延伸」「按转折切」。后台哪天加了第三种 ⇒ 原样印
+// 代号、title 里说明白，**不吞**（跟 MEASURE_NAME 同一条规矩）。
+// ★ 措辞表 CUT_NAME 在下面 RENDER_META 那一块里（图脚也用它，一处一份），见那块开头的注释。
+function buildCuts() {
+  const box = el('panel');
+  const g = document.createElement('div');
+  g.className = 'mgroup'; g.id = 'cgroup';
+  g.setAttribute('role', 'radiogroup'); g.setAttribute('aria-label', '中枢切法');
+  const cap = document.createElement('span');
+  cap.className = 'mcap'; cap.textContent = '中枢切法';
+  g.appendChild(cap);
+  for (const id of cuts.list) {
+    const [short, long] = CUT_NAME[id] || [id, `${id}（后台新加的切法，前端还没有中文名）`];
+    const b = document.createElement('button');
+    b.className = 'chip mchip'; b.type = 'button'; b.dataset.cut = id;
+    b.textContent = short; b.title = long;
+    b.setAttribute('role', 'radio');
+    b.onclick = () => setCut(id);
+    g.appendChild(b);
+  }
+  const mg = el('mgroup');
+  if (mg) box.insertBefore(g, mg.nextSibling);   // 挨着「背驰看法」：两组都在图层那排**前面**
+  else box.prepend(g);
+  // 「先看切后」：一个**开关**（`aria-pressed`），不是单选 —— 跟"切法选哪一种"不是一类东西，
+  // 所以**另起一组**，不塞进上面那个 `radiogroup`（把一个开关放进单选组里，读屏会读错）。
+  // ★ 只在切法名单里有 `turn` 的时候才建：没有"按转折切"，就没有"待定的刀"，这颗永远灰着 = 摆设。
+  if (cuts.list.includes('turn')) {
+    const pg = document.createElement('div');
+    pg.className = 'mgroup'; pg.id = 'pvgroup';
+    const pcap = document.createElement('span');
+    pcap.className = 'mcap'; pcap.textContent = '切后预览';
+    pg.appendChild(pcap);
+    const pb = document.createElement('button');
+    pb.className = 'chip mchip'; pb.type = 'button'; pb.id = 'pvchip';
+    pb.textContent = '先看切后';
+    pb.title = '先看切后：把还没立住的那几刀**也画成切开的框**（左沿虚线 ＋ 框内左端「随切点」签）。'
+      + '默认关 —— 没立住之前屏上照惯例画的还是旧框（第 88 课：中阴阶段仍借助前面那个中枢分析）。';
+    pb.onclick = () => {
+      if (paging.cut !== 'turn') return;          // 置灰时点不到；真点到了也什么都不做
+      opts.cutPreview = !opts.cutPreview;
+      renderCuts();
+      setUrl();
+      repaint();                                  // 只换**画法**：数据一个字都不用重取
+    };
+    pg.appendChild(pb);
+    const mg2 = el('cgroup');
+    if (mg2) box.insertBefore(pg, mg2.nextSibling); else box.prepend(pg);
+  }
+  watchOverflow(box);                  // 又多了一排，手机上右边还有没有东西要重算
+  renderCuts();
+}
+
+// 亮哪一颗**看回显**（paging.cut 是 adopt() 从响应里认来的），不看用户刚点的那一颗 —— 跟看法同一格。
+// ★ 中枢那两层都关着 ⇒ 置灰不可点：这一组只换中枢画在哪，层关着的时候点它，屏幕上**什么都不会变**，
+//   点了没反应会被当成坏了（判据只有 opts 一处，跟别的开关同一条账）。手机上没有 hover，所以
+//   「为什么是灰的」也写进标题那一行。
+function renderCuts() {
+  const g = el('cgroup'); if (!g) return;
+  const on = !!opts.pc || !!opts.sc;
+  for (const b of g.querySelectorAll('.mchip')) {
+    b.setAttribute('aria-checked', b.dataset.cut === paging.cut ? 'true' : 'false');
+    b.disabled = !on;
+  }
+  const cap = g.querySelector('.mcap');
+  if (cap) cap.textContent = on ? '中枢切法' : '中枢切法 · 中枢那两层都关着';
+  if (on) g.removeAttribute('title');
+  else g.title = '类中枢和线段中枢那两层都关着 —— 这一组只换中枢切在哪，先打开一层';
+  // 「先看切后」那颗开关（不是单选，所以不归上面那个循环）：只有「按转折切」下才有"待定的刀"，
+  // 别的切法下点了屏幕不会变 ⇒ 置灰，并把理由写在标题那行（手机没有 hover）。
+  const pg = el('pvgroup');
+  if (pg) {
+    const pb = el('pvchip');
+    const live = paging.cut === 'turn';
+    pb.setAttribute('aria-pressed', String(!!opts.cutPreview));
+    pb.disabled = !live;
+    const pcap = pg.querySelector('.mcap');
+    if (pcap) pcap.textContent = live ? '切后预览' : '切后预览 · 只在「按转折切」下有用';
+    if (live) pg.removeAttribute('title');
+    else pg.title = '切法现在是「延伸」：没有待定的刀，也就没有"切后"可看';
+  }
+}
+
+async function setCut(id) {
+  if (!cuts.list.includes(id) || id === paging.cut || paging.loading) return;
+  const own = state.data;
+  const id0 = ++paging.reqId;          // 跟首屏／换看法共用同一个号：谁后发谁算数
+  paging.loading = true;
+  el('state').textContent = '换切法…'; el('state').className = 'badge';
+  try {
+    // 锚点跟换看法一样按**时间**抓：切开之后后面整段都要重画（小栋 10-05 那条要求），框会大改；
+    // 但 **K 线一根不多不少**，按时间对回去视口就不动 —— 用户看到的是"同一段行情换了个切法"，
+    // 而不是图跳了一下。真变了也不跳：这一手本来就是按时间放回去的，不押在"一定不变"上。
+    const anchor = own ? anchorOf(own.bars, chart.timeScale().getVisibleLogicalRange()) : null;
+    const d = await load(el('symbol').value, el('tf').value, paging.span, paging.measure, id);
+    if (id0 !== paging.reqId) return;
+    Object.assign(paging, adopt(paging, d));
+    setUrl();
+    if (anchor) draw(d, anchor); else draw(d);
+    renderCuts();
+    el('state').textContent = d.closed ? '已收盘' : '未收盘（最后一根还在走）';
+    el('state').className = 'badge ' + (d.closed ? '' : 'live');
+  } catch (e) {
+    if (id0 !== paging.reqId) return;
+    el('state').textContent = String(e.message || e); el('state').className = 'badge bad';
+    renderCuts();                      // 没换成 ⇒ 亮回原来那一颗
   } finally {
     if (id0 === paging.reqId) paging.loading = false;
   }
@@ -1596,6 +1754,21 @@ function measureText(d) {
   if (typeof m !== 'string' || !m) return '';
   return ` ｜ 背驰看法 ${(MEASURE_NAME[m] || [m])[0]}`;
 }
+// 中枢切法：代号 → 人话（Nova 10-05 拍的）。跟 MEASURE_NAME 同一条规矩：后台加了第三种 ⇒ 原样印代号、
+// **不吞**；这张表**控件和图脚共用**，所以跟 MEASURE_NAME 一样放在这一块里（见本块开头的注释）。
+const CUT_NAME = {
+  extend: ['延伸', '延伸：中枢照原文的延伸/扩展判定（默认）'],
+  turn: ['按转折切', '按转折切：线段中枢横跨更大一级走势的转折点时，在那个转折点切开（卡 card-e346ede6-996）'],
+};
+// 图脚那一格（跟「背驰看法」同一格、同一条规矩）：**认回显**（`d.cut`）—— 用户点的那颗可能失败，
+// 屏上画的到底是哪种，只有后台回的那份说了算。旧后台和离线样本没有这个字段 ⇒ 这一格**不出现**。
+// ★ **缺省（延伸）也印**：图脚是一张图的记录 —— 两张对照图（延伸／按转折切）就靠这一格分开，
+//   要是"只有换了才印"，切换前那张图上没有任何一处说得出它是哪种切法。
+function cutText(d) {
+  const c = d.cut;
+  if (typeof c !== 'string' || !c) return '';
+  return ` ｜ 中枢切法 ${(CUT_NAME[c] || [c])[0]}`;
+}
 // 「消失的点」那个数（卡 card-cf3ed018-795）。★ 它是**单独一格浮层**（#ghostc），不并进图脚那行：
 //   图脚是流内布局，这一格一出来就把 #chart 挤矮（1440 实量：foot 60→77、#chart 760→743，
 //   整张图往下挪 3px —— 而它偏偏就是"消失的点刚出现"的那一刻，用户会看见图跳一下）；
@@ -1620,6 +1793,7 @@ function renderMeta(d) {
     + ` ｜ 精度 ${d.meta?.tick} ｜ ${d.meta?.pen_rule === 'new' ? '新笔' : '老笔'}`
     + ` ｜ 买卖点 线段中枢层 ${sigTierText(d.signals?.seg || [])} · 类中枢层 ${sigTierText(d.signals?.pen || [])}`
     + measureText(d)
+    + cutText(d)
     + ` ｜ 数据源 ${sourceLabel(d.source, d.stale)}`;
   ghostText(d);          // 那一格是浮层（见上），不在这句话里 —— 两处各写一遍就会分家
 }
@@ -1696,11 +1870,17 @@ function setUrl() {
   // 看法同理：写着缺省（面积）是噪音，抹掉；只有真换了才写上去（可分享、可截图复现）。
   if (measures.list.length && paging.measure !== DEFAULT_MEASURE) q.set('measure', paging.measure);
   else q.delete('measure');
+  // 切法同理（缺省是 extend）：只有真切到转折点那份才写上去。★ 名单没到 ⇒ 也抹掉：
+  // 那时候页面上根本没有这一组，地址栏却留着一个页面上不存在的词，是句假话（跟 load() 那条闸门对称）。
+  if (cuts.list.length && paging.cut !== DEFAULT_CUT) q.set('cut', paging.cut);
+  else q.delete('cut');
   // 副图那两颗同理：跟**这一屏的默认**（桌面开、手机关，见 SUB_DEF）不一样才写上去。
   // 这样地址栏永远只写"这一屏再从零打开会不一样的东西"—— 写着默认值是噪音，换屏时还得记得抹掉。
   for (const k of ['vol', 'macd']) {
     if (opts[k] === SUB_DEF) q.delete(k); else q.set(k, opts[k] ? '1' : '0');
   }
+  // 「先看切后」同理：关着是默认（这一档跟屏宽无关，见 opts.cutPreview 那行），开着才写上去。
+  if (opts.cutPreview) q.set('cutpv', '1'); else q.delete('cutpv');
   history.replaceState(null, '', `?${q}`);            // 可分享、可截图复现
 }
 
@@ -1724,6 +1904,7 @@ async function go(span = 1) {
     setUrl();                                    // 后台钳过档的话（15m 要 16 钳到 4），地址栏写**真**档位
     draw(d);
     renderMeasures();                            // 亮哪一颗看回显（名单是后到的，首屏画完得补一次）
+    renderCuts();
     el('state').textContent = d.closed ? '已收盘' : '未收盘（最后一根还在走）';
     el('state').className = 'badge ' + (d.closed ? '' : 'live');
   } catch (e) {
@@ -1753,7 +1934,8 @@ const metaReady = loadMeasures();
   // ★ 地址栏**点名了**看法就得先等名单：名单外的名字发出去后台回 400，整张图会白挂在这一个词上
   //   （跟 `?load=` 超白名单会被钳是同一类账，只是那边前端能自己钳、这边得先问后台认哪几个）。
   //   没点名（绝大多数）⇒ 一个字都不等，立刻发第一趟；那一趟不带 measure，走后台自己的缺省。
-  if (q.has('measure')) await metaReady;
+  //   切法（`?cut=`）同一条：点名了就得等名单 —— 名单外的词发出去，挂掉的是整张图。
+  if (q.has('measure') || q.has('cut')) await metaReady;
   // ?load=N：直接打开某一档（可分享 / 可截图复现；N 不在白名单上就退回它下面的那一档）
   go(ladderSpan(q.get('load')));
 })();
@@ -1764,4 +1946,4 @@ const metaReady = loadMeasures();
 // ★ `fmtPrice` 也递出去：工装要证「页头那个价跟图上那个价是**同一个数**」，只能拿页面**自己这个格式器**
 //   把图上那份印一遍去比 —— 工装自己再四舍五入一遍就是第二份规矩（`toFixed` 看二进制真值、
 //   `toLocaleString` 看最短十进制，1313.995 这种正好落在半个末位上的值会差一分，判据在**没事**的时候红）。
-window.__app = { chart, state, opts, paging, measures, sub, fmtPrice };
+window.__app = { chart, state, opts, paging, measures, cuts, sub, fmtPrice };
