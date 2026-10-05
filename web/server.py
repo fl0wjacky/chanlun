@@ -24,6 +24,7 @@
         不乘 2，hist_def 字段写明），带每根的 t；头部跟 /api/chart 一样（span / earliest / span_max / stale…）。
         副图打开才取，关着不付（ZEC 15m 全精度三列 gzip 约 +0.55 MB，所以不塞进 /api/chart）。
   GET /api/meta            → 白名单（前端拿来做下拉）
+        engine = 引擎版本（core/*.py 的 sha256 前 10 位，启动时算），/api/chart、/api/macd 头部也带同一个；
         measures 仍是字符串列表（契约不变）；measure_orig = {看法: 是否 108 课原文的判法}，slope 为 false（小栋 10-04 ①A）。
   GET /  /<静态文件>       → web/ 下的前端文件（只送 STATIC_EXT 里的类型，.py / .md / 点文件一律 404）
 """
@@ -66,6 +67,17 @@ DAYS = 210                               # span=1 看最近 210 天（与 README
 SPAN_MAX = {"15m": 4, "30m": 8, "1h": 16, "2h": 16, "4h": 16}
 SPAN_VALUES = (1, 2, 4, 8, 16)           # 契约（Nova 10-04）：span 只认这五个值，别的 400；在里面但超本周期封顶的钳到封顶
 IDLE_S = 600                             # span>1 的格子闲置这么久就清掉（几十万根 K 线常驻太占内存）
+def _engine_version():
+    """引擎版本 = core/ 下全部 .py 源码的 sha256 前 10 位，**进程启动时算一次**（跑的就是这一份）。
+    前端把它并进「同一份数据」的桶键：引擎一换就是换了一把尺，不能拿新旧两份比出「消失的点」（Iris 10-05）。
+    只 pull 不重启时文件变了、进程里跑的还是旧代码 —— 所以只能启动时算，不能每次请求现算。"""
+    h, root = hashlib.sha256(), os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "core")
+    for fn in sorted(f for f in os.listdir(root) if f.endswith(".py")):
+        h.update(fn.encode() + b"\0" + open(os.path.join(root, fn), "rb").read() + b"\0")
+    return h.hexdigest()[:10]
+
+
+ENGINE = _engine_version()
 REFRESH_S = 60                           # 同一（品种, 周期）至少隔这么久才再碰一次币安
 RETRY_S = 30                             # 拉失败之后，至少隔这么久才再试（失败也不许刷）
 STATIC = os.path.dirname(os.path.abspath(__file__))     # web/ 自己：前端文件就在这里
@@ -172,7 +184,7 @@ def _refresh(slot, symbol, tf):
     bars = [merged[t] for t in sorted(merged) if t >= lo]
     # fetched_at / stale / refreshing 放最前：两个旗只在响应时替换这一处，不重算结构
     body = json.dumps(dict(fetched_at=iso(now_ms), stale=False, refreshing=False,
-                           span=slot.span, earliest=earliest, span_max=SPAN_MAX[tf], measure="macd",
+                           span=slot.span, earliest=earliest, span_max=SPAN_MAX[tf], measure="macd", engine=ENGINE,
                            **build_payload(bars, symbol, tf)),
                       ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
     return bars, body, earliest
@@ -235,7 +247,7 @@ def _macd_body(slot, symbol, tf):
         dif, dea = macd_lines(slot.bars, *MACD_PARAMS)
         b = slot.mbodies[MACD_KEY] = json.dumps(dict(
             fetched_at=head["fetched_at"], stale=False, refreshing=False,
-            span=head["span"], earliest=head["earliest"], span_max=head["span_max"],
+            span=head["span"], earliest=head["earliest"], span_max=head["span_max"], engine=head["engine"],
             symbol=symbol, tf=tf, params=list(MACD_PARAMS), hist_def="dif-dea",
             t=[x["t"] for x in slot.bars], dif=_clean(dif), dea=_clean(dea),
             hist=_clean(_hist(slot.bars))),
@@ -498,7 +510,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._err(400)
             return self._send(200, json.dumps(dict(symbols=list(SYMBOLS), tfs=list(TFS), days=DAYS,
                                                    refresh_s=REFRESH_S, span_max=SPAN_MAX,
-                                                   measures=list(MEASURES),
+                                                   engine=ENGINE, measures=list(MEASURES),
                                                    measure_orig={m: MEASURE_ORIG.get(m, False) for m in MEASURES})).encode())
         return self._static(u.path, u.query)
 

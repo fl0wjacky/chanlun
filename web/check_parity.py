@@ -269,6 +269,8 @@ def run_macd(quiet=False):
                 diffs.append("hist ≠ 引擎 macd_hist（副图跟背驰判断不是同一份柱子）")
             if (mc.get("hist_def"), mc.get("params")) != ("dif-dea", [12, 26, 9]):
                 diffs.append("约定字段不对：%r %r" % (mc.get("hist_def"), mc.get("params")))
+            if not (mc.get("engine") == ch.get("engine") == server.ENGINE and re.fullmatch(r"[0-9a-f]{10}", ch["engine"])):
+                diffs.append("引擎版本不对：chart %r macd %r 进程 %r" % (ch.get("engine"), mc.get("engine"), server.ENGINE))
             if any(mc.get(k) != ch.get(k) for k in ("span", "span_max", "earliest", "fetched_at")):
                 diffs.append("头部回显跟 /api/chart 不一致")
             if [x.get("v") for x in ch["bars"]] != [x["v"] for x in bars_by_key[(sym, tf)]]:
@@ -289,7 +291,7 @@ def run_meta(quiet=False):
     with running({}) as port:
         m = get_path(port, "/api/meta")
     ms, mo = m.get("measures"), m.get("measure_orig")
-    diffs = []
+    diffs = [] if m.get("engine") == server.ENGINE else ["meta 的 engine %r ≠ 进程 %r" % (m.get("engine"), server.ENGINE)]
     if not (isinstance(ms, list) and ms and all(isinstance(x, str) for x in ms)):
         diffs.append("measures 不是字符串列表：%r" % (ms,))
     elif not isinstance(mo, dict) or sorted(mo) != sorted(ms) or any(type(v) is not bool for v in mo.values()):
@@ -411,6 +413,21 @@ def self_test():
             server.MEASURE_ORIG.clear()
             server.MEASURE_ORIG.update(real)
     arms.append(("斜率也标成原文", arm_meta_all_orig))
+
+    def arm_engine_stale():
+        """副图那份头部的引擎版本不跟着进程（比如缓存里留着旧值）⇒ 前端分不出换没换引擎，必须红。"""
+        orig = server._macd_body
+
+        def stale(slot, symbol, tf):
+            d = json.loads(orig(slot, symbol, tf))
+            d["engine"] = "0" * 10
+            return json.dumps(d, separators=(",", ":")).encode()
+        server._macd_body = stale
+        try:
+            return run_macd(quiet=True)
+        finally:
+            server._macd_body = orig
+    arms.append(("副图头部引擎版本是旧的", arm_engine_stale))
 
     miss = 0
     for name, f in arms:
