@@ -26,11 +26,18 @@ def _turn_bar(g, pens):
     return pens[g["unit"] - 1]["i0"]
 
 
-def _backdate(kind, leave_bar, prev_k, ends, bars):
+def _is_low(done, k):
+    """端点 ends[k] 是不是低点：k ≥ 1 看结束在它上面的线段（向下 ⇒ 低）；k == 0 看从它出发的第一段（向上 ⇒ 低）。"""
+    return done[k - 1]["dir"] == "down" if k else done[0]["dir"] == "up"
+
+
+def _backdate(kind, leave_bar, prev_k, ends, bars, done):
     """规则 2（10-05 改，L38:104 / L52:90 / L88:19-21）：三类点**往回**落到前一个走势的结束点。
-    窗口 = 上一刀之后（没有就从图头）到离开笔起点（含）的已完成线段端点；三买取最低、三卖取最高，一样极取后一个。
-    窗口里一个端点都没有 ⇒ None（这一刀不切）。"""
-    cand = [k for k in range(prev_k + 1, len(ends)) if ends[k] <= leave_bar]
+    窗口 = 上一刀之后（没有就从图头）到离开笔起点（含）的已完成线段端点，**只收同类端点**（三买只看低点、
+    三卖只看高点 —— 下跌在低点结束、上涨在高点结束；Nova 10-05 12:47）；三买取最低、三卖取最高，一样极取后一个。
+    窗口里没有同类端点 ⇒ None（这一刀不切）。"""
+    low = kind == "三买"
+    cand = [k for k in range(prev_k + 1, len(ends)) if ends[k] <= leave_bar and _is_low(done, k) == low]
     if not cand:
         return None
     if kind == "三买":
@@ -91,7 +98,7 @@ def cut_centers(r, pen_signals, units=None):
         if g["kind"] in ("一买", "一卖"):
             k = _snap(_turn_bar(g, pens), ends)
         else:
-            k = _backdate(g["kind"], _turn_bar(g, pens), prev_k, ends, r["bars"])
+            k = _backdate(g["kind"], _turn_bar(g, pens), prev_k, ends, r["bars"], done)
             if k is None:
                 continue
         if k == 0:
