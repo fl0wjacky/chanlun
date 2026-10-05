@@ -77,7 +77,7 @@ try {
 }
 
 const OUT = process.argv[2] || path.join(os.tmpdir(), 'measure-e2e');
-const PAGE = (process.argv[3] || 'http://127.0.0.1:8792/').replace(/\/?$/, '/');
+const PAGE = (process.env.E2E_URL || process.argv[3] || 'http://127.0.0.1:8792/').replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
 const QS = '?symbol=ZECUSDT&tf=15m';       // 周期挑最短的那档：首屏快，且这一档的四种看法分得最开
 let bad = 0, n = 0;
 const ck = (name, ok, extra) => {

@@ -63,7 +63,7 @@ try {
 }
 
 const OUT = process.argv[2] || path.join(os.tmpdir(), 'ghost-e2e');
-const PAGE = (process.argv[3] || 'http://127.0.0.1:8796/').replace(/\/?$/, '/');
+const PAGE = (process.env.E2E_URL || process.argv[3] || 'http://127.0.0.1:8796/').replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
 const QS = '?symbol=ZECUSDT&tf=15m';
 const EDGE_BAR = 100;          // 注入的那个"离左沿很近"的已确认点（真数据里 bar<200 处没有点）
 const TARGET_BAR = 4004;       // 拿它当"消失"的那个点（线段中枢层、实心，好量）

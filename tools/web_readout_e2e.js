@@ -82,7 +82,7 @@ try {
 
 const WEB = path.join(__dirname, '..', 'web');           // 仓相对：工装跟着仓走，不写死谁的家目录
 const OUT = process.argv[2] || path.join(os.tmpdir(), 'readout-e2e');
-const PAGE = (process.argv[3] || 'http://127.0.0.1:8793/').replace(/\/?$/, '/');
+const PAGE = (process.env.E2E_URL || process.argv[3] || 'http://127.0.0.1:8793/').replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
 const FULL = JSON.parse(fs.readFileSync(path.join(WEB, 'fixtures/zec_1h.json'), 'utf8'));
 
 // 假后台的开关（跟 web_more_e2e 一样：一格一格摆场景，**开页之前**声明）
