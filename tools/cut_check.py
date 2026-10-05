@@ -90,7 +90,23 @@ def span_self_test():
     m = len(span_violations(strict=False))
     print("%s 收紧成 <=（框沿也算跨）⇒ 真数据上报 %d 个 —— 证明「压在框沿」这一档真实存在，不等号必须严格"
           % ("✓" if m else "✗", m))
-    return 0 if n and m else 3
+    # 第三条（Atlas 核 d4fd3c3 时自己加的那一刀，收进来）：预览框不按待定的刀分组 ⇒ 预览框跨刀，必须报出来。
+    #  样本里预览框很少（10 份里只有 1 个待定刀带预览框），所以这一条薄，但它是这一支唯一的牙。
+    src = open(C.__file__, encoding="utf-8").read()
+    if "preview = _centers_with_cuts(done, sorted(k_done + k_pend))" not in src:
+        print("✗ 第三条找不到预览那一行，变异没打上 ⇒ 不算数")
+        return 3
+    real_cc = C.cut_centers
+    ns = {}
+    exec(compile(src.replace("preview = _centers_with_cuts(done, sorted(k_done + k_pend))",
+                             "preview = _centers_with_cuts(done, k_done)"), C.__file__, "exec"), C.__dict__, ns)
+    C.cut_centers = ns["cut_centers"]
+    try:
+        p = len(span_violations())
+    finally:
+        C.cut_centers = real_cc
+    print("%s 变异「预览框不按待定的刀分组」⇒ 跨刀的预览框 %d 个" % ("✓" if p else "✗", p))
+    return 0 if n and m and p else 3
 
 
 def main():

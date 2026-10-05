@@ -29,7 +29,7 @@
     0  输出逐位同 ⇒ pine 不用改
     1  ★ 输出不同 ⇒ pine 要改（印出差异键与数据名）
     2  跑不动（取不到树 / 数据缺 / 引擎抛异常）—— **查不了 ≠ 通过**
-    3  --self-test 的**正臂没红** ⇒ 这个检查程序本身不算数
+    3  --self-test 的**正臂没红** ⇒ 这个检查程序本身不算数；或者两边共同的键是 0 / 少于只有一边有的 ⇒ 没比成
 """
 import argparse, hashlib, io, importlib, json, os, shutil, subprocess, sys, tempfile
 
@@ -139,6 +139,11 @@ def compare(a_sha, b_sha, label_a, label_b):
     bad = [(k, A.get(k), B.get(k)) for k in sorted(keys) if A.get(k) != B.get(k)]
     if only:
         print("  （只有一边有、不比的键 %d 个：%s）" % (len(only), "、".join(only[:6]) + ("…" if len(only) > 6 else "")))
+    if not keys or len(only) > len(keys):
+        # 空转防线（Atlas 核 d4fd3c3 时提）：共同键是 0，或只有一边有的比共同的还多（样本整批改名、ref 对错）
+        # ⇒ 根本没比成，不许印「逐位相同」
+        print("  ★ 没比成：共同的键 %d 个、只有一边有的 %d 个 ⇒ 查不了（**不是「不用动」**）。" % (len(keys), len(only)))
+        return 3
     struct, sigs = split_keys(keys)
     bad_s = [k for k, _x, _y in bad if "|" not in k]
     bad_g = [k for k, _x, _y in bad if "|" in k]
