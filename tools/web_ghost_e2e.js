@@ -136,6 +136,26 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
     }
     return d;
   };
+  /** ⑰：一刀 `status=pending` 的切点 ＋（可选）「切开会变成的那两个框」。挑**最靠右**那个线段中枢
+   *  —— 它一定落在最近这一段窗口里（工装把视口摆在哪儿都看得见）。取框、取 bar 的算法跟 layers.js
+   *  的 `boxes()` **同一个出处**（host ＝ 已完成线段、`i0 = host[PI0].i0`、`i1 = host[PI1].i1`），
+   *  这样"切点在框里"这件事不是工装自己编的。`boxes` 里的两个小框按 Bram 的契约拼：PI 指向
+   *  已完成线段那一份，左边那个到切点为止、右边那个从切点起（右边那个就是「随切点」说的那种）。 */
+  const mkCut = (d, withBoxes) => {
+    const done = (d.segs || []).filter((s) => !s.live);
+    const zs = d.seg_centers || [];
+    for (let n = zs.length - 1; n >= 0; n--) {
+      const z = zs[n];
+      const a = done[z.PI0], b = done[z.PI1];
+      if (!a || !b || !(z.PI1 > z.PI0 + 1)) continue;      // 至少要三根成员才锯得开
+      const mid = z.PI0 + 1;
+      const bar = Math.max(a.i0 + 1, Math.min(b.i1 - 1, Math.floor((a.i0 + b.i1) / 2)));
+      const c = { cut_bar: bar, by: '笔·三买', level: 'seg', status: 'pending' };
+      if (withBoxes) c.boxes = [{ ...z, PI0: z.PI0, PI1: mid }, { ...z, PI0: mid, PI1: z.PI1 }];
+      return c;
+    }
+    return null;
+  };
   const K = (tier, s) => `${tier}|${s.kind}|${s.bar}`;
   const D_TARGET = new Set([K(target.level || 'seg', target)]);
   const D_EDGE = new Set([`pen|三买|${EDGE_BAR}`]);
@@ -159,6 +179,9 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
     // ⑯：跳价那几张页面的 /api/chart **每一趟都吐同一份全给**（跟 'same' 一个道理）：那一套量的是
     //   "跳价只动最后一根"，图上要是同时还有点在一个个少，"什么都没动"就分不出是谁的功劳了。
     if (which.startsWith('tick')) return NOTHING;
+    // ⑰ 切法那几张：每一趟都吐同一份（这一套量的是开关和画法，不是记账；
+    //   图片在动的话"屏上多了/少了一笔"就分不出是谁的功劳）。
+    if (which === 'nocut' || which.startsWith('cut')) return NOTHING;
     if (which !== 'same' && m === 'lines') return { drop: D_LINES };
     if (which === 'same') return NOTHING;                                  // ⑨：每一趟都吐一模一样的
     if (which === 'span') return sp >= 2 ? { drop: D_TARGET } : NOTHING;   // ⑪：换档后重叠区里少掉一个
@@ -238,6 +261,49 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
                || which === 'engsame' || which === 'engine' || which === 'engmiss';
     const shift = (soon ? NOWP - STEP_MS + 3000 : NOWP) - lastT;      // soon：还差 3 秒收盘
     const reqAt = [];                                                 // 每次取数的时刻（⑬ 量错峰用）
+    // ⑰：切法那几张页面（card-e346ede6-996）。控件是**名单驱动**的（`/api/meta` 的 `cut_modes`）——
+    //   真后台现在**还没有**这一项（Bram 那一半还没合），所以这里把名单造出来喂给页面；
+    //   `nocut` 那页照用真后台那一份（**没有** cut_modes）⇒ ⑰a 量的正是「名单没到 ⇒ 不画控件、也不发参数」。
+    //   ★ 假后台只加这一个键，别的字段全是真后台的 —— 免得"控件出现了"这件事被别的东西带偏。
+    if (which.startsWith('cut')) {
+      await p.route('**/api/meta', async (route) => {
+        const m = await (await fetch(`${PAGE}api/meta`)).json();
+        m.cut_modes = ['extend', 'turn'];
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(m) });
+      });
+    }
+    // ⑰：画布上**真画出来的东西**的一份记录。这一卡要量的两样（「待定」那枚签、切点那条竖虚线）
+    //   都是**画出来的**、不落在任何 DOM 上 —— 只能从 ctx 这一层认。★ 只记不改行为（包一层转发）。
+    //   `vseg` 只记**竖着的那一段**（x 不变、y 跨 4px 以上）＋ 落笔那一刻的虚线样式：
+    //   切点那条线就是这个形状，而它的高度必须＝包住它的那个旧框的 ZD…ZG（Bram 10-05 的契约）。
+    await p.addInitScript(() => {
+      const proto = CanvasRenderingContext2D.prototype;
+      const fx = { text: [], vseg: [] };
+      Object.defineProperty(window, '__fx', { value: fx, configurable: true });
+      const FT = proto.fillText;
+      proto.fillText = function (t, x, y) {
+        try { fx.text.push({ t: String(t), x: Math.round(x), y: Math.round(y),
+                             font: String(this.font || '') }); } catch (e) {}
+        return FT.apply(this, arguments);
+      };
+      const BP = proto.beginPath, MV = proto.moveTo, LN = proto.lineTo, ST = proto.stroke;
+      proto.beginPath = function () { this.__seg = null; return BP.apply(this, arguments); };
+      proto.moveTo = function (x, y) { this.__mv = [x, y]; return MV.apply(this, arguments); };
+      proto.lineTo = function (x, y) { const m = this.__mv;
+        if (m) this.__seg = [m[0], m[1], x, y]; return LN.apply(this, arguments); };
+      proto.stroke = function () {
+        try {
+          const s = this.__seg;
+          if (s && Math.abs(s[0] - s[2]) < 0.01 && Math.abs(s[1] - s[3]) > 4) {
+            fx.vseg.push({ x: Math.round(s[0]), y0: Math.round(Math.min(s[1], s[3])),
+                           y1: Math.round(Math.max(s[1], s[3])),
+                           dash: Array.from(this.getLineDash ? this.getLineDash() : []) });
+          }
+        } catch (e) {}
+        return ST.apply(this, arguments);
+      };
+    });
+    const cutReq = [];                                                // 每次取数**带没带** `cut`、带的是哪个
     await p.route('**/api/chart*', async (route) => {
       const u = new URL(route.request().url());
       const m = u.searchParams.get('measure') || 'macd';
@@ -249,6 +315,22 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
       if (which === 'fallback' && hits[m] >= 2) { await route.abort(); return; }
       const { drop, opt } = plan(which, hits[m], m, sp);
       const body = mk(m, drop, shift, opt, sp);
+      // ⑰ 切法（card-e346ede6-996）。Bram 那一半的契约：请求带 `cut`、**顶层回显** `cut`、
+      //   `cuts[]` 报每一刀（`cut_bar` / `by` / `level` / `status`，`boxes` 只挂在 pending 上）。
+      //   假后台照抄这个形状 —— 页面读的是**回显**，不是它自己点的那颗 chip（⑰c 就量这一条）。
+      const wantCut = u.searchParams.get('cut');
+      cutReq.push(wantCut);
+      //   ★ 「回显撒谎」那一页是**故意的**：真后台不会这样，但契约里"回显是唯一的真相"这句话
+      //     只有在回显与请求不一致时才量得出来（一致的话，跟"照点击画"永远分不开）。
+      body.cut = which === 'cutlie' ? 'extend' : (wantCut || 'extend');
+      if (which === 'cutvoid') {
+        const c = mkCut(body, true);
+        if (c) body.cuts = [{ cut_bar: c.cut_bar, by: '笔·三买', level: 'seg', status: 'done' },
+                            { cut_bar: c.cut_bar + 12, by: '笔·三买', level: 'seg', status: 'void' }];
+      } else if (which === 'cutturn' || which === 'cutpv') {
+        const c = mkCut(body, which === 'cutpv');
+        if (c) body.cuts = [c];
+      }
       // ⑯k：这一页认 `symbol` 入参 —— 换品种之后**手上那份数据的 symbol 真变了**（真后台本来就该这样）。
       //   不认的话，"换品种"在页面看来什么都没发生，那一格就成了空转（而且是看不出来的空转）。
       if (which === 'tickslow') body.symbol = u.searchParams.get('symbol') || body.symbol;
@@ -278,7 +360,7 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
     await p.goto(PAGE + qs, { waitUntil: 'domcontentloaded' });
     await p.waitForFunction(() => window.__app && window.__app.state && window.__app.state.data, null, { timeout: 60000 });
     await sleep(1200);                     // 等 /api/meta 那一趟（控件由它驱动）
-    return { c, p, hits, reqAt, tick, closeAt: NOWP + 3000 };
+    return { c, p, hits, reqAt, tick, cutReq, closeAt: NOWP + 3000 };
   };
 
   /** 切看法并等它落地（等的是**页面上那份数据**的 measure，不是请求 —— 请求回来之前那次不算数）。
@@ -1006,6 +1088,214 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
      + `｜图上最后一根 ${sl1.drawn && sl1.drawn.time} 收价 ${sl1.drawn && sl1.drawn.close}`
      + `｜换之前那一下：${sl0.drawn && sl0.drawn.close}（＝老品种那一趟给的值，证明这张页面上跳价**真的**会落上去）`
      + `（数据那边 ${sl1.lastBar && sl1.lastBar.c}；老品种那一趟想写的是 ${SLOWC}）`);
+
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  // ⑰ 中枢切法（卡 card-e346ede6-996，前端那半边）：名单驱动的切换 ＋ 「待定」的画法
+  //   · 能切哪几种**以 /api/meta 的 `cut_modes` 为准**；名单没到 ⇒ 控件不画、参数不发
+  //     （后台的白名单收到不认识的词就是 400 —— 前端多带一个参数就能把图打死）；
+  //   · 默认「延伸」**永远不写进 URL**（它就是不切的那种，写上去等于每次都点名要它）；
+  //   · **回显是唯一的真相**：chip 亮哪颗、图脚印哪一种，都看后台回的那份 `cut`；
+  //   · `status=pending` 的刀 ⇒ 在 `cut_bar` 那根上真画一条竖虚线（高度＝包住它的那个旧框的 ZD…ZG）
+  //     ＋ 一枚「待定」签；`done`/`void` 一根线都不画（不知道的事不编）；
+  //   · 「先看切后」是**前端开关**、默认关（那一刀没立住之前，屏上摆的还是旧框）。
+  //   量的都是**画布上真画出来的东西**（`window.__fx`，见 open()）—— 不是读 state 自说自话。
+  // ═══════════════════════════════════════════════════════════════════════════════════════════
+  /** 切法那几颗 chip ＋ 图脚那一格 ＋ 画布上真画出来的字/竖线（一份快照）。 */
+  const cutUI = (p) => p.evaluate(() => {
+    const g = document.getElementById('cgroup'), pv = document.getElementById('pvchip');
+    return { has: !!g,
+             cap: g ? (g.querySelector('.mcap') || {}).textContent : null,
+             chips: g ? [...g.querySelectorAll('.mchip')].map((c) => ({
+               cut: c.dataset.cut, on: c.getAttribute('aria-checked') === 'true',
+               dis: c.disabled, txt: c.textContent })) : null,
+             pv: pv ? { txt: pv.textContent, dis: pv.disabled,
+                        on: pv.getAttribute('aria-pressed') === 'true' } : null,
+             cut: window.__app.paging.cut, pvOn: !!window.__app.opts.cutPreview,
+             url: location.search,
+             foot: (document.getElementById('meta') || {}).textContent || '' };
+  });
+  const fxReset = (p) => p.evaluate(() => { window.__fx.text.length = 0; window.__fx.vseg.length = 0; });
+  const fxOf = (p) => p.evaluate(() => ({ text: window.__fx.text.map((x) => x.t),
+                                          vseg: window.__fx.vseg.slice() }));
+  /** 那一刀**该在屏上的哪儿**（x 走 timeScale，y 走包住它的旧框的 ZG/ZD），外加每张画布自己的偏移。
+   *  ★ 记录器记的是**画布坐标**（ctx 那一层），跟页面坐标差一张画布的偏移 —— readBoxes 也是这么对的。 */
+  const cutGeo = (p) => p.evaluate(() => {
+    const app = window.__app, d = app.state.data;
+    const ts = app.chart.timeScale(), s0 = app.chart.panes()[0].getSeries()[0];
+    const box = document.getElementById('chart').getBoundingClientRect();
+    const offs = [...document.querySelectorAll('#chart canvas')].map((c) => {
+      const r = c.getBoundingClientRect();
+      return { dx: Math.round(r.left - box.left), dy: Math.round(r.top - box.top) };
+    });
+    const done = (d.segs || []).filter((s) => !s.live);
+    return { offs, cuts: (Array.isArray(d.cuts) ? d.cuts : []).map((c) => {
+      const hit = (d.seg_centers || []).find((z) => done[z.PI0] && done[z.PI1]
+        && done[z.PI0].i0 <= c.cut_bar && c.cut_bar <= done[z.PI1].i1);
+      const x = ts.logicalToCoordinate(c.cut_bar);
+      const yt = hit ? s0.priceToCoordinate(hit.ZG) : null;
+      const yb = hit ? s0.priceToCoordinate(hit.ZD) : null;
+      return { bar: c.cut_bar, status: c.status,
+               x: x === null ? null : Math.round(x),
+               y0: (yt === null || yb === null) ? null : Math.round(Math.min(yt, yb)),
+               y1: (yt === null || yb === null) ? null : Math.round(Math.max(yt, yb)) };
+    }) };
+  });
+  /** 那一段竖虚线在画布上**真画出来了没有**（x 对得上、高度也对得上才算 —— 只有"某处有条虚线"不算数）。
+   *  虚线形（`dash` 至少两段）是判据之一：实线框边也是竖的，不认虚线样式的话这一格会把框边认成切点。 */
+  const vsegAt = (fx, offs, g) => fx.vseg.filter((v) => v.dash.length >= 2 && g.x !== null
+    && offs.some((o) => Math.abs(v.x - (g.x + o.dx)) <= 2
+      && Math.abs(v.y0 - (g.y0 + o.dy)) <= 3 && Math.abs(v.y1 - (g.y1 + o.dy)) <= 3));
+  const footCut = (txt) => (txt.match(/中枢切法[^｜]*/) || ['（没有这一格）'])[0].trim();
+
+  // ⑰a：名单没到（真后台现在还没有 `cut_modes`）⇒ 控件不画、请求一个 `cut` 都不带。
+  const NC = await open('nocut');
+  await sleep(600);
+  const nc0 = await cutUI(NC.p);
+  ck('⑰a 名单没到（真后台还没有 `cut_modes`）⇒ 切法控件**不画**、请求里**一个 `cut` 都不带**；'
+     + '回显给的那一档照样印在图脚上',
+     !nc0.has && NC.cutReq.length >= 1 && NC.cutReq.every((x) => x === null)
+       && nc0.cut === 'extend' && /中枢切法/.test(nc0.foot) && /延伸/.test(nc0.foot),
+     `控件 ${nc0.has ? '★ 画出来了' : '没画'}｜请求带的 cut：${JSON.stringify(NC.cutReq)}`
+     + `｜图脚「${footCut(nc0.foot)}」`);
+
+  // ⑰b/⑰c：名单到了 ⇒ 控件出现；默认那颗按**回显**亮着、默认照样不写进 URL；
+  //   点「按转折切」⇒ 请求才带上 `cut=turn`。
+  const CM = await open('cutmeta');
+  const cmp = CM.p;
+  await cmp.waitForSelector('#cgroup .mchip[data-cut="turn"]', { timeout: 15000 });
+  await sleep(500);
+  const cm0 = await cutUI(cmp);
+  ck('⑰b 名单到了（`cut_modes: ["extend","turn"]`）⇒ 控件出现、默认那颗亮着，而且**默认不写进 URL、'
+     + '也不发参数**（它就是不切的那种）；切法不是「按转折切」时那颗预览开关是**死的**',
+     cm0.has && cm0.chips.length === 2
+       && cm0.chips.some((c) => c.cut === 'extend' && c.on) && cm0.chips.some((c) => c.cut === 'turn' && !c.on)
+       && cm0.chips.every((c) => !c.dis)
+       && cm0.cut === 'extend' && !/cut=/.test(cm0.url)
+       && CM.cutReq.every((x) => x === null)
+       && cm0.pv && cm0.pv.dis === true
+       && /中枢切法/.test(cm0.foot),
+     `chips ${JSON.stringify(cm0.chips)}｜paging.cut=${cm0.cut}｜URL「${cm0.url}」`
+     + `｜请求带的 cut：${JSON.stringify(CM.cutReq)}｜预览开关 ${cm0.pv ? (cm0.pv.dis ? '禁用着' : '★ 亮的') : '★ 没画'}`);
+
+  await cmp.locator('.mchip[data-cut="turn"]').click();
+  await cmp.waitForFunction(() => window.__app.paging.cut === 'turn', null, { timeout: 30000 });
+  await sleep(900);
+  const cm1 = await cutUI(cmp);
+  const cmReq = CM.cutReq.filter((x) => x !== null);
+  ck('⑰c 点「按转折切」⇒ 请求才带上 `cut=turn`；chip 亮哪颗看的是**后台回的那一份**，图脚也报当前切法',
+     cmReq.length >= 1 && cmReq.every((x) => x === 'turn')
+       && cm1.chips.some((c) => c.cut === 'turn' && c.on) && cm1.chips.some((c) => c.cut === 'extend' && !c.on)
+       && /cut=turn/.test(cm1.url) && /按转折切/.test(cm1.foot),
+     `请求带的 cut：${JSON.stringify(CM.cutReq)}｜chips ${JSON.stringify(cm1.chips)}`
+     + `｜图脚「${footCut(cm1.foot)}」｜URL「${cm1.url}」`);
+
+  // ⑰d：**回显是唯一的真相**。这一页后台"撒谎"：请求要的是 turn，回的却是 extend
+  //   （真后台不会这样，但"照点击画"和"照回显画"只有在两者不一致时才分得开）。
+  const LIE = await open('cutlie');
+  const liep = LIE.p;
+  await liep.waitForSelector('#cgroup .mchip[data-cut="turn"]', { timeout: 15000 });
+  await sleep(400);
+  await liep.locator('.mchip[data-cut="turn"]').click();
+  await sleep(1200);
+  const lie1 = await cutUI(liep);
+  ck('⑰d 请求要了 turn、后台回音却是 extend ⇒ 屏上必须摆成「延伸」（chip ＋ 图脚），'
+     + 'URL 里那把 `cut` 也得撤掉 —— 前台不许自作主张',
+     LIE.cutReq.includes('turn') && lie1.cut === 'extend'
+       && lie1.chips.some((c) => c.cut === 'extend' && c.on) && lie1.chips.some((c) => c.cut === 'turn' && !c.on)
+       && !/cut=/.test(lie1.url) && /延伸/.test(lie1.foot),
+     `请求带的 cut：${JSON.stringify(LIE.cutReq)}｜回显之后 paging.cut=${lie1.cut}`
+     + `｜图脚「${footCut(lie1.foot)}」｜URL「${lie1.url}」`);
+
+  // ⑰e：一刀 pending ⇒ 那一根上真画出**竖虚线**（虚线形 ＋ 高度＝旧框的 ZD…ZG）＋ 一枚「待定」签；
+  //   同一份数据里 `done`/`void` 的刀**一根线都不画**（两张页面几何一样，只有 `status` 不同）。
+  const CT = await open('cutturn', QS + '&cut=turn');
+  const ctp = CT.p;
+  await sleep(1200);
+  const cg0 = await cutGeo(ctp);
+  const pendCut = cg0.cuts[0];
+  if (pendCut) await park(ctp, pendCut.bar);
+  await fxReset(ctp);                       // 清账之后再摆一次视口 ⇒ 记下来的就是**这一屏**画的
+  if (pendCut) await park(ctp, pendCut.bar);
+  const cg1 = await cutGeo(ctp);
+  const cfx = await fxOf(ctp);
+  const CV = await open('cutvoid', QS + '&cut=turn');
+  await sleep(1200);
+  const vg0 = await cutGeo(CV.p);
+  if (vg0.cuts[0]) await park(CV.p, vg0.cuts[0].bar);
+  await fxReset(CV.p);
+  await park(CV.p, vg0.cuts[0].bar);
+  const vg1 = await cutGeo(CV.p);
+  const vfx = await fxOf(CV.p);
+  ck('⑰e 没立住的那一刀`pending` ⇒ 在 `cut_bar` 那一根上真画出竖虚线（虚线形、高度＝包住它的旧框的 '
+     + 'ZD…ZG）＋ 一枚「待定」签；同一份数据里 `done`/`void` 的刀**一根线都不画**',
+     // ★ 第一趟就得带着 `cut`（深链打开的那一趟）—— 少带了，后台按缺省回「延伸」，回显就把
+     //   用户切好的那一刀弹回缺省，而屏上没有任何东西说过这件事（这一格第一次跑就是这么红的）。
+     CT.cutReq[0] === 'turn'
+       && !!pendCut && pendCut.x !== null && vsegAt(cfx, cg1.offs, cg1.cuts[0]).length >= 1
+       && cfx.text.includes('待定')
+       && vg1.cuts.length === 2 && vg1.cuts.every((c) => vsegAt(vfx, vg1.offs, c).length === 0)
+       && !vfx.text.includes('待定') && !vfx.text.includes('随切点'),
+     `pending 那一刀 bar=${pendCut && pendCut.bar} 该在画布 x≈${pendCut && pendCut.x}`
+     + ` y=${pendCut && pendCut.y0}…${pendCut && pendCut.y1}；真画出来的竖虚线 `
+     + `${JSON.stringify(cfx.vseg.filter((v) => v.dash.length >= 2))}`
+     + `｜签「${cfx.text.filter((t) => /待定|随切点/.test(t)).join(' ')}」`
+     + `‖ done/void 那两张：cuts=${JSON.stringify(vg1.cuts.map((c) => c.status))}`
+     + `（x≈${vg1.cuts.map((c) => c.x).join(',')}）对上切点的虚线 `
+     + `${vg1.cuts.reduce((k, c) => k + vsegAt(vfx, vg1.offs, c).length, 0)} 条、签 `
+     + `${vfx.text.filter((t) => /待定|随切点/.test(t)).length} 枚`);
+
+  // ⑰g：切法是**这一屏**的属性 —— 换看法（换一次尺子）那几趟也得带着它走。
+  //   ★ 这一格钉的是上面修掉的那个真 bug 最常踩的那条路：`setMeasure()` 原来没把 `cut` 传给 load()
+  //     ⇒ 那一趟不带 `cut` ⇒ 后台按缺省回「延伸」⇒ 回显把用户切好的刀弹回缺省。
+  const CTR = await open('cutturn', QS + '&cut=turn');
+  await sleep(1200);
+  // 买卖点那一层默认**关**着，关着的时候看法那排是灰的（renderMeasures 里那条闸）⇒ 先开层。
+  await CTR.p.locator('.chip[data-key="sig"]').click();
+  await sleep(600);
+  await CTR.p.locator('.mchip[data-measure="lines"]').click();
+  await CTR.p.waitForFunction(() => window.__app.state.data.measure === 'lines', null, { timeout: 30000 });
+  await sleep(900);
+  const ctg = await cutUI(CTR.p);
+  ck('⑰g 换看法那一趟也带着 `cut`（切法不是"点完就丢"的临时状态，是这一屏的属性）：'
+     + '换完之后请求里带的还是 `turn`，chip 和图脚都没被回显弹回「延伸」',
+     CTR.cutReq.length >= 2 && CTR.cutReq.slice(1).every((x) => x === 'turn')
+       && ctg.cut === 'turn' && /按转折切/.test(ctg.foot)
+       && ctg.chips.some((c) => c.cut === 'turn' && c.on),
+     `这一页请求带的 cut：${JSON.stringify(CTR.cutReq)}｜换完 paging.cut=${ctg.cut}`
+     + `｜图脚「${footCut(ctg.foot)}」`);
+
+  // ⑰f：「先看切后」是**前端开关**、默认关（切没立住之前屏上摆的还是旧框 ＋ 那条虚线）；
+  //   点开 ⇒ 切后的框换上去（各带一枚「随切点」）、「待定」那组收掉（同一件事不说两遍）、URL 带 cutpv=1。
+  const CP = await open('cutpv', QS + '&cut=turn');
+  const cpp = CP.p;
+  await sleep(1200);
+  const cpg = await cutGeo(cpp);
+  if (cpg.cuts[0]) await park(cpp, cpg.cuts[0].bar);
+  await fxReset(cpp);                       // 清账 ＋ 挪 3 根 ⇒ 读到的就是"预览关着"这一帧
+  await park(cpp, cpg.cuts[0].bar - 3);
+  const cp0 = await cutUI(cpp);
+  const cp0fx = await fxOf(cpp);
+  await cpp.locator('#pvchip').click();
+  await cpp.waitForFunction(() => window.__app.opts.cutPreview === true, null, { timeout: 15000 });
+  await sleep(900);
+  const cp1 = await cutUI(cpp);
+  // ★ 点完之后**再清一次账**，然后挪一下视口逼出这一帧：不清的话，点之前那几帧（那时预览还关着）
+  //   记下来的「待定」会混进来 —— 第一次跑就是这么假红的（读到「待定 待定 随切点 ×4」）。
+  //   这一枪挪 3 根 ⇒ 视口真的变了 ⇒ 一定重画（同一个区间摆两次，LWC 可能一次都不画）。
+  await fxReset(cpp);
+  await park(cpp, cpg.cuts[0].bar + 3);
+  const cp1fx = await fxOf(cpp);
+  ck('⑰f 「先看切后」默认**关**（屏上摆的还是旧框 ＋ 那条待定虚线）；点开 ⇒ 切后的框换上去'
+     + '（各带一枚「随切点」）、「待定」那组收掉、URL 带 cutpv=1',
+     CP.cutReq[0] === 'turn' && cp0.pv && cp0.pv.on === false && cp0.pvOn === false && !/cutpv=/.test(cp0.url)
+       && cp0fx.text.includes('待定') && !cp0fx.text.includes('随切点')
+       && cp1.pvOn === true && cp1.pv.dis === false && cp1.pv.on === true
+       && cp1fx.text.filter((t) => t === '随切点').length >= 1
+       && !cp1fx.text.includes('待定') && /cutpv=1/.test(cp1.url),
+     `关着：pvOn=${cp0.pvOn} 签「${cp0fx.text.filter((t) => /待定|随切点/.test(t)).join(' ')}」`
+     + ` 预览框 ${cpg.cuts[0] ? cpg.cuts[0].boxes : '?'} 个`
+     + `‖ 点开：pvOn=${cp1.pvOn} 签「${cp1fx.text.filter((t) => /待定|随切点/.test(t)).join(' ')}」`
+     + `｜URL「${cp1.url}」`);
 
   await b.close();
   console.log(`\n${n - bad}/${n} 过　截图：${OUT}`);
