@@ -131,8 +131,14 @@ def compare(a_sha, b_sha, label_a, label_b):
     print("对照 %s = %s" % (label_b, b_sha[:12]))
     A = ref_tree(a_sha)
     B = ref_tree(b_sha)
-    keys = set(A) | set(B)
+    # 只比**两边都有**的数据：基线之后新加的样本（如 data/zec30_cut.json）在基线里本来就没有，
+    # 「None → hash」不是引擎变了，是多了一份数据。原先它也算红 ⇒ 每加一份夹具 pine 就"必须重移植"，假红。
+    # 删掉的样本同理。两边都有的数据照旧逐键比，引擎一变照样红（--self-test 两条正臂不受影响）。
+    only = sorted((set(A) ^ set(B)))
+    keys = set(A) & set(B)
     bad = [(k, A.get(k), B.get(k)) for k in sorted(keys) if A.get(k) != B.get(k)]
+    if only:
+        print("  （只有一边有、不比的键 %d 个：%s）" % (len(only), "、".join(only[:6]) + ("…" if len(only) > 6 else "")))
     struct, sigs = split_keys(keys)
     bad_s = [k for k, _x, _y in bad if "|" not in k]
     bad_g = [k for k, _x, _y in bad if "|" in k]
