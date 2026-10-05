@@ -413,6 +413,12 @@ _sv = _span_violations()
 count("框跨过已切成的走势分界点", len(_sv), "　← %d 份样本，cut=turn%s" % (len(_kline_files()),
       "；例 %s" % (_sv[:2],) if _sv else ""))
 
+# ---- 走势分段（docs/spec/走势分段.md 第五节，card-51571a5f-dc2）----
+# 首尾相接 / 中间段至少一个线段中枢 / 分界都是 done 刀且在线段端点 / 类型状态 / 367.77、588.8 硬条件。
+# 反向验证在 tools/trend_check.py --self-test（拿掉规则 3、拿掉去刀后重算中枢 ⇒ 各自必须红）。
+from trend_check import check as _trend_check   # noqa: E402
+count("走势分段不合 spec 第五节", _trend_check(quiet=True), "　← %d 份样本 + zec15/zec30 硬条件" % len(_kline_files()))
+
 # ---- 判据前提：下面那扇「字体覆盖」门自己的基准对不对 ----
 # 那扇门判「缺不缺字」靠 `config._notdef_mask` 投出的 .notdef 基准。基准错了它就是**假绿**：
 # 拿一个没有墨的空白遮罩当 .notdef，所有真字形都"不等于它" ⇒ 报「一个都不缺」。

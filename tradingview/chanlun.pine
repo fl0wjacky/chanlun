@@ -14,6 +14,7 @@
 //   但扫的是笔 / 中枢 / 段、不是 K 线：中枢 zec15 末根约 4.5ms（扫 1135 笔），买卖点只扫候选 A/C 两段柱面积。
 //   ④⑤ 留在 islast 是量出来的决定（notes/center-cost-probe.py、notes/signals-cost-probe.py），不是漏做。
 // 买卖点：默认只标『结构已确认』的；打开『显示待确认』后，未确认的用空心标签，之后可能改掉或消失。
+// 走势分段（docs/spec/走势分段.md，Python core/trend.py）：**pine 没有移植，暂不跟**（card-51571a5f-dc2）。
 //
 // ⚠⚠ **本文件不是每一步都被运行验证过。**
 //   Python 引擎（core/）有 pytest 和数据对账；**Pine 这一侧没有运行时**（改动者本机跑不了 TradingView），
