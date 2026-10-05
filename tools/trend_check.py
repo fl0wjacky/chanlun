@@ -85,6 +85,11 @@ def invariants(fn):
         g = z.get("seg")
         if g is None or not (0 <= g < len(seg)) or not (seg[g]["i0"] <= z["X0"] and z["X1"] <= seg[g]["i1"]):
             bad.append("框 %d–%d 的 seg=%r 不对" % (z["X0"], z["X1"], g))
+    for b in bs:                                  # 对外 seg 只指走势段号：bounds 不许带同名键（用 line_seg）
+        if "seg" in b:
+            bad.append("bounds 带了 seg 键（该叫 line_seg）")
+        elif not any(s["i0"] == b["bar"] for s in seg[1:]):
+            bad.append("分界 %d 不是某一段走势的起点" % b["bar"])
     if sum(s["n_centers_level"] for s in seg) != len(v["seg_centers"]):
         bad.append("各段 n_centers_level 之和 ≠ seg_centers 个数")
     if seg[0]["i0"] != 0 or seg[-1]["i1"] != len(r["bars"]) - 1 or any(
