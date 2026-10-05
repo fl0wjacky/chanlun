@@ -58,6 +58,27 @@
            位置由 app.js 按副图窗格的高度算（窗格高度是 LWC 排的，不是 CSS 摆的）。
            ★ 为什么自己摆 DOM 而不让 LWC 画：series 的 title 在 5.2.1 里**根本不画**（2026-10-04 实拍验过）。 -->
       <div id="subhead" class="subhead"></div>
+      <!-- 「消失的点」那个数（卡 card-cf3ed018-795）。★ 为什么**不挂图脚**：图脚是流内布局，
+           这一格一出来就把 #chart 挤矮。1440 实量：图脚本行已经占 1344/1412 px，多这 42 个字
+           就折行 ⇒ foot 60→77、#chart 760→743，**整张图当场往下挪 3 px**（消失的点一出现图就跳，
+           而这正是这一卡要人看见的那一刻）。窄屏那一档更糟：`.foot` 整个 `display:none`
+           （body.m-fold），手机上这个数根本不存在。
+           挂进这个浮层盒子：绝对定位、不占位，图的尺寸一个字都不动，宽窄屏都在。 -->
+      <div id="ghostc" class="ghostc" role="status" aria-live="polite">
+        <!-- 记号本尊的小样：**形状**挂在这儿，不挂图例。
+             ★ 为什么不进图例（2026-10-05 实量的账）：图例那一行在 1280 宽下已经排满，再加一格就
+               **折行** —— legend 32→54px，#chart 660→637px，整幅图矮 23px（`tools/web_readout_e2e.js`
+               的 ㉑ 那一格当场红：它按图底的 40px 处点指针，图一矮，那一点就落到时间轴上去了）。
+               这一格是"出了事才出现"的，凭什么常驻着占图的高度。
+             ★ 而且图例在窄屏那一档是 `display:none`（body.m-fold），手机上根本看不见 ——
+               记号却会长在手机上。挂在这一格里，图和数一起出现，手机上也认得出。
+             色用 currentColor（跟着这一格的正文色走），**不**画成红或绿：这一格说的是形状，
+             不是方向 —— 图上那个记号是红是绿取决于它当初是个买点还是卖点，样例不该替用户认一个。 -->
+        <svg class="gs" width="15" height="13" viewBox="0 0 15 13" aria-hidden="true">
+          <polygon points="7.5,1 1,11.5 14,11.5" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <line x1="0.5" y1="12.5" x2="14.5" y2="0.5" stroke="currentColor" stroke-width="1.4"/>
+        </svg><span id="ghostc-tx"></span>
+      </div>
     </div>
   </div>
   <!-- 往左拖要更早 K 线时的话（加载中 / 已到最早）。挂在图上、不塞顶栏：用户在图左边做动作，话就说在他眼睛在的地方 -->

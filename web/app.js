@@ -4,7 +4,7 @@
 //   {symbol, tf, name, updated, closed, bars[], pens[], segs[], centers[], seg_centers[], signals{seg,pen}, meta{tick,pen_rule}}
 // 取不到后台就退回 `fixtures/`（离线也能看、也能截图对账）；两边都没有就老实说取不到，不画半张图。
 import { CHART, PAGE, CANDLE, WIDTH, SUB } from './theme.js';
-import { makeBoxPrimitive, makeAnnotPrimitive, shownOf } from './layers.js';
+import { makeBoxPrimitive, makeAnnotPrimitive, shownOf, ghostHitAt } from './layers.js';
 
 const LWC = window.LightweightCharts;
 
@@ -346,11 +346,140 @@ function paintVol(d) {
   volSeries.setData(pts);
 }
 
+// ---------------------------------------------------------------- 「消失的点」（卡 card-cf3ed018-795）
+// 小栋 10-05 ②A：**确认过的**买卖点，后来又没了 —— 在图上把它标出来（空心 ＋ 划一刀，悬停说一句）。
+//
+// ★ 这件事**只在有人看着的时候才成立**。谁也没看的那些小时里它没了几次，这张图不知道，也不该装作
+//   知道（那是第二步那个离线标注文件的活）。所以底下就是一个**页面内存里的账本**：每次新数据回来，
+//   跟同一个桶里上一份比一比，少掉的记下来；**重开页面就清零**。因为只在内存里，它天生就是
+//   「本次打开」—— 不需要后台留历史（Bram 10-05 那个「要存每个点的首次确认时刻」的估价当场收回了）。
+//
+// ★ 桶 = (品种, 周期, 看法, 档位)。**少一样就会造鬼**：
+//   · 换看法（面积 ↔ 黄白线）不是重画，是**换了一把尺**。拿新尺子量出来的点去比旧尺子那份，
+//     旧尺子的点全都「少了」，屏幕上当场刷出一片空心三角 —— 而那件事根本没发生。
+//   · 往左加载同一条：档位一变，后台是**整段重算**，靠左那一段本来就会变（span_measure 量过）。
+//   ⇒ 这两个动作**换桶**，不是「喂给同一个桶比」。这跟「加字段别换形状」是同一族毛病：
+//     把「状态变了」和「换了一把尺」当成了一件事。
+//
+// ★ 点的身份 = (层级, 种类, 极值那根的时间戳)。**不许用下标**（Bram 10-05 第 ③ 条）：
+//   往左补数据是往数组头上插，同一个下标当场就指向另一根 K 线（跟 anchorOf / structKey 同一条账）。
+//
+// ★ 只比**已确认**的点（Bram 第 ② 条）：待确认的点本来就会变，它变了不算「消失」；
+//   但「已确认 → 变回待确认」**要算** —— 那种点确实从图上被拿掉了。做法是这份账本**只把已确认的
+//   收进基准**，所以它下次没出现在已确认那份名单里，就自然算成消失，不用另写一条判据。
+//
+// ★ 左沿守卫（Atlas 10-05 提的）：线上窗口是定长的（210 天），起点自己会往后滑。起点一动，
+//   靠左沿那一段的结构本来就会被重算 —— 那里的点掉掉不是「被推翻」，是**尺子从左边收了一格**。
+//   拿 tools/span_measure.py 那套量法（同一档位、只把窗口往后滑），在 ZECUSDT 15m span=1
+//   （20161 根）上量了三档：
+//       滑  1 根（15 分钟）⇒ 重叠区 **0 处**差异
+//       滑 16 根（4 小时） ⇒ 5 处，最靠右那处在**离左沿第 2009 根**
+//       滑 96 根（1 天）   ⇒ 10 处，最靠右那处在**离左沿第 5463 根**
+//   比值 126 / 57 不稳（只有一份品种、三档滑动），所以倍数往上取 200 留足余量、下限 200 根。
+//   这道闸**宁可少报也不误报**：它吃掉的只是窗口最左边那一段（用户基本不看那儿）；
+//   误报一个「消失的点」，是拿一句假话去解释一件没发生的事 —— 那比漏报贵得多。
+const GHOST_SLIDE_MUL = 200, GHOST_SLIDE_MIN = 200;
+const ghostBuckets = new Map();      // 桶 → { pts: 上一份的已确认点, gone: 记下来的消失, first: 上一份的窗口起点 }
+
+function ghostConfirmed(d) {
+  const m = new Map();
+  for (const tier of ['seg', 'pen']) {
+    for (const s of (d.signals || {})[tier] || []) {
+      if (s.confirmed !== true) continue;                    // 待确认的不进基准（见上）
+      const t = (d.bars[s.bar] || {}).t;
+      if (t == null) continue;                               // 点落在数据外面 ⇒ 身份都组不出来，跳过
+      m.set(`${tier}|${s.kind}|${t}`, { tier, kind: s.kind, t, price: s.price });
+    }
+  }
+  return m;
+}
+
+/** 新的一份数据到了：跟同一个桶里上一份比，少掉的点记成「已经消失」。结果挂在 `d.ghosts` 上
+ *  （图脚和图都从 `d` 上读 —— 不留中间变量，跟 sourceLabel 那条同一条理由）。 */
+function ghostReconcile(d) {
+  const key = [d.symbol, d.tf, d.measure || paging.measure, d.span ?? paging.span].join('|');
+  const prev = ghostBuckets.get(key);
+  const now = ghostConfirmed(d);
+  if (prev) {
+    const start = (d.bars[0] || {}).t;
+    const stepMs = Math.max(1, ((d.bars[1] || {}).t - start) || 1);
+    const slide = prev.first != null && start != null && start > prev.first
+      ? Math.round((start - prev.first) / stepMs) : 0;
+    const guardT = (d.bars[Math.min(Math.max(GHOST_SLIDE_MIN, slide * GHOST_SLIDE_MUL), d.bars.length - 1)] || {}).t;
+    for (const [k, p] of prev.pts) {
+      if (now.has(k)) continue;                              // 还在 ⇒ 什么都没发生
+      if (p.t < guardT) continue;                            // 离左沿太近：尺子动过，不算（见上）
+      if (prev.gone.has(k)) continue;                        // 早记过了 —— 第一次丢失的时刻才算，别被后面的刷新改写
+      prev.gone.set(k, { ...p, at: Date.now() });
+    }
+    // ★ 又回来了 ⇒ 记号收掉：它现在就在图上，两个记号并列是自相矛盾。
+    //   这一句**必须**扫 gone 自己，不能挂在上面那个循环里 —— 一个点进了 gone，就是因为它**不在**
+    //   `now` 里，而 `b.pts = now` 又把它的键从 pts 里抹掉了；它回来的时候 pts 里已经没有这个键，
+    //   上面那个循环根本看不见它。（2026-10-05 工装 ⑧ 那一格抓到的就是这一条：macd 第 3 趟
+    //   明明把点给回来了，记号还挂在图上。）
+    for (const k of [...prev.gone.keys()]) if (now.has(k)) prev.gone.delete(k);
+  }
+  const b = prev || { pts: new Map(), gone: new Map() };
+  b.pts = now;
+  b.first = (d.bars[0] || {}).t;
+  ghostBuckets.set(key, b);
+  // 记号要画在**当前这份**数据上：按时间戳找回下标（下标会随往左补数据整体平移，不能用旧的）。
+  // 找不回（它那根已经滑出窗口了）就**不画** —— 位置画不出来的时候宁可不画，也不能挪个地方画：
+  // 位置本身就是这句话的一半。
+  const idx = new Map();
+  for (let i = 0; i < d.bars.length; i++) idx.set(d.bars[i].t, i);
+  d.ghosts = [...b.gone.values()].map((g) => {
+    const i = idx.get(g.t);
+    // `confirmed: true` 不是给它脸上贴金：它当初就是已确认的（本子只收已确认的），
+    // 而 layers.js 那边画不画它走的是**同一个** sigAt（大开关 ＋ kind 芯片）——
+    // 少这个字段，芯片一关它自己就没了，跟别的点两种待遇。
+    return i == null ? null : { bar: i, price: g.price, kind: g.kind, tier: g.tier, t: g.t, at: g.at, confirmed: true };
+  }).filter(Boolean);
+}
+
+// 悬停说明：画布上的记号没有 DOM，自己挂一层。命中判定在 layers.js（窗格坐标系只有那一处知道），
+// 这儿只管把鼠标位置递进去、把话摆出来。`fixed` 跟着指针走；`pointer-events:none`（见 style.css）
+// 它是说明、不是按钮，不许把拖拽/缩放吃掉（跟 .more / .readout 同一条账）。
+const ghostTip = document.createElement('div');
+ghostTip.id = 'ghosttip';
+ghostTip.className = 'ghosttip';
+ghostTip.setAttribute('role', 'tooltip');
+document.body.appendChild(ghostTip);
+let ghostOn = null;          // 现在指着哪一个（换了才重写文字，不然每动一下都重排）
+// 两个时刻**都要带 UTC**：时间轴的刻度就是 UTC（localization.timeFormatter 是 timeLabel），
+// 悬停里省掉这两个字母，用户就会拿本地时间去对轴上的刻度，然后怀疑图上标错了位置。
+const ghostDate = (ms) => new Date(ms).toISOString().slice(5, 16).replace('T', ' ');   // 10-05 12:43
+const ghostTime = (ms) => new Date(ms).toISOString().slice(11, 16);                    // 12:43
+
+function ghostShow(e, g) {
+  if (g !== ghostOn) {
+    ghostOn = g;
+    ghostTip.textContent =
+      `${g.kind} · 这个点 ${ghostDate(g.t)} UTC 出现过、后来消失了\n`
+      + `（本次打开 ${ghostTime(g.at)} UTC 那次取数里它已经不在了 —— 只在页面上记着，重开就清空）`;
+  }
+  ghostTip.classList.add('on');
+  const r = ghostTip.getBoundingClientRect();
+  ghostTip.style.left = `${Math.max(8, Math.min(e.clientX + 14, innerWidth - r.width - 8))}px`;
+  ghostTip.style.top = `${Math.max(8, Math.min(e.clientY + 14, innerHeight - r.height - 8))}px`;
+}
+function ghostHide() { ghostOn = null; ghostTip.classList.remove('on'); }
+el('chart').addEventListener('mousemove', (e) => {
+  const g = ghostHitAt(e.clientX, e.clientY);
+  if (g) ghostShow(e, g); else ghostHide();
+});
+el('chart').addEventListener('mouseleave', ghostHide);
+// 图在动（滚轮/拖拽缩放）时记号会跟着挪，指针底下那个可能已经不是它了 ⇒ 收掉，等下一次 mousemove 再说。
+el('chart').addEventListener('wheel', ghostHide, { passive: true });
+
 // ---------------------------------------------------------------- 画一张
 // ★ 画（paint）和**摆视口**（draw 里那一段）分开了：往左补数据之后重画，**不能**再走「摆视口」
 //   那一段（它要么 fitContent 缩成一团、要么按 ?last/?at 跳走）—— 补数据时视口由 place() 按**时间**放回原位。
 function paint(d) {
   state.data = d;
+  // ★ 记账要在**画之前**：记出来的东西挂在 d 上（d.ghosts），layers.js 和图脚都是从 d 上读的
+  //   —— 顺序反了屏上就是上一份的记号（跟 renderMeta 那条"不留中间变量"是同一类账）。
+  ghostReconcile(d);
   // 手上换了**另一份**数据（换档/换品种/换看法）⇒ 读数收起：十字线没动，但它底下那一根已经不是
   // 刚才那一根了，留着就是一行**过期的数**（光标一动它自己会回来）。手机上抬着手看的时候尤其要收。
   // ★★ 2026-10-04 实测（tools/web_readout_swap_probe.js）：**光这一句在这个位置量不出来** ——
@@ -1196,6 +1325,21 @@ function measureText(d) {
   if (typeof m !== 'string' || !m) return '';
   return ` ｜ 背驰看法 ${(MEASURE_NAME[m] || [m])[0]}`;
 }
+// 「消失的点」那个数（卡 card-cf3ed018-795）。★ 它是**单独一格浮层**（#ghostc），不并进图脚那行：
+//   图脚是流内布局，这一格一出来就把 #chart 挤矮（1440 实量：foot 60→77、#chart 760→743，
+//   整张图往下挪 3px —— 而它偏偏就是"消失的点刚出现"的那一刻，用户会看见图跳一下）；
+//   窄屏那一档 `.foot` 整个 display:none，手机上这个数根本不存在。
+// ★ 「本次打开」四个字不许省：回测那边报的是「150 个确认里 41 个被改掉」，分母是整段历史、起点固定；
+//   这个数的分母是**这一次打开、有人看着的那段时间**，而且窗口还在往后滑。
+//   两个数长得像 —— 混起来就是拿两个分母比大小，而屏幕上不会有任何一处会红。
+// ★ 走 `el()` 而不是直接摸 document：`tools/web_footer_check.py` 把 renderMeta 抠出来配假 DOM 真跑
+//   （它的 el 桩带 textContent / className 的 setter）—— 直接摸 document 那一格当场 ReferenceError。
+function ghostText(d) {
+  const g = d.ghosts;
+  const n = Array.isArray(g) ? g.length : 0;
+  el('ghostc-tx').textContent = n ? `消失的点 ${n}（本次打开）` : '';
+  el('ghostc').className = n ? 'ghostc on' : 'ghostc';
+}
 
 function renderMeta(d) {
   const done = d.segs.filter((s) => !s.live).length;
@@ -1206,6 +1350,7 @@ function renderMeta(d) {
     + ` ｜ 买卖点 线段中枢层 ${sigTierText(d.signals?.seg || [])} · 类中枢层 ${sigTierText(d.signals?.pen || [])}`
     + measureText(d)
     + ` ｜ 数据源 ${sourceLabel(d.source, d.stale)}`;
+  ghostText(d);          // 那一格是浮层（见上），不在这句话里 —— 两处各写一遍就会分家
 }
 // <<< RENDER_META
 

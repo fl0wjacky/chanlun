@@ -120,6 +120,23 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
 }
 .notice.on { opacity: 1; visibility: visible; }
 
+/* 「消失的点」那个数（卡 card-cf3ed018-795）。★ 为什么不进图脚：那笔账写在 index.html 里那一格旁边
+   —— 图脚是流内布局，这一格一出来就把图挤矮、整屏往下挪；窄屏那一档图脚还整个隐藏。
+   挂在这个浮层盒子里就不占位。跟 `.more` 一样：空着的时候整块收掉（opacity ＋ visibility），
+   只是它排在这根竖列**最后**，收着也不顶到谁。 */
+.ghostc {
+  display: flex; align-items: center; gap: 6px;    /* 记号小样 ＋ 那个数，横向排 */
+  padding: 4px 10px 4px 8px; border-radius: 999px;
+  font-size: 11px; line-height: 1.4; color: var(--tx);
+  background: var(--panel); border: 1px solid var(--line);
+  box-shadow: 0 0 0 3px var(--panel-hi);
+  font-variant-numeric: tabular-nums;      /* 数字变宽变窄的时候这一句不许跟着抖 */
+  opacity: 0; visibility: hidden; transition: opacity .15s;
+  pointer-events: none;
+}
+.ghostc.on { opacity: 1; visibility: visible; }
+.ghostc .gs { flex: 0 0 auto; display: block; }
+
 /* 光标读数（card-4cdf628c-c84）：十字线停在哪一根，就把那一根摊开。
    数字用 `tabular-nums`：**光标一路扫过去，数字的位宽不许抖** —— 读数块是"扫一眼"的东西，
    每换一根就缩一下宽、抖一下行，眼睛根本读不住。
@@ -146,6 +163,24 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
 .readout .rv b { font-weight: 600; color: var(--tx); }
 /* 涨跌幅：实底＋黑字，跟图上价签同一种写法（不是新发明的一种"标色"） */
 .readout .pct { padding: 0 5px; border-radius: 999px; font-weight: 600; }
+
+/* 「消失的点」的悬停说明（卡 card-cf3ed018-795）。位置由 app.js 跟着指针摆（fixed，靠边自己翻回来）；
+   它是**说明**、不是按钮 ⇒ pointer-events:none，不许把拖拽/缩放吃掉（跟 .more / .readout 同一条账）。
+   ★ `z-index: 3` 必须写：lightweight-charts 把画布铺成 z-index 1/2 的兄弟元素，而 `#chart` 自己
+     不是层叠上下文 ⇒ 不写 z-index 的定位元素会被画布盖住 —— 位置对、字数对、就是看不见
+     （`.more` 那条注释记的是同一次事故）。
+   ★ `pre-line`：那句话是两行（app.js 用 \n 分），别把它挤成一行。
+   ★ 色只用变量（尺 ①：:root 之外一个裸色值都不许写）。 */
+.ghosttip {
+  position: fixed; left: 0; top: 0;
+  max-width: 260px; padding: 5px 8px; border-radius: 8px;
+  font-size: 11px; line-height: 1.5; color: var(--tx); white-space: pre-line;
+  background: var(--panel); border: 1px solid var(--line);
+  box-shadow: 0 0 0 3px var(--panel-hi);
+  opacity: 0; visibility: hidden; transition: opacity .12s;
+  pointer-events: none; z-index: 3;
+}
+.ghosttip.on { opacity: 1; visibility: visible; }
 
 /* 副图那一格的头（卡 card-68704ee6-a5a）：口径（MACD(12,26,9) 柱=DIF−DEA）＋ 光标那一根的三个数。
    ★ 它是 .overlays 的孩子，但**不排在那条 flex 竖列里**（那样它会跟在读数块下面，
