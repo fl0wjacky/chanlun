@@ -413,6 +413,16 @@ _sv = _span_violations()
 count("框跨过已切成的走势分界点", len(_sv), "　← %d 份样本，cut=turn%s" % (len(_kline_files()),
       "；例 %s" % (_sv[:2],) if _sv else ""))
 
+# ---- 走势分界 v3（docs/spec/走势分段.md v3 §三，card-51571a5f-dc2）----
+# 基线（zec15／zec30 五个分界＋一次撤回）、不变量（交替、刀在同向线段终点、两刀间有中枢、框不跨分界、首尾相接）、
+# 367.77 不切框、不看未来。反向验证在 tools/trend_check.py --self-test（spec §四 的 P1／P2／P5 各自必须变）。
+import io as _io, contextlib as _ctx                       # noqa: E402
+from trend_check import main as _trend_main               # noqa: E402
+with _ctx.redirect_stdout(_io.StringIO()) as _tbuf:
+    _trc = _trend_main()
+count("走势分界 v3 不合 spec", 0 if _trc == 0 else sum(1 for l in _tbuf.getvalue().splitlines() if l.startswith("✗")),
+      "　← tools/trend_check.py%s" % ("" if _trc == 0 else "：" + " ｜ ".join(l for l in _tbuf.getvalue().splitlines() if l.startswith("✗"))[:200]))
+
 # ---- 判据前提：下面那扇「字体覆盖」门自己的基准对不对 ----
 # 那扇门判「缺不缺字」靠 `config._notdef_mask` 投出的 .notdef 基准。基准错了它就是**假绿**：
 # 拿一个没有墨的空白遮罩当 .notdef，所有真字形都"不等于它" ⇒ 报「一个都不缺」。

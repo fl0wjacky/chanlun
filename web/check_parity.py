@@ -101,7 +101,7 @@ def running(bars_by_key):
 
 
 def get(port, symbol, tf, span=None):
-    # 结构对账比的是引擎原样那份（不切）⇒ 显式要 cut=extend；默认（turn）那份另有 run_default 核
+    # 结构对账比的是引擎原样那份（不切）⇒ 显式要 cut=extend；默认（trend）那份另有 run_default 核
     req = urllib.request.Request("http://127.0.0.1:%d/api/chart?symbol=%s&tf=%s%s&cut=extend"
                                  % (port, symbol, tf, "&span=%d" % span if span else ""),
                                  headers={"Accept-Encoding": "gzip"})
@@ -287,49 +287,63 @@ def run_macd(quiet=False):
 
 
 def run_default(quiet=False):
-    """默认切法（小栋 10-05 11:09Z：按转折切设成默认，card-21fbf426-889）：
-    ① /api/meta 的 cut_default 是 turn、且在 cut_modes 里；② 不带 cut 的 /api/chart 回显 cut=turn、带 cuts；
-    ③ 不带 cut 那份 ＝ 显式 cut=turn 那份（结构逐字段同）；④ 它的 seg_centers ＝ 引擎 cut_centers 在同一份 K 线上的结果；
-    ⑤ 「延伸」还在：cut=extend 回显 extend、不带 cuts。"""
-    import core.cut as _cut
+    """默认切法 v3（docs/spec/走势分段.md，card-51571a5f-dc2）：
+    ① /api/meta 的 cut_default 是 trend、cut_modes 是 extend／trend；② 不带 cut 回显 trend、带 trend 对象、不带旧 cuts；
+    ③ 不带 cut ＝ 显式 cut=trend ＝ 老链接 cut=turn（当 trend 收、回显 trend）；④ seg_centers 和 trend 各字段 ＝ 引擎
+    trend_v3 在同一份 K 线上的结果；⑤ 换任何看法，框和 trend 都不变（v3 不读背驰）；⑥「延伸」还在：cut=extend 回显 extend、
+    不带 trend／cuts。"""
+    import core.trend as _trend
     eng = sys.modules["core.signals"]
     files = sorted(os.path.basename(p) for p in glob.glob(data("*.json")))
     cases = [(fn, dataset(fn)) for fn in files if dataset(fn)]
     bars_by_key = {key: json.load(open(data(fn), encoding="utf-8")) for fn, key in cases}
     bad = 0
+    keys = ("bounds", "retracted", "pending", "segments", "units")
     with running(bars_by_key) as port:
         m = get_path(port, "/api/meta")
-        if m.get("cut_default") != "turn" or "turn" not in (m.get("cut_modes") or []) or "extend" not in (m.get("cut_modes") or []):
+        if m.get("cut_default") != "trend" or sorted(m.get("cut_modes") or []) != ["extend", "trend"]:
             bad += 1
             if not quiet:
                 print("✗ /api/meta cut_default=%r cut_modes=%r" % (m.get("cut_default"), m.get("cut_modes")))
         for fn, (sym, tf) in cases:
-            dflt = get_path(port, "/api/chart?symbol=%s&tf=%s" % (sym, tf))
-            turn = get_path(port, "/api/chart?symbol=%s&tf=%s&cut=turn" % (sym, tf))
-            ext = get_path(port, "/api/chart?symbol=%s&tf=%s&cut=extend" % (sym, tf))
+            q = "/api/chart?symbol=%s&tf=%s" % (sym, tf)
+            dflt = get_path(port, q)
+            trd = get_path(port, q + "&cut=trend")
+            old = get_path(port, q + "&cut=turn")
+            ext = get_path(port, q + "&cut=extend")
             bars = [dict(t=x["t"], o=x["o"], h=x["h"], l=x["l"], c=x["c"]) for x in dflt["bars"]]
-            r = analyze(bars, tick=tick_of(fn))
-            cur, cuts = _cut.cut_centers(r, eng.signals(r, "pen", "macd"))
-            strip = lambda d: {k: v for k, v in d.items() if k not in ("fetched_at", "stale", "refreshing")}
+            v = _trend.trend_v3(analyze(bars, tick=tick_of(fn)), reading=server.TREND_READING)
+            strip = lambda d: {k: v_ for k, v_ in d.items() if k not in ("fetched_at", "stale", "refreshing")}
             diffs = []
-            if dflt.get("cut") != "turn" or "cuts" not in dflt:
-                diffs.append("不带 cut 回显 %r、cuts %s" % (dflt.get("cut"), "有" if "cuts" in dflt else "没有"))
-            if strip(dflt) != strip(turn):
-                diffs.append("不带 cut ≠ cut=turn")
-            if json.loads(json.dumps(server._clean(cur))) != dflt.get("seg_centers"):
-                diffs.append("默认的 seg_centers ≠ 引擎 cut_centers")
-            for ms in eng.MEASURES:                      # 选 A：切点固定按面积认 ⇒ 任何看法下框和刀都跟面积那份一样
+            if dflt.get("cut") != "trend" or "trend" not in dflt or "cuts" in dflt:
+                diffs.append("不带 cut 回显 %r、trend %s、cuts %s" % (dflt.get("cut"), "有" if "trend" in dflt else "没有",
+                                                                 "有" if "cuts" in dflt else "没有"))
+            if strip(dflt) != strip(trd):
+                diffs.append("不带 cut ≠ cut=trend")
+            if strip(dflt) != strip(old):
+                diffs.append("老链接 cut=turn ≠ trend")
+            if json.loads(json.dumps(server._clean(v["seg_centers"]))) != dflt.get("seg_centers"):
+                diffs.append("seg_centers ≠ 引擎 trend_v3")
+            if dflt.get("trend_reading") != v["reading"]:
+                diffs.append("trend_reading %r ≠ 引擎 %r" % (dflt.get("trend_reading"), v["reading"]))
+            if any("seg" not in z for z in dflt.get("seg_centers") or []):
+                diffs.append("seg_centers 有中枢不带 seg")
+            want = json.loads(json.dumps(server._clean({k: v[k] for k in keys})))
+            if want != dflt.get("trend"):
+                diffs.append("trend ≠ 引擎 trend_v3：%s" % [k for k in keys if want[k] != (dflt.get("trend") or {}).get(k)])
+            for ms in eng.MEASURES:                      # v3 只用线段 ⇒ 任何看法下框和 trend 都一样
                 if ms == "macd":
                     continue
-                o = get_path(port, "/api/chart?symbol=%s&tf=%s&measure=%s" % (sym, tf, ms))
-                if (o.get("seg_centers"), o.get("cuts")) != (dflt.get("seg_centers"), dflt.get("cuts")):
-                    diffs.append("measure=%s 下框/刀跟面积不同" % ms)
-            if ext.get("cut") != "extend" or "cuts" in ext:
+                o = get_path(port, q + "&measure=" + ms)
+                if (o.get("seg_centers"), o.get("trend")) != (dflt.get("seg_centers"), dflt.get("trend")):
+                    diffs.append("measure=%s 下框/trend 变了" % ms)
+            if ext.get("cut") != "extend" or "trend" in ext or "cuts" in ext or "trend_reading" in ext:
                 diffs.append("cut=extend 回显 %r" % ext.get("cut"))
             bad += bool(diffs)
             if not quiet:
                 print("%s %-18s %s %-3s 默认切法%s" % ("✗" if diffs else "✓", fn, sym, tf,
-                                                    "  ← " + " ｜ ".join(diffs) if diffs else " turn（刀 %d）" % len(cuts)))
+                                                    "  ← " + " ｜ ".join(diffs) if diffs else
+                                                    " trend（分界 %d、撤回 %d）" % (len(v["bounds"]), len(v["retracted"]))))
     if not quiet:
         print("默认切法 %d 份：不一致 %d 份" % (len(cases), bad))
     return bad
@@ -479,25 +493,18 @@ def self_test():
             server._macd_body = orig
     arms.append(("副图头部引擎版本是旧的", arm_engine_stale))
 
-    def arm_cut_follows_measure():
-        real = server._measure_body
+    def arm_trend_uncut():
+        real = server.trend_v3
 
-        def follow(slot, symbol, tf, measure, cut=server.DEFAULT_CUT):   # 回到选 A 之前：刀跟着这次的看法认
-            if cut == "extend" or measure == server.MACD_KEY:
-                return real(slot, symbol, tf, measure, cut)
-            slot.mbodies.pop(server.CUT_KEY, None)
-            slot.mbodies.pop((measure, cut), None)
-            server.CUT_MEASURE = measure
-            try:
-                return real(slot, symbol, tf, measure, cut)
-            finally:
-                server.CUT_MEASURE = "macd"
-        server._measure_body = follow
+        def uncut(r, **kw):                               # 变异：分界照认、框不按分界切（D4 没落实）
+            v = real(r, **kw)
+            return dict(v, seg_centers=r["seg_centers"])
+        server.trend_v3 = uncut
         try:
             return run_default(quiet=True)
         finally:
-            server._measure_body = real
-    arms.append(("切点跟着看法走", arm_cut_follows_measure))
+            server.trend_v3 = real
+    arms.append(("框不按 v3 分界切", arm_trend_uncut))
 
     def arm_default_extend():
         real = server.DEFAULT_CUT
