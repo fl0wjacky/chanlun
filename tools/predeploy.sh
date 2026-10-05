@@ -38,6 +38,11 @@ KEPT=()
 keep() {  # 不是绿的那一步：日志和截图留着，最后印位置（Nova 10-05 ③）
   KEPT+=("$1：$2")
 }
+tmpname() {  # 只印临时目录下的名字，不印本机绝对路径（Nova 10-05 12:39）：表可以直接贴
+  local t=${TMPDIR:-}
+  t=${t%/}
+  if [ -n "$t" ] && [ "${1#"$t"/}" != "$1" ]; then printf '$TMPDIR/%s' "${1#"$t"/}"; else printf '%s' "$1"; fi
+}
 
 # ---- 表头：版本，不印路径（Nova 10-05 ④）----
 PYV=$("$PY" -c 'import sys; print(sys.version.split()[0])' 2>/dev/null || echo 无)
@@ -63,7 +68,7 @@ for chk in tools/selfcheck.py web/check_parity.py web/check_abuse.py web/check_a
     98) record "$chk" 没比成 "环境没备齐：$(grep -E '^退出原因' "$log" | grep -oE '[^ ]+=(查不了|跑不了)' | tr '\n' ' ')" ;;
     *) record "$chk" 没比成 "rc=$rc $(grep -v '^[[:space:]]*$' "$log" | tail -1 | cut -c1-70)" ;;
   esac
-  if [ $rc = 0 ]; then rm -f "$log"; else keep "$chk" "日志 $log"; fi
+  if [ $rc = 0 ]; then rm -f "$log"; else keep "$chk" "日志 $(tmpname "$log")"; fi
 done
 
 # ---- 渲染那半：前端 e2e ----
@@ -93,7 +98,7 @@ else
   done
   if [ $up = 0 ]; then
     frontend_skip "临时后台 30 秒内没起来（$(tail -1 "$SRVLOG" | cut -c1-60)）"
-    keep "临时后台" "日志 $SRVLOG"
+    keep "临时后台" "日志 $(tmpname "$SRVLOG")"
   else
     export E2E_URL="http://127.0.0.1:$PORT/"   # 7 套都先读它（Iris 2140c0d），不用管各自收第几个参数
     for s in "${SUITES[@]}"; do
@@ -108,7 +113,7 @@ else
              record "$s" 没比成 "$m" ;;
         *) record "$s" 没比成 "rc=$rc（意料之外的退出码）" ;;
       esac
-      if [ $rc = 0 ]; then rm -rf "$out" "$log"; else keep "$s" "日志 $log ／ 截图 $out"; fi
+      if [ $rc = 0 ]; then rm -rf "$out" "$log"; else keep "$s" "日志 $(tmpname "$log") ／ 截图 $(tmpname "$out")"; fi
     done
     rm -f "$SRVLOG"
   fi
