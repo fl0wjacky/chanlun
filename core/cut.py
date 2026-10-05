@@ -27,8 +27,8 @@ def _turn_bar(g, pens):
 
 
 def _is_low(done, k):
-    """端点 ends[k] 是不是低点：k ≥ 1 看结束在它上面的线段（向下 ⇒ 低）；k == 0 看从它出发的第一段（向上 ⇒ 低）。"""
-    return done[k - 1]["dir"] == "down" if k else done[0]["dir"] == "up"
+    """端点 ends[k]（k ≥ 1；窗口从 prev_k + 1 起，碰不到图头）是不是低点：结束在它上面的线段向下 ⇒ 低。"""
+    return done[k - 1]["dir"] == "down"
 
 
 def _backdate(kind, leave_bar, prev_k, ends, bars, done):

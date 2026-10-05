@@ -11,6 +11,7 @@
   ③ 规则 5：每一刀的 status 按「切点后头三段已完成线段重叠」独立重算一遍，必须对上；
   ④ 规则 6：只动线段中枢 —— 笔、线段、类中枢、两层买卖点不变（cut_centers 不改 r）；
   探针 A（规格第三节第 4 条）：把『头三段重叠』改成『头一段走完就算』⇒ 切成数必须变；
+  ⑩ 所有样本：一类刀不落反类端点（--self-test 第四条：一类挪到下一个端点 ⇒ 必须报出来）；
   探针 C：三类往回落不分高低点（只收同类端点之前的样子）⇒ zec15 上刀位置必须变（19164 那把回来）；
   探针 B：转折点改在线段层认 ⇒ 最低点那个框（405.9–423）必须切不开（10-05 往回落以后最高点那个能被线段层三卖切到）。旧注：『线段层认出的刀里没有一刀
          落在 405.9–423 / 523.24–549.65 两个框的内部』。
@@ -79,6 +80,22 @@ def span_violations(files=None, measure="macd", strict=True):
     return bad
 
 
+def wrong_side(files=None, measure="macd"):
+    """Atlas 10-05：一类刀走「最近端点」（_snap），规则上没挡它落到反类端点 —— 一买必须落在低点、一卖在高点。
+    低点＝向下线段的终点或向上线段的起点（自己从 segs 算，不调 core/cut.py）。返回 [(文件, cut_bar, by)]，应为空。"""
+    from config import tick_of
+    bad = []
+    for fn in files or kline_files():
+        r = analyze(load(os.path.join(ROOT, "data", fn)), tick=tick_of(fn))
+        _, cuts = C.cut_centers(r, S.signals(r, "pen", measure))
+        fin = [x for x in r["segs"] if not x.get("live")]
+        lows = {x["i1"] for x in fin if x["dir"] == "down"} | {x["i0"] for x in fin if x["dir"] == "up"}
+        for c in cuts:
+            if c["by"] in ("笔·一买", "笔·一卖") and (c["cut_bar"] in lows) != (c["by"] == "笔·一买"):
+                bad.append((fn, c["cut_bar"], c["by"]))
+    return bad
+
+
 def span_self_test():
     """反向验证：把「切成的刀要分组」拿掉（_centers_with_cuts 忽略切点），框必然跨刀 ⇒ 必须报出来。"""
     real = C._centers_with_cuts
@@ -107,7 +124,14 @@ def span_self_test():
     finally:
         C.cut_centers = real_cc
     print("%s 变异「预览框不按待定的刀分组」⇒ 跨刀的预览框 %d 个" % ("✓" if p else "✗", p))
-    return 0 if n and m and p else 3
+    real_snap = C._snap
+    C._snap = lambda bar, ends: min(real_snap(bar, ends) + 1, len(ends) - 1)   # 一类落到下一个端点（反类）
+    try:
+        w = len(wrong_side())
+    finally:
+        C._snap = real_snap
+    print("%s 变异「一类刀挪到下一个端点」⇒ 落反的一类刀 %d 把" % ("✓" if w else "✗", w))
+    return 0 if n and m and p and w else 3
 
 
 def main():
@@ -216,6 +240,8 @@ def main():
     # ⑨ 框不跨已切成的切点（card-e634f6e9-bb5）：data/ 下所有 K 线样本都跑
     sv = span_violations()
     cell("⑨ 所有样本（%d 份）：没有框跨过已切成的切点" % len(kline_files()), not sv, "跨刀 %s" % sv[:3])
+    ws = wrong_side()
+    cell("⑩ 所有样本（%d 份）：一类刀不落反类端点（一买在低点、一卖在高点）" % len(kline_files()), not ws, "落反 %s" % ws[:3])
 
     real = C._status
     C._status = lambda done_, k: "done" if k + 1 <= len(done_) else "pending"     # 头一段走完就算
