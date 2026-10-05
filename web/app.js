@@ -1005,8 +1005,22 @@ function placeSubhead() {
   const on = !!opts.macd && !!sub.series;
   subBox.classList.toggle('on', on);
   if (!on) return;
-  reserveSubhead();                              // 先给页头让出那一条（比例尺变了不影响下面那行 top 的计算）
   const pane = chart.panes()[1];
+  // ★ 窗格刚建、LWC 还没把它排出来时 `getHeight()` 是 **0**，这一拍**不许摆**：
+  //   下面那行 top 是拿 `pane.getHeight()` 减出来的，按 0 算就**低一整格**
+  //   （实测格高 172 ⇒ 该是 514px，算成 686px ＝ 514＋172），页头整块掉到副图下面去。
+  //   而这一拍之后**不一定还有下一趟**：`syncSub()` 认出「还是这一格」就直接返回，不再取数、不再重画
+  //   ⇒ 错的值会**一直挂着**（2026-10-05 实测：连点两次开关就进这个状态，等 2.6 秒也没人修）。
+  //   所以：版面没出来就先不摆，下一帧再试一次；试满 500ms 就放手（不空转 —— 图被藏起来时高度永远是 0）。
+  if (!pane || !pane.getHeight()) {              // 窗格还没回来也算：拿不到格高就不摆
+    const now = performance.now();
+    if (!subPlaceFrom) subPlaceFrom = now;
+    if (now - subPlaceFrom < 500) requestAnimationFrame(placeSubhead);
+    else subPlaceFrom = 0;                       // 额度用完就清掉：下一次「格高还是 0」重新给 500ms
+    return;
+  }
+  subPlaceFrom = 0;
+  reserveSubhead();                              // 先给页头让出那一条（比例尺变了不影响下面那行 top 的计算）
   const chartBox = el('chart').getBoundingClientRect();
   const tsH = chart.timeScale().height();          // 时间轴是**共用**的一条，压在整栏的最下面
   // top 是**相对 .overlays 那个盒子**算的（它就是 subBox 的定位祖先，自己离图顶有 10px，见 style.css）——
@@ -1026,6 +1040,8 @@ function placeSubhead() {
 // 值没变就别再 applyOptions（那会重画一整格）。★ 建／拆窗格时要把记的值抹掉（见 buildSub/teardownSub）：
 // 新窗格的比例尺是新的，记着旧值就会「只有第一次生效」。
 let subTopMargin = null;
+// placeSubhead「等版面」那一小段的起点：进了「格高还是 0」这个状态就记一下，好给它 500ms 的额度（见 placeSubhead）
+let subPlaceFrom = 0;
 function reserveSubhead() {
   const pane = chart.panes()[1];
   if (!pane || !subBox) return;
