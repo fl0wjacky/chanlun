@@ -109,6 +109,8 @@ def main():
             if have != exp:
                 pin_bad.append(((x0, x1), have))
         cell("⑦ 钉死 zec15 那两个框的切点（谁切、切在哪根、状态）", not pin_bad, "不符 %s" % pin_bad[:1])
+    else:
+        print("· ⑦ 未执行（只钉 data/zec15.json；这份是 %s）—— 不算绿" % os.path.basename(path))
 
     real = C._status
     C._status = lambda done_, k: "done" if k + 1 <= len(done_) else "pending"     # 头一段走完就算
