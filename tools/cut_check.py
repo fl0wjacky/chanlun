@@ -3,6 +3,7 @@
 """中枢切分（core/cut.py，docs/spec/中枢切分.md）的检查＋探针。rc=0 才算过。
 
     python3 tools/cut_check.py [bars.json]     # 不给就用 data/zec15.json
+    python3 tools/cut_check.py --self-test     # ⑨ 的反向验证：造跨刀的框，必须报出来
 
 逐条核：
   ① 形状：cuts 按 cut_bar 升序、cut_bar 都是已完成线段端点、status ∈ pending/done/void、boxes 只在 pending 有且全带 provisional；
@@ -30,6 +31,66 @@ def load(path):
     raw = json.load(open(path))
     raw = raw["bars"] if isinstance(raw, dict) else raw
     return [dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"]) for b in raw]
+
+
+def kline_files():
+    """data/ 下所有「K 线数组」样本（每条有 t/o/h/l/c）；别的 JSON（标注、子图样本）跳过。"""
+    out = []
+    for fn in sorted(os.listdir(os.path.join(ROOT, "data"))):
+        if not fn.endswith(".json") or fn.endswith("_tmp.json"):
+            continue
+        try:
+            raw = json.load(open(os.path.join(ROOT, "data", fn)))
+        except ValueError:
+            continue
+        if isinstance(raw, list) and raw and isinstance(raw[0], dict) and {"t", "o", "h", "l", "c"} <= set(raw[0]):
+            out.append(fn)
+    return out
+
+
+def span_violations(files=None, measure="macd", strict=True):
+    """card-e634f6e9-bb5：cut=turn 下，**任何框都不许跨过已切成（done）的切点** —— 框跟走势分段对得上。
+    跨 = 框的成员线段里，有一段在切点之前、有一段在切点之后（X0 < cut_bar < X1）。
+    ★ 不等号必须**严格**：切点正好压在框沿上（cut_bar == X0 或 == X1）是故意允许的那一档（框在刀处相接，
+      前端 cut-edge f3f063e 就是为它写的）。收紧成 <= 会把这一档在真数据上全报成红（--self-test 第二条量这个）。
+    X0/X1 跟前端画框用的是同一条式子（web/layers.js：host[PI0].i0 .. host[PI1].i1），所以这里守的是屏幕上画出来的框。
+    pending / void 的刀不算：待定时旧框照画是规则页定的（L88:14），作废的刀本来就不切。
+    返回 [(文件, cut_bar, 切点的 by, 框 X0, 框 X1)]，应为空。"""
+    from config import tick_of
+    bad = []
+    for fn in files or kline_files():
+        r = analyze(load(os.path.join(ROOT, "data", fn)), tick=tick_of(fn))
+        cur, cuts = C.cut_centers(r, S.signals(r, "pen", measure))
+        for c in cuts:
+            if c["status"] != "done":
+                continue
+            for z in cur:
+                inside = (z["X0"] < c["cut_bar"] < z["X1"]) if strict else (z["X0"] <= c["cut_bar"] <= z["X1"])
+                if inside:
+                    bad.append((fn, c["cut_bar"], c["by"], z["X0"], z["X1"]))
+        # 预览框（cuts[i].boxes，provisional）是「待定的刀也切了」那一版：它们不许跨过任何 done 或 pending 的刀
+        live_cuts = [c["cut_bar"] for c in cuts if c["status"] in ("done", "pending")]
+        for c in cuts:
+            for z in c.get("boxes", []):
+                for x in live_cuts:
+                    if z["X0"] < x < z["X1"]:
+                        bad.append((fn + "（预览框）", x, c["by"], z["X0"], z["X1"]))
+    return bad
+
+
+def span_self_test():
+    """反向验证：把「切成的刀要分组」拿掉（_centers_with_cuts 忽略切点），框必然跨刀 ⇒ 必须报出来。"""
+    real = C._centers_with_cuts
+    C._centers_with_cuts = lambda done, ks: real(done, [])
+    try:
+        n = len(span_violations())
+    finally:
+        C._centers_with_cuts = real
+    print("%s 变异「切成的刀不分组」⇒ 跨刀的框 %d 个" % ("✓" if n else "✗", n))
+    m = len(span_violations(strict=False))
+    print("%s 收紧成 <=（框沿也算跨）⇒ 真数据上报 %d 个 —— 证明「压在框沿」这一档真实存在，不等号必须严格"
+          % ("✓" if m else "✗", m))
+    return 0 if n and m else 3
 
 
 def main():
@@ -131,6 +192,10 @@ def main():
     cell("⑧ ZEC 30m：5354、6150 两个极值都切成，且不在任何框里面", st.get(5354) == "done" and st.get(6150) == "done"
          and not inside30, "状态 5354=%s 6150=%s · 仍在框内 %s" % (st.get(5354), st.get(6150), inside30))
 
+    # ⑨ 框不跨已切成的切点（card-e634f6e9-bb5）：data/ 下所有 K 线样本都跑
+    sv = span_violations()
+    cell("⑨ 所有样本（%d 份）：没有框跨过已切成的切点" % len(kline_files()), not sv, "跨刀 %s" % sv[:3])
+
     real = C._status
     C._status = lambda done_, k: "done" if k + 1 <= len(done_) else "pending"     # 头一段走完就算
     try:
@@ -158,4 +223,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(span_self_test() if "--self-test" in sys.argv else main())
