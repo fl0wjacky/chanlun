@@ -2,7 +2,7 @@
 # 上线前一道门（card-9b0fe913-758）：数据那半（Python 检查）＋ 渲染那半（前端 e2e）按顺序跑，一张表收账。
 #
 #   tools/predeploy.sh          # 五套 Python 检查 + cut_check + 4 套前端回归（ghost / more / readout / measure）
-#   tools/predeploy.sh --all    # 再加 3 套单卡证据工装（macd_axis / mobile_share / readout_swap_probe）
+#   tools/predeploy.sh --all    # 再加 4 套单卡证据工装（macd_axis / mobile_share / readout_swap_probe / subhead_slot_probe）
 #
 # 环境变量（都可不给）：
 #   PYTHON     跑 Python 检查和临时后台用的解释器，默认 python3
@@ -73,7 +73,11 @@ done
 
 # ---- 渲染那半：前端 e2e ----
 SUITES=(tools/web_ghost_e2e.js tools/web_more_e2e.js tools/web_readout_e2e.js tools/web_measure_e2e.js)
-[ $ALL = 1 ] && SUITES+=(tools/web_macd_axis.js tools/web_mobile_share.js tools/web_readout_swap_probe.js)
+# ★ subhead_slot_probe 挂在 --all 档、**不进默认档**（Nova 2026-10-05 16:04）：它要真后台连点十二次开关、
+#   跑将近一分钟，只有上线前那一趟值这个时间。它钉的是「副图页头拿格高 0 摆位置」（card-9b0fe913-758）。
+# ★★ 它跟 68decdd 是**一对**：改前那一棵树（`e494d90`）上它 5/12 红。所以这支**必须在 68decdd 之后并**
+#   —— 先并它再并 68decdd，中间的 main 上 `--all` 就是红的（那不是它报错，是它说的实话）。
+[ $ALL = 1 ] && SUITES+=(tools/web_macd_axis.js tools/web_mobile_share.js tools/web_readout_swap_probe.js tools/web_subhead_slot_probe.js)
 
 frontend_skip() {  # 原因 —— 浏览器 / 后台起不来：每一套都记「未执行」，不许当绿
   for s in "${SUITES[@]}"; do record "$s" 未执行 "前端未执行：$1"; done
