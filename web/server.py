@@ -23,6 +23,9 @@
   GET /api/macd?symbol=&tf=[&span=]   → 副图：同一格同一份 K 线上的 MACD(12,26,9)，dif / dea / hist（hist = DIF−DEA，
         不乘 2，hist_def 字段写明），带每根的 t；头部跟 /api/chart 一样（span / earliest / span_max / stale…）。
         副图打开才取，关着不付（ZEC 15m 全精度三列 gzip 约 +0.55 MB，所以不塞进 /api/chart）。
+  GET /api/tick?symbol=&tf=  → 最后一根（未收盘）K 线 {t,o,h,l,c,v} ＋ fetched_at / stale / engine。同一格 2.5 秒内只碰
+        一次币安（单飞，多人同看不放大）；失败回上次成功的值、stale=true；从没成功过 503。**不碰结构**（小栋 10-05 A：
+        最后一根实时跳价，笔段中枢买卖点仍收盘才由 /api/chart 整份重算）。
   GET /api/meta            → 白名单（前端拿来做下拉）
         engine = 引擎版本（core/*.py 的 sha256 前 10 位，启动时算），/api/chart、/api/macd 头部也带同一个；
         measures 仍是字符串列表（契约不变）；measure_orig = {看法: 是否 108 课原文的判法}，slope 为 false（小栋 10-04 ①A）。
@@ -145,6 +148,64 @@ class Slot:
 
 SLOTS = {(s, t, k): Slot(k) for s in SYMBOLS for t in TFS for k in spans_of(t)}
 FETCHES = {"n": 0}                       # 自计数：压测脚本拿来核「没多拉」
+
+
+TICK_WAIT_S = 5                          # 冷启动时等第一份的上限（超了就 503，前端下一趟再来）
+TICK_S = 2.5                             # /api/tick：同一（品种, 周期）这么久内只碰一次币安（小栋 10-05 A：多人同看只打一次）
+
+
+class TickSlot:
+    def __init__(self):
+        self.lock = threading.Condition()   # 单飞：一个去拉；有旧值的直接拿旧值走，冷启动没值的等它（最多几秒）
+        self.bar = None                  # 上一次成功拉到的最后一根（未收盘的那根）
+        self.ok_at = 0.0                 # 上一次成功的时间（epoch 秒）—— 前端画「价格停在 HH:MM」用
+        self.tried_at = 0.0              # 上一次碰币安的时间（成功失败都算；失败也不许 2.5 秒内重打）
+        self.failed = False
+        self.busy = False                # 正有一个请求在拉（单飞旗）
+
+
+TICKS = {(s, t): TickSlot() for s in SYMBOLS for t in TFS}
+TICK_FETCHES = {"n": 0}
+
+
+def get_tick(symbol, tf):
+    """最后一根 K 线（未收盘那根）的开高低收量。**不碰结构**：不改 SLOTS 里的 K 线、不重算笔段中枢买卖点。
+    单飞但不排队：正有人在拉时，别的请求直接拿上一次的值走（币安慢的时候不把一串请求都挂住）。
+    返回 JSON bytes；从来没成功拉到过 ⇒ None（503，前端下一趟再来）。"""
+    ts, now = TICKS[(symbol, tf)], time.time()
+    with ts.lock:
+        go = not ts.busy and now - ts.tried_at >= TICK_S
+        if go:
+            ts.busy, ts.tried_at = True, now
+    if go:
+        TICK_FETCHES["n"] += 1
+        bar, err = None, None
+        try:
+            end = int(now * 1000)
+            got = fetch(symbol, tf, end - 2 * TFS[tf], end)
+            if not got:
+                raise RuntimeError("币安返回空")
+            bar = got[-1]
+        except Exception as e:                         # noqa: BLE001 —— 失败回上次的值、标 stale，不把栈回给用户
+            err = e
+        with ts.lock:
+            ts.busy = False
+            if bar is not None:
+                ts.bar, ts.ok_at, ts.failed = bar, now, False
+            else:
+                ts.failed = True
+            ts.lock.notify_all()
+        if err is not None:
+            log("tick %s %s 失败：%s" % (symbol, tf, err))
+    with ts.lock:
+        if ts.bar is None and ts.busy:                 # 冷启动：别人正在拉第一份 ⇒ 等它，别回 503
+            ts.lock.wait_for(lambda: not ts.busy, timeout=TICK_WAIT_S)
+        if ts.bar is None:
+            return None
+        b, ok_at, failed = ts.bar, ts.ok_at, ts.failed
+    return json.dumps(dict(symbol=symbol, tf=tf, t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"], v=b.get("v"),
+                           fetched_at=iso(int(ok_at * 1000)), stale=failed, engine=ENGINE),
+                      separators=(",", ":"), allow_nan=False).encode("utf-8")
 
 
 def _refresh(slot, symbol, tf):
@@ -505,6 +566,20 @@ class Handler(BaseHTTPRequestHandler):
             if got is None:
                 return self._err(503)
             return self._send(200, got[0], gz=got[1])
+        if u.path == "/api/tick":
+            try:
+                q = urllib.parse.parse_qs(u.query, keep_blank_values=True, strict_parsing=True, max_num_fields=2)
+            except ValueError:
+                return self._err(400)
+            if set(q) != {"symbol", "tf"} or any(len(v) != 1 for v in q.values()):
+                return self._err(400)                     # 只认 symbol + tf：span、measure 跟最后一根无关，带了也 400
+            symbol, tf = q["symbol"][0].upper(), q["tf"][0]
+            if symbol not in SYMBOLS or tf not in TFS:
+                return self._err(400)
+            body = get_tick(symbol, tf)
+            if body is None:
+                return self._err(503)
+            return self._send(200, body)
         if u.path == "/api/meta":
             if u.query:
                 return self._err(400)
