@@ -33,6 +33,8 @@
 //   ⑫ **待确认 vs 已确认→待确认**：待确认的点没了不报；已确认变回待确认**要报**（Bram 第 ② 条）
 //   ⑬ **收盘自动重取**（Nova 10-05 定）：没人碰页面，收盘后空心点**自己**出现；切到后台不发请求、
 //      切回来立刻补一次；一分钟内最多一次
+//   ⑮ **换引擎也不算重绘**（`engine` 进桶键）：core/*.py 一改、一部署，开着的页面拿到的就是点集不同的
+//      一份 —— 不许把新旧两份比成满屏「消失」。两张工装页**只差 engine 一个字段**，一张该报、一张报 0。
 //   ⑭ **后台挂了那一趟不许当刷新**：收盘时取不到真数据 ⇒ load() 会悄悄退回仓里的样本，
 //      而样本是**另一份数据** —— 画上去账本当场把整屏读成"全没了"（满屏假空心点），顺带把档位也洗了
 //   ★ 假后台**按请求里的 `measure` 路由**（不是按页面变体）—— 见 plan() 那段账：⑥ 原来是个空转格。
@@ -113,6 +115,7 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
       d.bars.push({ ...last, t: last.t + STEP_MS, o: last.c, h: last.c, l: last.c, c: last.c });
     }
     if (opt.refreshing) d.refreshing = true;
+    if (opt.engine) d.engine = opt.engine;      // ⑮：引擎版本（后台带在 /api/chart 顶层那个字段）
     if (opt.pend) d.signals[PEND_PT.level].push(clone(PEND_PT));
     for (const tier of ['seg', 'pen']) {
       d.signals[tier] = (d.signals[tier] || []).filter((s) => !drop.has(`${tier}|${s.kind}|${s.bar}`));
@@ -130,6 +133,12 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   const D_EDGE = new Set([`pen|三买|${EDGE_BAR}`]);
   const D_LINES = new Set([K(target.level || 'seg', target), K(control.level || 'pen', control)]);
   const NOTHING = { drop: new Set() };
+  // ⑮：两把假「尺」（形状跟真的一样：10 位 hex）。真值是 core/*.py 的 sha256 前 10 位，由后台算
+  //   （Bram 的 agent/bram/engine-version）—— 工装这里只需要「两个不同的值」。
+  const ENG1 = 'e1e1e1e1e1', ENG2 = 'e2e2e2e2e2';
+  // ⑮ 少掉的那一片：真实换引擎会少一大片，这里用目标＋对照＋左沿那个。
+  //   ★ 左沿那个（bar 100）本来就被左沿守卫吃掉（⑦ 量过）⇒ 这张页面上该报的是 D_LINES.size 个。
+  const D_ROUND = new Set([...D_LINES, ...D_EDGE]);
   // 正片每一趟吐什么：序号从 1 起（每张页面自己数自己的请求数）。
   // ★ 第 2 趟**还是全给**：这不是为了看鬼，是先空转一圈把图的几何站稳（见正片里那段账）——
   //   两次像素读数都得在"已经落定"的状态下取，否则量到的是图自己挪了 1px。
@@ -153,6 +162,13 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
     //   这就是"后台一直没把新那根拉回来"那种情形：页面该补（⑬g），但**不许无限补**（补到上限就停，
     //   然后 ③ 那道闸要拦住可见性来回切）(⑬i)。
     if (which === 'swr') return i === 1 ? NOTHING : { drop: D_TARGET, opt: { refreshing: true } };
+    // ⑮：换引擎 ≈ 换了一把尺。下面两张页面**只差 engine 这一个字段**（同样少那一片点、同样把新那根带回来）
+    //   —— 差别只有这一个 ⇒ 报不报只能归因于它。'engsame' 是**对照**：先证明这一套在这张页面上真报得出来，
+    //   否则 'engine' 那张报 0 也可能只是"这一套根本没工作"（空转格）。
+    if (which === 'engsame' || which === 'engine') {
+      const eng = which === 'engine' && i >= 2 ? ENG2 : ENG1;
+      return i <= 1 ? { opt: { engine: eng } } : { drop: D_ROUND, opt: { engine: eng, grow: true } };
+    }
     return { drop: i < SEQ.length ? SEQ[i] : new Set() };
   };
 
@@ -175,7 +191,8 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
     //   （定的定时器早就过点了，跟"切到后台不发请求"这道闸没关系）。
     const NOWP = Date.now();
     const lastT = base.bars[base.bars.length - 1].t;
-    const soon = which === 'auto' || which === 'swr' || which === 'fallback';
+    const soon = which === 'auto' || which === 'swr' || which === 'fallback'
+               || which === 'engsame' || which === 'engine';
     const shift = (soon ? NOWP - STEP_MS + 3000 : NOWP) - lastT;      // soon：还差 3 秒收盘
     const reqAt = [];                                                 // 每次取数的时刻（⑬ 量错峰用）
     await p.route('**/api/chart*', async (route) => {
@@ -225,7 +242,7 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
              gc: g ? { txt: (t || {}).textContent || '', on: g.classList.contains('on'),
                        svg: !!g.querySelector('svg') } : null,
              measure: d.measure, span: d.span,
-             src: d.source, nBars: (d.bars || []).length,
+             src: d.source, nBars: (d.bars || []).length, eng: d.engine,
              tip: (document.getElementById('ghosttip') || {}).textContent || '' };
   });
   const tipState = (p) => p.evaluate(() => {
@@ -634,6 +651,30 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   ck('⑭b 而且一个假鬼都没有（样本跟手上这份是两回事，画上去就是满屏空心点）',
      fb1.ghosts.length === 0 && (!fb1.gc || !fb1.gc.on),
      `页面报 ${fb1.ghosts.length} 个｜那一格：「${fb1.gc ? fb1.gc.txt : '（没有）'}」`);
+
+  // ---- ⑮ 换引擎（core/*.py 一改、部署）≈ 换了一把尺：不许拿新旧两份比出「消失」
+  //      两张页面**只差 `engine` 这一个字段**：同样的点、同样少那一片、同样把新那根带回来。
+  //      差别只有这一个 ⇒ 报不报只能归因于它。'engsame' 是对照组 —— 没有它，'engine' 报 0
+  //      也可能只是"这一套在这张页面上根本没工作"（空转格）。
+  console.log('\n15 换引擎（部署那一刻）不许比出「消失」—— 桶键里得有 engine');
+  const ES = await open('engsame');
+  const es = ES.p;
+  await es.locator('.chip[data-key="sig"]').click();
+  { const t = Date.now(); while (ES.hits.macd < 2 && Date.now() - t < 40000) await sleep(500); }
+  await sleep(1500);
+  const esS = await snap(es);
+  ck('⑮a 对照：引擎没变、同样少那一片 ⇒ **照报**（先证明这一套在这张页面上报得出来）',
+     esS.eng === ENG1 && esS.ghosts.length === D_LINES.size,
+     `引擎 ${esS.eng}｜该少 ${D_LINES.size} 个（左沿那个被守卫吃掉，照 ⑦），页面报 ${esS.ghosts.length} 个`);
+  const EG = await open('engine');
+  const eg = EG.p;
+  await eg.locator('.chip[data-key="sig"]').click();
+  { const t = Date.now(); while (EG.hits.macd < 2 && Date.now() - t < 40000) await sleep(500); }
+  await sleep(1500);
+  const egS = await snap(eg);
+  ck('⑮b 引擎变了（E1→E2）、点少得一模一样 ⇒ **一个都不许报**（换了把尺，不是重绘）',
+     egS.eng === ENG2 && egS.ghosts.length === 0 && (!egS.gc || !egS.gc.on),
+     `引擎 ${esS.eng} → ${egS.eng}｜页面报 ${egS.ghosts.length} 个｜那一格：「${egS.gc ? egS.gc.txt : '（没有）'}」`);
 
   await b.close();
   console.log(`\n${n - bad}/${n} 过　截图：${OUT}`);

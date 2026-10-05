@@ -397,7 +397,14 @@ function ghostConfirmed(d) {
 /** 新的一份数据到了：跟同一个桶里上一份比，少掉的点记成「已经消失」。结果挂在 `d.ghosts` 上
  *  （图脚和图都从 `d` 上读 —— 不留中间变量，跟 sourceLabel 那条同一条理由）。 */
 function ghostReconcile(d) {
-  const key = [d.symbol, d.tf, d.measure || paging.measure, d.span ?? paging.span].join('|');
+  // ★ `engine`（core/*.py 的版本，Bram 10-05 加在 /api/chart 顶层）**也进键**：引擎一换就是**换了一把尺**，
+  //   不能拿新旧两份比出「消失」。不并的话，部署那一刻**所有开着的页面**会当场把整屏读成「全没了」——
+  //   满屏假空心点，而用户什么都没做（跟我刚修掉的「取不到后台退回样本」是同一个病：把另一份数据当成
+  //   「同一份数据刷新了」）。
+  //   ★ 读 **chart 自己那份**，不读 /api/meta：meta 只在页面打开时取一次，部署之后开着的页面手里还是旧 meta
+  //   （Bram 指出的）。旧后台/样本没有这个字段 ⇒ 取 `''`，跟今天的行为一模一样。
+  //   往回滚也一样：E1→E2→E1 各算各的桶，不会拿 E2 那份去比 E1 的本子。
+  const key = [d.symbol, d.tf, d.measure || paging.measure, d.span ?? paging.span, d.engine ?? ''].join('|');
   const prev = ghostBuckets.get(key);
   const now = ghostConfirmed(d);
   if (prev) {
