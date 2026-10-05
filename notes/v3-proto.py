@@ -1,4 +1,4 @@
-"""docs/spec/走势分段.md §三／§四 的原型（只读，不改引擎）。用法：python3 notes/v3-proto.py zec15.json [P1|P2|P3]
+"""docs/spec/走势分段.md §三／§四 的原型（只读，不改引擎）。用法：python3 notes/v3-proto.py zec15.json [P1|P2|P3|P5]
 v3 D2 原型（只读）：本级别＝线段中枢，次级别＝线段。
 死点＝当前走势里的最高点 H（或最低点 L）；确立＝H 之后、价格没再过 H 的前提下，
 以「H 之前（含跨 H）最后一个中枢」为准出第一个三卖（离开段收在 ZD 下、回抽段高点 < ZD）。
@@ -6,13 +6,13 @@ v3 D2 原型（只读）：本级别＝线段中枢，次级别＝线段。
 import sys,json;sys.path.insert(0,'.')
 from core.analyze import analyze;import importlib
 C=importlib.import_module("core.cut")
-fn=sys.argv[1]; PROBE=sys.argv[2] if len(sys.argv)>2 else ''   # '' / P1 不重算 / P2 不交替 / P3 不查过H
+fn=sys.argv[1]; PROBE=sys.argv[2] if len(sys.argv)>2 else ''   # '' / P1 不重算 / P2 不交替 / P3 不查过H / P5 不查前一段有无中枢
 raw=json.load(open('data/'+fn));raw=raw['bars'] if isinstance(raw,dict) else raw
 B=[dict(t=b['t'],o=b['o'],h=b['h'],l=b['l'],c=b['c']) for b in raw]
 r=analyze(B,tick=0.01); done=[s for s in r['segs'] if not s.get('live')]
 import datetime as D, warnings; warnings.filterwarnings('ignore')
 ts=lambda i: D.datetime.utcfromtimestamp(B[i]['t']/1000).strftime('%m-%d %H:%M')
-ks=[]; bnd=[]          # ks: 切点段序号（新组起点）；bnd: (段序号 j 的终点, 'H'/'L', 确立段 t)
+ks=[]; bnd=[]; dropped=[]          # ks: 切点段序号（新组起点）；bnd: (段序号 j 的终点, 'H'/'L', 确立段 t)
 start=0; want=None     # want: 下一个分界要的是 'H' 还是 'L'（None＝两头都开）
 for t in range(start+2,len(done)):
   zs=C._centers_with_cuts(done[:t+1],[] if PROBE=='P1' else ks)
@@ -40,7 +40,15 @@ for t in range(start+2,len(done)):
     elif typ=='L' and leave['p1']>z['ZG'] and back['p1']>z['ZG'] and back['p1']<back['p0']:
       pass
     else: continue
+    # D2-7：这一刀让前一段（上一刀 → 这一刀）一个中枢都没有 ⇒ 不算（L17:44 基本原理二）；图头那一段不查
+    if ks and PROBE!='P5':
+      zz=C._centers_with_cuts(done[:t+1],ks+[j+1])
+      if not [q for q in zz if q['PI0']>=lo and q['PI1']<=j]:
+        # 上一刀到这一刀之间没有中枢 ⇒ 两把都去（一高一低），回到上一刀之前那段走势接着走
+        ks.pop(); prev=bnd.pop(); dropped.append((prev,(j,typ,t)))
+        want=prev[1]; break
     ks.append(j+1); bnd.append((j,typ,t,z)); want=None if PROBE=='P2' else ('L' if typ=='H' else 'H'); break
-print(fn,'segs',len(done),'分界',len(bnd))
+print(fn,'segs',len(done),'分界',len(bnd),'撤回',len(dropped))
+for (pj,pt,ptt,_),(j,typ,t) in dropped: print('  撤回 %s %.2f（确立于段%d）＋不立 %s %.2f（段%d）'%(pt,done[pj]['p1'],ptt,typ,done[j]['p1'],t))
 for j,typ,t,z in bnd:
   s=done[j]; print('  %s %s bar %d %.2f  确立于段%d终点 %s（参照中枢 ZD %.2f ZG %.2f）'%(typ,ts(s['i1']),s['i1'],s['p1'],t,ts(done[t]['i1']),z['ZD'],z['ZG']))

@@ -8,6 +8,7 @@ sys.argv = ['v3-proto.py', fn]
 with contextlib.redirect_stdout(io.StringIO()):
     g = runpy.run_path('notes/v3-proto.py')
 B, done, ks, bnd, r = g['B'], g['done'], g['ks'], g['bnd'], g['r']
+dropped = g['dropped']
 C = importlib.import_module('core.cut'); S = importlib.import_module('core.signals')
 cur_turn, cuts_turn = C.cut_centers(r, S.signals(r, 'pen', 'macd'))
 zs_v3 = C._centers_with_cuts(done, ks)
@@ -64,7 +65,7 @@ price_line(top1)
 
 # ---- 改后 ----
 top2 = top1 + PH + GAP
-axes(top2, '改后：v3 原型（%d 个分界；绿＝上涨、红＝下跌；斜线＝中阴：极值已出、还没确立）' % len(bnd))
+axes(top2, '改后：v3 原型（%d 个分界' % len(bnd) + ('、撤回 %d 次' % len(dropped) if dropped else '') + '；绿＝上涨、红＝下跌；斜线＝中阴：极值已出、还没确立）')
 cutbars = [done[j]['i1'] for j, _, _, _ in bnd]
 edges = [0] + cutbars + [N - 1]
 for k in range(len(edges) - 1):
@@ -85,6 +86,10 @@ for j, typ, t, z in bnd:
     o.append('<circle cx="%.1f" cy="%.1f" r="4.5" fill="%s" stroke="#fff" stroke-width="2"/>' % (x, y, INK))
     dy = -10 if typ == 'H' else 20
     o.append('<text x="%.1f" y="%.1f" font-size="13" fill="%s" text-anchor="middle" font-weight="600" stroke="#fff" stroke-width="3" paint-order="stroke">%.2f</text>' % (x, y + dy, INK, s['p1']))
+for (pj, pt, ptt, _), (j2, t2, tt2) in dropped:                 # 撤回过的刀（D2-7）
+    s_ = done[pj]; x = X(s_['i1'])
+    o.append('<line x1="%.1f" x2="%.1f" y1="%d" y2="%d" stroke="%s" stroke-width="1" stroke-dasharray="1 3"/>' % (x, x, top2, top2 + PH, MUTED))
+    o.append('<text x="%.1f" y="%d" font-size="12" fill="%s" text-anchor="middle" stroke="#fff" stroke-width="3" paint-order="stroke">%.2f 撤回</text>' % (x, top2 + 14, MUTED, s_['p1']))
 # 图尾：最后一个分界之后的极值，还没确立 ⇒ 中阴（候选，会换）
 if bnd:
     jl, tl = bnd[-1][0], bnd[-1][1]
