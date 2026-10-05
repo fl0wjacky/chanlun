@@ -26,6 +26,10 @@
   GET /api/tick?symbol=&tf=  → 最后一根（未收盘）K 线 {t,o,h,l,c,v} ＋ fetched_at / stale / engine。同一格 2.5 秒内只碰
         一次币安（单飞，多人同看不放大）；失败回上次成功的值、stale=true；从没成功过 503。**不碰结构**（小栋 10-05 A：
         最后一根实时跳价，笔段中枢买卖点仍收盘才由 /api/chart 整份重算）。
+  GET /api/chart …&cut=extend|turn  → 线段中枢的切法（docs/spec/中枢切分.md）。extend＝现行（默认，载荷逐字节同以前、
+        只多回显 cut）；turn＝在笔层转折点切开：seg_centers 回当前状态（待定的刀照回旧框），顶层多
+        cuts:[{level:"seg", cut_bar, by, status:pending|done|void, signal_bar, n, boxes?}]，boxes 只在 pending 时有、
+        跟 seg_centers 同形、带 provisional:true。线段层买卖点仍按不切的中枢算。白名单外 400。
   GET /api/meta            → 白名单（前端拿来做下拉）
         engine = 引擎版本（core/*.py＋config.py 的 sha256 前 10 位，启动时算），/api/chart、/api/macd 头部也带同一个；
         measures 仍是字符串列表（契约不变）；measure_orig = {看法: 是否 108 课原文的判法}，slope 为 false（小栋 10-04 ①A）。
@@ -56,6 +60,7 @@ from config import tick_of                              # noqa: E402
 from fetch_klines import BASE as BINANCE_KLINES, UA, fetch as binance_fetch   # noqa: E402
 from make_web_fixture import iso, shape                 # noqa: E402
 from core.analyze import analyze                        # noqa: E402
+from core.cut import cut_centers                       # noqa: E402
 from core.signals import MEASURES, MEASURE_ORIG, macd_lines, signals as engine_signals   # noqa: E402
 import core.signals as _engine_signals_mod              # noqa: E402,F401  （见下行：模块对象从 sys.modules 取）
 _ENGINE = sys.modules["core.signals"]                    # core/__init__ 把 signals 导成了函数，模块要从这里拿
@@ -256,7 +261,7 @@ def _refresh(slot, symbol, tf):
     bars = [merged[t] for t in sorted(merged) if t >= lo]
     # fetched_at / stale / refreshing 放最前：两个旗只在响应时替换这一处，不重算结构
     body = json.dumps(dict(fetched_at=iso(now_ms), stale=False, refreshing=False,
-                           span=slot.span, earliest=earliest, span_max=SPAN_MAX[tf], measure="macd", engine=ENGINE,
+                           span=slot.span, earliest=earliest, span_max=SPAN_MAX[tf], measure="macd", cut="extend", engine=ENGINE,
                            **build_payload(bars, symbol, tf)),
                       ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
     return bars, body, earliest
@@ -327,10 +332,23 @@ def _macd_body(slot, symbol, tf):
     return b
 
 
-def _measure_body(slot, symbol, tf, measure):
+CUT_MODES = ("extend", "turn")           # 线段中枢的切法（docs/spec/中枢切分.md）：extend＝现行（默认）／turn＝转折点切开
+
+
+def _measure_body(slot, symbol, tf, measure, cut="extend"):
     """在 slot.lock 里调用 → 这一格在某种背驰看法下的 JSON。买卖点之外的一切跟默认那份是同一份：
     K 线、笔、段、中枢跟看法无关，只有 signals 两层重算（懒算、按 measure 各存一份，数据刷新就作废）。
     切看法不碰币安。"""
+    if cut != "extend":
+        b = slot.mbodies.get((measure, cut))
+        if b is None:
+            d = json.loads(_measure_body(slot, symbol, tf, measure))
+            r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"))
+            cur, cuts = cut_centers(r, engine_signals(r, "pen", measure))   # 转折点跟着这次的看法认（规则 1、2）
+            d["seg_centers"], d["cuts"], d["cut"] = _clean(cur), _clean(cuts), cut
+            b = slot.mbodies[(measure, cut)] = json.dumps(d, ensure_ascii=False, separators=(",", ":"),
+                                                          allow_nan=False).encode("utf-8")
+        return b
     if measure == "macd":
         return slot.body
     if measure == MACD_KEY:
@@ -346,12 +364,12 @@ def _measure_body(slot, symbol, tf, measure):
     return b
 
 
-def _variant(slot, symbol=None, tf=None, measure="macd"):
+def _variant(slot, symbol=None, tf=None, measure="macd", cut="extend"):
     """在 slot.lock 里调用 → (json, gzip)，头上两个旗按当下状态如实标。"""
-    key = (slot.failed, slot.refreshing, measure)
+    key = (slot.failed, slot.refreshing, measure, cut)
     v = slot.variants.get(key)
     if v is None:
-        body = _measure_body(slot, symbol, tf, measure)
+        body = _measure_body(slot, symbol, tf, measure, cut)
         if slot.failed:
             body = body.replace(b'"stale":false', b'"stale":true', 1)
         if slot.refreshing:
@@ -398,7 +416,7 @@ def start_prefetch(symbol, tf, span):
     threading.Thread(target=_prefetch, args=(symbol, tf, nxt), daemon=True).start()
 
 
-def get_chart(symbol, tf, span=1, prefetch=True, touch=True, measure="macd"):
+def get_chart(symbol, tf, span=1, prefetch=True, touch=True, measure="macd", cut="extend"):
     """→ (json bytes, gzip bytes) 或 None（一次都没拉成功过）。
 
     · 冷（还没有缓存）：同步拉，持锁 ⇒ 并发进来的都等这一次，不回空；
@@ -424,7 +442,7 @@ def get_chart(symbol, tf, span=1, prefetch=True, touch=True, measure="macd"):
             slot.refreshing = True
             slot.variants = {}
             start_refresh(slot, symbol, tf)
-        out = _variant(slot, symbol, tf, measure)
+        out = _variant(slot, symbol, tf, measure, cut)
     if prefetch:
         start_prefetch(symbol, tf, span)
     return out
@@ -541,10 +559,10 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlsplit(self.path)
         if u.path == "/api/chart":
             try:
-                q = urllib.parse.parse_qs(u.query, keep_blank_values=True, strict_parsing=True, max_num_fields=4)
+                q = urllib.parse.parse_qs(u.query, keep_blank_values=True, strict_parsing=True, max_num_fields=5)
             except ValueError:
                 return self._err(400)
-            if not {"symbol", "tf"} <= set(q) <= {"symbol", "tf", "span", "measure"} or any(len(v) != 1 for v in q.values()):
+            if not {"symbol", "tf"} <= set(q) <= {"symbol", "tf", "span", "measure", "cut"} or any(len(v) != 1 for v in q.values()):
                 return self._err(400)                     # 多参数、少参数、重复参数一律不认
             symbol, tf = q["symbol"][0].upper(), q["tf"][0]
             if symbol not in SYMBOLS or tf not in TFS:
@@ -556,7 +574,10 @@ class Handler(BaseHTTPRequestHandler):
             measure = q.get("measure", ["macd"])[0]
             if measure not in MEASURES:
                 return self._err(400)                     # 背驰看法只认四个名字（macd / slope / lines / peak）
-            got = get_chart(symbol, tf, span, measure=measure)
+            cut = q.get("cut", ["extend"])[0]
+            if cut not in CUT_MODES:
+                return self._err(400)                     # 切法只认 extend / turn
+            got = get_chart(symbol, tf, span, measure=measure, cut=cut)
             if got is None:
                 return self._err(503)
             return self._send(200, got[0], gz=got[1])
@@ -596,7 +617,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._err(400)
             return self._send(200, json.dumps(dict(symbols=list(SYMBOLS), tfs=list(TFS), days=DAYS,
                                                    refresh_s=REFRESH_S, span_max=SPAN_MAX,
-                                                   engine=ENGINE, measures=list(MEASURES),
+                                                   engine=ENGINE, measures=list(MEASURES), cut_modes=list(CUT_MODES),
                                                    measure_orig={m: MEASURE_ORIG.get(m, False) for m in MEASURES})).encode())
         return self._static(u.path, u.query)
 
