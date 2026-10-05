@@ -1346,11 +1346,14 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
 
   // ⑰e：一刀 pending ⇒ 那一根上真画出**竖虚线**（虚线形 ＋ 高度＝旧框的 ZD…ZG）＋ 一枚「待定」签；
   //   同一份数据里 `done`/`void` 的刀**一根线都不画**（两张页面几何一样，只有 `status` 不同）。
-  //   ★★ 这一页的入口从"缺省那一档"变成了**老名字 `?cut=turn`**（卡 card-d8cf5815-19f）：老名字后台删了、
-  //     当 `trend` 收 ⇒ 这一格顺手把**别名**那条路钉死（以前没测过）：请求**真的带着 `turn` 发出去**、
-  //     后台回 `trend`、页面落在 trend 上、URL 归一掉那把 `cut`。
-  //     ★ 归一这一步**假后台说了不算**：它只是照着 server.py 的 CUT_ALIAS 演 —— "线上真收别名"那句话
-  //       得拿真后台量，钉在 ⑰h 里。
+  //   ★★ 这一页的入口从"缺省那一档"变成了**老名字 `?cut=turn`**（卡 card-d8cf5815-19f）：
+  //     老名字后台删了、当 `trend` 收。这一格量的是**老链接打开之后落在哪儿**。
+  //   ★ 我第一版把这一格写错了，写错的方向值得记一笔：我以为"老名字会带着发出去、由后台的别名收下"。
+  //     **不会。** `/api/meta` 的 `cut_modes` 里没有 `turn` ⇒ 页面在**本地**就把它落回缺省那一档
+  //     （app.js `renderMeta` 那句 `if (want && !cl.includes(want))`），请求里**一个字都不带**。
+  //     这是**故意的**，而且比"把老名字发出去"稳：前端只认后台当场给的名单，后台哪天连别名都撤了，
+  //     这条老链接照样打得开。所以这一格钉的是"**老名字一个字节都不上网** ＋ 落点是新档位 ＋ URL 归一"。
+  //     ★ "后台真收别名"那句是**另一件事**，得拿真后台量、页面说了不算 —— 钉在 ⑰e2。
   const CT = await open('cutturn', QS + `&cut=${OLD_CUT}`);
   const ctp = CT.p;
   await sleep(1200);
@@ -1372,10 +1375,12 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   const ctU = await cutUI(ctp);              // ★ 深链那一趟到底落在哪一档（老名字归一之后该是 trend）
   ck('⑰e 没立住的那一刀`pending` ⇒ 在 `cut_bar` 那一根上真画出竖虚线（虚线形、高度＝包住它的旧框的 '
      + 'ZD…ZG）＋ 一枚「待定」签；同一份数据里 `done`/`void` 的刀**一根线都不画**；'
-     + `另外深链老名字 \`?cut=${OLD_CUT}\` 必须**归一**到 \`${DEF_CUT}\``,
-     // ★ 老名字归一之后，深链那一趟**真的带着参数**（`turn` ≠ 缺省 ⇒ load 发得出去）—— 这跟搬走之前
-     //   正好相反（那时它是缺省、一个字都不带）。量的是"发出去的是老名字、落点却是新档位"。
-     CT.cutReq.some((x) => x === OLD_CUT) && ctU.cut === DEF_CUT && !/cut=/.test(ctU.url)
+     + `另外深链老名字 \`?cut=${OLD_CUT}\` 必须**在本地归一**到 \`${DEF_CUT}\`、一个字都不发出去`,
+     // ★ 这一串的牙齿：前半段要求"每一次请求都没带 `cut`"。哪天有人把老名字塞进 `/api/meta` 的名单、
+     //   或者给前端加一条"照发老名字"的旁路，这一格当场红 —— 那两种情况都会让页面的行为
+     //   重新**依赖后台的别名**，而这一页要的正是"不依赖它也能打开"。
+     CT.cutReq.length >= 1 && CT.cutReq.every((x) => x === null)
+       && ctU.cut === DEF_CUT && !/cut=/.test(ctU.url)
        && !!pendCut && pendCut.x !== null && vsegAt(cfx, cg1.offs, cg1.cuts[0]).length >= 1
        && cfx.text.includes('待定')
        && vg1.cuts.length === 2 && vg1.cuts.every((c) => vsegAt(vfx, vg1.offs, c).length === 0)

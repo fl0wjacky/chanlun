@@ -3,8 +3,8 @@
 // 数据只认一个形状（`tools/make_web_fixture.py` 就是它的可执行定义，后台卡 card-29a45ab6-0ac 照着吐）：
 //   {symbol, tf, name, updated, closed, bars[], pens[], segs[], centers[], seg_centers[], signals{seg,pen}, meta{tick,pen_rule}}
 // 取不到后台就退回 `fixtures/`（离线也能看、也能截图对账）；两边都没有就老实说取不到，不画半张图。
-import { CHART, PAGE, CANDLE, WIDTH, SUB } from './theme.js';
-import { makeBoxPrimitive, makeAnnotPrimitive, shownOf, ghostHitAt } from './layers.js';
+import { CHART, PAGE, CANDLE, WIDTH, SUB, TREND } from './theme.js';
+import { makeBoxPrimitive, makeAnnotPrimitive, makeTrendPrimitive, shownOf, ghostHitAt } from './layers.js';
 
 const LWC = window.LightweightCharts;
 
@@ -64,6 +64,12 @@ opts.macd = subParam('macd');
 // 不一样（那两颗是"手机上让图占满"），所以不走 SUB_DEF 那一套。地址栏 `?cutpv=1` 可以指名
 // （可分享、可截图复现；工装也拿它把两种画法都摆出来）。一个字没有 ⇒ 关。
 opts.cutPreview = SUB_Q.get('cutpv') === '1';
+// 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）：**默认关**，地址栏 `?trend=1` 可以指名
+// （可分享、可截图复现 —— 跟 `cutpv` 同一条）。★ 不进 DEFAULTS：那个对象记的是「TradingView 的
+// 默认值」那一组（卡面点名的），这一颗的理由跟它无关。
+// ★ 它**只在 `cut=trend` 那份载荷上有东西可画**（`cut=extend` 那份连 `trend` 这个键都没有）——
+//   所以那一档下这一颗按灰，理由写在标题里（跟「成交量」那颗在没有 v 的数据上按灰同一条账）。
+opts.trend = SUB_Q.get('trend') === '1';
 const state = { data: null, opts, candleSeries: null };
 const primitives = [];
 // 往左拖那套状态：span＝现在手上是第几档，spanMax＝后台给的封顶，earliest＝币安真没有了。
@@ -163,7 +169,11 @@ const overlay = line({ color: 'rgba(0,0,0,0)', lineWidth: 1 });
 state.overlaySeries = overlay;
 
 state.candleSeries = candle;
-for (const [c, p] of [[candle, makeBoxPrimitive(state)], [overlay, makeAnnotPrimitive(state)]]) {
+// ★ 走势分段那一层排在标注层**后面**：它的底图带（`bottom`）和记号（`top`）住在同一个 primitive 的
+//   两个 paneView 里，挂哪条系列不影响 zOrder（`bottom` 就在 K 线底下），所以挂在**永远可见**的
+//   `overlay` 上最稳（挂线段那条的话，一关线段开关整层跟着消失 —— 跟上面那段是同一条理由）。
+for (const [c, p] of [[candle, makeBoxPrimitive(state)], [overlay, makeAnnotPrimitive(state)],
+                      [overlay, makeTrendPrimitive(state)]]) {
   c.attachPrimitive(p);
   primitives.push(p);
 }
@@ -353,10 +363,28 @@ function structKey(d, t0, t1, shown) {
   const sigs = (a) => (a || []).filter((s) => at(ts(s.bar)) && (!sh || sh.sigAt(s)))
     .map((s) => `${ts(s.bar)}@${s.price},${s.kind}${s.confirmed === false ? ',未确认' : ''}`).join('|');
   const done = (d.segs || []).filter((s) => !s.live);   // 线段中枢的 host（跟 layers.js doneSegs 同一条）
+  // 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）。★ 跟别的层同一条账：**层关着就不算「看得见」**
+  //   —— 开着它却不算它的账，换档之后走势段整个换了一批、屏幕上明明白白变了，那句话却不出声。
+  // ★ 记的是**画出来的那几件事实**（分界／中阴那头／待定／撤回／背景带／升级框），不是把整个
+  //   `trend` 序列化：序列化会把"载荷里多了一个前端根本不画的键"也算成"屏幕变了"，那正是喊狼。
+  const trend = () => {
+    const T = d.trend || {};
+    const b = (T.bounds || []).filter((x) => at(ts(x.bar)))
+      .map((x) => `${ts(x.bar)}@${x.price},${x.kind}>${ts(x.pullback_end_bar)}`).join('|');
+    const pd = (T.pending || []).filter((x) => at(ts(x.bar))).map((x) => `${ts(x.bar)}@${x.price},${x.kind}`).join('|');
+    const rt = (T.retracted || []).filter((x) => at(ts(x.bar)))
+      .map((x) => `${ts(x.bar)}@${x.price},${x.kind}>${ts(x.retracted_bar)}`).join('|');
+    const sg = (T.segments || []).filter((s) => ov(ts(s.i0), ts(s.i1)))
+      .map((s) => `${ts(s.i0)}>${ts(s.i1)}@${s.type}${s.upgraded ? ',升级' : ''}${s.live ? ',live' : ''}`).join('|');
+    const un = (T.units || []).filter((u) => ov(ts(u.X0), ts(u.X1)))
+      .map((u) => `${ts(u.X0)}>${ts(u.X1)}@${u.DD},${u.GG}`).join('|');
+    return [b, pd, rt, sg, un].join('/');
+  };
   return [on('pen') ? part(d.pens) : '', on('seg') ? part(d.segs) : '',
           on('pc') ? boxes(d.centers, d.pens || [], on('up')) : '',
           on('sc') ? boxes(d.seg_centers, done, on('up')) : '',
-          sigs((d.signals || {}).seg), sigs((d.signals || {}).pen)].join('#');
+          sigs((d.signals || {}).seg), sigs((d.signals || {}).pen),
+          on('trend') ? trend() : ''].join('#');
 }
 // 可视窗口 → 时间区间。★ 换档前取一次、换档后用**同一段时间**再取一次：
 // 拿换完之后的新窗口去比，比的是「另一段时间」，那就不是「这一屏变没变」了。
@@ -1120,7 +1148,9 @@ function applyToggles() {
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
     const sigChip = k.startsWith('sig:') || k === 'sigPend';
     // 成交量那颗在**没有 v 的数据上**按灰（仓里的样本就是）：能点却画不出东西的开关是骗人的。
-    b.disabled = sigChip ? !opts.sig : k === 'vol' ? !sub.hasVol : false;
+    // 走势分段那颗同理：`cut=extend` 那份载荷没有 `trend` 这个键 ⇒ 开着也画不出东西 ⇒ 按灰。
+    b.disabled = sigChip ? !opts.sig : k === 'vol' ? !sub.hasVol
+      : k === 'trend' ? !(state.data && state.data.trend) : false;
   }
   // 「关着的层不许有能点的开关」这条账，看法那组也算：买卖点一关，它就得跟着灰（或反过来亮回来）。
   renderMeasures();
@@ -1150,6 +1180,10 @@ function buildChips() {
   add('类中枢', 'pc', CHART.pen);
   add('线段中枢', 'sc', CHART.seg);
   add('高一级', 'up', CHART.up_seg);
+  // 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）：背景带／分界／中阴／待定／撤回／升级框。
+  // 排在「高一级」后面 —— 它俩都跟"升级"沾边，挨着放；但**不是一个东西**（那颗是第 33 课"满 9 段"
+  // 升出来的框，这一层是 v3 的 D3"连续扩展合成"），标题里说清楚。
+  add('走势分段', 'trend', TREND.up);
   add('买卖点', 'sig', CHART.buy);
   for (const k of ['一买', '二买', '三买', '一卖', '二卖', '三卖']) add(k, `sig:${k}`, k.endsWith('买') ? CHART.buy : CHART.sell);
   add('待确认', 'sigPend', CHART.sell);
@@ -1911,6 +1945,8 @@ function setUrl() {
   }
   // 「先看切后」同理：关着是默认（这一档跟屏宽无关，见 opts.cutPreview 那行），开着才写上去。
   if (opts.cutPreview) q.set('cutpv', '1'); else q.delete('cutpv');
+  // 走势分段那一层同一条账：默认关，开着才写上去。
+  if (opts.trend) q.set('trend', '1'); else q.delete('trend');
   history.replaceState(null, '', `?${q}`);            // 可分享、可截图复现
 }
 
