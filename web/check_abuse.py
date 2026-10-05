@@ -91,6 +91,7 @@ def burst(port, n, method, path):
 def main():
     calls.update(n=0, down=False, inflight=0, peak=0, delay=0.3)   # 每一跑从同一个起点开始（自测会连跑多臂）
     server.fetch = fake_fetch
+    server.tick_fetch = lambda symbol, tf: fake_fetch(symbol, tf, 0, 1 << 62)[-2:]   # 跳价：一次调用＝一个请求
     real_prefetch = server.start_prefetch
     server.start_prefetch = lambda *a: None              # 老格子（⓪–⑨）量的是单档的拉取次数：先把预拉关掉，⑪ 再专门测它
     BASE = [k for k in server.SLOTS if k[2] == 1]

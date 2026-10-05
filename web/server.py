@@ -27,7 +27,7 @@
         一次币安（单飞，多人同看不放大）；失败回上次成功的值、stale=true；从没成功过 503。**不碰结构**（小栋 10-05 A：
         最后一根实时跳价，笔段中枢买卖点仍收盘才由 /api/chart 整份重算）。
   GET /api/meta            → 白名单（前端拿来做下拉）
-        engine = 引擎版本（core/*.py 的 sha256 前 10 位，启动时算），/api/chart、/api/macd 头部也带同一个；
+        engine = 引擎版本（core/*.py＋config.py 的 sha256 前 10 位，启动时算），/api/chart、/api/macd 头部也带同一个；
         measures 仍是字符串列表（契约不变）；measure_orig = {看法: 是否 108 课原文的判法}，slope 为 false（小栋 10-04 ①A）。
   GET /  /<静态文件>       → web/ 下的前端文件（只送 STATIC_EXT 里的类型，.py / .md / 点文件一律 404）
 """
@@ -45,6 +45,7 @@ import threading
 import time
 import traceback
 import urllib.parse
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -52,7 +53,7 @@ sys.path.insert(0, ROOT)
 
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 from config import tick_of                              # noqa: E402
-from fetch_klines import fetch as binance_fetch         # noqa: E402
+from fetch_klines import BASE as BINANCE_KLINES, UA, fetch as binance_fetch   # noqa: E402
 from make_web_fixture import iso, shape                 # noqa: E402
 from core.analyze import analyze                        # noqa: E402
 from core.signals import MEASURES, MEASURE_ORIG, macd_lines, signals as engine_signals   # noqa: E402
@@ -71,12 +72,14 @@ SPAN_MAX = {"15m": 4, "30m": 8, "1h": 16, "2h": 16, "4h": 16}
 SPAN_VALUES = (1, 2, 4, 8, 16)           # 契约（Nova 10-04）：span 只认这五个值，别的 400；在里面但超本周期封顶的钳到封顶
 IDLE_S = 600                             # span>1 的格子闲置这么久就清掉（几十万根 K 线常驻太占内存）
 def _engine_version():
-    """引擎版本 = core/ 下全部 .py 源码的 sha256 前 10 位，**进程启动时算一次**（跑的就是这一份）。
+    """引擎版本 = core/ 下全部 .py 源码＋config.py 的 sha256 前 10 位，**进程启动时算一次**（跑的就是这一份）。
     前端把它并进「同一份数据」的桶键：引擎一换就是换了一把尺，不能拿新旧两份比出「消失的点」（Iris 10-05）。
     只 pull 不重启时文件变了、进程里跑的还是旧代码 —— 所以只能启动时算，不能每次请求现算。"""
     h, root = hashlib.sha256(), os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "core")
-    for fn in sorted(f for f in os.listdir(root) if f.endswith(".py")):
-        h.update(fn.encode() + b"\0" + open(os.path.join(root, fn), "rb").read() + b"\0")
+    files = [os.path.join(root, f) for f in sorted(os.listdir(root)) if f.endswith(".py")]
+    files.append(os.path.join(os.path.dirname(root), "config.py"))   # 精度 tick 在这里：改了也是换了一把尺（Atlas 10-05）
+    for path in files:
+        h.update(os.path.basename(path).encode() + b"\0" + open(path, "rb").read() + b"\0")
     return h.hexdigest()[:10]
 
 
@@ -150,6 +153,15 @@ SLOTS = {(s, t, k): Slot(k) for s in SYMBOLS for t in TFS for k in spans_of(t)}
 FETCHES = {"n": 0}                       # 自计数：压测脚本拿来核「没多拉」
 
 
+def binance_last(symbol, tf, n=2):
+    """最后 n 根（含未收盘那根），**一个** HTTP 请求。不走 fetch()：那个是翻页拉历史用的，取最后一根也会
+    再翻一页空的、外加 sleep 0.25 秒（Atlas 10-05 核出来：每次跳价实际打 2 个请求）。"""
+    url = "%s?symbol=%s&interval=%s&limit=%d" % (BINANCE_KLINES, symbol, tf, n)
+    rows = json.loads(urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=10).read())
+    return [dict(t=int(k[0]), o=float(k[1]), h=float(k[2]), l=float(k[3]), c=float(k[4]), v=float(k[5])) for k in rows]
+
+
+tick_fetch = binance_last                # 模块级名字：压测脚本换成假的，数调用次数（一次调用 = 一个 HTTP 请求）
 TICK_WAIT_S = 5                          # 冷启动时等第一份的上限（超了就 503，前端下一趟再来）
 TICK_S = 2.5                             # /api/tick：同一（品种, 周期）这么久内只碰一次币安（小栋 10-05 A：多人同看只打一次）
 
@@ -181,8 +193,7 @@ def get_tick(symbol, tf):
         TICK_FETCHES["n"] += 1
         bar, err = None, None
         try:
-            end = int(now * 1000)
-            got = fetch(symbol, tf, end - 2 * TFS[tf], end)
+            got = tick_fetch(symbol, tf)
             if not got:
                 raise RuntimeError("币安返回空")
             bar = got[-1]
