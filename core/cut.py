@@ -27,7 +27,7 @@ def _turn_bar(g, pens):
 
 
 def _backdate(kind, leave_bar, prev_k, ends, bars):
-    """规则 2（10-05 改，L38:104 / L52:89 / L88:19-21）：三类点**往回**落到前一个走势的结束点。
+    """规则 2（10-05 改，L38:104 / L52:90 / L88:19-21）：三类点**往回**落到前一个走势的结束点。
     窗口 = 上一刀之后（没有就从图头）到离开笔起点（含）的已完成线段端点；三买取最低、三卖取最高，一样极取后一个。
     窗口里一个端点都没有 ⇒ None（这一刀不切）。"""
     cand = [k for k in range(prev_k + 1, len(ends)) if ends[k] <= leave_bar]

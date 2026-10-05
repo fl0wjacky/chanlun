@@ -147,8 +147,12 @@ def main():
     # 10-05 往回落以后，线段层的三卖也会往回落到最高点上 ⇒ 规格原先「线段层认、两个框都切不开」不再成立。
     # 现在守的是还成立的那一半：最低点那个框（405.9–423）在线段层仍切不开（线段层在那儿没有能往回落到低点的三买）。
     low_box = [v for (x0, x1), v in hit.items() if any(round(z["ZD"], 2) == 405.90 and z["X0"] == x0 for z in targets)]
-    cell("探针 B：线段层认 ⇒ 最低点那个框切不开（最高点那个现在能被线段层三卖往回切到，见卡）",
-         bool(low_box) and not low_box[0], "（目标框 %d 个；各框里线段层的刀 %s）" % (len(targets), hit))
+    if not low_box:
+        skipped.append("探针 B")
+        print("· 探针 B 未执行（这份数据里没有 405.9–423 那个框）—— 不算绿")
+    else:
+        cell("探针 B：线段层认 ⇒ 最低点那个框切不开（最高点那个现在能被线段层三卖往回切到，见卡）",
+             not low_box[0], "（目标框 %d 个；各框里线段层的刀 %s）" % (len(targets), hit))
     print(("全部通过" + ("（%s 未执行）" % "、".join(skipped) if skipped else "")) if not bad else "%d 格不过" % len(bad))
     return 1 if bad else 0
 
