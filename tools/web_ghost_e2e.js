@@ -35,6 +35,7 @@
 //      切回来立刻补一次；一分钟内最多一次
 //   ⑮ **换引擎也不算重绘**（`engine` 进桶键）：core/*.py 一改、一部署，开着的页面拿到的就是点集不同的
 //      一份 —— 不许把新旧两份比成满屏「消失」。两张工装页**只差 engine 一个字段**，一张该报、一张报 0。
+//      ⑮c 是**上线那一刻**：前一趟没有 engine、后一趟有（Bram 补的）—— 缺字段是独立的桶值，不是"跟谁都相等"。
 //   ⑭ **后台挂了那一趟不许当刷新**：收盘时取不到真数据 ⇒ load() 会悄悄退回仓里的样本，
 //      而样本是**另一份数据** —— 画上去账本当场把整屏读成"全没了"（满屏假空心点），顺带把档位也洗了
 //   ★ 假后台**按请求里的 `measure` 路由**（不是按页面变体）—— 见 plan() 那段账：⑥ 原来是个空转格。
@@ -115,7 +116,9 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
       d.bars.push({ ...last, t: last.t + STEP_MS, o: last.c, h: last.c, l: last.c, c: last.c });
     }
     if (opt.refreshing) d.refreshing = true;
-    if (opt.engine) d.engine = opt.engine;      // ⑮：引擎版本（后台带在 /api/chart 顶层那个字段）
+    // ⑮：引擎版本（后台带在 /api/chart 顶层那个字段）。用 `in` 不用真值判断 —— 「这一份**没有** engine」
+    //   是一个要显式摆出来的状态（`engine: null`），不能靠"底那份刚好没有"（那样换成带 engine 的后台就假红）。
+    if ('engine' in opt) d.engine = opt.engine;
     if (opt.pend) d.signals[PEND_PT.level].push(clone(PEND_PT));
     for (const tier of ['seg', 'pen']) {
       d.signals[tier] = (d.signals[tier] || []).filter((s) => !drop.has(`${tier}|${s.kind}|${s.bar}`));
@@ -169,6 +172,12 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
       const eng = which === 'engine' && i >= 2 ? ENG2 : ENG1;
       return i <= 1 ? { opt: { engine: eng } } : { drop: D_ROUND, opt: { engine: eng, grow: true } };
     }
+    // ⑮c：**上线那一刻**（Bram 10-05 补的那条）。线上后台现在**没有**这个字段，加上的那一瞬间，
+    //   开着的页面从「没有 engine」变成「有 engine」—— 这本身**就是一次换引擎**。
+    //   ⇒「缺字段」必须是**独立的桶值**（`''`），不能当成「跟谁都相等」，否则第一次上线就踩你要防的那个坑。
+    if (which === 'engmiss') {
+      return i <= 1 ? { opt: { engine: null } } : { drop: D_ROUND, opt: { engine: ENG1, grow: true } };
+    }
     return { drop: i < SEQ.length ? SEQ[i] : new Set() };
   };
 
@@ -192,7 +201,7 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
     const NOWP = Date.now();
     const lastT = base.bars[base.bars.length - 1].t;
     const soon = which === 'auto' || which === 'swr' || which === 'fallback'
-               || which === 'engsame' || which === 'engine';
+               || which === 'engsame' || which === 'engine' || which === 'engmiss';
     const shift = (soon ? NOWP - STEP_MS + 3000 : NOWP) - lastT;      // soon：还差 3 秒收盘
     const reqAt = [];                                                 // 每次取数的时刻（⑬ 量错峰用）
     await p.route('**/api/chart*', async (route) => {
@@ -675,6 +684,20 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   ck('⑮b 引擎变了（E1→E2）、点少得一模一样 ⇒ **一个都不许报**（换了把尺，不是重绘）',
      egS.eng === ENG2 && egS.ghosts.length === 0 && (!egS.gc || !egS.gc.on),
      `引擎 ${esS.eng} → ${egS.eng}｜页面报 ${egS.ghosts.length} 个｜那一格：「${egS.gc ? egS.gc.txt : '（没有）'}」`);
+
+  // ⑮c **上线那一刻**（Bram 10-05 补）：线上现在没有 engine，加上的那一瞬间，开着的页面从「没有」
+  //   变成「有」—— 这本身就是一次换引擎。缺字段要当**独立的桶值**，不能当「跟谁都相等」。
+  const ET = await open('engmiss');
+  const et = ET.p;
+  await et.locator('.chip[data-key="sig"]').click();
+  const et0 = await snap(et);                                  // 打开那趟：这份**没有** engine
+  { const t = Date.now(); while (ET.hits.macd < 2 && Date.now() - t < 40000) await sleep(500); }
+  await sleep(1500);
+  const et1 = await snap(et);
+  ck('⑮c 上线那一刻：前一趟不带 engine、后一趟带 ⇒ **一个都不许报**（缺字段是独立的桶值，不是"跟谁都相等"）',
+     et0.eng == null && et1.eng === ENG1 && et1.ghosts.length === 0 && (!et1.gc || !et1.gc.on),
+     `引擎 ${et0.eng === null ? '（没有这个字段）' : et0.eng} → ${et1.eng}｜页面报 ${et1.ghosts.length} 个`
+     + `｜那一格：「${et1.gc ? et1.gc.txt : '（没有）'}」`);
 
   await b.close();
   console.log(`\n${n - bad}/${n} 过　截图：${OUT}`);
