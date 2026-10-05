@@ -19,6 +19,8 @@
 import argparse
 import hashlib
 import json
+import math
+import multiprocessing
 import os
 import subprocess
 import sys
@@ -229,6 +231,46 @@ def print_report(r, fee, slip, commit, show_trades):
                      x["close_kind"], pct(x["gross"]), pct(x["net"])))
 
 
+def wilson(k, n, z=1.96):
+    """胜率的 95% 区间（Wilson）。n=0 ⇒ None。"""
+    if not n:
+        return None
+    p = k / n
+    d = 1 + z * z / n
+    c = (p + z * z / (2 * n)) / d
+    h = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
+    return round(c - h, 4), round(c + h, 4)
+
+
+def grouped(results, tags):
+    """按 (行情类型) 和 (品种) 两种分组汇总：笔数、胜率＋95% 区间、平均每笔净收益、同组同期持有不动的平均。
+    跨数据不做复利（不同份是不同时段，连不起来）。"""
+    out = {}
+    for by in ("regime", "symbol"):
+        g = {}
+        for r in results:
+            k = tags.get(r["data"], {}).get(by, "?")
+            x = g.setdefault(k, dict(n=0, win=0, net=[], hold=[], files=0))
+            x["n"] += len(r["trades"])
+            x["win"] += sum(t["net"] > 0 for t in r["trades"])
+            x["net"] += [t["net"] for t in r["trades"]]
+            x["hold"].append(r["hold"])
+            x["files"] += 1
+        out[by] = {k: dict(files=v["files"], n=v["n"], win_rate=round(v["win"] / v["n"], 4) if v["n"] else None,
+                           ci95=wilson(v["win"], v["n"]),
+                           mean_net=round(sum(v["net"]) / v["n"], 6) if v["n"] else None,
+                           mean_hold=round(sum(v["hold"]) / len(v["hold"]), 6)) for k, v in g.items()}
+    return out
+
+
+def _run_one(args):
+    return run_one(*args)
+
+
+def _probe(args):
+    return args[0], probe(*args)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=",".join(DATA))
@@ -238,29 +280,53 @@ def main():
     ap.add_argument("--slip-bps", type=float, default=5.0, help="每边滑点，基点")
     ap.add_argument("--probe", action="store_true")
     ap.add_argument("--trades", action="store_true", help="逐笔明细也印出来")
+    ap.add_argument("--manifest", help="清单 JSON（tools/bt_fetch.py 那份）；给了就跑清单里的数据、按行情类型／品种分组汇总")
+    ap.add_argument("--jobs", type=int, default=1, help="并行跑几份数据（每份一个进程）")
     ap.add_argument("--out")
     a = ap.parse_args()
-    files, commit = a.data.split(","), engine_commit()
+    tags = {}
+    if a.manifest:
+        man = json.load(open(a.manifest, encoding="utf-8"))
+        tags = {e["file"]: dict(regime=e["regime"], symbol=e["symbol"]) for e in man}
+        for e in man:
+            _, sha = load(e["file"])
+            if sha != e["sha1"]:
+                print("✗ %s 本地 sha1 %s ≠ 清单 %s —— 先跑 tools/bt_fetch.py" % (e["file"], sha[:12], e["sha1"][:12]))
+                return 2
+        files = [e["file"] for e in man]
+    else:
+        files = a.data.split(",")
+    commit = engine_commit()
+    pool = multiprocessing.Pool(a.jobs) if a.jobs > 1 else None
+    pmap = pool.map if pool else lambda f, xs: list(map(f, xs))
     print("参数：fee_bps=%.2f slip_bps=%.2f（每边）· level=%s · 看法=%s · 确认后下一根开盘成交 · 只做多 · 引擎 %s"
           % (a.fee_bps, a.slip_bps, a.level, a.measure, commit))
     if a.probe:
         idle = 0
-        for fn in files:
-            got, nbase = probe(fn, a.level, a.measure, a.fee_bps, a.slip_bps)
+        for fn, (got, nbase) in pmap(_probe, [(fn, a.level, a.measure, a.fee_bps, a.slip_bps) for fn in files]):
             print("— %s（正式 %d 笔，含未平）" % (fn, nbase))
             for k, (changed, n) in got.items():
                 idle += not changed
                 print("  %s %s（%d 笔）" % ("✓ 变了" if changed else "· 这份上空转", k, n))
         print("探针：%s" % ("每份每条都变了" if not idle else "%d 处空转（见上，空转的那份要写明）" % idle))
         return 0
-    out = []
-    for fn in files:
-        r = run_one(fn, a.level, a.measure, a.fee_bps, a.slip_bps)
-        out.append(r)
+    out = pmap(_run_one, [(fn, a.level, a.measure, a.fee_bps, a.slip_bps) for fn in files])
+    for r in out:
         print_report(r, a.fee_bps, a.slip_bps, commit, a.trades)
+    groups = grouped(out, tags) if tags else None
+    if groups:
+        for by, title in (("regime", "按行情类型"), ("symbol", "按品种")):
+            print("== %s（跨份不复利；平均每笔净收益 ｜ 同组同期持有不动的平均）" % title)
+            for k, v in sorted(groups[by].items()):
+                print("  %-10s %2d 份 笔数 %3d 胜率 %s 95%%区间 %s 平均每笔 %s ｜ 持有不动 %s%s"
+                      % (k, v["files"], v["n"], "-" if v["win_rate"] is None else "%.0f%%" % (100 * v["win_rate"]),
+                         "-" if not v["ci95"] else "%.0f%%–%.0f%%" % (100 * v["ci95"][0], 100 * v["ci95"][1]),
+                         pct(v["mean_net"]), pct(v["mean_hold"]),
+                         "  ⚠ " + WARN if v["n"] < SMALL else ""))
     if a.out:
         json.dump(dict(params=dict(fee_bps=a.fee_bps, slip_bps=a.slip_bps, level=a.level, measure=a.measure,
-                                   engine=commit), results=out), open(a.out, "w"), ensure_ascii=False, indent=1)
+                                   engine=commit, manifest=a.manifest), results=out, groups=groups),
+                  open(a.out, "w"), ensure_ascii=False, indent=1)
     return 0
 
 
