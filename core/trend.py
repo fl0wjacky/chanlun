@@ -139,25 +139,31 @@ def classify(zz, reading="A"):
 
 
 def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True):
-    """→ dict(seg_centers, bounds, retracted, pending, segments, units)。
-    seg_centers：按确立的分界切开重算的线段中枢（D4，前端画框就用它）；
-    segments：[dict(i0, i1, type, upgraded, head, live, n_centers)]，首尾相接盖满整张图；
-    units：D3 合成出来的高一级中枢（只列 n>1 的），给前端画升级框。"""
+    """→ dict(seg_centers, bounds, retracted, pending, segments, units, reading)。
+    seg_centers：按确立的分界切开重算的线段中枢（D4，前端画框就用它），每个带 seg（属于第几段走势，跟 segments 下标对齐）；
+    segments：[dict(i0, i1, type, upgraded, head, live, n_centers_level)]，首尾相接盖满整张图；
+      ★ n_centers_level 是**本级别**中枢个数，跟读法无关；读法 A 的升级段，字母挂在 units 上，个数不是它；
+    units：D3 合成出来的高一级中枢（只列 n>1 的），带 seg，给前端画升级框；
+    reading：这一跑用的 D3 读法（A／B），前端据此决定字母挂哪一级（spec §八 第 6 条）。"""
     res = find_bounds(r, regroup=regroup, alternate=alternate, check_empty=check_empty)
     done, ks = res["done"], res["ks"]
     n = len(r["bars"])
     if not done:
-        return dict(seg_centers=r["seg_centers"], bounds=[], retracted=[], pending=[], units=[],
-                    segments=[dict(i0=0, i1=n - 1, type="无中枢", upgraded=False, head=True, live=True, n_centers=0)])
+        return dict(seg_centers=[dict(z, seg=0) for z in r["seg_centers"]], bounds=[], retracted=[], pending=[],
+                    units=[], reading=reading,
+                    segments=[dict(i0=0, i1=n - 1, type="无中枢", upgraded=False, head=True, live=True,
+                                   n_centers_level=0)])
     zs = _centers_with_cuts(done, ks)
     edges = [0] + ks + [len(done)]
-    segments, units_out = [], []
+    segments, units_out, centers_out = [], [], []
     for g, (a, b) in enumerate(zip(edges, edges[1:])):
         zz = [z for z in zs if a <= z["PI0"] < b]
+        centers_out += [dict(z, seg=g) for z in zz]
         kind, upgraded = classify(zz, reading)
         last = g == len(edges) - 2
         segments.append(dict(i0=0 if g == 0 else done[a - 1]["i1"], i1=n - 1 if last else done[b - 1]["i1"],
-                             type=kind, upgraded=upgraded, head=g == 0, live=last, n_centers=len(zz)))
+                             type=kind, upgraded=upgraded, head=g == 0, live=last, n_centers_level=len(zz)))
         units_out += [dict(u, seg=g) for u in _units(zz) if u["n"] > 1]
-    return dict(seg_centers=zs, bounds=res["bounds"], retracted=res["retracted"],
-                pending=pending(done, ks, res["want"]), segments=segments, units=units_out)
+    assert len(centers_out) == len(zs)                # 每个中枢恰好属于一段（PI0 落在组内）
+    return dict(seg_centers=centers_out, bounds=res["bounds"], retracted=res["retracted"],
+                pending=pending(done, ks, res["want"]), segments=segments, units=units_out, reading=reading)

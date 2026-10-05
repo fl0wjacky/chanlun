@@ -28,7 +28,8 @@
         最后一根实时跳价，笔段中枢买卖点仍收盘才由 /api/chart 整份重算）。
   GET /api/chart …&cut=extend|trend  → 线段中枢的切法。**默认 trend**（docs/spec/走势分段.md v3，card-51571a5f-dc2）：
         在本级别确立的走势分界处切开，seg_centers 回切开重算的那套（D4），顶层多 trend:{bounds, retracted, pending,
-        segments, units}（形状见 core/trend.py::trend_v3）。只用线段、不读背驰 ⇒ 换 measure 框和刀都不变。
+        segments, units}、trend_reading（D3 读法 A／B），seg_centers 每个带 seg（第几段走势）；形状见 core/trend.py::trend_v3。
+        只用线段、不读背驰 ⇒ 换 measure 框和刀都不变。
         extend＝延伸/扩展（可切换的一档，载荷＝不切的那份）。旧的 turn（笔层出刀）删了：老链接 ?cut=turn 当 trend 收、
         回显 trend。白名单外 400。/api/meta 回 cut_default。
   GET /api/meta            → 白名单（前端拿来做下拉）
@@ -359,8 +360,9 @@ def _measure_body(slot, symbol, tf, measure, cut=DEFAULT_CUT):
                 r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"))
                 v = trend_v3(r, reading=TREND_READING)
                 cc = slot.mbodies[CUT_KEY] = (v["seg_centers"], {k: v[k] for k in
-                                              ("bounds", "retracted", "pending", "segments", "units")})
+                                              ("bounds", "retracted", "pending", "segments", "units")}, v["reading"])
             d["seg_centers"], d["trend"], d["cut"] = _clean(cc[0]), _clean(cc[1]), cut
+            d["trend_reading"] = cc[2]                    # D3 读法回显：前端据此决定字母挂哪一级（Nova 10-05 16:4x）
             b = slot.mbodies[(measure, cut)] = json.dumps(d, ensure_ascii=False, separators=(",", ":"),
                                                           allow_nan=False).encode("utf-8")
         return b

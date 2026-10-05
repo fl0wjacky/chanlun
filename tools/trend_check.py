@@ -7,7 +7,7 @@
 
   ① 基线（spec §三）：zec15 五个分界（bar、高低、确立那一根）＋ 531.91 撤回一次；zec30 五个；btc_4h／zec_1h／aaplusdt_30m 各一个；
   ② 不变量（data/ 下每份 K 线）：一高一低交替（D2-3）；刀落在同向线段的终点上（D2-1）；确立晚于刀（L88:19-21）；
-     相邻两刀之间至少一个中枢（D2-7）；没有框跨过分界（D4-1）；走势首尾相接盖满整张图；
+     相邻两刀之间至少一个中枢（D2-7）；没有框跨过分界（D4-1）；走势首尾相接盖满整张图；每个框的 seg 指对了段；
   ③ 367.77（zec15 bar 11314）不是分界、落在框里（D4-4）；
   ④ 不看未来：每个分界从『最早能确立』那一根截断起就在，之后再截都不变（实时确立比回抽段终点晚，印出来）。
 """
@@ -81,6 +81,12 @@ def invariants(fn):
             if z["X0"] < b["bar"] < z["X1"]:
                 bad.append("框 %d–%d 跨过分界 %d" % (z["X0"], z["X1"], b["bar"]))
     seg = v["segments"]
+    for z in v["seg_centers"]:                    # 每个框的 seg 指的那段走势真的装得下它（前端靠它编字母）
+        g = z.get("seg")
+        if g is None or not (0 <= g < len(seg)) or not (seg[g]["i0"] <= z["X0"] and z["X1"] <= seg[g]["i1"]):
+            bad.append("框 %d–%d 的 seg=%r 不对" % (z["X0"], z["X1"], g))
+    if sum(s["n_centers_level"] for s in seg) != len(v["seg_centers"]):
+        bad.append("各段 n_centers_level 之和 ≠ seg_centers 个数")
     if seg[0]["i0"] != 0 or seg[-1]["i1"] != len(r["bars"]) - 1 or any(
             a["i1"] != b["i0"] for a, b in zip(seg, seg[1:])):
         bad.append("走势没有首尾相接盖满")

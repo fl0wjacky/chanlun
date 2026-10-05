@@ -324,6 +324,10 @@ def run_default(quiet=False):
                 diffs.append("老链接 cut=turn ≠ trend")
             if json.loads(json.dumps(server._clean(v["seg_centers"]))) != dflt.get("seg_centers"):
                 diffs.append("seg_centers ≠ 引擎 trend_v3")
+            if dflt.get("trend_reading") != v["reading"]:
+                diffs.append("trend_reading %r ≠ 引擎 %r" % (dflt.get("trend_reading"), v["reading"]))
+            if any("seg" not in z for z in dflt.get("seg_centers") or []):
+                diffs.append("seg_centers 有中枢不带 seg")
             want = json.loads(json.dumps(server._clean({k: v[k] for k in keys})))
             if want != dflt.get("trend"):
                 diffs.append("trend ≠ 引擎 trend_v3：%s" % [k for k in keys if want[k] != (dflt.get("trend") or {}).get(k)])
@@ -333,7 +337,7 @@ def run_default(quiet=False):
                 o = get_path(port, q + "&measure=" + ms)
                 if (o.get("seg_centers"), o.get("trend")) != (dflt.get("seg_centers"), dflt.get("trend")):
                     diffs.append("measure=%s 下框/trend 变了" % ms)
-            if ext.get("cut") != "extend" or "trend" in ext or "cuts" in ext:
+            if ext.get("cut") != "extend" or "trend" in ext or "cuts" in ext or "trend_reading" in ext:
                 diffs.append("cut=extend 回显 %r" % ext.get("cut"))
             bad += bool(diffs)
             if not quiet:
