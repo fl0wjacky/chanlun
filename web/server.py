@@ -340,6 +340,10 @@ CUT_MODES = ("extend", "turn")           # 线段中枢的切法（docs/spec/中
 DEFAULT_CUT = "turn"                     # 小栋 10-05 11:09Z 拍板：默认画法改成按转折切（card-21fbf426-889）；不带 cut 就是它
 
 
+CUT_MEASURE = "macd"                     # 转折点用哪种看法认：固定面积，不跟请求的 measure 走（spec 中枢切分.md「编者口径」）
+CUT_KEY = "__cut__"                      # mbodies 里切法结果那一份的键（一格只算一次，各看法共用）
+
+
 def _measure_body(slot, symbol, tf, measure, cut=DEFAULT_CUT):
     """在 slot.lock 里调用 → 这一格在某种背驰看法下的 JSON。买卖点之外的一切跟默认那份是同一份：
     K 线、笔、段、中枢跟看法无关，只有 signals 两层重算（懒算、按 measure 各存一份，数据刷新就作废）。
@@ -350,9 +354,11 @@ def _measure_body(slot, symbol, tf, measure, cut=DEFAULT_CUT):
         b = slot.mbodies.get((measure, cut))
         if b is None:
             d = json.loads(_measure_body(slot, symbol, tf, measure, "extend"))   # 从不切的那份派生
-            r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"))
-            cur, cuts = cut_centers(r, engine_signals(r, "pen", measure))   # 转折点跟着这次的看法认（规则 1、2）
-            d["seg_centers"], d["cuts"], d["cut"] = _clean(cur), _clean(cuts), cut
+            cc = slot.mbodies.get(CUT_KEY)
+            if cc is None:                                # 切点固定按默认看法（面积）认（Nova 10-05 选 A）：换看法只换买卖点，框不动
+                r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"))
+                cc = slot.mbodies[CUT_KEY] = cut_centers(r, engine_signals(r, "pen", CUT_MEASURE))
+            d["seg_centers"], d["cuts"], d["cut"] = _clean(cc[0]), _clean(cc[1]), cut
             b = slot.mbodies[(measure, cut)] = json.dumps(d, ensure_ascii=False, separators=(",", ":"),
                                                           allow_nan=False).encode("utf-8")
         return b

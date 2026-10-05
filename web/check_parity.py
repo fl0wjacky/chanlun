@@ -318,6 +318,12 @@ def run_default(quiet=False):
                 diffs.append("不带 cut ≠ cut=turn")
             if json.loads(json.dumps(server._clean(cur))) != dflt.get("seg_centers"):
                 diffs.append("默认的 seg_centers ≠ 引擎 cut_centers")
+            for ms in eng.MEASURES:                      # 选 A：切点固定按面积认 ⇒ 任何看法下框和刀都跟面积那份一样
+                if ms == "macd":
+                    continue
+                o = get_path(port, "/api/chart?symbol=%s&tf=%s&measure=%s" % (sym, tf, ms))
+                if (o.get("seg_centers"), o.get("cuts")) != (dflt.get("seg_centers"), dflt.get("cuts")):
+                    diffs.append("measure=%s 下框/刀跟面积不同" % ms)
             if ext.get("cut") != "extend" or "cuts" in ext:
                 diffs.append("cut=extend 回显 %r" % ext.get("cut"))
             bad += bool(diffs)
@@ -472,6 +478,26 @@ def self_test():
         finally:
             server._macd_body = orig
     arms.append(("副图头部引擎版本是旧的", arm_engine_stale))
+
+    def arm_cut_follows_measure():
+        real = server._measure_body
+
+        def follow(slot, symbol, tf, measure, cut=server.DEFAULT_CUT):   # 回到选 A 之前：刀跟着这次的看法认
+            if cut == "extend" or measure == server.MACD_KEY:
+                return real(slot, symbol, tf, measure, cut)
+            slot.mbodies.pop(server.CUT_KEY, None)
+            slot.mbodies.pop((measure, cut), None)
+            server.CUT_MEASURE = measure
+            try:
+                return real(slot, symbol, tf, measure, cut)
+            finally:
+                server.CUT_MEASURE = "macd"
+        server._measure_body = follow
+        try:
+            return run_default(quiet=True)
+        finally:
+            server._measure_body = real
+    arms.append(("切点跟着看法走", arm_cut_follows_measure))
 
     def arm_default_extend():
         real = server.DEFAULT_CUT
