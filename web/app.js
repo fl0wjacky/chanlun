@@ -64,12 +64,13 @@ opts.macd = subParam('macd');
 // 不一样（那两颗是"手机上让图占满"），所以不走 SUB_DEF 那一套。地址栏 `?cutpv=1` 可以指名
 // （可分享、可截图复现；工装也拿它把两种画法都摆出来）。一个字没有 ⇒ 关。
 opts.cutPreview = SUB_Q.get('cutpv') === '1';
-// 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）：**默认关**，地址栏 `?trend=1` 可以指名
-// （可分享、可截图复现 —— 跟 `cutpv` 同一条）。★ 不进 DEFAULTS：那个对象记的是「TradingView 的
-// 默认值」那一组（卡面点名的），这一颗的理由跟它无关。
+// 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）：**默认开**（Nova 2026-10-05 17:09Z 定）——
+// 这一层就是小栋要看的那个东西，藏在 `?trend=1` 后面他打开页面根本看不见；开关留着，可以手动关掉。
+// 所以地址栏这一头是**反着写**的：`?trend=0` 才关（可分享、可截图复现 —— 跟 `cutpv` 同一条）。
+// ★ 不进 DEFAULTS：那个对象记的是「TradingView 的默认值」那一组（卡面点名的），这一颗的理由跟它无关。
 // ★ 它**只在 `cut=trend` 那份载荷上有东西可画**（`cut=extend` 那份连 `trend` 这个键都没有）——
 //   所以那一档下这一颗按灰，理由写在标题里（跟「成交量」那颗在没有 v 的数据上按灰同一条账）。
-opts.trend = SUB_Q.get('trend') === '1';
+opts.trend = SUB_Q.get('trend') !== '0';
 const state = { data: null, opts, candleSeries: null };
 const primitives = [];
 // 往左拖那套状态：span＝现在手上是第几档，spanMax＝后台给的封顶，earliest＝币安真没有了。
@@ -1945,8 +1946,9 @@ function setUrl() {
   }
   // 「先看切后」同理：关着是默认（这一档跟屏宽无关，见 opts.cutPreview 那行），开着才写上去。
   if (opts.cutPreview) q.set('cutpv', '1'); else q.delete('cutpv');
-  // 走势分段那一层同一条账：默认关，开着才写上去。
-  if (opts.trend) q.set('trend', '1'); else q.delete('trend');
+  // 走势分段那一层：**默认开**（Nova 17:09Z），所以这一头反过来写 —— **关着才写上去**（`?trend=0`）。
+  // 跟上面两颗（vol/macd 缺省写不写）同一条账，方向相反而已。
+  if (opts.trend) q.delete('trend'); else q.set('trend', '0');
   history.replaceState(null, '', `?${q}`);            // 可分享、可截图复现
 }
 
