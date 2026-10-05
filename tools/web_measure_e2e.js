@@ -48,7 +48,7 @@
 //      上得是中文名。★ 断言是 `名字 !== id` 而不是比对某个字面量 —— **改名不该红，漏名才该红**；
 //      这一格守的是「后台先上线、名字没跟上」那半天：屏幕上会是一串英文 id，不报错也认不出。
 //
-//   ㉛–㊲ **走势分段那一层**（2026-10-05 补，card-c73ab37d-5a1，v3 §八）：这一层**默认开**
+//   ㉜–㊳ **走势分段那一层**（2026-10-05 补，card-c73ab37d-5a1，v3 §八）：这一层**默认开**
 //      （Nova 17:09Z：小栋要看的东西不能藏在 `?trend=1` 后面）。落在这套里是因为**它只有真后台
 //      给得出** —— `trend` 那个对象是 Bram 在 dbda139 里新加的，`more` 那套的假后台没有它。
 //      ①默认开（开关亮／地址栏不写／真画出带子）②**颜色跟分界点的类型走**（低⇒绿／高⇒红／图头⇒灰），
@@ -514,7 +514,7 @@ const shotChart = async (p, tag) => {
   await d9.c.close();
 
   // ───────────────────────────────────────────────────────────────────────────
-  // ㉛–㊲ 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）
+  // ㉜–㊳ 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）
   //
   // ★ 为什么落在这套里：这一层**只有真后台给得出** —— `trend` 那个对象是 Bram 在 dbda139 里新加的，
   //   `web_more_e2e.js` 那一套的假后台（仓里的 fixtures）里没有它。这套是唯一一套跑真后台的。
@@ -524,16 +524,18 @@ const shotChart = async (p, tag) => {
   // ★ 这一层自带一个只读出口 `window.__app.state.trendDrawn`（跟 `state.boxesDrawn` 同性质：
   //   **这一帧**交给这一层的清单，每帧开头重写）—— 画了一条带它上面就有一条。量它，比截图找颜色稳，
   //   红了也说得清错在哪一条。
-  console.log('31–37 走势分段那一层：默认开、颜色跟分界点走、斜线带铺到载荷说的那根、关得掉、extend 不炸');
+  console.log('32–38 走势分段那一层：默认开、颜色跟分界点走、斜线带铺到载荷说的那根、关得掉、extend 不炸');
   const TQ = '?symbol=ZECUSDT&tf=15m';
-  const TREND = await p.evaluate(async () => (await import('/theme.js')).TREND);
   // 只读出口 ＝ 清单 ＋ **这一帧的视口口径**（每一根该落在哪个像素由工装自己算，不靠页面喂）。
   // 载荷那几件事实一起带回来，**断言的两边都印得出来** —— 后台哪天回了空对象，这几格是红，不是死闸。
   const trendState = (pg) => pg.evaluate(() => {
     const a = window.__app, D = a.state.trendDrawn || {}, T = a.state.data.trend || null;
     const ts = a.chart.timeScale(), bars = a.state.data.bars;
     const W = document.getElementById('chart').clientWidth;
-    const at = (i) => ({ x: bars[i] ? ts.timeToCoordinate(bars[i].t) : null });
+    // ★ `/1000` 那一除是要紧的：`bars[].t` 是**毫秒**，`timeToCoordinate` 认的是**秒** ——
+    //   不除就一直回 null，而 null 会让下面每一条「屏上本来就没东西」的断言**假装通过**。
+    //   这一行跟 `layers.js` 的 `viewport()` 里那句 `tOfBar[i] = data.bars[i].t / 1000` 是同一个口径。
+    const at = (i) => ({ x: bars[i] ? ts.timeToCoordinate(bars[i].t / 1000) : null });
     const vis = (o) => o.x !== null && o.x >= 0 && o.x <= W;      // 滚出屏幕那几根不量（图层也不画）
     return {
       T, on: a.state.opts.trend, W, url: location.search, hasTrendKey: 'trend' in a.state.data,
@@ -551,16 +553,19 @@ const shotChart = async (p, tag) => {
   const waitBand = (pg) => pg.waitForFunction(
     () => window.__app.state.trendDrawn && window.__app.state.trendDrawn.bands, null, { timeout: 120000 });
 
-  // ㉛ 默认开（Nova 2026-10-05 17:09Z 定的：这一层就是小栋要看的那个东西）
+  // ㉜ 默认开（Nova 2026-10-05 17:09Z 定的：这一层就是小栋要看的那个东西）
   const dA = await open(TQ);
   await waitBand(dA.p);
   const A = await trendState(dA.p);
+  // ★ 色号和不透明度从 `/theme.js` **现读**，写死一个 16% 混出来的色号当准就是焊在今天的配色上
+  //   （★ 从**这一页**读：本套开头那个 `p` 到这儿早就关了，拿它 evaluate 当场炸）。
+  const TREND = await dA.p.evaluate(async () => (await import('/theme.js')).TREND);
   ck('走势分段那一层**默认就开着**（不带任何参数打开：开关亮、地址栏里没有 `trend`、真画出带子）',
      A.on === true && !!A.chip && A.chip.pressed === 'true' && !/trend=/.test(A.url)
        && A.bands.length >= 1,
      `开=${A.on}　chip=${JSON.stringify(A.chip)}　带子=${A.bands.length}　地址栏=${A.url || '(空)'}`);
 
-  // ㉜ 颜色跟**分界点的类型**走，不跟段的 `type` 走
+  // ㉝ 颜色跟**分界点的类型**走，不跟段的 `type` 走
   //   ★ 这一格抓两种改法：把颜色挂到 `segments[].type` 上（一个"盘整"段就会被涂成第三种颜色），
   //     或者把红绿画反。§八 1 的原话就是「低→高绿、高→低红」—— 讲的是方向，不是类型。
   const segByI0 = new Map(A.segs.map((s, g) => [s.i0, g]));
@@ -574,7 +579,7 @@ const shotChart = async (p, tag) => {
      `画出来的 ${A.bands.map((b) => b.col).join(' ')}　该是 ${wantCol.join(' ')}　`
      + `（载荷 ${A.segs.length} 段，屏上分界点的类型有 ${A.kinds || '一条都没有'}）`);
 
-  // ㉝ §八 3 的牙：那条斜线带铺到**载荷说的那一根**（`pullback_end_bar`）为止，不是铺到段末
+  // ㉞ §八 3 的牙：那条斜线带铺到**载荷说的那一根**（`pullback_end_bar`）为止，不是铺到段末
   //   ★ 有人把 `pullback_end_bar` 换成 `s.i1`（"铺满这一段"读起来更顺）⇒ 当场红。
   //     把载荷那一头也印出来：万一哪天这两个数正好相等，格是绿的但**牙没了**，那得看得见。
   const endOf = new Map(A.T.bounds.map((b) => [b.bar, b.pullback_end_bar]));
@@ -583,7 +588,7 @@ const shotChart = async (p, tag) => {
      `画了 ${A.strips.length} 条 ${A.strips.map((s) => `${s.i0}>${s.i1}`).join(' ')}　／　`
      + `载荷（屏上）${A.bounds.map((b) => `${b.bar}>${b.pullback_end_bar}`).join(' ')}`);
 
-  // ㉞ 分界那枚价格的横心钉在极值那一根上（字跟着点走，不是随便摆的）
+  // ㉟ 分界那枚价格的横心钉在极值那一根上（字跟着点走，不是随便摆的）
   const mid = (L) => (L[0] + L[2]) / 2;
   const pinned = A.bounds.filter((b) => A.labels.some((L) =>
     Math.abs(mid(L) - b.x) <= 1.5 && Math.abs(parseFloat(L[4]) - b.price) < 0.01));
@@ -591,7 +596,7 @@ const shotChart = async (p, tag) => {
      A.bounds.length >= 1 && pinned.length === A.bounds.length,
      `对上 ${pinned.length}/${A.bounds.length}　屏上那几个极值：${A.bounds.map((b) => b.price).join(' ')}`);
 
-  // ㉟ 「待定」和「撤回」是两件事（候选换了 vs 刀撤回了），两句话得分开写、各配各的条数
+  // ㊱ 「待定」和「撤回」是两件事（候选换了 vs 刀撤回了），两句话得分开写、各配各的条数
   const pendLbl = A.labels.filter((L) => /待定$/.test(L[4])).map((L) => L[4]);
   const retrLbl = A.labels.filter((L) => /撤回$/.test(L[4])).map((L) => L[4]);
   ck('「待定」和「撤回」各写各的（屏上各有几枚 ⇒ 载荷里各有几条），不混用一个词',
@@ -599,7 +604,7 @@ const shotChart = async (p, tag) => {
      `载荷 待定 ${A.pending.length} ／ 撤回 ${A.retracted.length}　屏上 待定 ${pendLbl.length}`
      + ` ／ 撤回 ${retrLbl.length}　${JSON.stringify([...pendLbl, ...retrLbl])}`);
 
-  // ㊱ 关得掉 ＋ **那个色真的画到屏幕上了**
+  // ㊲ 关得掉 ＋ **那个色真的画到屏幕上了**
   //   ★ 「这一层真画了没有」数的是**它自己那个色**的像素：16% 的绿铺在近黑上，混出来是什么色
   //     是算得出来的（色号 α 都从 /theme.js 现读）。**不**用"前后两张截图不等"当判据 ——
   //     那个会拿"最后一根的价签在跳"当替身，这套工装的 ⑦⑰ 两条账上都吃过这个亏（见文件头）。
@@ -629,7 +634,7 @@ const shotChart = async (p, tag) => {
      + `（数的是 ${JSON.stringify(upGreen)} ±6）`);
   await dOff.c.close();
 
-  // ㊲ `cut=extend` 那档：载荷**连 `trend` 这个键都没有** ⇒ 开着也画不出东西
+  // ㊳ `cut=extend` 那档：载荷**连 `trend` 这个键都没有** ⇒ 开着也画不出东西
   //   ★ 牙齿：把置灰那半句删掉 ⇒ 屏上会留一颗"点了没反应"的开关（这一套 ⑮ 那条账的同一个道理）。
   const dE = await open(TQ + '&cut=extend');
   const E = await trendState(dE.p);
