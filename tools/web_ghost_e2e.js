@@ -107,10 +107,16 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   // ★ 兜底那一条**必须**离左沿够远：模子是**真后台**给的，窗口会滑、点位会挪（实测两次跑差过 1600 根），
   //   万一兜底挑到 bar<1000 的点，左沿守卫（200 根）会把它按住 ⇒ ④ 那一格变成假红，
   //   而真正的原因在工装自己挑错了点。这是**工装的**问题，不该让守卫背。
+  //   ★★ 这条闸 `control` 也得有（2026-10-05 补）：原先只有 `target` 有，`control` 的兜底是光秃秃的
+  //      `find(第一个已确认 pen)` —— 模子换一段窗口就会挑到贴左沿的点（实测挑中过 `pen|三卖|150`），
+  //      它被守卫按住**压根没上页面** ⇒ 「丢它」是空操作 ⇒ 页面少报一个**是对的**，而 ⑮a 的期望是常数
+  //      `D_LINES.size` ⇒ **假红**。这一格于是**红绿跟挂钟走**：main `e494d90` 上 9 趟 5 红、成簇
+  //      （相邻几分钟一致、跨半小时翻）—— 表现是「默认档随机拦住上线」，而跟那次要上的东西毫无关系。
+  //      ★ 判据（该报几个）一个字都不用动：**错的是挑点，不是尺**。（card-a70ed1c2-cc6）
   const target = (base.signals.seg || []).find((s) => s.confirmed === true && s.bar === TARGET_BAR)
               || (base.signals.seg || []).find((s) => s.confirmed === true && s.bar >= 1000);
   const control = (base.signals.pen || []).find((s) => s.confirmed === true && Math.abs(s.bar - target.bar) < 200)
-               || (base.signals.pen || []).find((s) => s.confirmed === true);
+               || (base.signals.pen || []).find((s) => s.confirmed === true && s.bar >= 1000);
   if (!target || !control) { console.error('✗ 模子里找不到已确认的点，这一套没法量'); process.exit(2); }
   console.log(`模子：${base.symbol} ${base.tf} ${base.bars.length} 根 ｜ 目标点 ${target.kind}@${target.bar}(${target.price})`
             + ` ｜ 对照点 ${control.kind}@${control.bar}(${control.price})`);
