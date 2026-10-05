@@ -1213,11 +1213,16 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   const ru = await cutUI(RU.p);
   const wantCtl = realModes.length >= 2;
   ck('⑰h 跟**真后台**对账（这一页不吃 meta 假后台）：屏上有没有那组控件、`cut` 发没发出去，必须跟 '
-     + '`/api/meta` 真回的那份 `cut_modes` 一致 —— 名单 ≥2 ⇒ 控件在（chip 数＝名单长度、默认那颗亮着）'
-     + '且 `?cut=turn` 真的发出去了；名单没到或只有一项 ⇒ 控件不在、一个 `cut` 都不发',
+     + '`/api/meta` 真回的那份 `cut_modes` 一致 —— 名单 ≥2 ⇒ 控件在（chip 数＝名单长度、'
+     + '**亮的那颗＝页面自报的切法**）且 `?cut=turn` 真的发出去了；名单没到或只有一项 ⇒ 控件不在、'
+     + '一个 `cut` 都不发',
+     // ★ 「亮的那颗」这一句第一版写的是「缺省那颗亮着」—— 而这一页是带 `?cut=turn` 打开的，亮的当然是
+     //   turn ⇒ 合并后的第一趟就假红（页面全对）。判据该问的是**亮的那颗跟页面自报的切法一致不一致**
+     //   （回显是唯一真源），不是"是不是缺省那颗"。
      ru.has === wantCtl
        && (wantCtl
-         ? ru.chips.length === realModes.length && ru.chips.some((c) => c.cut === 'extend' && c.on)
+         ? ru.chips.length === realModes.length && ru.cut === 'turn'
+           && ru.chips.some((c) => c.cut === ru.cut && c.on)
            && RU.cutReq.includes('turn') && /cut=turn/.test(ru.url)
          : RU.cutReq.every((x) => x === null) && ru.cut === 'extend' && !/cut=/.test(ru.url)),
      `真后台 cut_modes=${JSON.stringify(realModes)}｜控件 ${ru.has ? '在' : '不在'}`
