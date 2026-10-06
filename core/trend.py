@@ -41,6 +41,7 @@ def _centers_with_cuts(done, ks):
 
 
 _HEAD_FIRST = False                               # 只给 trend_check --self-test 的探针开：先挪图头／末段再挪中间
+_BLOCK_RETRACTED = True                           # 只给 trend_check --self-test 的探针关：D2-7 去掉过的那一对照旧反复确立／撤回
 _MOVE_ENDS = True                                 # 只给 trend_check --self-test 的探针关：图头起点／末段终点不挪
 
 
@@ -149,6 +150,7 @@ def find_bounds(r, regroup=True, alternate=True, check_empty=True, no_exceed=Tru
     done = _done(r, standardize)
     ks, bounds, retracted = [], [], []           # ks：切点段号（新组起点 ＝ j+1）
     want = None                                  # 下一个分界要 'H' 还是 'L'（None ＝ 两头都开）
+    blocked = {}                                 # (kind, line_seg of b) → line_seg of b′：D2-7 去掉过的那一对（编者口径，card-eecdfd08）
     for t in range(2, len(done)):
         lo = ks[-1] if ks else 0
         for typ in ("H", "L"):
@@ -158,11 +160,20 @@ def find_bounds(r, regroup=True, alternate=True, check_empty=True, no_exceed=Tru
             if hit is None:
                 continue
             j, z = hit
+            # 『同一对 (b, b′) 被 D2-7 去掉以后，b 不再确立，直到 b 或 b′ 被新的极值换掉』（编者口径，Nova 10-06）。
+            #   D2-7 只看 done[b..b′] 这一组里有没有中枢，同一对的结论不会变（1m 实测同一对判了 40 次、40 次都没有）；
+            #   b 换了 ⇒ j 不同、不在表里；b′ 换了 ⇒ 下面那个反向候选不是它了，放行。
+            if _BLOCK_RETRACTED and (typ, j) in blocked and j + 1 < t - 1:
+                opp = range(j + 1, t - 1)
+                k2 = max(opp, key=(lambda k: (-done[k]["p1"], k)) if typ == "H" else (lambda k: (done[k]["p1"], k)))
+                if k2 == blocked[(typ, j)]:
+                    continue
             if ks and check_empty:               # D2-7：上一刀 → 这一刀之间得有中枢
                 zz = _centers_with_cuts(done[:t + 1], ks + [j + 1])
                 if not [q for q in zz if q["PI0"] >= lo and q["PI1"] <= j]:
                     ks.pop()
                     prev = bounds.pop()
+                    blocked[(prev["kind"], prev["line_seg"])] = j
                     retracted.append(dict(bar=prev["bar"], kind=prev["kind"], price=prev["price"],
                                           pullback_end_bar=prev["pullback_end_bar"], retracted_bar=done[t]["i1"],
                                           blocked_bar=done[j]["i1"], blocked_kind=typ))

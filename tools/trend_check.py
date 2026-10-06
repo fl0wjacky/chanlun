@@ -64,7 +64,9 @@ def kline_files():
 # D2-0（10-06）以后 zec15 是 8 段：多切出 3699／4575 两刀，原先第 1 段（490–7558，读法 B「上涨」）被切成三段，各自中枢不够两个以上
 #   不重叠 ⇒ 都是盘整；原先第 5 段（14215 起）照旧「上涨」。
 TYPES = {"zec15.json": ["盘整", "盘整", "盘整", "盘整", "盘整", "盘整", "下跌", "上涨"]}
-FIX_D2STD = os.path.join(ROOT, "tools", "fixtures", "zec1m_d2std.json")   # Atlas 10-06：ZEC 永续 1m，04-29 317.74 真低点在向上线段段内
+FIX_D2STD = os.path.join(ROOT, "tools", "fixtures", "zec1m_d2std.json")
+# card-eecdfd08：ZEC 永续 1m 一段（04-08 前后），旧程序在这里把同一对 (308.24 L, 394.0 H) 确立又撤回 13 次
+FIX_RETRACT = os.path.join(ROOT, "tools", "fixtures", "zec1m_retract_loop.json")   # Atlas 10-06：ZEC 永续 1m，04-29 317.74 真低点在向上线段段内
 RETRACT = {"zec15.json": [(15295, "H")], "zec30_cut.json": []}
 _R = {}
 
@@ -210,6 +212,7 @@ def main():
          else ["读法 %s 段类型 %s" % (v["reading"], [s["type"] for s in v["segments"]])])
     cell("⑥ 每个分界是两邻分界之间的极值（直接从 K 线算，不经线段）", extreme_between())
     cell("⑦ D2-0 夹具 zec1m_d2std：04-29 那个 317.74 L 要确立（候选卡死就没有）", d2std_fixture())
+    cell("⑧ 同一对 (b, b′) 被 D2-7 去掉最多一次（编者口径；含 zec1m_retract_loop 夹具）", retract_once())
     cell("④ 不看未来（zec15：最早能确立那一根起，之后一直在、不变）", no_future())
     print("全部通过" if not bad else "%d 处不过" % len(bad))
     return 1 if bad else 0
@@ -234,9 +237,9 @@ def extreme_between():
     return bad
 
 
-def _fixture(**kw):
+def _fixture(path=None, **kw):
     from config import tick_of
-    bars = [dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"]) for b in json.load(open(FIX_D2STD))]
+    bars = [dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"]) for b in json.load(open(path or FIX_D2STD))]
     return T.trend_v3(analyze(bars, tick=tick_of("zecusdt_1m.json")), reading=READING, **kw)
 
 
@@ -244,6 +247,16 @@ def d2std_fixture():
     v = _fixture()
     return [] if ("L", 317.74) in [(b["kind"], round(b["price"], 2)) for b in v["bounds"]] else \
         ["没有 317.74 L：%s" % [(b["kind"], round(b["price"], 2)) for b in v["bounds"]]]
+
+
+def retract_once():
+    """D2-7 编者口径（card-eecdfd08）：同一对 (b, b′) 最多撤回一次 —— 那一组里有没有中枢只看 done[b..b′]，结论不会变。"""
+    import collections
+    bad = []
+    for name, v in [(fn, run(fn)[1]) for fn in kline_files()] + [("zec1m_retract_loop", _fixture(FIX_RETRACT))]:
+        c = collections.Counter((x["bar"], x["blocked_bar"]) for x in v["retracted"])
+        bad += ["%s 同一对 %s 撤回 %d 次" % (name, k, n) for k, n in c.items() if n > 1]
+    return bad
 
 
 def self_test():
@@ -290,6 +303,13 @@ def self_test():
     ok = [(b["kind"], round(b["price"], 2)) for b in hf["bounds"]][:1] != [("L", 191.35)]
     print("%s D2-0 先挪图头 ⇒ zec_2h 第一刀 %s（应为 191.35）" % ("✓" if ok else "✗", [(b["kind"], round(b["price"], 2)) for b in hf["bounds"]][:1]))
     miss += not ok
+    T._BLOCK_RETRACTED = False                           # 编者口径拿掉 ⇒ ⑧ 必须在 retract_loop 夹具上报出来
+    try:
+        e8 = retract_once()
+    finally:
+        T._BLOCK_RETRACTED = True
+    print("%s D2-7 编者口径拿掉 ⇒ 报出 %d 处（例 %s）" % ("✓" if e8 else "✗", len(e8), e8[:1]))
+    miss += not e8
     T._MOVE_ENDS = False                                 # 图头起点／末段终点不挪 ⇒ 不变量里「段端点＝段内极值」必须报出来
     _R.clear()
     try:
