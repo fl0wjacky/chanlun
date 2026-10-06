@@ -8,7 +8,7 @@
         离开段 done[t-1] 终点 < Z.ZD 且回抽段 done[t]（向上）终点 < Z.ZD，且 H 之后价格没再过 H（P3，按段内 hi／lo）
         ⇒ 在 done[t] 走完时确立，刀落在 H。L 反过来（> Z.ZG）。
   D2-3  分界一高一低交替。
-  D2-4  确立以后从 H 起整段重算中枢（core.cut._centers_with_cuts，按刀分组）。
+  D2-4  确立以后从 H 起整段重算中枢（_centers_with_cuts，按刀分组）。
   D2-6  没确立的就是中阴；最后一段还在长。
   D2-7  新刀 b' 让 b→b' 那一段一个中枢都没有 ⇒ b' 不立、b 撤回，回到 b 之前那段走势接着走（图头那一段不查）。
   D4    线段中枢的框只在确立的分界处断开（同一套中枢既画框又判分界）。
@@ -17,7 +17,27 @@
 
 D2-5 死点类型（趋势背驰／盘整背驰／小转大）只标注、不决定刀，另一步做。
 """
-from .cut import _centers_with_cuts
+from .center import find_centers, classify_relations
+
+
+def _centers_with_cuts(done, ks):
+    """D2-4（原 core/cut.py 规则 4，笔层出刀退役后挪到这里）：按切点下标 ks（段序号，升序）把已完成线段分组，各组从头 find_centers，PI 加回全局下标。
+    组被切点截断的最后一个中枢 live 改 False、终结写『转折点切开』（跟段内类中枢『所在线段结束』同一个道理）。"""
+    out, bounds = [], [0] + list(ks) + [len(done)]
+    for gi in range(len(bounds) - 1):
+        lo, hi = bounds[gi], bounds[gi + 1]
+        last_group = gi == len(bounds) - 2
+        for z in find_centers(done[lo:hi]):
+            z["PI0"] += lo
+            z["PI1"] += lo
+            z["seg"] = gi                                # 只用来让 classify_relations 在切点处不接续
+            if z["live"] and not last_group:
+                z["live"], z["term"] = False, "转折点切开"
+            out.append(z)
+    out = classify_relations(out)
+    for z in out:
+        z.pop("seg", None)                               # 线段中枢的对外形状不多一个键
+    return out
 
 
 def _done(r):
