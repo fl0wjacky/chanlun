@@ -323,8 +323,18 @@ async function readPixels(page) {
     }
     // 这格有没有牙，看的是**三根柱子的数据比**（判据要求 ≥2），不是整屏的极值比
     const 牙 = taken.length === 3 ? Math.round(Math.abs(taken[0].value) / Math.abs(taken[2].value) * 100) / 100 : null;
+    // ★★ 「挑了几根才凑够」（Nova 2026-10-06 定，Bram／Atlas 那条收敛后的版本）：这一屏为了凑够 3 根，
+    //   **一共碰过几根候选**。为什么要它：上面那四栏「跳过」是按**原因**分的，读不出**分母** ——
+    //   「跳过 9」到底是 3/12 还是 3/40，光看跳过数分不清。而真正要防的是「最后真量到的太少」：
+    //   一屏要靠捞四十根才凑出三根，账面上的「3 根」会**读得比实际自信**。（Nova 原话要的就是 3/12、3/40
+    //   这个形状；「跳过 > 1/3 就记未量」那条拍脑袋的阈值当场作废，不另立规矩。）
+    //   ★ 这个数是**推出来的，不是另开一个计数器** —— 上面那个循环里每一根候选**要么**变成 `got`（进 taken），
+    //     **要么**撞上四栏跳过之一 `continue`，没有第三条路 ⇒ 碰过的根数 ≡ Σ跳过 ＋ taken.length。
+    //     反过来说：**将来谁在循环里加一条新的 `continue`，必须同时给它一栏跳过**，否则这个数会**静默少算**
+    //     （跟 `band.bottom` 那个死条件同一个形状：不报错、闸不红，只是数变小了）。
+    const 挑了几根 = 跳过.太挤 + 跳过.盖住 + 跳过.被线穿 + 跳过.量不到 + taken.length;
     return { picks: taken.map(({ x, ...q }) => q), meta: {
-      柱距: Math.round(柱距 * 100) / 100, 屏内根数: win.length, 零线y, 三根数据比: 牙,
+      柱距: Math.round(柱距 * 100) / 100, 屏内根数: win.length, 零线y, 三根数据比: 牙, 挑了几根,
       跳过, 页头盖住的一段: band ? { y: [Math.round(band.top), Math.round(band.bot)], x: [Math.round(band.left), Math.round(band.right)] } : null } };
   }, { SEP: PX_SEP });
   // 「这一屏量得开吗」＝ 判据里那三件事（三根都有、像素起步够高、数据比够宽）。
@@ -538,6 +548,7 @@ async function judge(page, tag) {
          + `；px/单位 ${比值.join('/')}`
          + `｜量在哪一屏：${meta.用的哪一屏}（试了 ${JSON.stringify(meta.试了)}）、柱距 ${meta.柱距}px、屏内 ${meta.屏内根数} 根、三根数据比 ${meta.三根数据比}`
          + `｜跳过 太挤 ${meta.跳过.太挤}/盖住 ${meta.跳过.盖住}/**被线穿 ${meta.跳过.被线穿}**/量不到 ${meta.跳过.量不到}`
+         + `｜挑了几根才凑够 **${px.length}/${meta.挑了几根}**（这一屏碰过的候选 ÷ 真量到的）`
          + `｜页头盖住 y=${JSON.stringify((meta.页头盖住的一段 || {}).y)}`
          + `｜原区间还回去了：${meta.还回去了 && meta.还回去了.一样 ? '是' : `否（${JSON.stringify(meta.还回去了)}）`}`;
       if (!符号对 || (缩得开 && !偏差.every((x) => x <= 1.5))) {
