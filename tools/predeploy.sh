@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 上线前一道门（card-9b0fe913-758）：数据那半（Python 检查）＋ 渲染那半（前端 e2e）按顺序跑，一张表收账。
 #
-#   tools/predeploy.sh          # 五套 Python 检查 + trend_check --self-test + seg_prefix_check（含 --self-test）+ 4 套前端回归（ghost / more / readout / measure）
+#   tools/predeploy.sh          # 五套 Python 检查 + trend_check --self-test + seg_prefix_check（含 --self-test）+ live_seg_check + 4 套前端回归（ghost / more / readout / measure）
 #   tools/predeploy.sh --all    # 再加 4 套单卡证据工装（macd_axis / mobile_share / readout_swap_probe / subhead_slot_probe）
 #   tools/predeploy.sh --expect <sha> [--all]   # 只在 HEAD 就是这笔、且没有未提交改动时才跑；对不上 ⇒ exit=2（没比成），一格都不跑
 #                                               # （也认环境变量 EXPECT_SHA）。card-a1ea0209-015：10-06 worktree 没建成，
@@ -80,9 +80,10 @@ fi
 
 # ---- 数据那半：Python 检查（每一套自己就是 0 过 / 非 0 不过）----
 # trend_check --self-test：反向验证（拿掉规则 ⇒ 必须变／必须报）每趟都跑，不靠手动记得（Nova 10-06，card-3edd7fb3）。
+# live_seg_check：线上 15 张图现拉现算跑 check_segments，报错就拦（已知例外列在脚本里、写明卡号；拉不到 ⇒ 没比成）。约 50 秒，要联网。
 # seg_prefix_check：线段已确认段逐笔加长只增不撤（card-753bd03a 合并条件；Pine 逐根续扫押的就是它，约 50 秒）。
 #   它退 3 ＝ 某条探针没响 ＝ 那条检查没牙 ⇒ 记红，不记「没比成」。条目里带参数，所以下面 $chk 不加引号（路径无空格）。
-for chk in tools/selfcheck.py web/check_parity.py web/check_abuse.py web/check_assets.py tools/pine_lockstep.py "tools/trend_check.py --self-test" tools/seg_prefix_check.py "tools/seg_prefix_check.py --self-test"; do
+for chk in tools/selfcheck.py web/check_parity.py web/check_abuse.py web/check_assets.py tools/pine_lockstep.py "tools/trend_check.py --self-test" tools/seg_prefix_check.py "tools/seg_prefix_check.py --self-test" tools/live_seg_check.py; do
   log=$(mktemp)
   "$PY" $chk >"$log" 2>&1
   rc=$?

@@ -101,14 +101,14 @@ def invariants(fn):
     # ★ 独立核 D2-0（不调引擎那份 _standardize）：按定义查 —— 首尾相接、方向交替、每段端点就是自己区间里的最高／最低
     bars = r["bars"]
     for a_, b_ in zip(done, done[1:]):
-        if a_["i1"] != b_["i0"] or (a_["p1"] > a_["p0"]) == (b_["p1"] > b_["p0"]):
+        if a_["i1"] != b_["i0"] or a_["dir"] == b_["dir"] or a_["i0"] >= a_["i1"]:
             bad.append("标准化后不首尾相接或不交替 %d/%d" % (a_["i1"], b_["i0"]))
-    for k, s_ in enumerate(done[1:], 1):
+    for k, s_ in enumerate(done):
         hi = max(bars[i]["h"] for i in range(s_["i0"], s_["i1"] + 1))
         lo = min(bars[i]["l"] for i in range(s_["i0"], s_["i1"] + 1))
-        up_ = s_["p1"] > s_["p0"]
+        up_ = s_["dir"] == "up"
         if (s_["p0"], s_["p1"]) != ((lo, hi) if up_ else (hi, lo)):
-            bad.append("标准化后段 %d 端点不是段内极值" % k)
+            bad.append("%s 标准化后段 %d 端点不是段内极值" % (fn, k))
     ends = {s["i1"]: s for s in done}
     bs = v["bounds"]
     for a, b in zip(bs, bs[1:]):
@@ -278,6 +278,15 @@ def self_test():
         _R.clear()
     print("%s ⑥ 关掉标准化 ⇒ 报出 %d 处（例 %s）" % ("✓" if e6 else "✗", len(e6), e6[:1]))
     miss += not e6
+    T._MOVE_ENDS = False                                 # 图头起点／末段终点不挪 ⇒ 不变量里「段端点＝段内极值」必须报出来
+    _R.clear()
+    try:
+        ends = [x for fn in kline_files() for x in invariants(fn) if "端点不是段内极值" in x]
+    finally:
+        T._MOVE_ENDS = True
+        _R.clear()
+    print("%s D2-0 图头／末段不挪 ⇒ 报出 %d 处（例 %s）" % ("✓" if ends else "✗", len(ends), ends[:1]))
+    miss += not ends
     _, s0 = run("zec15.json", standardize=False)
     ok = len(s0["bounds"]) != len(base["bounds"])
     print("%s D2-0 拿掉标准化（zec15）⇒ 分界 %d（原样 %d）" % ("✓" if ok else "✗", len(s0["bounds"]), len(base["bounds"])))

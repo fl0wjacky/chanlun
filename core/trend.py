@@ -40,22 +40,41 @@ def _centers_with_cuts(done, ks):
     return out
 
 
+_MOVE_ENDS = True                                 # 只给 trend_check --self-test 的探针关：图头起点／末段终点不挪
+
+
 def _standardize(done, bars):
     """D2-0（L78:50-51／L78:54，card-acbe5855）：已完成线段标准化成首尾相连的折线 —— 每条向上线段从段内最低开始、到最高结束，
     向下反过来。只改端点（价格与那一根），不改线段怎么划；hi／lo 按新区间重取。
-    做法：接点顶／底交替；每个顶挪到「左右两个底之间」最高的那根，每个底挪到「左右两个顶之间」最低的那根，反复到不再动
-    （只挪一次、只看相邻两段不够 —— 顶往后挪会把下一段先跌的那一截带进来，造出新的段内低点；zec15 段 23、48，zec_2h 段 9 实测）。
-    一样极取后一根（跟 D2-1「一样高取后一个」同口径）。图头那一段的起点、最后一段的终点没有两邻，不挪。"""
+    · 顶、底按线段自己的 dir 认，不按端点高低（线上 AAPL 1h 首段 dir=down、终点却比起点高，按端点认会造出零长度段）。
+    · 每个接点挪到它左右两个接点之间（**不含**那两根）的极值上，顶取最高、底取最低；一轮挪完再来，直到不动 ——
+      只挪一次不够（顶往后挪会带进下一段先跌的那一截，zec15 段 23 实测）；不含两邻是因为一根 K 线可能同时是最高和最低。
+    · 图头起点只在 [第一段起点, 接点 1) 里挪，末段终点只在 (倒数第二个接点, 最后一段终点] 里挪（编者口径，Nova 06:30Z）。
+    · 一样极取后一根（跟 D2-1「一样高取后一个」同口径）。"""
     if not done:
         return done
+    n = len(done)
     piv = [done[0]["i0"]] + [s["i1"] for s in done]          # 第 k 个接点 ＝ done[k-1] 终点 ＝ done[k] 起点
-    top = [False] + [s["p1"] > s["p0"] for s in done]         # 接点 k 是顶 ⇔ 它前一段向上
-    top[0] = not top[1]
-    for _ in range(len(piv)):                                 # 每轮至少定住一个；上限给死，免得哪天不收敛卡住
+    top = [done[0]["dir"] != "up"] + [s["dir"] == "up" for s in done]   # 接点 k 是顶 ⇔ 它前一段向上（图头起点反过来）
+    lo0, hi_n = done[0]["i0"], done[-1]["i1"]
+
+    def best(rng, k):
+        return max(rng, key=(lambda i: (bars[i]["h"], i)) if top[k] else (lambda i: (-bars[i]["l"], i)))
+
+    for _ in range(len(piv) + 1):                            # 每轮至少定住一个；上限给死
         moved = False
-        for k in range(1, len(piv) - 1):
-            rng = range(piv[k - 1], piv[k + 1] + 1)
-            nb = max(rng, key=(lambda i: (bars[i]["h"], i)) if top[k] else (lambda i: (-bars[i]["l"], i)))
+        for k in range(n + 1):
+            if k in (0, n) and not _MOVE_ENDS:
+                continue
+            if k == 0:
+                rng = range(lo0, piv[1])
+            elif k == n:
+                rng = range(piv[n - 1] + 1, hi_n + 1)
+            else:
+                rng = range(piv[k - 1] + 1, piv[k + 1])
+            if not rng:
+                continue
+            nb = best(rng, k)
             if nb != piv[k]:
                 piv[k], moved = nb, True
         if not moved:
@@ -64,7 +83,7 @@ def _standardize(done, bars):
     for k, s in enumerate(done):
         i0, i1 = piv[k], piv[k + 1]
         out.append(dict(s, i0=i0, i1=i1,
-                        p0=s["p0"] if k == 0 else (bars[i0]["h"] if top[k] else bars[i0]["l"]),
+                        p0=bars[i0]["h"] if top[k] else bars[i0]["l"],
                         p1=bars[i1]["h"] if top[k + 1] else bars[i1]["l"],
                         hi=max(bars[i]["h"] for i in range(i0, i1 + 1)), lo=min(bars[i]["l"] for i in range(i0, i1 + 1))))
     return out
@@ -76,7 +95,7 @@ def _done(r, standardize=True):
 
 
 def _is_up(s):
-    return s["p1"] > s["p0"]
+    return s["dir"] == "up"                      # 按线段自己的方向，不按端点高低（spec D2-0；线段层偶有终点不高于起点的坏段，card-24dd71cb-003）
 
 
 def _try_confirm(done, t, ks, typ, lo, no_exceed=True):
