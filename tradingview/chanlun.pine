@@ -542,8 +542,36 @@ reverseScan(array<Unit> P, int endPen, bool segUp) =>
         ok := hasFractal(mh, ml, not segUp)
     [ok, brk]
 
+// 第二种情况在哪一笔到来时才算确认（同 Python _reverse_confirm_pen）：反向序列第一次出分型的那一笔，与 E3 那一笔取晚的。
+//   只给「第一个反向线段」的 memo 用（card-753bd03a）；没确认 ⇒ n。
+reverseConfirmPen(array<Unit> P, int endPen, bool segUp, int e3) =>
+    n = P.size()
+    pivot = P.get(endPen).p1
+    eh = array.new<float>()
+    el = array.new<float>()
+    int ntail = 0
+    int res = n
+    bool fin = false
+    j = endPen + 1
+    while j < n and not fin
+        p = P.get(j)
+        if segUp ? p.hi > pivot : p.lo < pivot
+            fin := true
+        else
+            ntail += 1
+            if isUp(p) == segUp
+                eh.push(p.hi), el.push(p.lo)
+            if ntail >= 3 and eh.size() >= 3
+                [mh, ml] = featStd(eh, el, not segUp, featModeB)
+                if hasFractal(mh, ml, not segUp)
+                    res := math.max(j, e3)
+                    fin := true
+        j += 1
+    res
+
 // 第 71 课：假设 pens[k] 的终点是分界点。返回 [情况(0 不成立 / 1 / 2), at(-1 = 无)]，含义同 Python _case_at
-caseAt(array<Unit> P, int i, int k, bool up) =>
+//   mEnd / mConf / mDir：「从第 s 笔起的第一个已完成线段」的 memo（终点笔 / 确认那一笔 / 1 上 -1 下；mEnd = -1 ⇒ 没有），由 firstSegFill 填
+caseAt(array<Unit> P, int i, int k, bool up, array<int> mEnd, array<int> mConf, array<int> mDir) =>
     n = P.size()
     int cse = 0
     int at = -1
@@ -563,18 +591,25 @@ caseAt(array<Unit> P, int i, int k, bool up) =>
         e2l = P.get(k + 1).lo
         if not (up ? V <= e1h : V >= e1l)
             gap = up ? e1h < e2l : e1l > e2h
-            if not gap                                    // 第一种情况：第一笔在中间地带，看先破哪一头
+            if not gap                                    // 第一种情况：第一笔 X 在中间地带
+                // L78:32-38（card-753bd03a）：看 X 之后第一个反向线段 —— 它被确认之前先破 X 起点 ⇒ ① 旧段延续；
+                //   先破 X 结束位置 ⇒ 提前定（L71:27）；被确认时都没破 ⇒ ② V 是终点；还没确认 ⇒ 待定。
                 L = P.get(k + 1).p1
+                s0 = k + 2
+                okRev = s0 < n and mEnd.get(s0) >= 0 and mDir.get(s0) == (up ? 1 : -1)
+                stop = okRev ? mConf.get(s0) - 1 : n - 1
                 at := n
                 r = k + 2
                 bool fin = false
-                while r < n and not fin
+                while r <= stop and not fin
                     p = P.get(r)
                     if up ? p.hi > V : p.lo < V
                         at := r, fin := true
                     else if up ? p.lo < L : p.hi > L
                         cse := 1, at := r, fin := true
                     r += 1
+                if not fin and okRev
+                    cse := 1, at := mConf.get(s0)
             else                                          // 第二种情况
                 float e3h = na
                 float e3l = na
@@ -593,6 +628,7 @@ caseAt(array<Unit> P, int i, int k, bool up) =>
                         [ok, brk] = reverseScan(P, k, up)
                         if ok
                             cse := 2
+                            at := reverseConfirmPen(P, k, up, jj - 2)   // 只给 memo 用；调用方 born 仍只取第一种情况
                         else
                             at := brk >= 0 ? brk : n
     [cse, at]
@@ -627,9 +663,44 @@ openingOverlaps(array<Unit> P, int i) =>
         ok := lo < hi
     ok
 
+// 「从第 s 笔起的第一个已完成线段」memo（Python _first_seg）。Pine 不许递归，所以从右往左填：
+//   s 的答案只用到起点 > s 的 memo（caseAt 第一种情况查的是 k+2，k ≥ s+2），往左填时都已填好。
+firstSegFill(array<Unit> P, int from, array<int> mEnd, array<int> mConf, array<int> mDir) =>
+    n = P.size()
+    s = n - 1
+    while s >= from
+        i = s
+        while i + 2 < n and not openingOverlaps(P, i)
+            i += 1
+        int e = -1
+        int c = -1
+        if i + 2 < n
+            up = isUp(P.get(i))
+            k = i + 2
+            while k < n - 1 and e < 0
+                [cse, at] = caseAt(P, i, k, up, mEnd, mConf, mDir)
+                if cse > 0
+                    e := k
+                    c := math.max(k + 1, at)
+                else
+                    k += 2
+                    if at >= 0
+                        while k < at
+                            k += 2
+            if e >= 0
+                mDir.set(s, up ? 1 : -1)
+        mEnd.set(s, e)
+        mConf.set(s, c)
+        s -= 1
+    true
+
 buildSegments(array<Unit> P) =>
     segs = array.new<Unit>()
     n = P.size()
+    mEnd = array.new<int>(n, -1)
+    mConf = array.new<int>(n, -1)
+    mDir = array.new<int>(n, 0)
+    firstSegFill(P, 0, mEnd, mConf, mDir)
     i = 0
     born = 0
     bool stop = false
@@ -648,7 +719,7 @@ buildSegments(array<Unit> P) =>
         int endPen = -1
         int res = -1
         while k < n - 1 and endPen < 0
-            [cse, at] = caseAt(P, i, k, up)
+            [cse, at] = caseAt(P, i, k, up, mEnd, mConf, mDir)
             if cse > 0
                 endPen := k
                 res := cse == 1 ? at : 0
@@ -715,6 +786,11 @@ zSegStep(array<Fx> fx, array<int> seq, array<Unit> pens, array<Unit> segs, array
         // 续扫（镜像 buildSegments 内层）
         n = pens.size()
         i = segI.get(0)
+        // memo 只需从续扫位置起（扫描不回头）；每根重填 —— 尾巴上未确认的反向线段会随新笔变成已确认
+        mEnd = array.new<int>(n, -1)
+        mConf = array.new<int>(n, -1)
+        mDir = array.new<int>(n, 0)
+        firstSegFill(pens, i, mEnd, mConf, mDir)
         born = segBorn.get(0)
         bool stop = false
         while i + 2 < n and not stop
@@ -728,7 +804,7 @@ zSegStep(array<Fx> fx, array<int> seq, array<Unit> pens, array<Unit> segs, array
             int endPen = -1
             int res = -1
             while k < n - 1 and endPen < 0
-                [cse, at] = caseAt(pens, i, k, up)
+                [cse, at] = caseAt(pens, i, k, up, mEnd, mConf, mDir)
                 if cse > 0
                     endPen := k
                     res := cse == 1 ? at : 0
