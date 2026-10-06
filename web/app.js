@@ -578,11 +578,16 @@ function renderLast() {
   //   而 fmtPrice 会当场抛（`v.toLocaleString`）⇒ paint 半路炸掉，后面的 stamp/autoPlan 全没了。
   const px = `最新 ${fmtPrice(last.c, d.meta?.tick)}`;
   if (!tickStale) { badge.textContent = px; badge.className = 'badge'; badge.removeAttribute('title'); return; }
-  const at = clockUtc(tickAt);
+  const at = clockLocal(tickAt);
+  // ★ 这一格**自己不带时区字样**（card-e7554dd2-44a 的口径）：它是同一行里最左边那颗短徽标，
+  //   而这一行的偏移量由右边那颗常驻的「本根…数据…」写在末尾 —— 一行的钟说一遍就够，
+  //   两颗徽标各写一遍，360 宽上先爆的就是它们（见 style.css 手机那段的账）。
+  //   说清楚的那句话在 title 里（下面那行），一个字都没省。
   badge.textContent = at ? `${px} ｜ 价格停在 ${at}` : `${px} ｜ 价格停了`;
   badge.className = 'badge warn';
+  const za = at && tickAt ? `（本地时区 ${zoneTag(new Date(tickAt))}）` : '';
   badge.title = at
-    ? `跳价这一趟没拉到新的（后台回的 stale=true）—— ${px} 是 ${at}（UTC）那一次的，之后就停在那儿了`
+    ? `跳价这一趟没拉到新的（后台回的 stale=true）—— ${px} 是 ${at}${za}那一次的，之后就停在那儿了`
     : '跳价这一趟没拉到新的（后台回的 stale=true），这个价之后就停在那儿了';
 }
 
@@ -1957,40 +1962,87 @@ function renderMeta(d) {
 //     本根 = 最后一根 K 线的开盘时间（"本根 12:00 开盘"）
 //     数据 = 后台从币安取数的时间（payload 里的 fetched_at，"数据 14:50 刷新"）
 //   fetched_at 缺（离线样本、旧后台）就**只说本根** —— 不知道的事不编。
+// ★ 2026-10-06 再改一次（card-e7554dd2-44a，小栋 06:4xZ）：这两格原本按 **UTC** 印。可它们答的是
+//   「我手上这根什么时候开的／数据什么时候刷的」—— 那是**用户自己的钟**上的事，不是行情坐标。
+//   一个 UTC+8 的人看到「本根 04:00 开盘」，得自己心算 +8 才知道是不是刚开的；这正是本地钟该干的事。
+//   ⇒ 这两格一律按**浏览器本地时区**印，并在那一行末尾把偏移量写出来（`zoneTag`），
+//     免得它跟图上那根 UTC 轴对不上时，用户以为是图错了。
+//   ★★ **图上不动**：时间轴的刻度、光标读数（`timeLabel`）、画布上那些记号，**仍是 UTC** ——
+//   那是行情自己的时间原点，全世界的图都拿它当坐标；跟页头这格不是一件事，别顺手一起改
+//   （app.js:132 那段「只此一份」管的是**画布那一侧**：轴上的刻度、光标读数里的时刻，念同一句。
+//    页头从来不在那句话的射程里 —— 它是「数据新不新」，不是「这一根在坐标系的哪儿」）。
 function stamp(d) {
   const t = d.updated ? new Date(d.updated) : null;
   // ★ 跳价那一趟也是**取数**（card-f3fffac4-83d）：价是它拿回来的，所以「数据 … 刷新」说的是**最新那一次**。
   //   照旧只写 chart 那份的时间，角上就成了一句假话（价是刚取的、戳却是几分钟前的）。
   const src = tickAt || d.fetched_at;
   const f = src ? new Date(src) : null;
-  const bar = t && !isNaN(t) ? `本根 ${shortUtc(d.updated)} 开盘` : '数据时间未知';
+  const barTxt = shortLocal(d.updated);
+  const srcTxt = shortLocal(src);
+  const bar = barTxt ? `本根 ${barTxt} 开盘` : '数据时间未知';
   // ★ 印的就是上面判过的那个 `src` —— 判据用 `src`、印的却是 `d.fetched_at`，这一格就成了"两处各写一遍"
   //   （跳价取的价、配着 chart 那份的戳）。秒在角上只是噪音，所以只印到分。
-  const fresh = f && !isNaN(f) ? ` ｜ 数据 ${shortUtc(src)} 刷新` : '';
+  // ★ 「数据」那一格的**日期**：跟本根同一天（都按本地算）就省掉。两格挨着写两遍同一个日期全是噪音，
+  //   而它正好占着窄屏那点预算 —— 手机 360 上这一行一共只有 344px，一个日期就是 60 多 px
+  //   （见 style.css 手机那段）。少一个日期，才装得下后面的时区。
+  //   ★★ 不同天**必须**写出来：后台停了一夜之后「数据 15:20 刷新」配着今天的本根，会被读成**今天**
+  //     15:20 —— 那正是最该说清楚的一刻，省掉日期＝省掉它唯一的破绽。所以这条不是"好看点"，
+  //     是"同意省略的前提是同一天"。本根印不出来（barTxt 空）时也照旧写全：没有可比的那一天。
+  const sameDay = srcTxt && barTxt && srcTxt.slice(0, 10) === barTxt.slice(0, 10);
+  const fresh = srcTxt ? ` ｜ 数据 ${sameDay ? srcTxt.slice(-5) : srcTxt} 刷新` : '';
   // 后台这轮没拉到币安、回的是上一次的结果时会带 stale=true：那这格的取数时间说的是**上一次**，
   // 不标出来它就是一句假话 —— 角上必须自己承认。字段没有 / 为 false 就照常。
   // ★ 跳价那一趟的 stale 也算：价卡住不动的时候，角上跟页头那一格（「价格停在 …」）说的是同一件事。
   const st = !!d.stale || tickStale;
-  const base = bar + fresh;
+  // 时区那一格（"UTC+8"）：**印过哪个时刻就按哪个时刻算偏移** —— 有夏令时的时区一年里会变，
+  // 拿"现在"的偏移去标一个几小时前的时刻，那天正好跨了切换点就是假的（Europe/London 那类）。
+  // 两个时刻都没有（离线样本）才退回到"现在"：那一行只剩一句「数据时间未知」，标着也不会更错。
+  const zt = zoneTag(f && !isNaN(f) ? f : (t && !isNaN(t) ? t : new Date()));
+  // ★ 这一格的字面量是 **`UTC+8`**，不是「本地 UTC+8」：省掉那两个字是有代价的，代价拿宽度换的。
+  //   360 宽的机器上这一行只有 344px（style.css 手机那段），「本地」两个字恰好把它顶到两行 ——
+  //   而顶栏每高一截，图就矮一截（card-c7f19e45-022 那一整笔账）。偏移量本身已经把话说完了：
+  //   时刻后面跟着 `UTC+8`，就是"这一行按 UTC+8 念"（ISO 里 `+08:00` 也是这么收尾的）。
+  //   它跟右边那根 UTC 轴怎么区分？—— 轴的刻度**不带**这个尾巴，页头这行**带**；两个钟只差这一处，
+  //   一处就够。真要说清楚"这是你自己机器那个钟"，那句话在 title 里（下面那一句），一个字没省。
+  // ★ 三段挨着排，别抽成常量表：顺序就是屏上读出来的语序，是版式决定，不是数据决定的。
+  const base = `${bar}${fresh} ｜ ${zt}`;
   el('updated').textContent = st ? `${base} ｜ ★ 旧数据（本轮拉取失败）` : base;
   el('updated').className = 'badge' + (st ? ' warn' : '');
   // 相对时间（"3 小时前"）只放 title：角上那格宽度有限，而且相对时间依赖**客户端时钟**，
   // 钟不准就会说错话 —— 绝对时间不会。相对值在这里仍有用（一眼看出多旧），所以不删。
   const rel = f && !isNaN(f) ? `（${ago(f)}）` : '';
+  // ★ 这两句里原来各写了一遍「（UTC）」—— 现在改成**一处**说清楚：两个时刻同一个钟，说一遍就够，
+  //   说两遍反而像两个不同的时区。图上那根轴是另一件事，这里不提，免得用户以为页头也在 UTC。
   el('updated').title = st
-    ? `这是上一次的结果：本轮拉取没成功（后台 stale=true）；「数据 … 刷新」说的是那一次的取数时间（UTC）${rel}`
-    : `本根＝最后一根 K 线的开盘时间（UTC）；数据＝后台从币安取数的时间（UTC）${rel}，价格随它更新`;
+    ? `这是上一次的结果：本轮拉取没成功（后台 stale=true）；「数据 … 刷新」说的是那一次的取数时间（本地时区 ${zt}）${rel}`
+    : `两个时刻都按你机器的本地时区印（现在是 ${zt}）：本根＝最后一根 K 线的开盘时间，数据＝后台从币安取数的时间${rel}，价格随它更新`;
 }
-/** "2026-09-29T14:50:00Z" → "14:50"（UTC）。形状不对就返回空串 —— **不知道的事不编**
- *  （页头那一格写「价格停了」也不写一个瞎编的时刻）。跟 shortUtc 同一处口径。 */
-const clockUtc = (s) => {
-  const t = shortUtc(s);
-  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(t) ? t.slice(-5) : '';
+/** 那一刻的 UTC 偏移怎么念："UTC+8"／"UTC-3:30"／"UTC+0"。整点不带 ":00"（"UTC+8" 比 "UTC+8:00" 好读）。
+ *  ★ 按**传进来的那一刻**算，不是模块加载时算一次：有夏令时的时区一年里会换偏移，
+ *   开机算一次的那份在切换点之后就是错的（而且错得很难看 —— 它会在屏上理直气壮地写出来）。
+ *  ★ getTimezoneOffset() 是**反的**（西区为正），所以取负号；分那一位用绝对值取，别让符号漏进去。 */
+function zoneTag(d) {
+  const m = -d.getTimezoneOffset();                      // 分钟，东为正
+  const h = Math.trunc(m / 60), mm = Math.abs(m % 60);
+  return `UTC${m < 0 ? '-' : '+'}${Math.abs(h)}${mm ? ':' + String(mm).padStart(2, '0') : ''}`;
+}
+/** "2026-09-29T14:50:00Z" → "14:50"（**浏览器本地时区**）。认不出来就返回空串 —— **不知道的事不编**
+ *  （页头那一格写「价格停了」也不写一个瞎编的时刻）。跟 shortLocal 同一处口径。 */
+const clockLocal = (s) => {
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? '' : [d.getHours(), d.getMinutes()].map((n) => String(n).padStart(2, '0')).join(':');
 };
-/** "2026-09-29T00:00:00Z" → "2026-09-29 00:00"；形状不是 ISO（后台换了格式）就原样返回，不猜 */
-const shortUtc = (s) => {
-  const m = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(String(s));
-  return m ? `${m[1]} ${m[2]}` : String(s).replace('T', ' ').replace('Z', '');
+/** "2026-09-29T00:00:00Z" → "2026-09-29 08:00"（**浏览器本地时区**）。
+ *  ★ 认不出来 ⇒ 空串。**不猜、不洗** —— 原来那版是拿正则从 ISO 串里抠字，认不出来就把原串抹掉 T/Z
+ *   吐回去；那串字未必是给人看的格式（后台真换了格式，屏上就会多一句谁也读不懂的话）。
+ *    判据从"像不像 ISO"改成"Date 认不认"，是**收紧**：`null`/`""` 这些以前会漏进分支的值
+ *    在这里必须显式挡掉 —— `new Date(null)` 不是 Invalid，它是 1970，会安安静静印出个假时刻。 */
+const shortLocal = (s) => {
+  if (s == null || s === '') return '';
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 function ago(t) {
   const m = Math.round((Date.now() - t.getTime()) / 60000);
@@ -2101,4 +2153,9 @@ const metaReady = loadMeasures();
 // ★ `fmtPrice` 也递出去：工装要证「页头那个价跟图上那个价是**同一个数**」，只能拿页面**自己这个格式器**
 //   把图上那份印一遍去比 —— 工装自己再四舍五入一遍就是第二份规矩（`toFixed` 看二进制真值、
 //   `toLocaleString` 看最短十进制，1313.995 这种正好落在半个末位上的值会差一分，判据在**没事**的时候红）。
-window.__app = { chart, state, opts, paging, measures, cuts, sub, fmtPrice, autoReload };   // autoReload：工装 readout_swap_probe 的 F 场景直接触发自动重取
+// ★ `shortLocal`／`clockLocal`／`zoneTag` 跟 `fmtPrice` 同一个理由挂出去：页头那两个时刻的判据里，
+//   期望值要**由页面自己印**（工装在 node 里另写一份 Date 取值器，就是第二份规矩 —— 时区一样、
+//   但口径是抄的，抄的那份迟早跟页面分家；而这两个函数正是"本地钟怎么念"的唯一一份）。
+//   ★ 它们**只是印**，不碰状态：跟下面那两条注释一样，工装拿到的是字，不是权限。
+window.__app = { chart, state, opts, paging, measures, cuts, sub, fmtPrice, autoReload,
+                 shortLocal, clockLocal, zoneTag };   // autoReload：工装 readout_swap_probe 的 F 场景直接触发自动重取

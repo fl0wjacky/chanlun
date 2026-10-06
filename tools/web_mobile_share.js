@@ -64,6 +64,13 @@ const probe = (p) => p.evaluate(() => {
     vh: window.innerHeight,
     state: (document.getElementById('state') || {}).textContent || '',
     updated: (document.getElementById('updated') || {}).textContent || '',
+    // ★ 角上那两个时刻现在按**浏览器本地时区**印（card-e7554dd2-44a）。这一格量的是宽度，
+    //   所以除了形状还得知道"本根那半真按本地印了"——期望值**由页面自己印**（不写死几点：
+    //   写死的判据量的是跑工装那台机器的时区，不是页面）。payload 的 `updated` 跟跳价无关，不会飘。
+    barLocal: window.__app.shortLocal((window.__app.state.data || {}).updated),
+    // 「数据」那格用的是 `tickAt || fetched_at`（两者都在"现在"这一两分钟里，跨零点那一下可以忽略）。
+    // 这里只要**日期**对不对，用 fetched_at 就够。
+    fetchLocal: window.__app.shortLocal((window.__app.state.data || {}).fetched_at),
   };
 });
 const share = (m) => Math.round((m.chart.h / m.vh) * 100);
@@ -173,11 +180,29 @@ const probeFold = (p) => p.evaluate(() => {
   await p.waitForFunction(() => window.__app && window.__app.state.data, null, { timeout: 30000 }).catch(() => process.exit(2));
   await sleep(1000);
   const d = await probe(p);
-  const full = /^本根 \d{4}-\d{2}-\d{2} \d{2}:\d{2} 开盘( ｜ 数据 \d{4}-\d{2}-\d{2} \d{2}:\d{2} 刷新)?/.test(d.updated);
+  // ★ 串的形状必须**整条**对上 —— 这一格量的是宽度（徽标多长 ⇒ 顶栏多高 ⇒ 图占比），
+  //   少写一段就少量一截。末尾那格 `UTC+8` 是 card-e7554dd2-44a 加的，必须算进宽度里。
+  //   ★ 「数据」那格的日期是**可选**的：跟本根同一天（本地）时页面会省掉它（app.js 的 sameDay，
+  //     那两个日期重复本来就只是噪音，省下来正好付时区那格的账）。所以这里不能钉死带日期那种，
+  //     否则真后台跑在正常的一天里这条会**假红**。
+  //   ★ 只钉形状、不钉"具体几点"：那个归 web_ghost_e2e ⑯g2（那边拿页面自己印的字当期望值）。
+  //   ★ 尾部不锚 `$`：stale 的时候后面还会跟一句「｜ ★ 旧数据（…）」。
+  const full = /^本根 \d{4}-\d{2}-\d{2} \d{2}:\d{2} 开盘 ｜ 数据 (\d{4}-\d{2}-\d{2} )?\d{2}:\d{2} 刷新 ｜ UTC[+-]\d{1,2}(:\d{2})?/.test(d.updated);
+  // ★ 省日期这件事只在**同一天**才许发生 —— 判据得自己盯着这条前提，不然"哪一格少写了"
+  //   会变成一种没人守的静默自由（少了日期的那格读起来跟本根同一天，这是它成立的全部理由）。
+  //   `barLocal`／`fetchLocal` 都是页面自己印的本地字，工装只比前缀。
+  const sameDay = d.barLocal.slice(0, 10) === d.fetchLocal.slice(0, 10);
+  const dateOk = sameDay ? !/数据 \d{4}-\d{2}-\d{2}/.test(d.updated) : /数据 \d{4}-\d{2}-\d{2} \d{2}:\d{2} 刷新/.test(d.updated);
+  // ★ 再钉一条**它真的是本地钟**：`barLocal` 是页面拿本地取值器印出来的同一刻。这条是冲着
+  //   「有人把它改回 UTC」去的 —— 只钉形状的判据在 UTC 机器上照样绿，挡不住那个错。
+  //   空串要先挡掉（印不出来 ⇒ 红），不然 `startsWith('本根  开盘')` 那种恒假/恒真的空隙会漏。
+  const localOk = d.barLocal !== '' && d.updated.startsWith(`本根 ${d.barLocal} 开盘`);
   const liveFull = /^(已收盘|未收盘（最后一根还在走）)$/.test(d.state);
-  say(full && liveFull && d.foldDisplay === 'none',
+  say(full && localOk && dateOk && liveFull && d.foldDisplay === 'none',
     '⑥ 桌面 1280×860 角上还是**全写**、开关不在',
-    `「${d.updated}」／「${d.state}」；开关 display:${d.foldDisplay}，图 ${d.chart.h}/${d.vh} = ${share(d)}%`);
+    `「${d.updated}」／「${d.state}」；本根那一刻本地念「${d.barLocal || '（印不出来 ⇒ 红）'}」；`
+    + `两个时刻${dateOk ? '' : '**日期该省没省 / 该写没写** ⇒ 红'}；`
+    + `开关 display:${d.foldDisplay}，图 ${d.chart.h}/${d.vh} = ${share(d)}%`);
   await ctx.close();
   await b.close();
   console.log(`\n== 手机图占比（真后台 ${Page}）==\n` + lines.join('\n'));
