@@ -1711,6 +1711,12 @@ function renderLegend() {
   if (opts.pc) items.push(['box', CHART.pen, 2, '类中枢（与笔同色）'], ['box-split', CHART.pen, 2, '前三实线 / 延续虚线']);
   if (opts.sc) items.push(['box', CHART.seg, 4, '线段中枢（与线段同色）']);
   if (opts.up) items.push(['box', CHART.up_pen, 2, '高一级：类中枢升的'], ['box', CHART.up_seg, 4, '高一级：线段中枢升的']);
+  // ★ 「等确认」那条斜线带（§八 3，卡 card-60678062-8c2）。**这是补的，不是改的** ——
+  //   走势分段那一层（card-c73ab37d-5a1）当初上线时**一条图例都没上**，这个器件在屏上就是一条斜线，
+  //   小栋的原话「没有文字说明」是字面意思：屏上真的一个字都没有。
+  //   悬停那句（`title`）用大白话，不写「中阴」「回抽段终点」这些内部叫法。
+  if (opts.trend) items.push(['hatch', TREND.hatch, 0, '等确认',
+    '从这个高点／低点出现，到它被确认为转折点的这段时间']);
   items.push(['tag', CHART.pen, 0, '价签：实底 ＋ 黑字']);
   if (opts.sig) items.push(['tri-fill', CHART.buy, 0, '买卖点（线段中枢层）'], ['tri-hollow', CHART.sell, 0, '空心「·笔」＝类中枢层，「?」＝待确认']);
   // ★ 价签那一格**不能用定宽 SVG**（2026-10-03 真机反馈：`[ZD,ZG]` 缺了右括号）。
@@ -1718,7 +1724,7 @@ function renderLegend() {
   //   ⇒ 越界 8.23px。注意这跟「真机太窄」无关 —— SVG 定宽 30，**桌面宽度下一样缺右括号**。
   //   改成 HTML 一格：宽由浏览器按字量出来，写死的那一头就没了（同一类账：图脚那把尺的 44 字预算）。
   //   样例文字与 Python 的图例一字不差（`full_common.py:270` 画的就是 `[ZD, ZG]`，带空格）。
-  el('legend').innerHTML = items.map(([kind, col, w, name]) => {
+  el('legend').innerHTML = items.map(([kind, col, w, name, tip]) => {
     const dash = kind === 'line-dash';
     const svg = kind === 'tag'
       ? `<span class="tagsw" style="background:${col};color:${CHART.tag_ink}">[ZD, ZG]</span>`
@@ -1728,8 +1734,14 @@ function renderLegend() {
           ? `<svg width="30" height="14"><polygon points="15,1 6,13 24,13" fill="none" stroke="${col}" stroke-width="2"/></svg>`
           : kind === 'box' || kind === 'box-split'
             ? `<svg width="30" height="14"><rect x="1" y="2" width="28" height="10" fill="${col}22" stroke="${col}" stroke-width="${Math.min(3, w * 0.6)}" ${kind === 'box-split' ? 'stroke-dasharray="6 4"' : ''}/></svg>`
-            : `<svg width="30" height="14"><line x1="1" y1="7" x2="29" y2="7" stroke="${col}" stroke-width="${w}" ${dash ? 'stroke-dasharray="5 4"' : ''}/></svg>`;
-    return `<span class="lg">${svg}${name}</span>`;
+            // 「等确认」那条带：样例要跟**屏上那条**同构 —— 一条贴顶的矮带子，里面 45° 斜线。
+            // 画成一条细横线（就是下面那个兜底分支）会让人以为是"一条线"，而这一层最容易被读错的地方
+            // 恰恰就是这个（见 layers.js 那句「不是一条从左下斜到右上的连线」）。
+            : kind === 'hatch'
+              ? `<svg width="30" height="14"><defs><pattern id="lgHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="${col}" stroke-width="1.5"/></pattern></defs><rect x="1" y="3" width="28" height="9" fill="url(#lgHatch)"/></svg>`
+              : `<svg width="30" height="14"><line x1="1" y1="7" x2="29" y2="7" stroke="${col}" stroke-width="${w}" ${dash ? 'stroke-dasharray="5 4"' : ''}/></svg>`;
+    // `title` 是悬停提示（卡 card-60678062-8c2 要求一句大白话）。只有给了 tip 的那几条才挂。
+    return `<span class="lg"${tip ? ` title="${tip}"` : ''}>${svg}${name}</span>`;
   }).join('');
 }
 

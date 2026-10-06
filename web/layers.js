@@ -470,18 +470,32 @@ function trendBandView(target, state, prim) {
         state.trendDrawn.bands.push({ i0: s.i0, i1: s.i1, col, a: +a.toFixed(3), head: !!s.head, live: !!s.live });
       }
 
-      // ② 中阴（§八 3）：极值那一根 → 回抽段终点（载荷的 `pullback_end_bar`）之间，**贴格底一条窄带**，
-      //    里面是 45° 斜线。★ 图例叫「极值到回抽段终点」，**不写「确立」**（Nova 10-05 16:43／16:48 定）——
+      // ② 中阴（§八 3）：极值那一根 → 回抽段终点（载荷的 `pullback_end_bar`）之间，**贴格顶一条窄带**，
+      //    里面是 45° 斜线。★ 名字叫「等确认」（小栋 10-05 23:46Z：「没有文字说明」，10-06 定名），
+      //    **不写「确立」**（Nova 10-05 16:43／16:48 定）——
       //    那一根不是"实时确立"的那一根：线段要等后面的 K 线才算走完，实时确立比它晚一截。
       //    ★ 形状说破一句：是**一条斜线填充的窄带**，不是"一条从左下斜到右上的连线"。两个字很容易读错。
+      //
+      //    ★★ **原来贴格底，现在贴格顶**（卡 card-60678062-8c2，小栋原话「挡住了交易量」）。
+      //      成交量是挂在**主图下沿**的（`volSeries` 的 `scaleMargins.top = 0.82`，`app.js:161`），
+      //      而这条带原先铺在 `H - hatchH` —— 正好压在成交量柱头上。挪到顶上就不相交了。
+      //      ★ **跟成交量那颗开关无关**：关着也放顶部。位置跟着开关跳的话，同一个东西会有两个地方，
+      //        截出来的两张图也说不清哪张是哪张。
+      //      ★ 待定（`pending`）跟中阴**走同一个 `strip()`**，所以它一起挪 —— 它俩是同一个器件
+      //        （极值已出、还没立住），压在成交量上这件事对两条**一样真**；只挪一条的话，
+      //        屏上会同时有两个"斜线条"，底下的那个照样压着成交量。
+      //        （撤回不在这一支：它是 `trendMarkView` 里的灰点线，本来就没铺带子。）
       const hatch = hatchFill(ctx);
       const strip = (i0, i1, key) => {
         const x0 = vp.xOfBar(i0), x1 = vp.xOfBar(i1);
         if (x0 === null || x1 === null || x1 < 0 || x0 > W) return;
         if (x1 - x0 < 1) return;
+        const y0 = TREND.hatchTop, y1 = y0 + TREND.hatchH;   // 格顶往上留 2 px（见上）
         ctx.fillStyle = hatch;
-        ctx.fillRect(x0, H - TREND.hatchH, x1 - x0, TREND.hatchH);
-        state.trendDrawn[key].push({ i0, i1 });
+        ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+        // 像素区间一起记：工装要拿它跟**成交量柱的 y 范围**对账（"不相交"是这张卡的验收之一），
+        // 让工装自己另推一遍带子在哪，改了位置它不会跟着走。
+        state.trendDrawn[key].push({ i0, i1, y0, y1 });
       };
       for (const b of bnd) strip(b.bar, b.pullback_end_bar, 'bounds');
       // 图尾（或者图头）还没确立的候选极值：也得铺一条 —— 它跟已确立的那几条是同一件事
@@ -618,6 +632,46 @@ function trendMarkView(target, state, prim) {
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
         ctx.setLineDash([]);
         D.labels.push(haloText(ctx, x + 8, y + 4, `${fmtG(r.price)} 撤回`, TREND.mut, 'left', mine));
+      }
+
+      // ③.5「等确认」三个字（§八 3，卡 card-60678062-8c2）：那条斜线带的**名字写在带子自己头上**。
+      //    小栋原话「没有文字说明」—— 说得对，而且比"名字不好"更彻底：这一层**从来没上图例**，
+      //    这个器件在屏上就是一条斜线，没有任何一处告诉过他那是干什么的。
+      //    ★ 数据源是 `D.bounds`（`trendBandView` 这一帧**真铺上去**的那几条），不是原始 `T.bounds`：
+      //      一处算、两处用（跟「升级」同一条账）—— 层关着的时候不会留下"带子没了、字还在"。
+      //    ★ 「字放不下就只写在最近一段」（小栋 10-05 23:46Z）：带宽够的**每条都写**；**一条都放不下**时，
+      //      只写**最近的那一条**（`D.bounds` 是按载荷顺序登的，最后一条就是最新的那个极值）。
+      //      两种情形分得很清，别读混：有够宽的时候，不够宽的那几条**就是不写**
+      //      （写上去只会溢出到隔壁那条带子头上，读成"那一块也是等确认"，比不写更糟）；
+      //      走"只写最近一条"这一支的时候，才允许字**溢出这条带子的右头**一点
+      //      —— 那时屏上根本没有第二条带子，溢出不会指错人，而"一个字都不写"等于把小栋报的毛病原样留着。
+      //      ★ 这一支**到今天为止没被走到过**：我拿 616 个视口（跨度 1～30 根 K）扫过，
+      //        带子要么整条在屏外（`strip()` 当场 return），要么可见宽度就没低于过 49 px（字要 36.8＋12）。
+      //        ⇒ 它是**防"载荷里出现一根 K 宽的带子"的保险**，不是现在能触发的东西。
+      //        工装里 54 那格把"被走到几次"印出来了，别以为它验过。
+      //    ★ 锚在**这条带子自己的左头**（可见部分的左沿）`+6`，跟「升级」同一个锚法。
+      //      这里**允许夹到 x=0**，跟「升级」那条不一样：那条的框左沿能跑到屏幕外三千个像素、
+      //      底下什么都没有，夹出来的就是"孤儿字"；这一条是**横铺**的带子，x=0 那一点底下
+      //      **真的有这条带子**。★ 判据不是"夹没夹"，是"字底下到底有没有那个东西"。
+      if (D.bounds.length) {
+        const TXT = '等确认';
+        ctx.font = FONT;
+        const tw = ctx.measureText(TXT).width;
+        const px = (b) => [vp.xOfBar(b.i0), vp.xOfBar(b.i1)];
+        const visW = (b) => { const [x0, x1] = px(b);
+          return (x0 === null || x1 === null) ? 0 : Math.min(x1, W) - Math.max(x0, 0); };
+        const roomy = D.bounds.filter((b) => visW(b) >= tw + 12);
+        const draw = roomy.length ? roomy : D.bounds.slice(-1);   // 都放不下 ⇒ 只写最近那一条
+        for (const b of draw) {
+          const [x0, x1] = px(b);
+          if (x0 === null || x1 === null || visW(b) < 8) continue; // 带子只露一条缝 ⇒ 不写
+          const lx = Math.min(Math.max(x0, 0) + 6, W - tw - 6);
+          if (lx >= Math.min(x1, W)) continue;                     // 起笔点已经出了带子右头 ⇒ 不写
+          // y：基线摆到带子底沿往上 2 px ⇒ 墨迹落 [2.1, 13.2]、描边落 [0.6, 14.7]，
+          // 整个包在带子 [2, 14] 里（字是"写在带子上"，不是掉在带子下面）。
+          // ★ 这几个数是**量出来的**，别凭感觉调：12 px 的 `FONT` 量到 asc 9.90 / desc 1.20。
+          D.labels.push(haloText(ctx, lx, TREND.hatchTop + TREND.hatchH - 2, TXT, TREND.mut, 'left', mine));
+        }
       }
     }
 

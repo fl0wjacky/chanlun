@@ -989,6 +989,226 @@ const shotChart = async (p, tag) => {
      offStill,
      pages.map((p, i) => `第 ${i + 1} 档：框 ${p.off.got.length}／字 ${p.off.upLabels.length}`).join('　'));
 
+  // ───────────────────────────────────────────────────────────────────────────
+  // 49–53 「等确认」那条斜线带：挪到格顶（不再压成交量）＋ 条上写「等确认」＋ 图例里也有它
+  //        （v3 §八 3，卡 card-60678062-8c2；小栋 10-05 23:46Z 两句原话：「挡住了交易量」「没有文字说明」）
+  //
+  // ★ 小栋报的两件事底下是**同一件事**：那条带子铺在 `H - hatchH` ＝ 主图下沿，
+  //   而成交量也挂在主图下沿（`volSeries` 的 `scaleMargins.top = 0.82`，`app.js:161`）——
+  //   两边各自都没写错，叠在一起就是「带子压在柱子上」。
+  //   所以 49 量的是**两个 y 区间相交不相交**，不是"带子在哪一行"：哪天主图高度变了、
+  //   或者把成交量挪到副图，写死行号的判据当场变成假话，而"相交不相交"照样成立。
+  //
+  // ★★ 成交量的 y 范围**不许由页面自报**。`trendDrawn` 只能证明"这一层画在哪"，
+  //    拿它当成交量的准就是自说自话（把带子挪回格底，两边一起变，这格照样绿）。
+  //    所以走 **LWC 自己的 API**：`chart.panes()[0].getSeries()` 里那根 Histogram ＋ 它自己的
+  //    `priceToCoordinate(0 / v)` —— 柱顶落在哪一行是**库**算的，跟这一层的代码一个字都不沾。
+  //
+  // ★ 50 是**另一路**、只读画布的像素判据：成交量占的那几行里，斜线色一个都不许有。
+  //    它跟 49 互不依赖（49 量几何、50 量像素），两条都绿才叫"真的不相交"。
+  //    挑画布那一步本身就是正对照：`TREND.hatch` 这个色**只有 `hatchFill()` 一处会画**，
+  //    探测器一旦读错色 ⇒ 一张画布都挑不出来 ⇒ 这格是**红**（写着"没量到"），不是绿。
+  console.log('\n49–53 「等确认」斜线带：铺在格顶（不压成交量）＋ 条上写「等确认」＋ 图例里也有它');
+  const r2 = (x) => (x === null || x === undefined ? null : Math.round(x * 100) / 100);
+
+  const hatchState = (pg, search) => pg.evaluate(async (sq) => {
+    const TH = await import('/theme.js');
+    const a = window.__app, st = a.state, D = st.trendDrawn || {};
+    const ts = a.chart.timeScale(), bars = st.data.bars;
+    const W = document.getElementById('chart').clientWidth;
+    const r1 = (x) => (x === null || x === undefined ? null : Math.round(x * 10) / 10);
+    const px = (i) => { const b = bars[i]; const x = b ? ts.timeToCoordinate(b.t / 1000) : null; return x === null ? null : r1(x); };
+    const band = (r) => ({ i0: r.i0, i1: r.i1, x0: px(r.i0), x1: px(r.i1), y0: r.y0, y1: r.y1 });
+
+    // ── 成交量那一侧：LWC 自己的 API，这一层一个字都不参与 ────────────────────
+    const pane = a.chart.panes()[0];
+    const H = pane.getHeight();
+    const hv = pane.getSeries().find((s) => { try { return s.seriesType() === 'Histogram'; } catch (e) { return false; } });
+    let volMargins = null; const cols = [];
+    if (hv) {
+      volMargins = hv.priceScale().options().scaleMargins;
+      const yZero = hv.priceToCoordinate(0);
+      for (const d of hv.data()) {
+        const x = ts.timeToCoordinate(d.time);
+        if (x === null || x < -40 || x > W + 40) continue;          // 屏外的柱不参与
+        const yTop = hv.priceToCoordinate(d.value);
+        if (yTop === null || yZero === null) continue;
+        cols.push({ x: r1(x), yTop: r1(yTop), yBot: r1(yZero) });
+      }
+    }
+    // 一根柱横向占多宽：拿相邻两根的间距（柱宽随缩放走，不写死）
+    let colHalfW = 0;
+    for (let i = 1; i < cols.length; i++) { const g = cols[i].x - cols[i - 1].x; if (g > 0) { colHalfW = g / 2; break; } }
+
+    const B = { bounds: (D.bounds || []).map(band), pending: (D.pending || []).map(band) };
+    // 每条带子：落在这条带子 x 区间里的柱，柱顶最高的那一行
+    const perStrip = [];
+    for (const kind of ['bounds', 'pending']) for (const s of B[kind]) {
+      if (s.x0 === null || s.x1 === null) continue;
+      const inS = cols.filter((c) => c.x + colHalfW >= Math.max(s.x0, 0) && c.x - colHalfW <= Math.min(s.x1, W));
+      perStrip.push({ kind, s, n: inS.length, colTop: inS.length ? Math.min(...inS.map((c) => c.yTop)) : null });
+    }
+
+    // ── 像素那一侧：只读画布 ─────────────────────────────────────────────────
+    const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+    const hatch = hex(TH.TREND.hatch);
+    const cvs = [...document.querySelectorAll('#chart canvas')];
+    // 挑带子**不写下标**：取第一条"在屏上真的露出一截"的（数据是活的，第 0 条哪天滚出屏外就量空了）
+    const s0 = [...B.bounds, ...B.pending].find((s) =>
+      s.x0 !== null && s.x1 !== null && Math.min(s.x1, W) - Math.max(s.x0, 0) > 0) || null;
+    const cy0 = s0 ? s0.y0 : TH.TREND.hatchTop, cy1 = s0 ? s0.y1 : TH.TREND.hatchTop + TH.TREND.hatchH;
+    const cx0 = s0 && s0.x0 !== null ? Math.max(0, Math.round(s0.x0)) : 0;
+    const cx1 = s0 && s0.x1 !== null ? Math.min(W, Math.round(s0.x1)) : 0;
+    const volTopRow = cols.length ? Math.max(0, Math.floor(Math.min(...cols.map((c) => c.yTop)))) : null;
+    let pix = null, which = -1;
+    if (cx1 > cx0) {
+      const cnt = (img, x0, x1, y0, y1) => { let c = 0;
+        for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const i = (y * img.w + x) * 4;
+          if (Math.abs(img.d[i] - hatch[0]) <= 6 && Math.abs(img.d[i + 1] - hatch[1]) <= 6 && Math.abs(img.d[i + 2] - hatch[2]) <= 6) c++; }
+        return c; };
+      const grab = (cv) => ({ d: cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data, w: cv.width, h: cv.height });
+      for (let k = 0; k < cvs.length && which < 0; k++) if (cnt(grab(cvs[k]), cx0, cx1, cy0, cy1) > 0) which = k;
+      if (which >= 0) {
+        const img = grab(cvs[which]);
+        pix = { canvas: which, inBand: cnt(img, cx0, cx1, cy0, cy1),
+          volRows: volTopRow === null ? null : [volTopRow, H],
+          inVolRows: volTopRow === null ? null : cnt(img, cx0, cx1, volTopRow, H) };
+      }
+    }
+
+    // ── 字那一侧：页面现量的字体度量 ─────────────────────────────────────────
+    // ★ 字体串**是从 `layers.js:25` 抄过来的**（那边是模块内的 const，导不出来）。
+    //   抄一份就有走样的风险 —— 所以 51 拿"字盒宽度"跟这里 `measureText` 的宽度对一次账：
+    //   真走样了那条判据会红，不会静静地量到别的字号上去。
+    const mctx = document.createElement('canvas').getContext('2d');
+    mctx.font = '12px -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif';
+    const m = mctx.measureText('等确认');
+    const labels = (D.labels || []).filter((L) => L[4] === '等确认')
+      .map((L) => ({ x0: r1(L[0]), x1: r1(L[2]), w: r1(L[2] - L[0]),
+        base: L[3] - 3 }));                 // `haloText` 的框下沿 = 基线 + round(12×0.25) = 基线 + 3
+    return {
+      url: sq, W, H, hatchTop: TH.TREND.hatchTop, hatchH: TH.TREND.hatchH, hatchCol: TH.TREND.hatch,
+      bounds: B.bounds, pending: B.pending, nStrip: B.bounds.length + B.pending.length,
+      perStrip, nCols: cols.length, volMargins, colTopMin: cols.length ? r1(Math.min(...cols.map((c) => c.yTop))) : null,
+      pix, measure: { w: r1(m.width), asc: r1(m.actualBoundingBoxAscent), desc: r1(m.actualBoundingBoxDescent) },
+      labels, haloHalf: 1.5,                // `haloText` 的 `lineWidth = 3`
+      legend: [...document.querySelectorAll('#legend .lg')].map((s) => ({ t: s.textContent, tip: s.title || '' })),
+      trendOn: !!st.opts.trend,
+    };
+  }, search);
+
+  const dH = await open(TQ);
+  await waitBand(dH.p);
+  const HS = await hatchState(dH.p, TQ);
+  await dH.c.close();
+
+  // 49 几何：**每一条**带子（中阴 ＋ 待定走的是同一个 `strip()`）的 y 区间，都在成交量柱顶之上
+  const badTop = HS.perStrip.filter((p) => p.n === 0 || p.colTop === null || !(p.s.y1 <= p.colTop));
+  ck('斜线条的 y 区间与**成交量柱**的 y 区间**不相交**（中阴＋待定一起量；柱顶走 LWC 的 `priceToCoordinate` 现算）',
+     HS.nStrip > 0 && HS.nCols > 0 && badTop.length === 0,
+     `带子 ${HS.nStrip} 条：` + (HS.perStrip.length ? HS.perStrip.map((p) => `[${p.kind}] y[${p.s.y0}, ${p.s.y1}]`
+       + `　该区间内 ${p.n} 根柱、柱顶最高 ${p.colTop}（不相交=${p.n > 0 && p.colTop !== null && p.s.y1 <= p.colTop}）`).join('　')
+       : '★ 一条带子都没有') + `　主图高 ${HS.H}　成交量价格尺 scaleMargins=${JSON.stringify(HS.volMargins)}`
+     + `　（★ 老位置 H-hatchH = [${HS.H - HS.hatchH}, ${HS.H}]：柱顶最高 ${HS.colTopMin} ⇒ **压在柱子上、这格会红**，判据不是空转）`);
+
+  // 50 像素：成交量那几行里，斜线色一个都不许有
+  const Pix = HS.pix;
+  ck('像素判据（不读任何自报出口）：成交量占的那几行里，斜线色**一个像素都没有**（挑不到画布就是红，不是绿）',
+     !!Pix && Pix.inVolRows === 0 && Pix.inBand > 0,
+     Pix ? `画布 #${Pix.canvas}　带子那几行里斜线色 ${Pix.inBand} 个（正对照）　成交量那几行 y[${Pix.volRows}] 里斜线色 ${Pix.inVolRows} 个（要 0）　斜线色 ${HS.hatchCol}`
+       : `★ 一张含斜线色（${HS.hatchCol}）的画布都没挑到 —— 没量到，不算绿`);
+
+  // 51 条上有可见文字：字盒宽度跟现量字体对得上（防抄字体串走样）＋ 墨迹和 3px 描边整个落在带子里
+  const labH = HS.labels[0] || null;
+  // 认领这个字的那条带子：**谁罩住它算谁的**（不写"第 0 条"—— 屏上不止一条带子时那样会认错）
+  const S0 = (labH && [...HS.bounds, ...HS.pending].find((s) => s.x0 !== null && s.x1 !== null
+    && labH.x0 >= Math.min(s.x0, s.x1) - 1 && labH.x0 <= Math.max(s.x0, s.x1) + 1))
+    || HS.bounds[0] || HS.pending[0] || null;
+  const wMatch = !!labH && Math.abs(labH.w - HS.measure.w) <= 0.5;
+  const inkTop = labH ? r2(labH.base - HS.measure.asc) : null;
+  const inkBot = labH ? r2(labH.base + HS.measure.desc) : null;
+  const haloTop = inkTop === null ? null : r2(inkTop - HS.haloHalf);
+  const haloBot = inkBot === null ? null : r2(inkBot + HS.haloHalf);
+  const intoStrip = (S0 && labH && S0.x0 !== null && S0.x1 !== null)
+    ? (labH.x0 >= Math.min(S0.x0, S0.x1) - 1 && labH.x0 <= Math.max(S0.x0, S0.x1) + 1) : false;
+  const insideBand = !!(S0 && inkTop !== null) && inkTop >= S0.y0 && inkBot <= S0.y1;
+  ck('那条带子上**写了「等确认」**：字起在带子里、墨迹连同 3px 描边整个落在带子里，且**没有越过画布上沿**（不切字）',
+     !!labH && intoStrip && wMatch && haloTop >= 0 && insideBand,
+     labH ? `字盒 x[${labH.x0}, ${labH.x1}]（宽 ${labH.w}，现量 ${HS.measure.w}${wMatch ? '' : '　★ 对不上'}）　基线 ${labH.base}`
+       + `　墨迹 y[${inkTop}, ${inkBot}]　带描边 y[${haloTop}, ${haloBot}]　带子 y[${S0 ? S0.y0 + ', ' + S0.y1 : '?'}]`
+       + `　起笔在带子里=${intoStrip}　整个包在带子里=${insideBand}`
+       + `（★ 带子贴着 y=0、基线 hatchH-2 的老做法：描边顶到 ${r2(HS.hatchH - 2 - HS.measure.asc - HS.haloHalf)} ⇒ 被上沿切，这格会红）`
+     : '★ 一条「等确认」都没画（`trendDrawn.labels` 里没有）');
+
+  // 52 图例：有这一项、写的是「等确认」、悬停是一句人话（老术语名不许还在）
+  const lgH = HS.legend.find((e) => e.t === '等确认');
+  const jargon = HS.legend.filter((e) => /极值|回抽|段终点/.test(e.t));
+  ck('图例里有「等确认」这一项 ＋ 一句人话的悬停说明，而「极值到回抽段终点」那套老术语**一个字都不剩**',
+     !!lgH && !!lgH.tip && jargon.length === 0,
+     `图例 ${HS.legend.length} 项：${HS.legend.map((e) => e.t + (e.tip ? `⟨${e.tip}⟩` : '（无悬停说明）')).join(' | ')}`
+     + `　老术语残留 ${jargon.length}${jargon.length ? '　★ ' + jargon.map((e) => e.t).join(',') : ''}`);
+
+  // 53 关掉走势那一层 ⇒ 带子、字、图例项**一起**没（不许留"字还在、带子没了"的半截状态）
+  const dHO = await open(`${TQ}&trend=0`);
+  await dHO.p.waitForFunction(() => window.__app && window.__app.state.data, null, { timeout: 120000 });
+  await dHO.p.waitForTimeout(2500);        // 层关着 ⇒ `trendDrawn.bands` 一直不出现，这里不能用 waitBand
+  const HS_HO = await hatchState(dHO.p, `${TQ}&trend=0`);
+  await dHO.c.close();
+  ck('把走势那一层关掉：带子、条上的字、图例里那一项**一起**没（不许留下"字还在、带子没了"这种半截状态）',
+     HS.trendOn && !HS_HO.trendOn && HS.nStrip > 0
+       && HS_HO.nStrip === 0 && HS_HO.labels.length === 0 && !HS_HO.legend.some((e) => e.t === '等确认'),
+     `开着：带子 ${HS.nStrip} 条／字 ${HS.labels.length} 个／图例项 ${HS.legend.length}`
+     + `　关掉：带子 ${HS_HO.nStrip} 条／字 ${HS_HO.labels.length} 个／图例项 ${HS_HO.legend.length}`
+     + `（图例里还剩「等确认」=${HS_HO.legend.some((e) => e.t === '等确认')}）`);
+
+  // 54 ② 的前半句「够宽的每条都写」得在**很多个视口**上成立，不是"默认那一屏碰巧写了"。
+  //    ★ 后半句「一条都放不下就只写最近那一段」**这一格量不到** —— 我拿 616 个视口扫过：
+  //      带子要么整条在屏外（`strip()` 当场 return），要么可见宽度就没低于过 49 px（字要 36.8＋12），
+  //      **一次都没进过那个分支**。所以这里只印它被走到了几次、**不拿它当绿**；
+  //      那半句是防"载荷里出现一根 K 宽的带子"的保险，今天的数据造不出来（`layers.js` 那段有说明）。
+  const dW = await open(TQ);
+  await waitBand(dW.p);
+  const SW54 = await dW.p.evaluate(async () => {
+    const a = window.__app, st = a.state, ts = a.chart.timeScale(), bars = st.data.bars;
+    const W = document.getElementById('chart').clientWidth;
+    const mctx = document.createElement('canvas').getContext('2d');
+    mctx.font = '12px -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif';
+    const tw = mctx.measureText('等确认').width;
+    const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const px = (i) => { const b = bars[i]; const x = b ? ts.timeToCoordinate(b.t / 1000) : null; return x === null ? null : x; };
+    const wins = [];
+    for (const span of [1, 3, 8, 30]) for (let from = 4000; from <= 16000; from += 271) wins.push({ from, span });
+    let nWin = 0, nWithStrip = 0, orphans = 0, mismatch = 0, fellBack = 0, maxLabels = 0, worst = null;
+    for (const s of wins) {
+      ts.setVisibleLogicalRange({ from: s.from, to: s.from + s.span });
+      await frame(); await frame();
+      const D = st.trendDrawn || {};
+      const bs = (D.bounds || []).map((b) => { const x0 = px(b.i0), x1 = px(b.i1);
+        const vis = (x0 === null || x1 === null) ? 0 : Math.min(x1, W) - Math.max(x0, 0);
+        return { x0: x0 === null ? null : Math.round(x0), x1: x1 === null ? null : Math.round(x1),
+          vis: Math.round(vis), roomy: vis > 0 && vis >= tw + 12 }; });
+      const labs = (D.labels || []).filter((L) => L[4] === '等确认');
+      const roomy = bs.filter((b) => b.roomy);
+      const vis = bs.filter((b) => b.vis > 0);
+      nWin++; if (vis.length) nWithStrip++;
+      maxLabels = Math.max(maxLabels, labs.length);
+      // 孤儿：这个字右边没有一个"露在屏上、罩得住它"的带子（跟 47 那条「升级」同一个判据）
+      orphans += labs.filter((L) => !bs.some((b) => b.vis > 0
+        && L[0] >= Math.min(b.x0, b.x1) - 1 && L[0] <= Math.max(b.x0, b.x1) + 1)).length;
+      if (roomy.length) {
+        if (labs.length !== roomy.length) { mismatch++; if (!worst) worst = { from: s.from, span: s.span, vis: bs.map((b) => b.vis), labs: labs.length }; }
+      } else if (vis.length) fellBack++;
+    }
+    return { nWin, nWithStrip, orphans, mismatch, fellBack, maxLabels, tw: Math.round(tw * 10) / 10, worst };
+  });
+  await dW.c.close();
+  ck('「够宽的带子**每条都写字**、一个字都不许落在没有带子的地方」在**很多个视口**上都成立（不是"默认那一屏碰巧"）',
+     SW54.nWithStrip >= 20 && SW54.orphans === 0 && SW54.mismatch === 0 && SW54.maxLabels >= 1,
+     `扫了 ${SW54.nWin} 个视口（其中 ${SW54.nWithStrip} 个屏上有带子）　孤儿字 ${SW54.orphans} 个　`
+     + `"写字数 ≠ 够宽的条数"的视口 ${SW54.mismatch} 个${SW54.worst ? '　★ ' + JSON.stringify(SW54.worst) : ''}　`
+     + `一屏最多写了 ${SW54.maxLabels} 个字　（★「一条都放不下就只写最近那一段」这一趟被走到 ${SW54.fellBack} 次`
+     + ` ⇒ ${SW54.fellBack ? '量到了' : '**没量到**，那半句这格不算数'}）`);
+
   await b.close();
   console.log(`\n${n - bad}/${n} 过${bad ? `，${bad} 条红` : ''}　截图：${OUT}`);
   process.exit(bad ? 1 : 0);
