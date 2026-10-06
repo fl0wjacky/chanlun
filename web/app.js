@@ -384,15 +384,19 @@ function structKey(d, t0, t1, shown) {
       .map((x) => `${ts(x.bar)}@${x.price},${x.kind}>${ts(x.retracted_bar)}`).join('|');
     const sg = (T.segments || []).filter((s) => ov(ts(s.i0), ts(s.i1)))
       .map((s) => `${ts(s.i0)}>${ts(s.i1)}@${s.type}${s.upgraded ? ',升级' : ''}${s.live ? ',live' : ''}`).join('|');
-    const un = (T.units || []).filter((u) => ov(ts(u.X0), ts(u.X1)))
+    // ★★ 合成大框（`un`）现在**归 `up` 那颗芯片**，不跟 `trend` 走（小栋 10-05 23:3xZ 定，
+    //   卡 card-113a3b16-026；`layers.js` 里那两个 if 用的是同一个 `shownOf`）。⇒ 可见性也得各按各的开关取：
+    //   `trend` 关着的时候前四样不画，`up` 关着的时候合成框不画 —— 谁关着就不算谁"看得见"，
+    //   否则"开关关着的层变了"会被算成"屏幕变了"，正是这一段开头那句喊狼。
+    const un = (on('up') ? (T.units || []) : []).filter((u) => ov(ts(u.X0), ts(u.X1)))
       .map((u) => `${ts(u.X0)}>${ts(u.X1)}@${u.DD},${u.GG}`).join('|');
-    return [b, pd, rt, sg, un].join('/');
+    return (on('trend') ? [b, pd, rt, sg].join('/') : '') + '/' + un;
   };
   return [on('pen') ? part(d.pens) : '', on('seg') ? part(d.segs) : '',
           on('pc') ? boxes(d.centers, d.pens || [], on('up')) : '',
           on('sc') ? boxes(d.seg_centers, done, on('up')) : '',
           sigs((d.signals || {}).seg), sigs((d.signals || {}).pen),
-          on('trend') ? trend() : ''].join('#');
+          (on('trend') || on('up')) ? trend() : ''].join('#');
 }
 // 可视窗口 → 时间区间。★ 换档前取一次、换档后用**同一段时间**再取一次：
 // 拿换完之后的新窗口去比，比的是「另一段时间」，那就不是「这一屏变没变」了。
