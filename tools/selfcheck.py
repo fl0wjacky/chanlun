@@ -416,7 +416,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
 print("=" * 72)
 import json as _json                                         # noqa: E402
 _fx = [dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"])
-       for b in _json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "aapl1h_headdir.json")))]
+       for b in _json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "aaplusdt_1h_headdir.json")))]
 from config import tick_of as _tick_of                       # noqa: E402
 _rh = analyze(_fx, tick=_tick_of("aaplusdt_1h.json"))
 count("AAPL 1h 夹具线段不变量违规（图头段方向）", len(check_segments(_rh["segs"], _rh["pens"])))

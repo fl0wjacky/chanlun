@@ -129,7 +129,7 @@ def incrementalPine(P):
 LIVE = sys.argv[1] if len(sys.argv) > 1 else None   # 可选：一份 /api/chart 载荷（线上永续），一起对账
 sets = [(fn, load(os.path.join('data', fn)), tick_of(fn)) for fn in kline_files()] + \
        ([('live', [dict(t=b['t'], o=b['o'], h=b['h'], l=b['l'], c=b['c']) for b in json.load(open(LIVE))['bars']], tick_of('btcusdt_4h.json'))] if LIVE else []) + \
-       [('aapl1h_headdir', [dict(t=b['t'], o=b['o'], h=b['h'], l=b['l'], c=b['c']) for b in json.load(open('tools/fixtures/aapl1h_headdir.json'))], tick_of('aaplusdt_1h.json'))]   # 图头段方向（24dd）只在这份上触发
+       [('aapl1h_headdir', [dict(t=b['t'], o=b['o'], h=b['h'], l=b['l'], c=b['c']) for b in json.load(open('tools/fixtures/aaplusdt_1h_headdir.json'))], tick_of('aaplusdt_1h.json'))]   # 图头段方向（24dd）只在这份上触发
 bad = 0
 for fn, bars, tk in sets:
     P = analyze(bars, tick=tk)["pens"]
