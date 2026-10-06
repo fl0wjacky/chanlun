@@ -13,6 +13,15 @@ const hex2rgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16)
 const rgba = (h, a) => { const [r, g, b] = hex2rgb(h); return `rgba(${r},${g},${b},${a / 255})`; };
 const lighter = (h, d = 40) => '#' + hex2rgb(h).map((v) => Math.min(255, v + d).toString(16).padStart(2, '0')).join('');
 
+// 「高一级」那些框的点色：**按级别取，同一级同一色**（小栋 10-05 23:3xZ 定，卡 card-113a3b16-026 第 ② 条）。
+//   线段中枢升上去的 ⇒ 品红（`up_seg`）；类中枢升上去的 ⇒ 淡紫（`up_pen`）。
+// ★ 这一条现在有**三处**用，所以它得是一个函数、不是三处各写一遍的三目：
+//   框层那两个 `z.up`（满 9 段升出来的，按**它底下那个框**的 `tier`）＋ 走势那一层的合成大框（定死 `seg`）。
+//   分头写的话，哪天改配色就会改漏一处，而漏掉的那处**不会红**，只会让人在图上看见两种"高一级"不是一套色。
+// ★ 合成大框为什么是 `seg`：走势分段这一层本来就是**在线段中枢那一级**分的（`docs/spec/走势分段.md`），
+//   它扩展合成出来的当然是线段升一级 ⇒ 品红。不是"挑"的，是这一层在哪一级决定的。
+const upColor = (tier) => (tier === 'seg' ? CHART.up_seg : CHART.up_pen);
+
 const FONT = '12px -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif';
 const FONT_SM = '11px -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif';
 // 框编号那几个字母（§八 6，card-c6644f52-2fa）：**加粗、比这一层别的字大半档（14px）**。
@@ -271,7 +280,7 @@ export function makeBoxPrimitive(state) {
                     for (const u of bx.z.up) {                  // 高一级别：满 9 段（第 33 课）
                       const uyt = vp.yOfPrice(u.ZG), uyb = vp.yOfPrice(u.ZD);
                       if (uyt === null || uyb === null) continue;
-                      const ucol = tier === 'seg' ? CHART.up_seg : CHART.up_pen;
+                      const ucol = upColor(tier);
                       // 升级框**不跟着拆两截**：高一级的「前三笔」没有定义（Python 同）
                       // 升级框跟它下面那个框同命：底下那个是 provisional，它也是（同一个切点撑着的）
                       drawFrame(ctx, x0, uyt, x1, uyb, ucol, w, CHART.up_fill, null, !bx.z.live, W, openL);
@@ -408,7 +417,7 @@ export function makeAnnotPrimitive(state) {
                     for (const u of bx.z.up) {
                       const uy = vp.yOfPrice(u.ZG);
                       if (uy === null) continue;
-                      const ucol = tier === 'seg' ? CHART.up_seg : CHART.up_pen;
+                      const ucol = upColor(tier);
                       tag(ctx, placed, x + 8, uy - 8, `↑高${'一两三四'[u.up - 1]}级 [${fmtG(u.ZD)}, ${fmtG(u.ZG)}]`, ucol, W, H);
                     }
                   }
@@ -554,11 +563,19 @@ export function makeTrendPrimitive(state) {
   };
 }
 
-/** bottom：走势背景带（§八 1）＋ 中阴那条斜线条（§八 3）＋ 升级框（§八 5）。 */
+/** bottom：走势背景带（§八 1，归「走势分段」）＋ 中阴那条斜线条（§八 3，同）＋ 合成大框
+ *  （§八 5，**归「高一级」**）。
+ *  ★★ 这一层现在挂着**两个不同的开关**（小栋 10-05 23:3xZ 定，卡 card-113a3b16-026）：
+ *    「这一段怎么走的」那一组（背景带／中阴条／分界／待定／撤回）归 `trend`；
+ *    合成出来的高一级框归 `up` —— 它跟框层那批"满 9 段"升上来的框**是同一件事**（都是"高一级"），
+ *    所以小栋把它挪到那颗芯片底下，`up` 默认关 ⇒ 合成框也跟着默认不画。
+ *    ⇒ 所以这儿的早退条件是 `两个都关`，不是 `trend 关`；两个 if 各自管自己那一组。
+ */
 function trendBandView(target, state, prim) {
   const { data, opts } = state;
   const T = trendOf(data);
-  if (!T || !shownOf(opts).trend) return;
+  const sh = shownOf(opts);
+  if (!T || (!sh.trend && !sh.up)) return;
   target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
     const W = mediaSize.width, H = mediaSize.height;
     const vp = viewport(prim._chart, state.candleSeries || prim._series, data);
@@ -572,65 +589,80 @@ function trendBandView(target, state, prim) {
     //    不是"这一段被判成什么类型"。（我先前问过"盘整铺什么色" —— 那个问题读错了轴，作废。）
     //    图头（第一把刀之前）没有方向 ⇒ 灰；最后一段（还在长）⇒ 同色更浅（§八 1）。
     const segs = T.segments, bnd = T.bounds;
-    for (let g = 0; g < segs.length; g++) {
-      const s = segs[g];
-      const x0 = vp.xOfBar(s.i0), x1 = vp.xOfBar(s.i1);
-      if (x0 === null || x1 === null || x1 < 0 || x0 > W) continue;   // 滚出去的那几段不画
-      let col, a;
-      if (s.head || g === 0) { col = TREND.head; a = TREND.headA; }
-      else {
-        // ★ 绿和红**不是同一个 alpha**：同一个 16% 在白纸上红本来就比绿实（ΔL* 8.55 vs 6.93），
-        //   近黑底上要保住这个差，红得给得比绿多。`theme.js` 里那五个数逐个反解过，别拉齐。
-        const up = (bnd[g - 1] || {}).kind === 'L';
-        col = up ? TREND.up : TREND.dn;
-        a = s.live ? (up ? TREND.liveUp : TREND.liveDn) : (up ? TREND.bandUp : TREND.bandDn);
+    // ①② 归「走势分段」那颗芯片。
+    if (sh.trend) {
+      for (let g = 0; g < segs.length; g++) {
+        const s = segs[g];
+        const x0 = vp.xOfBar(s.i0), x1 = vp.xOfBar(s.i1);
+        if (x0 === null || x1 === null || x1 < 0 || x0 > W) continue;   // 滚出去的那几段不画
+        let col, a;
+        if (s.head || g === 0) { col = TREND.head; a = TREND.headA; }
+        else {
+          // ★ 绿和红**不是同一个 alpha**：同一个 16% 在白纸上红本来就比绿实（ΔL* 8.55 vs 6.93），
+          //   近黑底上要保住这个差，红得给得比绿多。`theme.js` 里那五个数逐个反解过，别拉齐。
+          const up = (bnd[g - 1] || {}).kind === 'L';
+          col = up ? TREND.up : TREND.dn;
+          a = s.live ? (up ? TREND.liveUp : TREND.liveDn) : (up ? TREND.bandUp : TREND.bandDn);
+        }
+        ctx.fillStyle = rgba(col, Math.round(a * 255));
+        ctx.fillRect(x0, 0, x1 - x0, H);
+        state.trendDrawn.bands.push({ i0: s.i0, i1: s.i1, col, a: +a.toFixed(3), head: !!s.head, live: !!s.live });
       }
-      ctx.fillStyle = rgba(col, Math.round(a * 255));
-      ctx.fillRect(x0, 0, x1 - x0, H);
-      state.trendDrawn.bands.push({ i0: s.i0, i1: s.i1, col, a: +a.toFixed(3), head: !!s.head, live: !!s.live });
+
+      // ② 中阴（§八 3）：极值那一根 → 回抽段终点（载荷的 `pullback_end_bar`）之间，**贴格底一条窄带**，
+      //    里面是 45° 斜线。★ 图例叫「极值到回抽段终点」，**不写「确立」**（Nova 10-05 16:43／16:48 定）——
+      //    那一根不是"实时确立"的那一根：线段要等后面的 K 线才算走完，实时确立比它晚一截。
+      //    ★ 形状说破一句：是**一条斜线填充的窄带**，不是"一条从左下斜到右上的连线"。两个字很容易读错。
+      const hatch = hatchFill(ctx);
+      const strip = (i0, i1, key) => {
+        const x0 = vp.xOfBar(i0), x1 = vp.xOfBar(i1);
+        if (x0 === null || x1 === null || x1 < 0 || x0 > W) return;
+        if (x1 - x0 < 1) return;
+        ctx.fillStyle = hatch;
+        ctx.fillRect(x0, H - TREND.hatchH, x1 - x0, TREND.hatchH);
+        state.trendDrawn[key].push({ i0, i1 });
+      };
+      for (const b of bnd) strip(b.bar, b.pullback_end_bar, 'bounds');
+      // 图尾（或者图头）还没确立的候选极值：也得铺一条 —— 它跟已确立的那几条是同一件事
+      // （极值已出、还没立住），只差"这一头还没走完"。铺到**它所在那一段走完**为止。
+      for (const p of T.pending) {
+        const s = segs.find((q) => q.i0 <= p.bar && p.bar <= q.i1);
+        strip(p.bar, s ? s.i1 : data.bars.length - 1, 'pending');
+      }
     }
 
-    // ② 中阴（§八 3）：极值那一根 → 回抽段终点（载荷的 `pullback_end_bar`）之间，**贴格底一条窄带**，
-    //    里面是 45° 斜线。★ 图例叫「极值到回抽段终点」，**不写「确立」**（Nova 10-05 16:43／16:48 定）——
-    //    那一根不是"实时确立"的那一根：线段要等后面的 K 线才算走完，实时确立比它晚一截。
-    //    ★ 形状说破一句：是**一条斜线填充的窄带**，不是"一条从左下斜到右上的连线"。两个字很容易读错。
-    const hatch = hatchFill(ctx);
-    const strip = (i0, i1, key) => {
-      const x0 = vp.xOfBar(i0), x1 = vp.xOfBar(i1);
-      if (x0 === null || x1 === null || x1 < 0 || x0 > W) return;
-      if (x1 - x0 < 1) return;
-      ctx.fillStyle = hatch;
-      ctx.fillRect(x0, H - TREND.hatchH, x1 - x0, TREND.hatchH);
-      state.trendDrawn[key].push({ i0, i1 });
-    };
-    for (const b of bnd) strip(b.bar, b.pullback_end_bar, 'bounds');
-    // 图尾（或者图头）还没确立的候选极值：也得铺一条 —— 它跟已确立的那几条是同一件事
-    // （极值已出、还没立住），只差"这一头还没走完"。铺到**它所在那一段走完**为止。
-    for (const p of T.pending) {
-      const s = segs.find((q) => q.i0 <= p.bar && p.bar <= q.i1);
-      strip(p.bar, s ? s.i1 : data.bars.length - 1, 'pending');
-    }
-
-    // ③ 升级（§八 5）：D3 合成出来的**高一级**中枢，范围取 `DD～GG`，横跨 `X0～X1`（载荷里
+    // ③ 合成大框（§八 5）：D3 合成出来的**高一级**中枢，范围取 `DD～GG`，横跨 `X0～X1`（载荷里
     //    就是 bar 下标，跟 `PI0/PI1` 那套不同 —— 别拿 host 去换）。本级别那几个小框照画在它里面
     //    （那是框层的事，这一层不动它们）。
-    //    ★ 它**不归「高一级」那颗芯片管**：那颗粒管的是第 33 课"满 9 段"升出来的框（`z.up`），
-    //      这里是 D3 的"连续扩展合成"—— 两套机制，只是名字撞了。跟着这一层走。
+    //    ★★ **归「高一级」那颗芯片，不跟 `trend` 走**（小栋 10-05 23:3xZ 定，卡 card-113a3b16-026）：
+    //      它跟框层那批第 33 课"满 9 段"升出来的框（`z.up`）**是一件事**（都是"高一级的那个中枢"），
+    //      所以跟它们**同一个开关**。那颗芯片默认关 ⇒ 合成框也跟着默认不画（以前是跟着 `trend` 默认就画）。
+    //      先前这儿写的「它不归高一级管」是**上一版的判断，作废** —— 两套机制的名字撞了是真的，
+    //      但"名字撞了"不等于"该分两个开关"：对看图的人来说，屏上就是两种高一级的框。
+    //    ★ `T.units` 里**只有 n>1 的**（合成过的）：`core/trend.py:176` 那句 `if u["n"] > 1` 保证的。
+    //      这儿**不重复过滤** —— 再加一道前端过滤是永远走不到的那半边（放不坏的守卫等于没守卫），
+    //      而且它会让人以为"前端也管这件事"。这条保证的出处写在这儿，改后台那句的人要连这儿一起看。
     //    ★ 还在长的那一段里的合成中枢 ⇒ 整框虚线（跟框层同一条：没走完的东西不画实线）。
-    for (const u of T.units) {
-      const x0 = vp.xOfBar(u.X0), x1 = vp.xOfBar(u.X1);
-      const yt = vp.yOfPrice(u.GG), yb = vp.yOfPrice(u.DD);
-      if (x0 === null || x1 === null || yt === null || yb === null) continue;
-      if (x1 < 0 || x0 > W) continue;
-      const live = !!(segs[u.seg] || {}).live;
-      // ★ **不填充**（`fillAlpha = 0`），跟参考图一致（那边 `boxes()` 画的全是 `fill="none"`）。
-      //   这不是我挑的：合成出来的高一级中枢**可以很大** —— ZEC 15m 上有一个横跨 6684 根
-      //   （全历史的三分之一）、上下 400 多点，铺 8% 的品红上去，屏上就是一大块紫，
-      //   把底下的红带子（高→低）**染成紫色** —— 而"紫"是这张图的图例里根本没有的颜色，
-      //   读的人只会以为那是第三种走势。框要说的本来是"这几个中枢合成一个高的"，
-      //   那是**边**在说，不是面在说。出图看过才定的（第一版带填充，屏上一眼就不对）。
-      drawFrame(ctx, x0, yt, x1, yb, CHART.up_seg, WIDTH.sc, 0, null, !live, W, false);
-      state.trendDrawn.units.push({ X0: u.X0, X1: u.X1, DD: u.DD, GG: u.GG, n: u.n, seg: u.seg, live });
+    if (sh.up) {
+      for (const u of T.units) {
+        const x0 = vp.xOfBar(u.X0), x1 = vp.xOfBar(u.X1);
+        const yt = vp.yOfPrice(u.GG), yb = vp.yOfPrice(u.DD);
+        if (x0 === null || x1 === null || yt === null || yb === null) continue;
+        if (x1 < 0 || x0 > W) continue;
+        const live = !!(segs[u.seg] || {}).live;
+        // ★ **不填充**（`fillAlpha = 0`），跟参考图一致（那边 `boxes()` 画的全是 `fill="none"`）。
+        //   这不是我挑的：合成出来的高一级中枢**可以很大** —— ZEC 15m 上有一个横跨 6684 根
+        //   （全历史的三分之一）、上下 400 多点，铺 8% 的品红上去，屏上就是一大块紫，
+        //   把底下的红带子（高→低）**染成紫色** —— 而"紫"是这张图的图例里根本没有的颜色，
+        //   读的人只会以为那是第三种走势。框要说的本来是"这几个中枢合成一个高的"，
+        //   那是**边**在说，不是面在说。出图看过才定的（第一版带填充，屏上一眼就不对）。
+        //   ★ 框层那批 `z.up` 是**带填充**的（`CHART.up_fill`）：那些框小，8% 摊得开。同一条账的两头。
+        const ucol = upColor('seg');
+        drawFrame(ctx, x0, yt, x1, yb, ucol, WIDTH.sc, 0, null, !live, W, false);
+        // `col` 进只读出口是给工装用的：它得能拿画上去的那个色跟 `/theme.js` 对账，
+        // 而不是自己另外推一遍「这个级别该是什么色」（推的那套改了配色不会跟着走）。
+        state.trendDrawn.units.push({ X0: u.X0, X1: u.X1, DD: u.DD, GG: u.GG, n: u.n, seg: u.seg, live, col: ucol });
+      }
     }
   });
 }
@@ -649,11 +681,13 @@ function hatchFill(ctx) {
   return ctx.createPattern(hatchTile, 'repeat');
 }
 
-/** top：分界（§八 2）＋ 待定（§八 3）＋ 撤回（§八 4）＋ 框编号（§八 6，默认关）＋「升级」二字（§八 5）。 */
+/** top：分界（§八 2）＋ 待定（§八 3）＋ 撤回（§八 4）＋ 框编号（§八 6，默认关）——**这四个归 `trend`**；
+ *  「升级」二字（§八 5）——**归 `up`**（它挂在合成框上，跟框同一个开关，见 `trendBandView` 开头那段账）。 */
 function trendMarkView(target, state, prim) {
   const { data, opts } = state;
   const T = trendOf(data);
-  if (!T || !shownOf(opts).trend) return;
+  const sh = shownOf(opts);
+  if (!T || (!sh.trend && !sh.up)) return;
   // ★ 这一层的字**一律不登记 `placed`**（价签那张避让表），理由两条，都说破：
   //   ① 它们钉在**一条竖线和一个价**上（分界价格、待定、撤回）—— 挪开它就不是那个价了，避让没有意义；
   //   ② 「升级」那两个字倒是可以避让，但避让表住在**标注层**那个 primitive 里，两边共用一张表只能
@@ -674,53 +708,56 @@ function trendMarkView(target, state, prim) {
     // →「升级」（管一整段，可以挪）。**这条链就是画的顺序**，改顺序就得连这里一起改。
     const mine = [];
 
-    // ① 分界（§八 2）：竖虚线 ＋ 极值处一个实心点 ＋ 标价格。画在 K 线**之上** —— 理由跟切点记号
-    //    那一条是同一个（一根细虚线压在密集 K 线上就没了，真像素量过）。
-    for (const b of T.bounds) {
-      const x = vp.xOfBar(b.bar), y = vp.yOfPrice(b.price);
-      if (x === null || y === null || !onScreen(x, W, 8)) continue;
-      ctx.setLineDash(DASH.trendEdge);
-      ctx.strokeStyle = rgba(TREND.edge, 200); ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-      ctx.setLineDash([]);
-      // 那个点：填结构色、外面描一圈**页面底色** —— 参考图那边是"深点 ＋ 白圈"，这边正好反过来，
-      // 干的是同一件事：把点从背后的带子里"抠"出来，别糊成一片。
-      ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2);
-      ctx.fillStyle = TREND.edge; ctx.fill();
-      ctx.strokeStyle = TREND.halo; ctx.lineWidth = 2; ctx.stroke();
-      // 价格跟着极值走：极值在上面就往上写、在下面就往下写（参考图的 dy -10 / +20），免得字压在带子上。
-      // ★ 多一条**翻边**：极值本来就贴着格顶（ZEC 15m 那个 1699 就是）⇒ 往上写会顶出画布、
-      //   只剩半行字。翻到下面去写 —— 位置仍然钉在那一根上，只是站到点的另一侧。
-      let ly = y + (b.kind === 'H' ? -10 : 20);
-      if (ly < 14) ly = y + 20;
-      else if (ly > H - 6) ly = y - 10;
-      // 读数是 `fmtG`，跟这张图上**所有**价格同一个格式（价签、图脚都是它）。
-      D.labels.push(haloText(ctx, x, ly, fmtG(b.price), TREND.edge, 'center', mine));
-    }
+    // ①②③ 归「走势分段」那颗芯片。④ 归 `trendNum`（`shownOf` 里已经和 `trend` 与过了，见那边）。
+    if (sh.trend) {
+      // ① 分界（§八 2）：竖虚线 ＋ 极值处一个实心点 ＋ 标价格。画在 K 线**之上** —— 理由跟切点记号
+      //    那一条是同一个（一根细虚线压在密集 K 线上就没了，真像素量过）。
+      for (const b of T.bounds) {
+        const x = vp.xOfBar(b.bar), y = vp.yOfPrice(b.price);
+        if (x === null || y === null || !onScreen(x, W, 8)) continue;
+        ctx.setLineDash(DASH.trendEdge);
+        ctx.strokeStyle = rgba(TREND.edge, 200); ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+        ctx.setLineDash([]);
+        // 那个点：填结构色、外面描一圈**页面底色** —— 参考图那边是"深点 ＋ 白圈"，这边正好反过来，
+        // 干的是同一件事：把点从背后的带子里"抠"出来，别糊成一片。
+        ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+        ctx.fillStyle = TREND.edge; ctx.fill();
+        ctx.strokeStyle = TREND.halo; ctx.lineWidth = 2; ctx.stroke();
+        // 价格跟着极值走：极值在上面就往上写、在下面就往下写（参考图的 dy -10 / +20），免得字压在带子上。
+        // ★ 多一条**翻边**：极值本来就贴着格顶（ZEC 15m 那个 1699 就是）⇒ 往上写会顶出画布、
+        //   只剩半行字。翻到下面去写 —— 位置仍然钉在那一根上，只是站到点的另一侧。
+        let ly = y + (b.kind === 'H' ? -10 : 20);
+        if (ly < 14) ly = y + 20;
+        else if (ly > H - 6) ly = y - 10;
+        // 读数是 `fmtG`，跟这张图上**所有**价格同一个格式（价签、图脚都是它）。
+        D.labels.push(haloText(ctx, x, ly, fmtG(b.price), TREND.edge, 'center', mine));
+      }
 
-    // ② 待定（§八 3）：还没确立的候选极值 —— 灰点线 ＋ 旁边标「待定」。价格再过它（创了新极值）
-    //    就换成新的一根（D2-6）：这是**候选换了**，不是刀撤回 —— 所以它跟下面那条必须分得开。
-    for (const p of T.pending) {
-      const x = vp.xOfBar(p.bar), y = vp.yOfPrice(p.price);
-      if (x === null || y === null || !onScreen(x, W, 8)) continue;
-      ctx.setLineDash(DASH.trendCand);
-      ctx.strokeStyle = rgba(TREND.mut, 200); ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-      ctx.setLineDash([]);
-      D.labels.push(haloText(ctx, x - 8, y + 4, `${fmtG(p.price)} 待定`, TREND.mut, 'right', mine));
-    }
+      // ② 待定（§八 3）：还没确立的候选极值 —— 灰点线 ＋ 旁边标「待定」。价格再过它（创了新极值）
+      //    就换成新的一根（D2-6）：这是**候选换了**，不是刀撤回 —— 所以它跟下面那条必须分得开。
+      for (const p of T.pending) {
+        const x = vp.xOfBar(p.bar), y = vp.yOfPrice(p.price);
+        if (x === null || y === null || !onScreen(x, W, 8)) continue;
+        ctx.setLineDash(DASH.trendCand);
+        ctx.strokeStyle = rgba(TREND.mut, 200); ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+        ctx.setLineDash([]);
+        D.labels.push(haloText(ctx, x - 8, y + 4, `${fmtG(p.price)} 待定`, TREND.mut, 'right', mine));
+      }
 
-    // ③ 撤回（D2-7，§八 4）：确立过、后来被撤掉的那把刀。**跟「待定」分开**这件事
-    //    靠两样东西，不只靠两个字：线的疏密不同（`trendCand` 2 4 ／ `trendBack` 1 3），字也不同。
-    //    只靠字面分开，扫一眼是分不出来的 —— 而这两件事在图上都不常见，正是"难得一见"最容易被看错。
-    for (const r of T.retracted) {
-      const x = vp.xOfBar(r.bar), y = vp.yOfPrice(r.price);
-      if (x === null || y === null || !onScreen(x, W, 8)) continue;
-      ctx.setLineDash(DASH.trendBack);
-      ctx.strokeStyle = rgba(TREND.mut, 200); ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
-      ctx.setLineDash([]);
-      D.labels.push(haloText(ctx, x + 8, y + 4, `${fmtG(r.price)} 撤回`, TREND.mut, 'left', mine));
+      // ③ 撤回（D2-7，§八 4）：确立过、后来被撤掉的那把刀。**跟「待定」分开**这件事
+      //    靠两样东西，不只靠两个字：线的疏密不同（`trendCand` 2 4 ／ `trendBack` 1 3），字也不同。
+      //    只靠字面分开，扫一眼是分不出来的 —— 而这两件事在图上都不常见，正是"难得一见"最容易被看错。
+      for (const r of T.retracted) {
+        const x = vp.xOfBar(r.bar), y = vp.yOfPrice(r.price);
+        if (x === null || y === null || !onScreen(x, W, 8)) continue;
+        ctx.setLineDash(DASH.trendBack);
+        ctx.strokeStyle = rgba(TREND.mut, 200); ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+        ctx.setLineDash([]);
+        D.labels.push(haloText(ctx, x + 8, y + 4, `${fmtG(r.price)} 撤回`, TREND.mut, 'left', mine));
+      }
     }
 
     // ④ 框编号 A／B／C（§八 6，card-c6644f52-2fa）：**段内按时间排，换一段重新从 A 起**。
@@ -777,17 +814,46 @@ function trendMarkView(target, state, prim) {
       }
     }
 
-    // ⑤ 升级（§八 5 的前半）：段上标「升级」二字。框在下层（③ 那一节），这一句是给"这一段按
-    //    高一级读"这件事挂个名。锚在段的**左上角** —— 段可以横跨整屏，锚中间会让字落在半空中。
-    //    ★ 颜色借 `up_seg`（品红那一族）：它跟框层那个「↑高N级」是同一套语汇，一个新色都不造。
-    //    ★ 画在最后 ⇒ 也**让位**（它管的是"这一整段"，挪一挪不丢信息；上面那四种挪了就不是那个东西了）：
-    //      分界价格钉在一个价上、待定／撤回钉在一根 bar 上、编号钉在某个中枢上，只有它能挪。
-    for (const s of T.segments) {
-      if (!s.upgraded) continue;
-      const x = vp.xOfBar(s.i0), x1 = vp.xOfBar(s.i1);
-      if (x === null || x1 === null || x1 < 0 || x > W) continue;
-      const lx = Math.max(x, 4) + 6;
-      D.labels.push(haloText(ctx, lx, fitLabel(ctx, lx, 4 + 14, '升级', mine, H), '升级', CHART.up_seg, 'left', mine));
+    // ⑤ 「升级」二字：★★ **挂在合成出来的那个框上，不挂段**（§八 5 改；小栋 10-05 23:3xZ 定，
+    //    卡 card-113a3b16-026 第 ③ 条）。
+    //
+    //    ★ 改之前是什么样，为什么改（这是小栋点名的那一条，原话"一直往右拖，左上角『升级』挂很久，会误会"）：
+    //      旧画法遍历 `T.segments` 里 `upgraded` 的段，锚在**段的左上角**，并且把 x **夹进画布**：
+    //      `Math.max(x, 4)`。而一段可以横跨整屏 —— 往右拖的时候 `s.i0` 早跑到屏左沿之外，夹出来的
+    //      lx 就**一直是 4**：那两个字于是钉死在视口左上角不动。看上去不像"某一段升级了"，
+    //      像"整个屏幕/整个图都升级了"。**钳位把一个会动的东西变成了一个不动的东西** —— 这是那个 bug 的全部。
+    //
+    //    ★ 新画法三条，一条都不许省：
+    //      ① 锚在**框自己的可见左上角**：框动它动，读的人一眼看得出这俩是一套；
+    //      ② 框整个出了屏 ⇒ **一个字都不画**（不夹回来 —— 夹回来就是旧 bug 的翻版）；
+    //      ③ 只给**这一帧真画出来的那些框**写字：数据源是 `D.units`（上面 `trendBandView` 那一趟
+    //         登记下来的），不是 `T.units` 原始载荷。**一处算、两处用** —— 否则开关关着的时候
+    //         会画出"框没了、字还在"（那正是"账上有、屏上没有"的反面，一样是假账）。
+    //    ★ 颜色 `upColor('seg')`：跟框、跟框层那批高一级框**同一条规则**（第 ② 条要的"同一级同一色"）。
+    //    ★ y 跟着框的上沿走；框比屏幕高的时候落在**可见那一段**的顶上，不夹到视口外。
+    //    ★ 仍然让位（`fitLabel`）：这一层里只有它是"可以挪"的 —— 分界价格钉在一个价上、
+    //      待定／撤回钉在一根 bar 上、编号钉在某个中枢上，挪了就不是那个东西了；它挪一挪还在同一个框里。
+    if (sh.up) {
+      for (const u of D.units) {
+        const x0 = vp.xOfBar(u.X0), x1 = vp.xOfBar(u.X1);
+        const yt = vp.yOfPrice(u.GG), yb = vp.yOfPrice(u.DD);
+        if (x0 === null || x1 === null || yt === null || yb === null) continue;
+        // 框整个出了屏 ⇒ 一个字都不画
+        if (x1 <= 0 || x0 >= W) continue;
+        // 框纵向也整个出了屏 ⇒ 画面上根本没有这个框，别给它写字
+        if (yb < 0 || yt > H) continue;
+        // ① 锚在**框自己的左边线**内侧 `+6`。
+        // ★★ 这条边**只要在屏外就不画**，绝不夹回 0 —— 夹回去正是旧 bug：钳位之后那两个字
+        //    就钉在视口左边不动了（小栋原话"一直往右拖，左上角『升级』挂很久"）。
+        //    **代价说破**（不藏）：比屏幕还宽的大框，左沿滚出屏外的时候这两个字不出来 ——
+        //    那时候认这个框靠它的品红边和框编号。这是有意的取舍，等小栋看图再定；不许偷偷夹回去。
+        const lx = x0 + 6;
+        if (x0 < 0 || lx > Math.min(x1, W) - 6) continue;
+        // 框上沿在屏外（框比屏幕高）⇒ 从可见的那一段顶上写；再夹进画布内，免得只剩半行字
+        let ly = Math.max(yt, 0) + 15;
+        if (ly > H - 6) ly = H - 6;
+        D.labels.push(haloText(ctx, lx, fitLabel(ctx, lx, ly, '升级', mine, H), '升级', upColor('seg'), 'left', mine));
+      }
     }
   });
 }

@@ -787,6 +787,132 @@ const shotChart = async (p, tag) => {
   await dN0.c.close(); await dNT.c.close(); await dN.c.close();
   await dA.c.close();
 
+  // ───────────────────────────────────────────────────────────────────────────
+  // ㊸–㊽ **合成出来的高一级框**归哪颗开关、按级别上什么色、「升级」二字钉在哪
+  //        （v3 §八 5，卡 card-113a3b16-026，小栋 10-05 23:3xZ 定）
+  //
+  // ★ 这张卡的三件事：①合成框（载荷的 `T.units`）从「走势分段」挪到**「高一级」**底下 ——
+  //   它跟框层那批"满 9 段"升上来的框**是同一件事**（都是"高一级"），所以跟着那颗芯片、默认不画；
+  //   ②框**按级别上色**，三处调用共用一个 `upColor(tier)`（分头写的话，哪天改配色就会改漏一处，
+  //   而漏掉的那处**不会红** —— 所以这一格量的是"画上去的那个色"跟 `/theme.js` 对得上）；
+  //   ③段头那两个字**挪到框上、跟着框走**。老代码把它夹在 `Math.max(x, 4) + 6` 上：
+  //   框一宽、左沿一滚出屏幕，那两个字就**钉死在视口左上角不动了** —— 小栋看见的就是这个。
+  //
+  // ★ 视口**不写死下标**（数据是活的 210 天，写死迟早指着空处）：先开一页读载荷，挑一个合成框，
+  //   把它的**左沿摆在屏内左边**，再把视口往右推四档（框就在屏上往左走，最后一档把它推出屏）——
+  //   "字跟着框走"和"左沿出屏就不画"这两半都得量到。
+  // ★ 色号从 `/theme.js` 现读（跟 ㉜–㊳ 同一条账），画上去的色从 `trendDrawn.units[].col` 现读
+  //   （那一格是画的时候顺手记的），**两边都印出来** —— 不然改了配色这格就成死闸。
+  console.log('\n43–48 合成大框：跟着「高一级」开关走、按级别上色、「升级」二字钉在框上（不是视口左上角）');
+  const upState = (pg) => pg.evaluate(() => {
+    const a = window.__app, st = a.state, D = st.trendDrawn || {};
+    const ts = a.chart.timeScale(), bars = st.data.bars;
+    const r1 = (x) => (x === null || x === undefined ? null : Math.round(x * 10) / 10);
+    const px = (i) => { const b = bars[i]; const x = b ? ts.timeToCoordinate(b.t / 1000) : null; return x === null ? null : r1(x); };
+    const c = document.querySelector('#chart canvas');
+    const pane = c ? { w: c.getBoundingClientRect().width, h: c.getBoundingClientRect().height } : { w: 0, h: 0 };
+    const T = st.data.trend || {};
+    return {
+      up: st.opts.up, trend: st.opts.trend, W: document.getElementById('chart').clientWidth,
+      chip: (() => { const k = document.querySelector('.chip[data-key="up"]');
+        return k ? { pressed: k.getAttribute('aria-pressed'), disabled: k.disabled } : null; })(),
+      bands: (D.bands || []).length,
+      // 载荷里**本该画上去**的那些：跟 layers.js 同一个判据（`x1 < 0 || x0 > W` 就跳过，
+      // `W` 用的是 mediaSize —— 也就是这一格的画布，不是 `#chart`）。
+      want: (T.units || []).map((u) => ({ seg: u.seg, n: u.n, X0: u.X0, X1: u.X1, x0: px(u.X0), x1: px(u.X1) }))
+        .filter((u) => u.x0 !== null && u.x1 !== null && !(u.x1 < 0 || u.x0 > pane.w)).length,
+      // 这一帧**真画上去**的（只读出口）：像素区间是工装拿页面自己的换算折的，不是页面喂的。
+      got: (D.units || []).map((u) => ({ seg: u.seg, n: u.n, col: u.col,
+        x0: px(u.X0), x1: px(u.X1), yt: (() => { const s = st.candleSeries; const y = s ? s.priceToCoordinate(u.GG) : null; return r1(y); })(),
+        yb: (() => { const s = st.candleSeries; const y = s ? s.priceToCoordinate(u.DD) : null; return r1(y); })() })),
+      upLabels: (D.labels || []).filter((L) => L[4] === '升级').map((L) => ({ x: r1(L[0]), y: r1(L[1]), col: L[5] })),
+      pane,
+    };
+  });
+
+  const dU = await open(TQ);
+  await waitBand(dU.p);
+  const US0 = await upState(dU.p);                       // 默认那一档：「高一级」没勾
+  const upChip0 = US0.chip;
+  // ★ 级别色在 `theme.js` 的 **`CHART`** 那一段（`up_pen` 淡紫／`up_seg` 品红），**不在 `TREND` 里** ——
+  //   这一层虽然画的是走势那层的东西，取色走的却是框层那套（它俩本来就是一回事）。读错了当场红成假话。
+  const UCHART = await dU.p.evaluate(async () => (await import('/theme.js')).CHART);
+  const pick = await dU.p.evaluate(() => {
+    const us = ((window.__app.state.data.trend || {}).units) || [];
+    if (!us.length) return null;
+    // 挑**最靠后**的那一个：它离视口右沿近，屏幕上一开就能看见（前面那些老框的像素 x 是负的）。
+    const u = us[us.length - 1];
+    return { X0: u.X0, X1: u.X1, seg: u.seg, n: u.n };
+  });
+  await dU.c.close();
+
+  ck('合成大框**默认不画**（「高一级」没勾 ⇒ 一个框、一个「升级」字都没有），但走势那一层照常画',
+     !!upChip0 && upChip0.pressed === 'false' && US0.got.length === 0 && US0.upLabels.length === 0
+       && US0.bands > 0,
+     `载荷里这一屏也该画 ${US0.want} 个框　「高一级」chip=${JSON.stringify(upChip0)}　`
+     + `画上去 ${US0.got.length} 个框／${US0.upLabels.length} 个字　背景带 ${US0.bands} 条`
+     + `（带子是 0 就说明整层没画，不是开关的功劳）`);
+
+  // 把那个框的左沿摆在屏内左边，再把视口往右推四档（最后一档要把它推出屏去）。
+  const SWEEP = pick ? [150, 230, 310, 400].map((d) => ({ at: pick.X0 + d, span: 600 })) : [];
+  const pages = [];
+  for (const w of SWEEP) {
+    const dw = await open(`${TQ}&at=${w.at}&span=${w.span}`);
+    await waitBand(dw.p);
+    const was = await upState(dw.p);
+    const chip = dw.p.locator('.chip[data-key="up"]');
+    let clickErr = null;
+    try { await chip.click(); await sleep(900); } catch (e) { clickErr = e.message; }
+    const now = await upState(dw.p);
+    pages.push({ w, off: was, on: now, clickErr });
+    await dw.c.close();
+  }
+  const onP = pages.map((p) => p.on);
+  const clicked = onP.find((s) => s.chip && s.chip.pressed === 'true');
+  const anyUnit = onP.find((s) => s.got.length);
+  const offStill = pages.every((p) => p.off.got.length === 0 && p.off.upLabels.length === 0);
+
+  ck('勾上「高一级」⇒ 合成框**才**画，且画了几个 == 载荷里落在这一屏的几个（逐个对，不是"大于零"）',
+     !!clicked && !!anyUnit && onP.every((s) => s.got.length === s.want)
+       && pages.filter((p) => p.clickErr).length === 0,
+     (clicked ? '' : '★ 那颗芯片点不动：' + (pages.map((p) => p.clickErr).filter(Boolean)[0] || '(没报错)') + '　')
+       + pages.map((p, i) => `at+${SWEEP[i].at - (pick ? pick.X0 : 0)}：载荷 ${p.on.want} / 画了 ${p.on.got.length}`
+         + `（关着时 ${p.off.got.length}）`).join('　'));
+
+  ck('框**按级别上色**：画上去的那个色 == `/theme.js` 的级别色（这一层的合成框都是**线段中枢升的** ⇒ `up_seg`）',
+     !!anyUnit && onP.every((s) => s.got.every((u) => u.col === UCHART.up_seg)),
+     `画上去的色 ${JSON.stringify([...new Set(onP.flatMap((s) => s.got.map((u) => u.col)))])}`
+       + `　theme 的 up_seg=${UCHART.up_seg}　up_pen=${UCHART.up_pen}（两个色相同时这格就成死闸：印出来）`);
+
+  // ★★ 这一格是这张卡的牙之一：「升级」二字得**落在它那个框里**，横向差恒为 6 px。
+  const owned = onP.flatMap((s) => s.upLabels.map((L) => {
+    const u = s.got.find((u) => u.x0 !== null && u.x0 >= -1 && L.x >= u.x0 - 1 && L.x <= u.x1 + 1);
+    return { L, u };
+  }));
+  const dxs = owned.filter((o) => o.u).map((o) => Math.round((o.L.x - o.u.x0) * 10) / 10);
+  ck('「升级」二字的 x **在它那个框里**，且贴左沿 6 px（不是段的左上角、更不是视口的左上角）',
+     !!anyUnit && owned.length > 0 && owned.every((o) => !!o.u) && dxs.every((d) => Math.abs(d - 6) <= 1.5),
+     `${owned.length} 个字：` + owned.map((o, i) => o.u
+       ? `x=${o.L.x} ∈ 框[${o.u.x0}, ${o.u.x1}]（差 ${dxs[i]}）`
+       : `★ x=${o.L.x} **不在任何一个框里**`).join('　'));
+
+  // ★★ 这张卡的正题：老代码把那个字夹在 `Math.max(x, 4) + 6` 上 ⇒ 框左沿一滚出屏，
+  //    字就**钉死在视口左上角**（x≈10）。判据：**每一个**「升级」字，都必须有一个"左沿在屏内"的框认领它。
+  //    防空洞是后半边：这一趟里**真出现过**左沿出屏的框 —— 不然这格是空转（什么都没量到也能绿）。
+  const sawOffLeft = onP.some((s) => s.got.some((u) => u.x0 !== null && u.x0 < 0));
+  const orphans = onP.flatMap((s) => s.upLabels.filter((L) =>
+    !s.got.some((u) => u.x0 !== null && u.x0 >= 0 && L.x >= u.x0 - 1 && L.x <= u.x1 + 1)));
+  ck('框左沿滚出屏幕 ⇒ 那个「升级」**一个字都不画**（老毛病：夹在 `Math.max(x,4)` 上钉死在视口左上角）',
+     !!anyUnit && sawOffLeft && orphans.length === 0,
+     `这一趟里左沿出屏的框：` + onP.map((s, i) => `${s.got.filter((u) => u.x0 < 0).length} 个`).join('／')
+       + `　没人认领的字：${orphans.length}${orphans.length ? '　★ ' + orphans.map((L) => `x=${L.x}`).join(',') : ''}`
+       + `（"没人认领"= 那个字右边没有一个左沿在屏内、把它罩住的框）`);
+
+  // 关着的那一档：四档全都一个框都不画（上面第一格只量了默认那一次，这一格把推过的四档也量了）
+  ck('这四档里「高一级」没勾的那一帧，也一个框都不画（不是"默认那一次碰巧没画"）',
+     offStill,
+     pages.map((p, i) => `第 ${i + 1} 档：框 ${p.off.got.length}／字 ${p.off.upLabels.length}`).join('　'));
+
   await b.close();
   console.log(`\n${n - bad}/${n} 过${bad ? `，${bad} 条红` : ''}　截图：${OUT}`);
   process.exit(bad ? 1 : 0);
