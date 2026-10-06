@@ -40,12 +40,74 @@ def _centers_with_cuts(done, ks):
     return out
 
 
-def _done(r):
-    return [s for s in r["segs"] if not s.get("live")]
+_HEAD_FIRST = False                               # 只给 trend_check --self-test 的探针开：先挪图头／末段再挪中间
+_BLOCK_RETRACTED = True                           # 只给 trend_check --self-test 的探针关：D2-7 去掉过的那一对照旧反复确立／撤回
+_MOVE_ENDS = True                                 # 只给 trend_check --self-test 的探针关：图头起点／末段终点不挪
+
+
+def _standardize(done, bars):
+    """D2-0（L78:50-51／L78:54，card-acbe5855）：已完成线段标准化成首尾相连的折线 —— 每条向上线段从段内最低开始、到最高结束，
+    向下反过来。只改端点（价格与那一根），不改线段怎么划；hi／lo 按新区间重取。
+    · 顶、底按线段自己的 dir 认，不按端点高低（线上 AAPL 1h 首段 dir=down、终点却比起点高，按端点认会造出零长度段）。
+    · 每个接点挪到它左右两个接点之间（**不含**那两根）的极值上，顶取最高、底取最低；一轮挪完再来，直到不动 ——
+      只挪一次不够（顶往后挪会带进下一段先跌的那一截，zec15 段 23 实测）；不含两邻是因为一根 K 线可能同时是最高和最低。
+    · 图头起点只在 [第一段起点, 接点 1) 里挪，末段终点只在 (倒数第二个接点, 最后一段终点] 里挪（编者口径，Nova 06:30Z）。
+    · 一样极取后一根（跟 D2-1「一样高取后一个」同口径）。"""
+    if not done:
+        return done
+    n = len(done)
+    piv = [done[0]["i0"]] + [s["i1"] for s in done]          # 第 k 个接点 ＝ done[k-1] 终点 ＝ done[k] 起点
+    top = [done[0]["dir"] != "up"] + [s["dir"] == "up" for s in done]   # 接点 k 是顶 ⇔ 它前一段向上（图头起点反过来）
+    lo0, hi_n = done[0]["i0"], done[-1]["i1"]
+
+    def best(rng, k):
+        return max(rng, key=(lambda i: (bars[i]["h"], i)) if top[k] else (lambda i: (-bars[i]["l"], i)))
+
+    def move(k):
+        if k == 0:
+            rng = range(lo0, piv[1])
+        elif k == n:
+            rng = range(piv[n - 1] + 1, hi_n + 1)
+        else:
+            rng = range(piv[k - 1] + 1, piv[k + 1])
+        if not rng:
+            return False
+        nb = best(rng, k)
+        if nb == piv[k]:
+            return False
+        piv[k] = nb
+        return True
+
+    # 先后（编者口径，Nova 06:44Z 定 Atlas 的写法）：中间接点先挪到不动，图头起点、末段终点最后各挪一次。
+    #   图头是被窗口截断的那一段，只能它迁就中间；先挪图头会把中间接点卡住（线上 AAPL 1h：起点先跳到 274.33，
+    #   接点 1 只能在它后面找，真低点 245.99 就够不着了）。图头在 [起点, 接点1) 里挪、挪不过接点 1，所以挪完中间也不会再动。
+    ends = (0, n) if _MOVE_ENDS else ()
+    if _HEAD_FIRST:                                       # 只给探针：反过来先挪图头／末段
+        for k in ends:
+            move(k)
+    for _ in range(len(piv) + 1):                         # 每轮至少定住一个；上限给死
+        if not any([move(k) for k in range(1, n)]):
+            break
+    if not _HEAD_FIRST:
+        for k in ends:
+            move(k)
+    out = []
+    for k, s in enumerate(done):
+        i0, i1 = piv[k], piv[k + 1]
+        out.append(dict(s, i0=i0, i1=i1,
+                        p0=bars[i0]["h"] if top[k] else bars[i0]["l"],
+                        p1=bars[i1]["h"] if top[k + 1] else bars[i1]["l"],
+                        hi=max(bars[i]["h"] for i in range(i0, i1 + 1)), lo=min(bars[i]["l"] for i in range(i0, i1 + 1))))
+    return out
+
+
+def _done(r, standardize=True):
+    done = [s for s in r["segs"] if not s.get("live")]
+    return _standardize(done, r["bars"]) if standardize and "bars" in r else done
 
 
 def _is_up(s):
-    return s["p1"] > s["p0"]
+    return s["dir"] == "up"                      # 按线段自己的方向，不按端点高低（spec D2-0；线段层偶有终点不高于起点的坏段，card-24dd71cb-003）
 
 
 def _try_confirm(done, t, ks, typ, lo, no_exceed=True):
@@ -78,16 +140,17 @@ def _try_confirm(done, t, ks, typ, lo, no_exceed=True):
     return (j, z) if ok else None
 
 
-def find_bounds(r, regroup=True, alternate=True, check_empty=True, no_exceed=True):
+def find_bounds(r, regroup=True, alternate=True, check_empty=True, no_exceed=True, standardize=True):
     """→ dict(bounds, retracted)。四个开关是 spec §四 的探针 P1／P2／P5／P3（默认全开 ＝ 规则本身）。
     bounds：[dict(line_seg=j, bar, kind 'H'/'L', price, pullback_line_seg=t, pullback_end_bar, ZD, ZG)]，按时间升序；
       ★ line_seg／pullback_line_seg 是**已完成线段**的下标（不是走势段号）—— 对外 `seg` 只指 segments[] 下标（Iris 10-05 17:51）；
     retracted：[dict(bar, kind, price, pullback_end_bar, retracted_bar, blocked_bar, blocked_kind)]（D2-7）。
     ★ pullback_end_bar ＝ 回抽段 S[t] 的终点那一根，**不是**实时能确立的那一根：线段要等后面的 K 线才算走完，
       实时确立更晚（tools/trend_check.py ④ 量出来 zec15 晚 61～184 根）。前端斜线画「极值到回抽段终点」，不标「确立」。"""
-    done = _done(r)
+    done = _done(r, standardize)
     ks, bounds, retracted = [], [], []           # ks：切点段号（新组起点 ＝ j+1）
     want = None                                  # 下一个分界要 'H' 还是 'L'（None ＝ 两头都开）
+    blocked = {}                                 # (kind, line_seg of b) → line_seg of b′：D2-7 去掉过的那一对（编者口径，card-eecdfd08）
     for t in range(2, len(done)):
         lo = ks[-1] if ks else 0
         for typ in ("H", "L"):
@@ -97,11 +160,20 @@ def find_bounds(r, regroup=True, alternate=True, check_empty=True, no_exceed=Tru
             if hit is None:
                 continue
             j, z = hit
+            # 『同一对 (b, b′) 被 D2-7 去掉以后，b 不再确立，直到 b 或 b′ 被新的极值换掉』（编者口径，Nova 10-06）。
+            #   D2-7 只看 done[b..b′] 这一组里有没有中枢，同一对的结论不会变（1m 实测同一对判了 40 次、40 次都没有）；
+            #   b 换了 ⇒ j 不同、不在表里；b′ 换了 ⇒ 下面那个反向候选不是它了，放行。
+            if _BLOCK_RETRACTED and (typ, j) in blocked and j + 1 < t - 1:
+                opp = range(j + 1, t - 1)
+                k2 = max(opp, key=(lambda k: (-done[k]["p1"], k)) if typ == "H" else (lambda k: (done[k]["p1"], k)))
+                if k2 == blocked[(typ, j)]:
+                    continue
             if ks and check_empty:               # D2-7：上一刀 → 这一刀之间得有中枢
                 zz = _centers_with_cuts(done[:t + 1], ks + [j + 1])
                 if not [q for q in zz if q["PI0"] >= lo and q["PI1"] <= j]:
                     ks.pop()
                     prev = bounds.pop()
+                    blocked[(prev["kind"], prev["line_seg"])] = j
                     retracted.append(dict(bar=prev["bar"], kind=prev["kind"], price=prev["price"],
                                           pullback_end_bar=prev["pullback_end_bar"], retracted_bar=done[t]["i1"],
                                           blocked_bar=done[j]["i1"], blocked_kind=typ))
@@ -168,14 +240,15 @@ def classify(zz, reading="A"):
     return (_trend_of(units) or "盘整"), bool(up)
 
 
-def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_exceed=True):
+def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_exceed=True, standardize=True):
     """→ dict(seg_centers, bounds, retracted, pending, segments, units, reading)。
     seg_centers：按确立的分界切开重算的线段中枢（D4，前端画框就用它），每个带 seg（属于第几段走势，跟 segments 下标对齐）；
     segments：[dict(i0, i1, type, upgraded, head, live, n_centers_level)]，首尾相接盖满整张图；
       ★ n_centers_level 是**本级别**中枢个数，跟读法无关；读法 A 的升级段，字母挂在 units 上，个数不是它；
     units：D3 合成出来的高一级中枢（只列 n>1 的），带 seg，给前端画升级框；
     reading：这一跑用的 D3 读法（A／B），前端据此决定字母挂哪一级（spec §八 第 6 条）。"""
-    res = find_bounds(r, regroup=regroup, alternate=alternate, check_empty=check_empty, no_exceed=no_exceed)
+    res = find_bounds(r, regroup=regroup, alternate=alternate, check_empty=check_empty, no_exceed=no_exceed,
+                      standardize=standardize)
     done, ks = res["done"], res["ks"]
     n = len(r["bars"])
     if not done:

@@ -28,10 +28,15 @@ READING = _m.group(1) if _m else None
 
 # spec §三（agent/atlas/spec-v3 22e0570 起）：(bar, 高低, 确立那一根)
 BASE = {
-    "zec15.json": [(490, "L", None), (7558, "H", None), (9043, "L", None), (12906, "H", None), (14215, "L", None)],
+    # D2-0（card-acbe5855，10-06）整层用标准化后的线段：zec15 多出 3699 H（394.0）、4575 L（299.56）—— 段 23 的真高点在下一段段内，
+    #   以前候选是端点那个次高点、P3 又按区间判它「被过了」，卡到 7558 才确立；其余 5 刀不变。
+    "zec15.json": [(490, "L", None), (3699, "H", None), (4575, "L", None), (7558, "H", None), (9043, "L", None),
+                   (12906, "H", None), (14215, "L", None)],
     "zec30_cut.json": [(134, "L", None), (3476, "H", None), (4219, "L", None), (6150, "H", None), (6805, "L", None)],
 }
-BASE_PRICE = {"btc_4h.json": [("H", 97932.1)], "zec_1h.json": [("L", 205.07)], "aaplusdt_30m.json": [("L", 300.50)]}
+BASE_PRICE = {"btc_4h.json": [("H", 97932.1)], "zec_1h.json": [("L", 205.07)], "aaplusdt_30m.json": [("L", 300.50)],
+              # D2-0 先后（Nova 06:44Z）：中间接点先挪到不动、图头最后挪 ⇒ zec_2h 第一刀 191.35；图头先挪会卡住接点 1，变成 205.07
+              "zec_2h.json": [("L", 191.35)]}
 def load(path):
     raw = json.load(open(path))
     raw = raw["bars"] if isinstance(raw, dict) else raw
@@ -56,7 +61,12 @@ def kline_files():
 # spec D3（小栋 10-05 定 B）：升级中枢留在本级别一起数。下面是**冻结夹具 data/zec15.json** 的段类型（下标 0 起），
 # 不是线上：线上窗口在滚，段数和中枢合法都会变（10-06 线上第 1 段 4 个中枢合成一个 n=4 ⇒ 本级别只剩一个 ⇒ 盘整，也对）。
 # 夹具里第 1 段（bar 490–7558）4 个中枢只合了 2 个 ⇒ 本级别 3 个 ⇒「上涨」；第 5 段同理。A 读法下两段都是「升级·盘整」。
-TYPES = {"zec15.json": ["盘整", "上涨", "盘整", "盘整", "下跌", "上涨"]}
+# D2-0（10-06）以后 zec15 是 8 段：多切出 3699／4575 两刀，原先第 1 段（490–7558，读法 B「上涨」）被切成三段，各自中枢不够两个以上
+#   不重叠 ⇒ 都是盘整；原先第 5 段（14215 起）照旧「上涨」。
+TYPES = {"zec15.json": ["盘整", "盘整", "盘整", "盘整", "盘整", "盘整", "下跌", "上涨"]}
+FIX_D2STD = os.path.join(ROOT, "tools", "fixtures", "zec1m_d2std.json")
+# card-eecdfd08：ZEC 永续 1m 一段（04-08 前后），旧程序在这里把同一对 (308.24 L, 394.0 H) 确立又撤回 13 次
+FIX_RETRACT = os.path.join(ROOT, "tools", "fixtures", "zec1m_retract_loop.json")   # Atlas 10-06：ZEC 永续 1m，04-29 317.74 真低点在向上线段段内
 RETRACT = {"zec15.json": [(15295, "H")], "zec30_cut.json": []}
 _R = {}
 
@@ -91,7 +101,18 @@ def baseline():
 def invariants(fn):
     r, v = run(fn)
     bad = []
-    done = [s for s in r["segs"] if not s.get("live")]
+    done = T._done(r)                                # 走势层看的是标准化后的线段（D2-0）
+    # ★ 独立核 D2-0（不调引擎那份 _standardize）：按定义查 —— 首尾相接、方向交替、每段端点就是自己区间里的最高／最低
+    bars = r["bars"]
+    for a_, b_ in zip(done, done[1:]):
+        if a_["i1"] != b_["i0"] or a_["dir"] == b_["dir"] or a_["i0"] >= a_["i1"]:
+            bad.append("标准化后不首尾相接或不交替 %d/%d" % (a_["i1"], b_["i0"]))
+    for k, s_ in enumerate(done):
+        hi = max(bars[i]["h"] for i in range(s_["i0"], s_["i1"] + 1))
+        lo = min(bars[i]["l"] for i in range(s_["i0"], s_["i1"] + 1))
+        up_ = s_["dir"] == "up"
+        if (s_["p0"], s_["p1"]) != ((lo, hi) if up_ else (hi, lo)):
+            bad.append("%s 标准化后段 %d 端点不是段内极值" % (fn, k))
     ends = {s["i1"]: s for s in done}
     bs = v["bounds"]
     for a, b in zip(bs, bs[1:]):
@@ -189,9 +210,53 @@ def main():
          [] if 11314 not in [b["bar"] for b in v["bounds"]] and in_box else ["11314 是分界或不在框里"])
     cell("⑤ 段类型按线上读法 B（spec D3，server.TREND_READING）", [] if v["reading"] == "B" and [s["type"] for s in v["segments"]] == TYPES["zec15.json"]
          else ["读法 %s 段类型 %s" % (v["reading"], [s["type"] for s in v["segments"]])])
+    cell("⑥ 每个分界是两邻分界之间的极值（直接从 K 线算，不经线段）", extreme_between())
+    cell("⑦ D2-0 夹具 zec1m_d2std：04-29 那个 317.74 L 要确立（候选卡死就没有）", d2std_fixture())
+    cell("⑧ 同一对 (b, b′) 被 D2-7 去掉最多一次（编者口径；含 zec1m_retract_loop 夹具）", retract_once())
     cell("④ 不看未来（zec15：最早能确立那一根起，之后一直在、不变）", no_future())
     print("全部通过" if not bad else "%d 处不过" % len(bad))
     return 1 if bad else 0
+
+
+def extreme_between():
+    """H 是它前后两个分界之间的最高价、L 是最低价（D2-1 候选＝到当时为止的极值，D2-2 价格没再过它）—— 直接从 K 线算，不经线段，
+    所以能逮住「真极值在段内、候选卡在端点次高点」（D2-0 补的就是这个；关掉标准化 ⇒ zec_2h 367.77 那刀报出来）。第一刀不查。"""
+    bad = []
+    for fn in kline_files():
+        r, v = run(fn)
+        bars, bs = r["bars"], v["bounds"]
+        for k, b in enumerate(bs):
+            if k == 0:
+                continue                                 # 图头那一刀两头都开（D2-1），更极端的点若前面没中枢就永远确立不了（D2-2 第 1 步）⇒ 不适用
+            a = bs[k - 1]["bar"]
+            z = bs[k + 1]["bar"] if k + 1 < len(bs) else len(bars) - 1
+            seg = bars[a:z + 1]
+            ext = max(x["h"] for x in seg) if b["kind"] == "H" else min(x["l"] for x in seg)
+            if ext != b["price"]:
+                bad.append("%s 刀 %d %s %.2f 不是两邻分界之间的极值 %.2f" % (fn, b["bar"], b["kind"], b["price"], ext))
+    return bad
+
+
+def _fixture(path=None, **kw):
+    from config import tick_of
+    bars = [dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"]) for b in json.load(open(path or FIX_D2STD))]
+    return T.trend_v3(analyze(bars, tick=tick_of("zecusdt_1m.json")), reading=READING, **kw)
+
+
+def d2std_fixture():
+    v = _fixture()
+    return [] if ("L", 317.74) in [(b["kind"], round(b["price"], 2)) for b in v["bounds"]] else \
+        ["没有 317.74 L：%s" % [(b["kind"], round(b["price"], 2)) for b in v["bounds"]]]
+
+
+def retract_once():
+    """D2-7 编者口径（card-eecdfd08）：同一对 (b, b′) 最多撤回一次 —— 那一组里有没有中枢只看 done[b..b′]，结论不会变。"""
+    import collections
+    bad = []
+    for name, v in [(fn, run(fn)[1]) for fn in kline_files()] + [("zec1m_retract_loop", _fixture(FIX_RETRACT))]:
+        c = collections.Counter((x["bar"], x["blocked_bar"]) for x in v["retracted"])
+        bad += ["%s 同一对 %s 撤回 %d 次" % (name, k, n) for k, n in c.items() if n > 1]
+    return bad
 
 
 def self_test():
@@ -205,10 +270,58 @@ def self_test():
     miss = 0
     # P3（「H 之后价格不再过 H」，按段内 hi／lo）。card-753bd03a（L78 待定改判）以后 zec_1h 第 8 段拆开了，原来那颗牙
     # （zec_1h 不交替 1 刀 1 撤 ↔ 0 刀 3 撤）没了；现在默认规则下 zec15 就咬得到：留着 5 刀，拿掉 7 刀。
-    _, b3 = run("zec15.json", no_exceed=False)
-    ok = len(b3["bounds"]) != len(base["bounds"])
-    print("%s P3 拿掉「H 之后不再过 H」（zec15）⇒ 分界 %d、撤回 %d（留着 %d、%d）" % (
-        "✓" if ok else "✗", len(b3["bounds"]), len(b3["retracted"]), len(base["bounds"]), len(base["retracted"])))
+    # P3 在标准化以后是推论（看区间＝看端点，spec D2-0），拿掉它默认规则下不会变 —— 所以这颗牙放在**不标准化**那条路上量，
+    #   守的是「P3 这一条代码本身还在干活」。
+    _, a3 = run("zec15.json", standardize=False)
+    _, b3 = run("zec15.json", standardize=False, no_exceed=False)
+    ok = len(b3["bounds"]) != len(a3["bounds"])
+    print("%s P3 拿掉「H 之后不再过 H」（zec15、不标准化）⇒ 分界 %d、撤回 %d（留着 %d、%d）" % (
+        "✓" if ok else "✗", len(b3["bounds"]), len(b3["retracted"]), len(a3["bounds"]), len(a3["retracted"])))
+    miss += not ok
+    # D2-0 的两颗牙：拿掉标准化 ⇒ 夹具上 317.74 L 没了；zec15 分界数也变
+    vf = _fixture(standardize=False)
+    ok = ("L", 317.74) not in [(b["kind"], round(b["price"], 2)) for b in vf["bounds"]]
+    print("%s D2-0 拿掉标准化（zec1m_d2std）⇒ 317.74 L %s" % ("✓" if ok else "✗", "没了" if ok else "还在"))
+    miss += not ok
+    real = T._done                                       # ⑥ 的牙：关掉标准化 ⇒ 「分界是两邻之间的极值」必须报出来
+    T._done = lambda r, standardize=True: real(r, False)
+    _R.clear()
+    try:
+        e6 = extreme_between()
+    finally:
+        T._done = real
+        _R.clear()
+    print("%s ⑥ 关掉标准化 ⇒ 报出 %d 处（例 %s）" % ("✓" if e6 else "✗", len(e6), e6[:1]))
+    miss += not e6
+    T._HEAD_FIRST = True                                 # D2-0 先后反过来（先挪图头）⇒ zec_2h 第一刀必须变
+    _R.clear()
+    try:
+        _, hf = run("zec_2h.json")
+    finally:
+        T._HEAD_FIRST = False
+        _R.clear()
+    ok = [(b["kind"], round(b["price"], 2)) for b in hf["bounds"]][:1] != [("L", 191.35)]
+    print("%s D2-0 先挪图头 ⇒ zec_2h 第一刀 %s（应为 191.35）" % ("✓" if ok else "✗", [(b["kind"], round(b["price"], 2)) for b in hf["bounds"]][:1]))
+    miss += not ok
+    T._BLOCK_RETRACTED = False                           # 编者口径拿掉 ⇒ ⑧ 必须在 retract_loop 夹具上报出来
+    try:
+        e8 = retract_once()
+    finally:
+        T._BLOCK_RETRACTED = True
+    print("%s D2-7 编者口径拿掉 ⇒ 报出 %d 处（例 %s）" % ("✓" if e8 else "✗", len(e8), e8[:1]))
+    miss += not e8
+    T._MOVE_ENDS = False                                 # 图头起点／末段终点不挪 ⇒ 不变量里「段端点＝段内极值」必须报出来
+    _R.clear()
+    try:
+        ends = [x for fn in kline_files() for x in invariants(fn) if "端点不是段内极值" in x]
+    finally:
+        T._MOVE_ENDS = True
+        _R.clear()
+    print("%s D2-0 图头／末段不挪 ⇒ 报出 %d 处（例 %s）" % ("✓" if ends else "✗", len(ends), ends[:1]))
+    miss += not ends
+    _, s0 = run("zec15.json", standardize=False)
+    ok = len(s0["bounds"]) != len(base["bounds"])
+    print("%s D2-0 拿掉标准化（zec15）⇒ 分界 %d（原样 %d）" % ("✓" if ok else "✗", len(s0["bounds"]), len(base["bounds"])))
     miss += not ok
     # D4-1 的反向验证（原 cut_check --self-test 挪来）：重算中枢时不按刀分组 ⇒ ② 必须报出跨分界的框
     real = T._centers_with_cuts
