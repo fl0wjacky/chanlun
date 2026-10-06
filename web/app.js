@@ -253,7 +253,9 @@ const mmdd = (t) => {
 function levelsStartText(lv) {
   const st = lv && lv.start;
   if (!st) return '';
-  if (st.status === 'window') return '图里没有更早的数据 —— 两张图的窗口不同，起点没法比，不算分歧。';
+  // ★ 这一句**不带句号**：句号归**整行**（`renderLevelsHead` 在那行末尾补一个），不归某一段 ——
+  //   段与段之间是 `｜`，一段自己带句号的话，后面再接一段就成了"句子说完了又接着说"。
+  if (st.status === 'window') return '图里没有更早的数据 —— 两张图的窗口不同，起点没法比，不算分歧';
   if (st.status !== 'differs') return '';           // same／unmeasured：不写（后台 start_link 的 `same`＝一样、不标）
   const who = TF_LABEL[lv.finest_tf] || '';
   const dFine = mmdd(st.finest && st.finest.t);
@@ -262,11 +264,18 @@ function levelsStartText(lv) {
   if (!who || !dFine || !fine) return '';           // 前两句拼不齐（缺周期名／日子／价）⇒ 整句不说，不写半截
   const seg = [
     `起点按 ${who}算在 ${dFine}（${fine}），以细图为准`,
-    `这是${who}的图头那一刀，窗口一变会跟着挪（「会变」）`,
+    // ★ 名字前后**都要那个空格**：`起点按 ${who}算在…` 那一截有，这一截原来漏了 ⇒ 同一句里
+    //   同一个名字印成「起点按 15 分钟图…这是15 分钟图…」两种样子。空格是**字面量**（不在
+    //   `TF_LABEL` 那几张表里），所以每一处都得自己带 —— 加/改这句的人连空格一起加。
+    `这是 ${who}的图头那一刀，窗口一变会跟着挪（「会变」）`,
   ];
   const dC = mmdd(st.first_center_t);
   if (dC) seg.push(`本图第一个中枢 ${dC} 开始`);
-  return seg.join('｜') + '。';
+  // ★ **不在这里收句号**（Nova 定的）：这一行话是 `｜` 串起来的读数，不是一句话 ——
+  //   句号归**整行**末尾那一处（`renderLevelsHead`）。加在这儿，后面再缀一段覆盖率就变成
+  //   「…开始。 ｜ 跨度最大的一档，没有对照图」：一句已经说完了，还接着往下说。
+  //   1h（没有覆盖率那一句）看不出来，2h 一眼就出来了。
+  return seg.join('｜');
 }
 /** 覆盖率那一句（L-9）——「没比成」的诚实出口。★★ **先看 `ref_tf`，再看缓存**（这两件事在报文上
  *  长得像、意思相反，Nova 五个档全探过）：
@@ -301,15 +310,28 @@ function levelsCoverageText(lv) {
   if (k) seg.push(`${k} 个没比成`);
   return `${N} 个框：${seg.join('、')}`;
 }
-/** 那一行话 = 起点那一句 ＋ 覆盖率那一句，中间用 ` ｜ ` 接。开关关着 ⇒ 整行收掉。 */
+/** 那一行话 = 起点那一句 ＋ 覆盖率那一句，中间用 ` ｜ ` 接。开关关着 ⇒ 整行收掉。
+ *  ★★ 这里的"开关"是**这一层画不画**（`shownOf(opts).lv` ＝ `opts.lv && opts.up`），
+ *  不是 `opts.lv` 那一个裸标志 —— 跟 ⑥ 里给框写字用的是**同一个谓词**（`layers.js` 的 `sh.lv`）。
+ *  写 `opts.lv && lv` 会出一件很难看的事：「高一级」**默认关着** ⇒ 屏上零个框、零个标，
+ *  那一行话却照样印「6 个框：4 个比过、2 个没比」——**它在说屏上根本没有的那几个框**，
+ *  而旁边那颗「级别对照」芯片正按灰（"用不了"）。芯片说"没有"，字说"这是结果"，同一屏自相矛盾
+ *  （这是「能点却画不出东西的开关是骗人的」那一族的另一头：画不出东西却还在说话的读数）。
+ *  ★ `up` 一开关两样一起出、一起收：`applyToggles()` 里就调这个函数（见那儿），所以拨一下
+ *    「高一级」，框、标、这一行话三条同时到位 —— 不用另写一份"跟着谁走"的规矩。 */
 function renderLevelsHead() {
   const e = el('lvhead');
   if (!e) return;
   const lv = state.levels;
   let txt = '';
-  if (opts.lv && lv) {
+  if (shownOf(opts).lv && lv) {
     const a = levelsStartText(lv), b = levelsCoverageText(lv);
     txt = [a, b].filter(Boolean).join(' ｜ ');
+    // ★★ `。` 归**整行**，不归某一段（Nova 2026-10-06 定，见 `levelsStartText` 末尾那段账）：
+    //   · 有起点那一句 ⇒ 在**行末**补一个（1h 那一屏跟以前一字不差）。
+    //   · 只有覆盖率 ⇒ 不补：`6 个框：4 个比过、2 个部分没比` 是一栏读数，不是一句话，
+    //     给它缀个句号是把读数打扮成句子。⇒ 判的是 `a` 在不在，不是"有没有 txt"。
+    if (a) txt += '。';
   }
   e.textContent = txt;
   e.classList.toggle('on', !!txt);
