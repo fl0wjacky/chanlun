@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 上线前一道门（card-9b0fe913-758）：数据那半（Python 检查）＋ 渲染那半（前端 e2e）按顺序跑，一张表收账。
 #
-#   tools/predeploy.sh          # 五套 Python 检查 + 4 套前端回归（ghost / more / readout / measure）
+#   tools/predeploy.sh          # 五套 Python 检查 + trend_check --self-test + 4 套前端回归（ghost / more / readout / measure）
 #   tools/predeploy.sh --all    # 再加 4 套单卡证据工装（macd_axis / mobile_share / readout_swap_probe / subhead_slot_probe）
 #
 # 环境变量（都可不给）：
@@ -53,10 +53,13 @@ HEAD_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo 不在 git 里)
 git diff --quiet HEAD -- 2>/dev/null || HEAD_SHA="$HEAD_SHA（有未提交的改动）"
 
 # ---- 数据那半：Python 检查（每一套自己就是 0 过 / 非 0 不过）----
-for chk in tools/selfcheck.py web/check_parity.py web/check_abuse.py web/check_assets.py tools/pine_lockstep.py; do
+# trend_check --self-test：反向验证（拿掉规则 ⇒ 必须变／必须报）每趟都跑，不靠手动记得（Nova 10-06，card-3edd7fb3）。
+#   它退 3 ＝ 某条探针没响 ＝ 那条检查没牙 ⇒ 记红，不记「没比成」。条目里带参数，所以下面 $chk 不加引号（路径无空格）。
+for chk in tools/selfcheck.py web/check_parity.py web/check_abuse.py web/check_assets.py tools/pine_lockstep.py "tools/trend_check.py --self-test"; do
   log=$(mktemp)
-  "$PY" "$chk" >"$log" 2>&1
+  "$PY" $chk >"$log" 2>&1
   rc=$?
+  case $chk in *--self-test) [ $rc = 3 ] && rc=1 ;; esac
   # Python 崩了（缺包、Traceback）退的也是 1，跟「比了、红了」同码 ⇒ 先看日志分开（Iris 核 167a32a 时逮到）
   if [ $rc = 1 ] && grep -qE '^(Traceback|ModuleNotFoundError|ImportError)' "$log"; then rc=99; fi
   # selfcheck 自己有一栏「查不了 / 跑不了」（缺字体、缺版式工具）而引擎违规是 0 ⇒ 那是环境没备齐，不是红
