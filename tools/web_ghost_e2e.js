@@ -906,11 +906,19 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   const eq = (a, b) => a != null && b != null && Math.abs(a - b) < 1e-9;
   const LASTI = base.bars.length - 1;
   const TICKVALS = [1, 2, 3, 4, 5].map(tickC);
-  // 结构记号那一块：挑**靠尾巴**的一个已确认点（真数据 bar<200 没有点，尾巴上该有 —— 挑不到就报出来，
+  // 结构记号那一块：挑**最靠尾巴**的一个已确认点（真数据 bar<200 没有点 —— 挑不到就报出来，
   // 别让那一格变成"空转格"）。★ 离最后一根留出 4 根：记号那一块横着能盖住两三根，别蹭到要动的那一根。
+  // ★ 不再限「尾巴 140 根内」（10-06 bd79070 门红：最后一个已确认点在 LASTI-144，窗口一滚就出界，
+  //   新旧引擎同一份数据都挑不到 ⇒ 这一格看日历红）。点不一定落在 tickPark 的视口里，所以那一块
+  //   在**它自己的视口**（同宽 168 根、以它为中心）量，量完摆回 tickPark —— 前后两次摆法逐位相同，框可比。
   const tailPts = ['seg', 'pen'].flatMap((tier) => ((base.signals || {})[tier] || []).map((s) => ({ ...s, tier })))
-                  .filter((s) => s.confirmed === true && s.bar > LASTI - 140 && s.bar <= LASTI - 4);
+                  .filter((s) => s.confirmed === true && s.bar <= LASTI - 4)
+                  .sort((a, b) => a.bar - b.bar);
   const NEAR = tailPts[tailPts.length - 1];
+  const nearPark = async (p) => {
+    await p.evaluate((n) => window.__app.chart.timeScale().setVisibleLogicalRange({ from: n - 84, to: n + 84 }), NEAR.bar);
+    await sleep(700);
+  };
 
   const TK = await open('tick');
   const tp = TK.p;
@@ -921,14 +929,15 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   const sh0 = await structHash(tp);
   const closedBox = await barBox(tp, LASTI - 4);
   const cl0 = await pxHash(tp, closedBox);
-  const nbBox = NEAR ? await boxAt(tp, NEAR) : null;
-  const nb0 = nbBox ? await pxHash(tp, nbBox) : null;
+  let nbBox = null, nb0 = null;
+  if (NEAR) { await nearPark(tp); nbBox = await boxAt(tp, NEAR); nb0 = nbBox ? await pxHash(tp, nbBox) : null; await tickPark(tp, LASTI); }
   { const t = Date.now(); while (TK.tick.n < 3 && Date.now() - t < 40000) await sleep(400); }
   await sleep(800);
   const k1 = await snap(tp);
   const sh1 = await structHash(tp);
   const cl1 = await pxHash(tp, closedBox);                 // ★ 仍用**原来那个框**：位置动一点都会变
-  const nb1 = nbBox ? await pxHash(tp, nbBox) : null;
+  let nb1 = null;
+  if (nbBox) { await nearPark(tp); nb1 = await pxHash(tp, nbBox); await tickPark(tp, LASTI); }
 
   ck('⑯a 跳价真的落在**画在图上**的那一根上（先证明这一套在这张页面上工作，否则下面几格全是空转）',
      TK.tick.n >= 3 && !!k1.drawn && !eq(k1.drawn.close, k0.drawn.close)
