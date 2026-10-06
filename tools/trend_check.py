@@ -34,7 +34,9 @@ BASE = {
                    (12906, "H", None), (14215, "L", None)],
     "zec30_cut.json": [(134, "L", None), (3476, "H", None), (4219, "L", None), (6150, "H", None), (6805, "L", None)],
 }
-BASE_PRICE = {"btc_4h.json": [("H", 97932.1)], "zec_1h.json": [("L", 205.07)], "aaplusdt_30m.json": [("L", 300.50)]}
+BASE_PRICE = {"btc_4h.json": [("H", 97932.1)], "zec_1h.json": [("L", 205.07)], "aaplusdt_30m.json": [("L", 300.50)],
+              # D2-0 先后（Nova 06:44Z）：中间接点先挪到不动、图头最后挪 ⇒ zec_2h 第一刀 191.35；图头先挪会卡住接点 1，变成 205.07
+              "zec_2h.json": [("L", 191.35)]}
 def load(path):
     raw = json.load(open(path))
     raw = raw["bars"] if isinstance(raw, dict) else raw
@@ -278,6 +280,16 @@ def self_test():
         _R.clear()
     print("%s ⑥ 关掉标准化 ⇒ 报出 %d 处（例 %s）" % ("✓" if e6 else "✗", len(e6), e6[:1]))
     miss += not e6
+    T._HEAD_FIRST = True                                 # D2-0 先后反过来（先挪图头）⇒ zec_2h 第一刀必须变
+    _R.clear()
+    try:
+        _, hf = run("zec_2h.json")
+    finally:
+        T._HEAD_FIRST = False
+        _R.clear()
+    ok = [(b["kind"], round(b["price"], 2)) for b in hf["bounds"]][:1] != [("L", 191.35)]
+    print("%s D2-0 先挪图头 ⇒ zec_2h 第一刀 %s（应为 191.35）" % ("✓" if ok else "✗", [(b["kind"], round(b["price"], 2)) for b in hf["bounds"]][:1]))
+    miss += not ok
     T._MOVE_ENDS = False                                 # 图头起点／末段终点不挪 ⇒ 不变量里「段端点＝段内极值」必须报出来
     _R.clear()
     try:

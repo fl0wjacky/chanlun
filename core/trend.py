@@ -40,6 +40,7 @@ def _centers_with_cuts(done, ks):
     return out
 
 
+_HEAD_FIRST = False                               # 只给 trend_check --self-test 的探针开：先挪图头／末段再挪中间
 _MOVE_ENDS = True                                 # 只给 trend_check --self-test 的探针关：图头起点／末段终点不挪
 
 
@@ -61,24 +62,34 @@ def _standardize(done, bars):
     def best(rng, k):
         return max(rng, key=(lambda i: (bars[i]["h"], i)) if top[k] else (lambda i: (-bars[i]["l"], i)))
 
-    for _ in range(len(piv) + 1):                            # 每轮至少定住一个；上限给死
-        moved = False
-        for k in range(n + 1):
-            if k in (0, n) and not _MOVE_ENDS:
-                continue
-            if k == 0:
-                rng = range(lo0, piv[1])
-            elif k == n:
-                rng = range(piv[n - 1] + 1, hi_n + 1)
-            else:
-                rng = range(piv[k - 1] + 1, piv[k + 1])
-            if not rng:
-                continue
-            nb = best(rng, k)
-            if nb != piv[k]:
-                piv[k], moved = nb, True
-        if not moved:
+    def move(k):
+        if k == 0:
+            rng = range(lo0, piv[1])
+        elif k == n:
+            rng = range(piv[n - 1] + 1, hi_n + 1)
+        else:
+            rng = range(piv[k - 1] + 1, piv[k + 1])
+        if not rng:
+            return False
+        nb = best(rng, k)
+        if nb == piv[k]:
+            return False
+        piv[k] = nb
+        return True
+
+    # 先后（编者口径，Nova 06:44Z 定 Atlas 的写法）：中间接点先挪到不动，图头起点、末段终点最后各挪一次。
+    #   图头是被窗口截断的那一段，只能它迁就中间；先挪图头会把中间接点卡住（线上 AAPL 1h：起点先跳到 274.33，
+    #   接点 1 只能在它后面找，真低点 245.99 就够不着了）。图头在 [起点, 接点1) 里挪、挪不过接点 1，所以挪完中间也不会再动。
+    ends = (0, n) if _MOVE_ENDS else ()
+    if _HEAD_FIRST:                                       # 只给探针：反过来先挪图头／末段
+        for k in ends:
+            move(k)
+    for _ in range(len(piv) + 1):                         # 每轮至少定住一个；上限给死
+        if not any([move(k) for k in range(1, n)]):
             break
+    if not _HEAD_FIRST:
+        for k in ends:
+            move(k)
     out = []
     for k, s in enumerate(done):
         i0, i1 = piv[k], piv[k + 1]
