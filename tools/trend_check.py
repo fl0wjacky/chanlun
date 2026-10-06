@@ -203,13 +203,12 @@ def self_test():
             ("D3 换回读法 A（⑤ 那一格必须看得见）", dict(reading="A"),
              lambda v: [s["type"] for s in v["segments"]] != [s["type"] for s in base["segments"]])]
     miss = 0
-    # P3（「H 之后价格不再过 H」，按段内 hi／lo）：默认规则下 5 份夹具都一根不差，牙只在 zec_1h 不交替时露出来
-    # （段 8 端点 502.11→889.99、段内低点 250）：留着 P3 ⇒ 1 刀 1 撤（跟 Atlas 原型一样），拿掉 ⇒ 0 刀 3 撤
-    _, a3 = run("zec_1h.json", alternate=False)
-    _, b3 = run("zec_1h.json", alternate=False, no_exceed=False)
-    ok = (len(a3["bounds"]), len(a3["retracted"])) != (len(b3["bounds"]), len(b3["retracted"]))
-    print("%s P3 拿掉「H 之后不再过 H」（zec_1h、不交替）⇒ 分界 %d、撤回 %d（留着 %d、%d）" % (
-        "✓" if ok else "✗", len(b3["bounds"]), len(b3["retracted"]), len(a3["bounds"]), len(a3["retracted"])))
+    # P3（「H 之后价格不再过 H」，按段内 hi／lo）。card-753bd03a（L78 待定改判）以后 zec_1h 第 8 段拆开了，原来那颗牙
+    # （zec_1h 不交替 1 刀 1 撤 ↔ 0 刀 3 撤）没了；现在默认规则下 zec15 就咬得到：留着 5 刀，拿掉 7 刀。
+    _, b3 = run("zec15.json", no_exceed=False)
+    ok = len(b3["bounds"]) != len(base["bounds"])
+    print("%s P3 拿掉「H 之后不再过 H」（zec15）⇒ 分界 %d、撤回 %d（留着 %d、%d）" % (
+        "✓" if ok else "✗", len(b3["bounds"]), len(b3["retracted"]), len(base["bounds"]), len(base["retracted"])))
     miss += not ok
     # D4-1 的反向验证（原 cut_check --self-test 挪来）：重算中枢时不按刀分组 ⇒ ② 必须报出跨分界的框
     real = T._centers_with_cuts

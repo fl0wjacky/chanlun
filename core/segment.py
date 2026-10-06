@@ -496,8 +496,34 @@ def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
             out.append((h, l))
         return [dict(h=h, l=l, ih=0, il=0) for h, l in out]
 
+    memo = {}
+
+    def first_seg_def(start):
+        """从 pens[start] 起按定义找出的第一个已完成线段 → dict(dir, PI0, PI1, confirm)；没有 ⇒ None。
+        另写一遍（不调 build_segments）：开头三笔要有公共重叠，逐个候选按 judge 判，待定区间里的候选跳过。"""
+        if start in memo:
+            return memo[start]
+        out, i = None, start
+        while i + 2 < N and max(p["lo"] for p in pens[i:i + 3]) > min(p["hi"] for p in pens[i:i + 3]):
+            i += 1                                # 开头三笔没有公共重叠：构不成线段，往后挪
+        if i + 2 < N:
+            up_ = pens[i]["p1"] > pens[i]["p0"]
+            k2, skip_ = i + 2, 0
+            while k2 + 1 < N:
+                if k2 >= skip_:
+                    verdict, r = judge(i, k2, up_)
+                    if verdict == "yes":
+                        out = dict(dir="up" if up_ else "down", PI0=i, PI1=k2, confirm=max(k2 + 1, r or 0))
+                        break
+                    if verdict == "wait":
+                        skip_ = r
+                k2 += 2
+        memo[start] = out
+        return out
+
     def judge(i, k, up):
-        """候选 k 的判决：("yes", None) / ("no", None) / ("wait", r) —— r 为待定区间终止处。"""
+        """候选 k 的判决：("yes", r) / ("no", None) / ("wait", r)。
+        yes 时 r ＝ 新段方向确立的那一笔（第二种情况为 None）；wait 时 r ＝ 待定区间终止处。"""
         if k + 1 >= N:
             return "no", None
         pre = [dict(h=pens[j]["hi"], l=pens[j]["lo"]) for j in range(i + 1, k, 2)]
@@ -509,13 +535,17 @@ def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
         if (up and not v > e1["h"]) or (not up and not v < e1["l"]):
             return "no", None
         no_gap = first["lo"] <= e1["h"] if up else first["hi"] >= e1["l"]
-        if no_gap:                                # 第一种情况：第一笔在中间地带
+        if no_gap:                                # 第一种情况：第一笔 X 在中间地带 —— L78:32-38 看第一个反向线段
             end = first["p1"]
-            for r in range(k + 2, N):
+            rev = first_seg_def(k + 2)
+            ok_rev = rev is not None and rev["dir"] == ("up" if up else "down")
+            for r in range(k + 2, (rev["PI1"] + 1) if ok_rev else N):
                 if beyond_v(pens[r]):
-                    return "wait", r
+                    return "wait", r              # 反向线段破了 X 的起点：① 旧段延续
                 if (pens[r]["lo"] < end) if up else (pens[r]["hi"] > end):
-                    return "yes", None
+                    return "yes", r               # 反向线段走完前先破 X 的结束位置：提前定（L71:27）
+            if ok_rev:
+                return "yes", rev["confirm"]      # ② 反向线段走完没破 X 的起点
             return "wait", N
         # 第二种情况：V 之后的同类元素可以包含，找 E3
         mid, right, j = [first["hi"], first["lo"]], None, k + 3
@@ -554,9 +584,8 @@ def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
             bad.append(("终点处不满足定义", n, k))
         skip = 0                                  # 方向确立前 / 待定区间：其间候选不判
         if n > 0 and segs[n - 1].get("case") == 1:
-            end1 = pens[i]["p1"]                  # 本段第一笔的结束位置
-            r = next((j for j in range(i + 1, N)
-                      if ((pens[j]["hi"] > end1) if up else (pens[j]["lo"] < end1))), N)
+            p = segs[n - 1]                       # 上一段第一种情况结束：本段方向在它被确立的那一笔才确立
+            r = judge(p["PI0"], p["PI1"], p["dir"] == "up")[1] or 0
             if k < r:
                 bad.append(("本段在方向确立前就结束", n, r))
             skip = r
