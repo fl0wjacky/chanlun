@@ -60,13 +60,9 @@ const el = (id) => document.getElementById(id);
 const opts = { ...DEFAULTS, sigKinds: { ...DEFAULTS.sigKinds } };
 opts.vol = subParam('vol');
 opts.macd = subParam('macd');
-// 「先看切后」预览（卡 card-e346ede6-996）：**默认关**，而且不按屏宽定 —— 它跟 vol/macd 那两颗的理由
-// 不一样（那两颗是"手机上让图占满"），所以不走 SUB_DEF 那一套。地址栏 `?cutpv=1` 可以指名
-// （可分享、可截图复现；工装也拿它把两种画法都摆出来）。一个字没有 ⇒ 关。
-opts.cutPreview = SUB_Q.get('cutpv') === '1';
 // 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）：**默认开**（Nova 2026-10-05 17:09Z 定）——
 // 这一层就是小栋要看的那个东西，藏在 `?trend=1` 后面他打开页面根本看不见；开关留着，可以手动关掉。
-// 所以地址栏这一头是**反着写**的：`?trend=0` 才关（可分享、可截图复现 —— 跟 `cutpv` 同一条）。
+// 所以地址栏这一头是**反着写**的：`?trend=0` 才关（可分享、可截图复现）。
 // ★ 不进 DEFAULTS：那个对象记的是「TradingView 的默认值」那一组（卡面点名的），这一颗的理由跟它无关。
 // ★ 它**只在 `cut=trend` 那份载荷上有东西可画**（`cut=extend` 那份连 `trend` 这个键都没有）——
 //   所以那一档下这一颗按灰，理由写在标题里（跟「成交量」那颗在没有 v 的数据上按灰同一条账）。
@@ -93,6 +89,12 @@ const DEFAULT_MEASURE = 'macd';       // 后台的缺省也是它（core/signals
 //   所以地址栏里那个 `?cut=turn` 只会活到 /api/meta 回来为止：回显写 trend，`:1239` 那条闸门把
 //   认不出的词摆回缺省，两下一夹，这一页就落在 trend 上。**别在前端也留一份 turn 的名字表**。
 const DEFAULT_CUT = 'trend';
+// ★ 2026-10-06（小栋定 A，卡 card-3edd7fb3-412）：「延伸」**不摆给用户**了 —— 页面上只留「走势分段」。
+//   后台一个字没动：`cut_modes` 照旧回两档、`?cut=extend` 照旧打得开、图脚照旧印得出「延伸」，
+//   我们自己比对、查问题全靠它。⇒ 这是**藏起来**，不是删掉。
+//   ★ 摆出来只剩一档的时候，`loadMeasures` 那条「只有一个切法就不画这一组」自己会把整组藏掉 ——
+//     所以这里不用另写一段隐藏逻辑，也不动 CSS。★ 深链和归一都走**后台那份全名单**，不走这一行。
+const CUT_HIDDEN = ['extend'];
 // ★ measure 的初值是**地址栏说的那个**（可分享、可截图复现），不是写死的缺省 —— 但地址栏点名的那个
 //   后台认不认只有 /api/meta 知道，所以首屏是「先等名单、再发图表那一趟」，见文件末尾的启动那几行。
 //   切法同理（`?cut=extend` 可分享），所以这两个词的初值都是**地址栏说的那个**。
@@ -1305,11 +1307,15 @@ async function loadMeasures() {
     // 名单叫 `cut_modes`（Bram 10-05）：不叫 `cuts` —— 那个名字是**图表载荷**顶层那份切点清单的，
     // 两个接口里同名不同物，混起来就是把一张表的字段名当另一张表的用。
     const cl = Array.isArray(m.cut_modes) ? m.cut_modes.filter((x) => typeof x === 'string' && x) : [];
-    if (cl.length >= 2) {                // 同上：只有一个切法＝没什么可切的，不画这一组、也不发这个参数
-      cuts.list = cl;
+    // ★ 两个名单，别混：`cl` 是**后台真认的那几档**（地址栏那一头、深链归一那一条要看它 ——
+    //   `?cut=extend` 能不能留、该不该归一，问的是后台认不认，不是我们摆了几颗 chip）；
+    //   `shown` 才是**摆给用户的那几档**（滤掉 `CUT_HIDDEN`，见 DEFAULT_CUT 上面那段）。
+    const shown = cl.filter((x) => !CUT_HIDDEN.includes(x));
+    if (cl.length >= 2) {
+      cuts.list = shown;
       const want = new URLSearchParams(location.search).get('cut');
       if (want && !cl.includes(want)) paging.cut = cl.includes(DEFAULT_CUT) ? DEFAULT_CUT : cl[0];
-      buildCuts();
+      if (shown.length >= 2) buildCuts();    // 只剩一档＝没什么可切的：不画这一组、也不发这个参数
     }
   } catch (e) { /* 没后台（离线样本）或没这个接口：没有看法/切法可切，页面上不多一个字 */ }
 }
@@ -1432,31 +1438,6 @@ function buildCuts() {
   const mg = el('mgroup');
   if (mg) box.insertBefore(g, mg.nextSibling);   // 挨着「背驰看法」：两组都在图层那排**前面**
   else box.prepend(g);
-  // 「先看切后」：一个**开关**（`aria-pressed`），不是单选 —— 跟"切法选哪一种"不是一类东西，
-  // 所以**另起一组**，不塞进上面那个 `radiogroup`（把一个开关放进单选组里，读屏会读错）。
-  // ★ 只在切法名单里有 `trend` 的时候才建：没有"走势分段"，就没有"待定的刀"，这颗永远灰着 = 摆设。
-  if (cuts.list.includes('trend')) {
-    const pg = document.createElement('div');
-    pg.className = 'mgroup'; pg.id = 'pvgroup';
-    const pcap = document.createElement('span');
-    pcap.className = 'mcap'; pcap.textContent = '切后预览';
-    pg.appendChild(pcap);
-    const pb = document.createElement('button');
-    pb.className = 'chip mchip'; pb.type = 'button'; pb.id = 'pvchip';
-    pb.textContent = '先看切后';
-    pb.title = '先看切后：把还没立住的那几刀**也画成切开的框**（左沿虚线 ＋ 框内左端「随切点」签）。'
-      + '默认关 —— 没立住之前屏上照惯例画的还是旧框（第 88 课：中阴阶段仍借助前面那个中枢分析）。';
-    pb.onclick = () => {
-      if (paging.cut !== 'trend') return;         // 置灰时点不到；真点到了也什么都不做
-      opts.cutPreview = !opts.cutPreview;
-      renderCuts();
-      setUrl();
-      repaint();                                  // 只换**画法**：数据一个字都不用重取
-    };
-    pg.appendChild(pb);
-    const mg2 = el('cgroup');
-    if (mg2) box.insertBefore(pg, mg2.nextSibling); else box.prepend(pg);
-  }
   watchOverflow(box);                  // 又多了一排，手机上右边还有没有东西要重算
   renderCuts();
 }
@@ -1476,19 +1457,6 @@ function renderCuts() {
   if (cap) cap.textContent = on ? '中枢切法' : '中枢切法 · 中枢那两层都关着';
   if (on) g.removeAttribute('title');
   else g.title = '类中枢和线段中枢那两层都关着 —— 这一组只换中枢切在哪，先打开一层';
-  // 「先看切后」那颗开关（不是单选，所以不归上面那个循环）：只有「走势分段」下才有"待定的刀"，
-  // 别的切法下点了屏幕不会变 ⇒ 置灰，并把理由写在标题那行（手机没有 hover）。
-  const pg = el('pvgroup');
-  if (pg) {
-    const pb = el('pvchip');
-    const live = paging.cut === 'trend';
-    pb.setAttribute('aria-pressed', String(!!opts.cutPreview));
-    pb.disabled = !live;
-    const pcap = pg.querySelector('.mcap');
-    if (pcap) pcap.textContent = live ? '切后预览' : '切后预览 · 只在「走势分段」下有用';
-    if (live) pg.removeAttribute('title');
-    else pg.title = '切法现在是「延伸」：没有待定的刀，也就没有"切后"可看';
-  }
 }
 
 async function setCut(id) {
@@ -1962,12 +1930,10 @@ function setUrl() {
   for (const k of ['vol', 'macd']) {
     if (opts[k] === SUB_DEF) q.delete(k); else q.set(k, opts[k] ? '1' : '0');
   }
-  // 「先看切后」同理：关着是默认（这一档跟屏宽无关，见 opts.cutPreview 那行），开着才写上去。
-  if (opts.cutPreview) q.set('cutpv', '1'); else q.delete('cutpv');
   // 走势分段那一层：**默认开**（Nova 17:09Z），所以这一头反过来写 —— **关着才写上去**（`?trend=0`）。
   // 跟上面两颗（vol/macd 缺省写不写）同一条账，方向相反而已。
   if (opts.trend) q.delete('trend'); else q.set('trend', '0');
-  // 框编号：**默认关**（跟 cutpv 同一头）⇒ 开着才写上去。
+  // 框编号：**默认关**（跟「走势分段」那颗反着来）⇒ 开着才写上去。
   if (opts.trendNum) q.set('trendnum', '1'); else q.delete('trendnum');
   history.replaceState(null, '', `?${q}`);            // 可分享、可截图复现
 }

@@ -56,6 +56,9 @@
 //      这是 §八 3 的牙）④分界的价格字横心钉在极值那一根上 ⑤「待定」和「撤回」各写各的、条数对得上
 //      ⑥`?trend=0` 关得掉，且**那个色的像素真的清零**（数颜色，不数"前后两张图不等"—— 后者会拿
 //      价签跳动当替身）⑦`cut=extend` 那档载荷没有 `trend` 键 ⇒ 开关按灰、一条不画、图照常画。
+//      ⑤b（2026-10-06 补，card-3edd7fb3-412）那条「待定」的**灰点线钉在载荷说的那一根上** ——
+//      量画布像素（局部对比 ＋ 点划周期 == `DASH.trendCand` ＋ 段数），不读 state。它是 ghost ⑰e
+//      退休时的**接班的**：那格原先钉的就是"待定画在 `cut_bar` 那一根上"，位置守卫不能跟着退休。
 //      ★ 判据的色号和不透明度都从 `/theme.js` 现读（`await import('/theme.js')`）：改配色这几格跟着走。
 //
 //   ★ 牙齿（2026-10-04 我补的）：把页面弄坏、看它**是红还是炸**。做法：去掉 web/app.js 里那句
@@ -524,7 +527,8 @@ const shotChart = async (p, tag) => {
   // ★ 这一层自带一个只读出口 `window.__app.state.trendDrawn`（跟 `state.boxesDrawn` 同性质：
   //   **这一帧**交给这一层的清单，每帧开头重写）—— 画了一条带它上面就有一条。量它，比截图找颜色稳，
   //   红了也说得清错在哪一条。
-  console.log('32–38 走势分段那一层：默认开、颜色跟分界点走、斜线带铺到载荷说的那根、关得掉、extend 不炸');
+  console.log('32–38 走势分段那一层：默认开、颜色跟分界点走、斜线带铺到载荷说的那根、'
+            + '「待定」那条线钉在载荷说的那一根上、关得掉、extend 不炸');
   const TQ = '?symbol=ZECUSDT&tf=15m';
   // 只读出口 ＝ 清单 ＋ **这一帧的视口口径**（每一根该落在哪个像素由工装自己算，不靠页面喂）。
   // 载荷那几件事实一起带回来，**断言的两边都印得出来** —— 后台哪天回了空对象，这几格是红，不是死闸。
@@ -613,6 +617,78 @@ const shotChart = async (p, tag) => {
      pendLbl.length === A.pending.length && retrLbl.length === A.retracted.length,
      `载荷 待定 ${A.pending.length} ／ 撤回 ${A.retracted.length}　屏上 待定 ${pendLbl.length}`
      + ` ／ 撤回 ${retrLbl.length}　${JSON.stringify([...pendLbl, ...retrLbl])}`);
+
+  // ㊱b 那条「待定」的灰点线**钉在载荷说的那一根上**（2026-10-06 补，卡 card-3edd7fb3-412）
+  //   ★ 为什么补这一格：退掉「先看切后」那套画法的时候，ghost ⑰e 跟着退了 —— 它当时量的正是
+  //     "那一刀画在 `cut_bar` 那一根上"。**位置守卫不能跟着退休**：v3 自己那条 `trend.pending`
+  //     灰点线接住了「待定」这件事（见 `layers.js` 的 `trendMarkView` ②），它要是画歪了、或者哪天
+  //     有人动了那个换算，屏上那条线就指着**另一根 K 线** —— 而画面看起来**完全正常**。
+  //     这正是"掉牙"那种坏法：格子还绿着，量的东西早没了。所以这一格量的是**画布上的像素**。
+  //   ★ 认的是**那一条线**，不是"某处有条竖线"，三层一起认：
+  //     ① 这一列上的墨要比左右各 2px 都亮（局部对比 —— 蜡烛边也亮，所以光有这条不够）；
+  //     ② 墨的**点划周期** == `/theme.js` 的 `DASH.trendCand`（`[2,4]` ⇒ 6px）。同屏另外两条竖线是
+  //        `trendEdge`（7px）和 `trendBack`（4px），三个周期互不相同 ⇒ 认不错；
+  //     ③ 墨的占比够大、段数够多（一条贯穿整屏的点线有八十来段，蜡烛那点边凑不出这个形状）。
+  //   ★ 容差 ±1px：线画出来占两列（round 之后），且 `timeToCoordinate` 给的是小数，四舍五入差 1 是正常的。
+  //   ★ 牙齿（交这一卡时手验过，工装不会自己去改页面）：把 `trendMarkView` ② 里那个 x 的换算挪 5 根，
+  //     这条线跟着挪 5 根 ⇒ 本格当场红（5 根远超出 ±1px）。
+  const DASH = await dA.p.evaluate(async () => (await import('/theme.js')).DASH);
+  const CAND_P = (DASH.trendCand || []).reduce((a, b) => a + b, 0);      // 点划一个周期的长度
+  // 在 `X ± win` 这几列里找「待定那条点线」的形状。返回：认出来的那几列（相对 X 的偏移）＋ 全窗口的读数。
+  const candCols = (pg, X, win) => pg.evaluate(([X, win, P]) => {
+    const c0 = document.querySelector('#chart canvas'), r0 = c0.getBoundingClientRect();
+    const one = (Xc) => {
+      let best = null;
+      for (const c of document.querySelectorAll('#chart canvas')) {
+        const r = c.getBoundingClientRect(), sx = c.width / r.width;
+        const cx = Math.round((Xc - (r.left - r0.left)) * sx);
+        if (cx < 8 || cx + 8 >= c.width) continue;
+        let img;
+        try { img = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; } catch (e) { continue; }
+        const lum = (x, y) => { const i = (y * c.width + x) * 4; return img[i] + img[i + 1] + img[i + 2]; };
+        const off = Math.max(2, Math.round(2 * sx));
+        const ink = new Uint8Array(c.height);
+        for (let y = 0; y < c.height; y++) {
+          const L = lum(cx, y);
+          ink[y] = (L - lum(cx - off, y) > 90 && L - lum(cx + off, y) > 90) ? 1 : 0;
+        }
+        const runs = [];
+        for (let y = 0; y < ink.length; ) {
+          if (!ink[y]) { y++; continue; }
+          const s0 = y; while (y < ink.length && ink[y]) y++;
+          runs.push([s0, y - s0]);
+        }
+        const gaps = runs.slice(1).map((q, i) => q[0] - runs[i][0]).sort((p, q) => p - q);
+        const s = { frac: runs.reduce((k, q) => k + q[1], 0) / ink.length,
+                    gap: gaps.length ? gaps[gaps.length >> 1] / sx : 0, runs: runs.length };
+        if (!best || s.frac > best.frac) best = s;
+      }
+      return best;
+    };
+    const hits = [], all = [];
+    for (let d = -win; d <= win; d++) {
+      const s = one(X + d);
+      all.push({ d, frac: s ? +s.frac.toFixed(3) : null, gap: s ? +s.gap.toFixed(1) : null,
+                 runs: s ? s.runs : null });
+      if (s && s.frac >= 0.25 && s.runs >= 20 && Math.abs(s.gap - P) <= 1) hits.push(d);
+    }
+    return { hits, all };
+  }, [X, win, CAND_P]);
+  const CG = [];
+  for (const p of A.pending) CG.push(Object.assign({ bar: p.bar, x: Math.round(p.x) },
+    await candCols(dA.p, Math.round(p.x), 8)));
+  const topOf = (g) => g.all.reduce((a, b) => ((b.frac || 0) > (a.frac || 0) ? b : a));
+  ck(`那条「待定」的灰点线**钉在载荷说的那一根上**（认形状：点划周期 == \`DASH.trendCand\` ＝ ${CAND_P}px）`
+     + '—— 屏上每一根「待定」都得在**它自己那个 x** 上认得出这条线，而且窗口里别处不许认出来',
+     A.pending.length >= 1 && CG.every((g) => g.hits.length >= 1 && g.hits.every((d) => Math.abs(d) <= 1)),
+     // ★ 载荷里一根「待定」都没有 ⇒ 这一格**什么都没量到**，红着让人来看，不是绿（假绿比红坏）。
+     (A.T.pending || []).length === 0
+       ? '★ 载荷里一根「待定」都没有 ⇒ 这一格是**空的**'
+       : (A.pending.length === 0 ? '★ 载荷有「待定」，但一根都不在屏上 ⇒ 这一格是**空的**' : '')
+         + CG.map((g) => `bar=${g.bar} 载荷 x=${g.x}｜认出来的列 `
+             + (g.hits.length ? JSON.stringify(g.hits) : '★ 一列都没有')
+             + `（${g.all.length} 列里占比最高的是 x${topOf(g).d >= 0 ? '+' : ''}${topOf(g).d}：`
+             + `占比 ${topOf(g).frac}／周期 ${topOf(g).gap}／段数 ${topOf(g).runs}）`).join('；'));
 
   // ㊲ 关得掉 ＋ **那个色真的画到屏幕上了**
   //   ★ 「这一层真画了没有」数的是**它自己那个色**的像素：16% 的绿铺在近黑上，混出来是什么色

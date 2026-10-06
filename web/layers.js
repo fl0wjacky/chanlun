@@ -86,19 +86,12 @@ export function hostOf(data, tier) {
   return { host: pens, unfinishedJ: pens.length - 1 };   // 最后一根笔的终点还会被更极端的分型替换
 }
 
-/** 载荷不对劲时报一声（**只报一次**：这种东西一帧一条会把控制台刷爆，等于没报）。
- *  报的是「我按什么画的」，不是渲染失败 —— 页面上照画，读的人才知道该去哪儿补字段。 */
-const cutWarned = new Set();
-function warnCut(msg) {
-  if (cutWarned.has(msg)) return;
-  cutWarned.add(msg);
-  if (typeof console !== 'undefined' && console.warn) console.warn(`[中枢切分] ${msg}`);
-}
-
-/** 载荷顶层的 `cuts[]`（卡 card-e346ede6-996）。形状不对/没有 ⇒ 空数组 ⇒ 页面上不多一笔。 */
-const cutsOf = (data) => (Array.isArray(data.cuts) ? data.cuts : []);
-
-export function boxes(data, tier, preview) {
+/** 中枢框：这一层要画的那些（`centers` ／ `seg_centers`）。
+ *  ★ 形参 `preview`（「先看切后」）2026-10-06 退了（卡 card-3edd7fb3-412）：载荷顶层不再有 `cuts[]`
+ *    （spec D4-2 中阴框不断 ⇒ 没有"切开会变成的框"这种来源），那个开关点着**一个像素都不变**。
+ *  ★ 退的是**预览那套画法**；`drawFrame` 里「左沿改虚线」那条照旧留着 —— 它读的是 `z.provisional`，
+ *    跟开关无关（后台哪天真在 `seg_centers` 上标这个键，它还接得住）。 */
+export function boxes(data, tier) {
   const key = tier === 'seg' ? 'seg_centers' : 'centers';
   const { host, unfinishedJ } = hostOf(data, tier);
   const out = [];
@@ -107,84 +100,17 @@ export function boxes(data, tier, preview) {
     if (!a || !b) continue;
     out.push({ z, tier, i0: a.i0, i1: b.i1, unfinishedJ, host });
   }
-  // 「先看切后」（前端开关，默认关；Nova 2026-10-05 定）：没立住的那几刀，把**切开会变成的框**
-  // 也摆出来（载荷顶层 `cuts[i].boxes`）。开了预览就是"先看切后那个样子" ⇒ 被切的那个旧框**换掉**，
-  // 不是新旧两层框叠着画 —— 叠着画读起来像两个中枢，那是另一回事（用户会以为图上真有这么两个框）。
-  // ★ 只换**线段中枢**这一层：契约里只有 `seg_centers` 是"当前状态"那一份（Bram 10-05）。
-  // ★ 「同一组里两刀」时预览只摆**第一刀**切出来的样子（`cuts[]` 里按序取，后一刀的组跟先收下的组
-  //   交叠就跳过）：预览是给人看一眼的，不是让人在预览里比较两种切法；两刀的分叉是 `cuts[]` 里的事实，
-  //   不归这一层表达。
-  // ★ 「换掉哪些旧框」的判据是**载荷给的临时框自己的地盘**，不是"哪一刀切在框里"：
-  //   真引擎给的是**整组**重算的结果（`cut_centers`：`prev <= PI0 < next` 全收），组里**没被切到**的
-  //   框也在里头 —— 线上 ZEC 15m 那一刀的两个临时框里就有一个跟旧框一模一样。只换"包住 `cut_bar`
-  //   的那个"的话，那个没变过的框会**画两遍**（旧的一遍 ＋ 临时的一遍，左沿一实一虚、还多挂一枚
-  //   「随切点」）——屏上是同一个框摞着两条边。工装 ⑰i 钉的就是这个。
-  //   ★ 交叠判据用**严格**不等号：两个框只共一个端点（前一个的右沿＝后一个的左沿）不算交叠，
-  //     算的话会把挨着的那一组框误撤掉、还补不回来。
-  if (preview && tier === 'seg') {
-    const pend = cutsOf(data).filter((c) => c && c.status === 'pending' && Array.isArray(c.boxes) && c.boxes.length);
-    const spans = [];                               // 收下的那一刀，整组临时框的地盘（PI 只指向成员，拿 host 换成 bar）
-    const taken = [];                               // 已经收下的是哪几刀
-    for (const c of pend) {
-      const sp = [];
-      for (const z of c.boxes) {
-        const a = host[z.PI0], b = host[z.PI1];
-        if (a && b) sp.push([a.i0, b.i1]);
-      }
-      if (!sp.length) continue;
-      // 后一刀的组跟前一刀的组交叠 ⇒ 同一组被切了两次 ⇒ 只留先的那一刀（见上面那条注释）。
-      if (spans.some(([s0, s1]) => sp.some(([t0, t1]) => t0 < s1 && s0 < t1))) continue;
-      spans.push(...sp); taken.push(c);
-    }
-    if (spans.length) {
-      const overlaps = (x) => spans.some(([s0, s1]) => x.i0 < s1 && s0 < x.i1);
-      const keep = out.filter((b) => !overlaps(b));
-      if (keep.length !== out.length) {
-        out.length = 0; out.push(...keep);
-      }
-      for (const c of taken) {
-        for (const z of c.boxes) {
-          const a = host[z.PI0], b = host[z.PI1];
-          if (!a || !b) continue;
-          // 契约：`cuts[i].boxes` 里的框**一定**是 provisional（Bram 10-05）。这里兜底补上这个键，
-          // 为的是「缺了键」时预览里的框**照样带记号** —— 预览开着却看不出哪些框是临时的，
-          // 比不画还坏：屏幕上会多出几个看着像已经定了的框。
-          out.push({ z: { ...z, provisional: true }, tier, i0: a.i0, i1: b.i1, unfinishedJ, host });
-        }
-      }
-    }
-  }
   return out;
 }
 
-/** status=pending 的那几刀，各认到「**包住它的那个旧框**」上（Bram 10-05：竖虚线画在 cut_bar 那根、
- *  高度取包住它的旧框的 ZD…ZG）。认不到框的刀**不画**：一条悬空的竖线没有高度，也没有"切了谁"可讲。
- *  ★ `done`（已经切成 ⇒ 框本来就是切开的那些）和 `void`（作废 ⇒ 什么都不加）都不画记号 ——
- *    跟图脚同一条规矩：**不知道的事不编**，作废的刀更不该在图上留一笔。 */
-function pendingCuts(data) {
-  const out = [];
-  const seg = boxes(data, 'seg'), pen = boxes(data, 'pen');
-  for (const c of cutsOf(data)) {
-    if (!c || c.status !== 'pending') continue;
-    const bar = Number(c.cut_bar);
-    if (!Number.isFinite(bar)) continue;
-    // 层号以载荷为准。★ Atlas 10-05 定死：规则页里**只切线段层**（笔层只用来认转折点），所以
-    // `level` 缺了就是后台漏了字段 —— **按 seg 画、控制台报一声**，不往笔层反推：反推是在猜，
-    // 猜出来的线画在图上，没人看得出那是猜的（这条比"少画一条线"贵得多）。
-    const level = c.level === 'pen' ? 'pen' : 'seg';
-    if (c.level !== 'seg' && c.level !== 'pen') warnCut(`cuts[].level 缺了/不认识（${JSON.stringify(c.level)}）：按 seg 画，请后台补 level`);
-    const bx = (level === 'seg' ? seg : pen).find((b) => b.i0 <= bar && bar <= b.i1);
-    // ★ `inner`：这一刀是不是**真的切在这个框的肚子里**（i0 < bar < i1）。闭区间只管"这刀归哪个框画线"，
-    //   「挂不挂签」是另一件事：切点正好压在框的**右沿**上时（线上 ZEC 15m 就是：cut_bar=19911 ＝ 框
-    //   19698..19911 的右端），这一刀**不改这个框**，改的是它**后面那一组从哪儿重算**（Bram/Atlas 10-05
-    //   的规则解释）。在这种框上挂「待定」＝告诉人"这个框快要被切了"，正好是反的 ⇒ 只画线、不挂签
-    //   （Nova 10-05 08:58 拍的）。要求"严格落在框内"**不是**把这种刀丢掉：线照画、刀照样进 `cuts`。
-    if (!bx) continue;
-    const inner = bx.i0 < bar && bar < bx.i1;
-    out.push({ bar, tier: level, bx, inner });
-  }
-  return out;
-}
+/** ★ 这里原本有一个 `pendingCuts`：把载荷顶层 `cuts[]` 里 `status=pending` 的那几刀认到「包住它的
+ *  那个旧框」上，给标注层 ③.5 画那条「待定」竖线用。2026-10-06 整段退了（卡 card-3edd7fb3-412）——
+ *  载荷不再产 `cuts`（spec D4-2：中阴框不断），这条路没有输入了。
+ *  ★ 连带退掉的是一条**规矩**、不是搬走：这里原来立着「切点压在框沿上 ⇒ 只画线、不挂签」，理由是
+ *    **那一刀不改这个框**（改的是它后面那一组从哪儿重算），挂「待定」会读成"这个框要被切"——正好是反的。
+ *    v3 里框不再被切 ⇒ 这条规矩**失去了前提**。将来谁要再引入「框被切」的路，先回来看这一句。
+ *  ★ 「待定」这件事**没有丢**：v3 自己那一条（`trend.pending`，见 `trendMarkView` ②）接住了它，
+ *    位置守卫落在 `tools/web_measure_e2e.js`（灰点线必须钉在载荷说的那一根上）。 */
 
 /** 规则 B（full_common.box_split 的同构版）→ {splitAt: bar 下标 | null, solid: bool} */
 function boxSplit(z, i0, i1, host, unfinishedJ, iOfBar) {
@@ -263,14 +189,16 @@ export function makeBoxPrimitive(state) {
                 const col = tier === 'seg' ? CHART.seg : CHART.pen;
                 const w = tier === 'seg' ? WIDTH.sc : WIDTH.pc;   // 框线宽跟 TradingView 调用点走（卡面口径）
                 const fill = tier === 'seg' ? CHART.sc_fill : CHART.pc_fill;
-                for (const bx of boxes(data, tier, !!opts.cutPreview)) {
+                for (const bx of boxes(data, tier)) {
                   const x0 = vp.xOfBar(bx.i0), x1 = vp.xOfBar(bx.i1);
                   const yt = vp.yOfPrice(bx.z.ZG), yb = vp.yOfPrice(bx.z.ZD);
                   if (x0 === null || x1 === null || yt === null || yb === null) continue;
                   const { splitAt, solid } = boxSplit(bx.z, bx.i0, bx.i1, bx.host, bx.unfinishedJ, (i) => vp.xOfBar(i));
                   // 卡 card-e346ede6-996：`provisional`（这个框是从一个**还没立住**的切点之后重算出来的）
                   // ⇒ **左沿**改虚线。为什么是左沿：那个切点就是它的起点（起点一撤，整个框回并进原来那个大框）。
-                  // 「待定」那根切点和签**不在这儿画** —— 它们在标注层（画在 K 线之上），见那一层 ③.5。
+                  // ★ 2026-10-06：从前这儿还跟着一句「「待定」那根切点和签不在这儿画，在标注层 ③.5」——
+                  //   那条路退了（卡 card-3edd7fb3-412），标注层整个 ③.5／③.6 都撤了。这条判定本身
+                  //   **留着**：它读的是载荷的 `z.provisional`，跟「先看切后」那颗开关无关。
                   const openL = !!bx.z.provisional;
                   drawFrame(ctx, x0, yt, x1, yb, col, w, fill, splitAt, solid, W, openL);
                   // 只记**底下那个框**：升级框跟它同 i0/i1，记进去会让「同一格只许出现一次」这把尺子
@@ -347,7 +275,6 @@ export function makeAnnotPrimitive(state) {
               const H = mediaSize.height;   // 视口下沿 —— 夹框/避让要两头都不出画布（见 fitBox）
               const vp = viewport(this._chart, state.candleSeries || this._series, data);
               placed.length = 0;
-              const pv = !!opts.cutPreview;   // 「先看切后」（切点记号那一节用它，见 ③.5）
 
               // ① 线段端点：顶红底绿（full_common 的 ellipse，半径 9 / 描边 4）
               if (sh.seg) {
@@ -409,7 +336,7 @@ export function makeAnnotPrimitive(state) {
                 const on = tier === 'seg' ? sh.sc : sh.pc;
                 if (!on) continue;
                 const col = tier === 'seg' ? CHART.seg : CHART.pen;
-                for (const bx of boxes(data, tier, pv)) {
+                for (const bx of boxes(data, tier)) {
                   const x = vp.xOfBar(bx.i0), y = vp.yOfPrice(bx.z.ZG);
                   if (!onScreen(x, W, 8) || y === null) continue;   // 框滚出去了，价签也跟着走
                   tag(ctx, placed, x + 8, y - 8, `[${fmtG(bx.z.ZD)}, ${fmtG(bx.z.ZG)}]`, col, W, H);
@@ -424,84 +351,16 @@ export function makeAnnotPrimitive(state) {
                 }
               }
 
-              // ③.5 切点记号（卡 card-e346ede6-996）：载荷顶层 `cuts[]` 里 `status=pending` 的那几刀。
-              //   ★ 画在**标注层**（K 线之上），不在框层：框层在 K 线**底下**（跟 Python 落笔次序一致），
-              //     一根竖虚线画在底下正好被密集 K 线吃掉（真像素量过：同一个记号在空背景上读得出、
-              //     压在 K 线上就没了）。框留在底下，**记号必须在上面**才有意义。
-              //   ★ 走 `tag()`（价签那一套：实底 ＋ 黑字 ＋ 登记 `placed`）⇒ ① 跟价签同一个形状语言；
-              //     ② 自动跟价签/买卖点文字互相避让；③ 进 `state.labelBoxes`，那把「文字零重叠」的尺子
-              //     顺手就把这枚签也量了。**签是主判据** —— 站点最远 0.53 px/根 时一条细虚线基本看不见。
-              //   ★ **一个框上只挂一枚签**、签里带刀数（「待定 ×3」）：一刀一枚签的话，笔层三类点一多
-              //     （Bram 10-05 提醒过会切碎）屏上就只剩小签，读不出"哪个框待定"这件事了。
-              //   ★ **切点压在框的右沿（或左沿）上时只画线、不挂签**：那一刀不改这个框（改的是它后面
-              //     那一组从哪儿重算，Bram/Atlas 10-05），挂签会读成"这个框要被切" —— 正好是反的。
-              //     Nova 10-05 08:58 拍。签里的刀数也只数框内那几刀。
-              //   ★ 闸门跟价签同一条（框所在那一层开着才画）：层关着还往外画，那就不是开关的语义了。
-              //   ★ 预览开着时不画这一组：那时候屏上摆的就是切开后的框（各带「随切点」），
-              //     再把待定的竖线画上去，等于同一件事说两遍。
-              if (!pv) {
-                const byTier = { seg: [], pen: [] };
-                for (const c of pendingCuts(data)) byTier[c.tier].push(c);
-                for (const tier of ['seg', 'pen']) {
-                  if (!byTier[tier].length) continue;
-                  const on = tier === 'seg' ? sh.sc : sh.pc;
-                  if (!on) continue;
-                  const col = tier === 'seg' ? CHART.seg : CHART.pen;
-                  const byBox = new Map();                      // 框 → 它身上那几刀（顺序＝载荷给的顺序）
-                  for (const c of byTier[tier]) {
-                    if (!byBox.has(c.bx)) byBox.set(c.bx, []);
-                    byBox.get(c.bx).push(c);
-                  }
-                  for (const [bx, cuts] of byBox) {
-                    const yt = vp.yOfPrice(bx.z.ZG), yb = vp.yOfPrice(bx.z.ZD);
-                    if (yt === null || yb === null) continue;
-                    const yTop = Math.min(yt, yb), yBot = Math.max(yt, yb);
-                    ctx.setLineDash(DASH.box); ctx.strokeStyle = rgba(col, 235);
-                    ctx.lineWidth = WIDTH[tier === 'seg' ? 'sc' : 'pc'];
-                    // ★ 线归「刀」，签归「框内的刀」——两件事分开数：
-                    //   压在框沿上的那一刀（`inner === false`）**线照画**（切点是真事、位置也在那儿），
-                    //   但**不进签的账**：它不改这个框，挂「待定」会读成"这个框要被切"（见 `pendingCuts`）。
-                    let xr = null;                              // 签挂**看得见的、框内**最右那一刀上
-                    for (const c of cuts) {
-                      const x = vp.xOfBar(c.bar);
-                      if (x === null || !onScreen(x, W, 8)) continue;
-                      ctx.beginPath(); ctx.moveTo(x, yTop); ctx.lineTo(x, yBot); ctx.stroke();
-                      if (!c.inner) continue;
-                      if (xr === null || x > xr) xr = x;
-                    }
-                    ctx.setLineDash([]);
-                    const nIn = cuts.filter((c) => c.inner).length;   // 签里的刀数＝**框内**那几刀
-                    if (xr !== null && nIn) {
-                      const txt = nIn > 1 ? `待定 ×${nIn}` : '待定';
-                      tagRight(ctx, placed, xr - 4, yTop + 4 + TAG_H, txt, col, W, H);
-                    }
-                  }
-                }
-              }
-
-              // ③.6 「随切点」（卡 card-e346ede6-996）：这个框是**照还没立住的那一刀切出来的**
-              //   （`cuts[i].boxes` 里那一份，契约说它们一定带 `provisional`）—— 那一刀一撤，它们整个
-              //   都没了、旧框回来，**不只是挪一下边界**。Nova 定的两条：① 一眼看得出跟「待定」不是一种东西；
-              //   ② 不确定程度更高的更「虚」。⇒ **左沿**改虚线（框层按同一个字段画，见 drawFrame 的 `openL`）
-              //   ＋ 框内左端一枚「随切点」签。只有预览开着的时候才可能有这种框（契约：`provisional`
-              //   只挂在 `cuts[i].boxes` 上）。
-              for (const tier of ['seg', 'pen']) {
-                const on = tier === 'seg' ? sh.sc : sh.pc;
-                if (!on) continue;
-                const col = tier === 'seg' ? CHART.seg : CHART.pen;
-                for (const bx of boxes(data, tier, pv)) {
-                  if (!bx.z.provisional) continue;
-                  const yt = vp.yOfPrice(bx.z.ZG), yb = vp.yOfPrice(bx.z.ZD);
-                  const x0 = vp.xOfBar(bx.i0), x1 = vp.xOfBar(bx.i1);
-                  if (yt === null || yb === null || x0 === null || x1 === null) continue;
-                  // ★ 判据是「**这个框有没有露在屏上**」，不是「它的左沿在不在屏上」。切点前面那个没被切到的
-                  //   框可以很长（线上那一组就是这样：i0 在左边界外 1067px，一直伸进屏里）—— 按左沿判的话
-                  //   它会被整条跳过，屏上就是一个**看得见、却没记号**的临时框，跟已经定了的框分不出来。
-                  //   露着就挂，签锚在**看得见的那一头**（左沿在屏外就锚到左边界上）。
-                  if (x1 < 0 || x0 > W) continue;                 // 整只在屏外：没地方挂，也不该挂
-                  tag(ctx, placed, Math.max(x0, 4) + 4, Math.min(yt, yb) + 4 + TAG_H, '随切点', col, W, H);
-                }
-              }
+              // ③.5 切点记号 ／ ③.6 「随切点」（卡 card-e346ede6-996）：**2026-10-06 整段退了**
+              //   （卡 card-3edd7fb3-412）。载荷顶层不再有 `cuts[]`（spec D4-2：中阴框不断）⇒ 既没有
+              //   "待定的刀"可标、也没有"切开会变成的框"可画；「先看切后」那颗开关点着**一个像素都不变**
+              //   （本机探针连跑 3 次数过逐层像素），却还在**默认那一档**上撒谎（title 写着"把没立住的那几刀
+              //   画成切开的框"）—— 开关和这套画法一起退。
+              //   ★ 「待定」这件事**没有丢**：v3 自己那一条（`trend.pending`，见 `trendMarkView` ②）接住了
+              //     它 —— 那是**整屏高**的灰点线，说的是"这里是候选极值"；旧的 ③.5 是**框高**、说的是
+              //     "这个框要被切"。v3 只剩前一层意思，画法本来就该换，不是原样搬过去的。
+              //   ★ 量法挪了个地方：`tools/web_measure_e2e.js` 里新补的那一格钉的就是"灰点线落在载荷
+              //     那一根上"（原来钉这件事的是 ghost ⑰e，它量的是 `cuts[]` 这条路，跟着一起退了）。
 
               // ④ 买卖点**文字**：最后画，跟价签共用 `placed` ⇒ 文字之间互相避让、价签也避开它；
               //    压在三角上面 ⇒ 数字/字完整可读（与 Python 出图的结论一致）。
@@ -539,7 +398,9 @@ export function makeAnnotPrimitive(state) {
 // 载荷：顶层 `trend` ＝ {bounds, retracted, pending, segments, units}。**只有 `cut=trend` 那一趟才有**
 // （`cut=extend` 那份连这个键都没有 —— web/check_parity.py 两头各钉了一条断言）；没有就一笔不画。
 //
-// 分两层画，跟框层／标注层同一条理由（真像素量过，见下面 ③.5 那段）：
+// 分两层画，跟框层／标注层同一条理由（真像素量过：一根竖虚线画在框层那种位置会被密集 K 线整个吃掉，
+// 同一个记号在空背景上读得出、压在 K 线上就没了 —— 那条账原来记在标注层 ③.5，2026-10-06 ③.5 退了，
+// 结论照旧，见卡 card-3edd7fb3-412）：
 //   · **背景带 ＋ 中阴那条斜线 ＋ 升级框** 挂 `bottom`（压在 K 线底下，跟 Python 落笔次序一致）；
 //   · **分界竖虚线 ＋ 极值那个点 ＋ 价格 ＋ 待定／撤回 ＋「升级」二字** 挂 `top`（压在 K 线之上）
 //     —— 一根竖虚线画在底下会被密集 K 线整个吃掉，那就等于没画。
@@ -1012,13 +873,9 @@ function tag(ctx, placed, x, y, text, col, W, H) {   // placed 由调用方传�
 }
 // <<< TAG_BOX
 
-/** 跟 `tag()` 同一枚签，只是**贴在右边**：给「待定」用（签挂在切点那根竖线的左边，右边缘贴线）。
- *  ★ 这里只多量一次字宽（`tag()` 里还会再量一次）：框的式子**仍然只有 `tag()` 那一份** ——
- *    这一步是"先问一句字多宽、好把左锚挪到它该在的地方"，不是另写一遍框（另写一遍就是两处判据）。 */
-function tagRight(ctx, placed, xr, y, text, col, W, H) {
-  ctx.font = FONT_SM;
-  return tag(ctx, placed, xr - (ctx.measureText(text).width + 10) - 4, y, text, col, W, H);
-}
+// ★ 2026-10-06 退了一个 `tagRight`（右锚的签）：它只服务标注层 ③.5 那条「待定」竖线，那条路跟着
+//   `cuts[]` 一起退了（卡 card-3edd7fb3-412）。将来要挂右锚的签，`tag()` 那一份框式子照旧能用，
+//   右锚 = 左锚减去字宽（见 ③.5 退掉的那一版的 git 历史）。
 
 /** 买卖点的**三角**（只画形状）。文字拆到 `drawSignalText` —— 拆开是为了让三角先落地、
  *  文字最后走 `placed`，跟 Python `draw_signals()` 与 `draw_labels()` 的分工同构。 */
