@@ -692,6 +692,43 @@ const rgbOf = (hex) => 'rgb(' + [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2
   await xp.close();
   await xctx.close();
 
+  // ================================================================ ㉒ 署名那颗日期按**本地钟**
+  // Nova 2026-10-06 12:28Z 定的口径：这一格答的是「今天几号」，读的人是看图的人 ⇒ 跟页头那两格同类，
+  //   按浏览器本地时区印。作者侧的那颗时间戳本来就不该跟着"打开页面的时刻"变。
+  // ★ 怎么摆才不是替身：挑两个**相差 25 小时**的时区 —— +14 和 −11。差 25h > 24h ⇒ 它们的日历
+  //   **永远不是同一天**，两支页面印出来的日期**必须不同**。
+  //   写成 UTC 那版（老代码）两支印的是同一个 UTC 日期 ⇒ 这一格必红。
+  //   ★ 这一半**跟"现在几点"无关**：跑在一天里的任何一刻判据都咬得住，不会像"挑个时段才红"的摆法那样空转。
+  // ★ 但它只证「两边不一样」，不证「值是对的」（印成 UTC+X 的胡编也能不一样）⇒ 再各自对一次**真值**：
+  //   同一刻用 Intl 在那个时区里算出来的今天。真值那半留 ±1 小时容差 —— 读页面的那一刻正好压在这两个
+  //   时区的午夜上时，本地日期会自然翻页，那是**时间在走**、不是页面错。（容差只够跨一次午夜，
+  //   咬 UTC 那版的两半各差 14h／11h，仍然咬得住。）
+  scen({ tick: 0.1 });
+  const TZ_A = 'Pacific/Kiritimati';                         // UTC+14
+  const TZ_B = 'Pacific/Midway';                             // UTC−11
+  const dateIn = (tz, d) => new Intl.DateTimeFormat('sv-SE',
+    { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d || new Date());
+  const nearToday = (tz) => [...new Set([-3600e3, 0, 3600e3]
+    .map((k) => dateIn(tz, new Date(Date.now() + k))))];
+  const readToday = async (tz) => {
+    const c = await newCtx({ viewport: { width: 1280, height: 800 }, timezoneId: tz });
+    const q = await open(c, '?symbol=ZECUSDT&tf=1h&last=300');
+    const v = ((await q.locator('#today').textContent()) || '').trim();
+    await q.close();
+    await c.close();
+    return v;
+  };
+  const todayA = await readToday(TZ_A);
+  const expA = nearToday(TZ_A);
+  const todayB = await readToday(TZ_B);
+  const expB = nearToday(TZ_B);
+  t('㉒ 角上署名那颗日期按**浏览器本地钟**印（不是 UTC）：两个相差 25 小时的时区，「今天」必须印成不同的两天',
+    todayA !== todayB && expA.includes(todayA) && expB.includes(todayB),
+    `${TZ_A}(UTC+14) ⇒ ${todayA}（该是 ${expA.join('／')}）｜`
+    + `${TZ_B}(UTC−11) ⇒ ${todayB}（该是 ${expB.join('／')}）`
+    + `｜UTC 今天 = ${dateIn('UTC')}`
+    + (todayA === todayB ? '　★ 两边印成同一天 ⇒ 这格印的是 UTC 那版' : ''));
+
   await b.close();
   console.log(`\n${ok.length}/${ok.length + bad.length} 绿`
     + (errors.length ? `　★ 页面报错 ${errors.length} 条：\n   ` + errors.slice(0, 5).join('\n   ') : ''));

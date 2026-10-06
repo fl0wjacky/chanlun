@@ -20,12 +20,19 @@ const mix = (a, b, k) => '#' + rgb(a).map((c, i) => Math.round(c * k + rgb(b)[i]
 // 写法跟图上中枢框一致（layers.js 里是 `rgba(col, fill)`，fill 是 0-255）—— 色仍只有 theme.js 一个出处。
 const hexA = (h, a) => `rgba(${rgb(h).join(',')},${a})`;
 const cssVar = (n, v) => document.documentElement.style.setProperty(n, v);
+// 角上署名那颗日期印的是**浏览器本地的今天**（`card-e7554dd2-44a`：这格答的是「今天几号」，
+//   读的人是看图的人，跟页头「本根／数据」那两格同一类）。
+// ★ 不写 `toISOString().slice(0, 10)` —— 那是 **UTC**：一个 UTC+8 的人晚上十点打开页面，
+//   角上写的是"明天"。图上那些记号（时间轴刻度、光标读数）仍按 UTC，那是行情自己的坐标；
+//   这一格不是坐标，是"今天"，两回事。
+const localDate = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  + `-${String(d.getDate()).padStart(2, '0')}`;
 cssVar('--am', CANDLE.open);                                  // 未收盘 / 旧数据：琥珀（style.py AM）
 cssVar('--rd', CHART.sell);                                   // 出错：红（style.py CHART.sell）
 cssVar('--am-line', mix(CANDLE.open, PAGE.bg, 0.26));         // 徽标边框＝同色压到 bg 上，不新造色
 cssVar('--rd-line', mix(CHART.sell, PAGE.bg, 0.26));
 cssVar('--panel-hi', mix(PAGE.tx, PAGE.panel, 0.05));         // 选中的 chip：panel 抬 5% 白
-document.getElementById('today').textContent = new Date().toISOString().slice(0, 10);   // 署名：冲浪者 · 日期
+document.getElementById('today').textContent = localDate();   // 署名：冲浪者 · 日期（本地钟）
 
 // 白名单跟后台卡一致（后台卡：白名单外一律 400）——前端也拦一道，省一次没意义的请求
 export const SYMBOLS = [
