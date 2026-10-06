@@ -535,7 +535,12 @@ const shotChart = async (p, tag) => {
   const trendState = (pg) => pg.evaluate(() => {
     const a = window.__app, D = a.state.trendDrawn || {}, T = a.state.data.trend || null;
     const ts = a.chart.timeScale(), bars = a.state.data.bars;
-    const W = document.getElementById('chart').clientWidth;
+    // ★ 画布宽要跟**画图那把尺**一致：图层画东西用的是 `useMediaCoordinateSpace` 给的 mediaSize
+    //   ＝ **主图那一格的画布**，不是 `#chart` 的 clientWidth —— 后者把右轴（还有整个副图）也算进去了。
+    //   实测 1440×900 的窗口：`#chart` **1250**、那一格 **1194**（差 56 ＝ 右轴那一条）。
+    //   差这 56 px，右边缘那一条上的「在不在屏上」会判反（card-4700b9cc-35e 就是这么假红出来的）。
+    const W = (() => { const c = document.querySelector('#chart canvas');
+      return c ? c.getBoundingClientRect().width : 0; })();
     // ★ `/1000` 那一除是要紧的：`bars[].t` 是**毫秒**，`timeToCoordinate` 认的是**秒** ——
     //   不除就一直回 null，而 null 会让下面每一条「屏上本来就没东西」的断言**假装通过**。
     //   这一行跟 `layers.js` 的 `viewport()` 里那句 `tOfBar[i] = data.bars[i].t / 1000` 是同一个口径。
@@ -980,7 +985,10 @@ const shotChart = async (p, tag) => {
     const pane = c ? { w: c.getBoundingClientRect().width, h: c.getBoundingClientRect().height } : { w: 0, h: 0 };
     const T = st.data.trend || {};
     return {
-      up: st.opts.up, trend: st.opts.trend, W: document.getElementById('chart').clientWidth,
+      // ★ `W` 也换成 mediaSize 那把尺（＝下面 `want` 用的 `pane.w`）：原先这里写的是 `#chart` 的
+      //   clientWidth（1250 vs 1194），虽然这一行只是印出来给人看、没进判据，但留着**一把错的尺**
+      //   迟早被人拿去用（card-4700b9cc-35e 就是这么假红出来的）。
+      up: st.opts.up, trend: st.opts.trend, W: Math.round(pane.w),
       chip: (() => { const k = document.querySelector('.chip[data-key="up"]');
         return k ? { pressed: k.getAttribute('aria-pressed'), disabled: k.disabled } : null; })(),
       bands: (D.bands || []).length,
@@ -1106,7 +1114,11 @@ const shotChart = async (p, tag) => {
     const TH = await import('/theme.js');
     const a = window.__app, st = a.state, D = st.trendDrawn || {};
     const ts = a.chart.timeScale(), bars = st.data.bars;
-    const W = document.getElementById('chart').clientWidth;
+    // ★ 同前：mediaSize（主图那一格）≠ `#chart` 的 clientWidth（1250 vs 1194，差 56 ＝ 右轴）。
+    //   这里 W 只用来把远处的成交量柱滤掉（±40 px 的松口径），但尺子还是用同一把 —— 免得将来有人
+    //   在这里写死一个紧判据，又踩同一个坑（card-4700b9cc-35e）。
+    const W = (() => { const c = document.querySelector('#chart canvas');
+      return c ? c.getBoundingClientRect().width : 0; })();
     const r1 = (x) => (x === null || x === undefined ? null : Math.round(x * 10) / 10);
     const px = (i) => { const b = bars[i]; const x = b ? ts.timeToCoordinate(b.t / 1000) : null; return x === null ? null : r1(x); };
     const band = (r) => ({ i0: r.i0, i1: r.i1, x0: px(r.i0), x1: px(r.i1), y0: r.y0, y1: r.y1 });
@@ -1261,7 +1273,15 @@ const shotChart = async (p, tag) => {
   await waitBand(dW.p);
   const SW54 = await dW.p.evaluate(async () => {
     const a = window.__app, st = a.state, ts = a.chart.timeScale(), bars = st.data.bars;
-    const W = document.getElementById('chart').clientWidth;
+    // ★★ 这一格原先拿 `#chart` 的 clientWidth 当画布宽 ⇒ **假红**（card-4700b9cc-35e）：
+    //    图层判「这条带子够不够宽、要不要写字」用的是 mediaSize（主图那一格，**1194**），
+    //    这里用 1250 会把右轴那一条也算成"带子露在屏上" ⇒ 那条带子按 1250 看 82px 宽（够）、
+    //    按 1194 看只有 26px（不够）⇒ 工装说"该写字"、图层没写 ⇒ 判成漏写。
+    //    （闸门里那趟刚好没落在这个窗口上 ⇒ 绿；单独重跑两遍都红 —— 一颗会假红也会假绿的牙。）
+    //    W 跟画图同一把尺：mediaSize ＝ `#chart` 那张主图画布的宽度；`#chart` 那个数只印出来对照。
+    const W = (() => { const c = document.querySelector('#chart canvas');
+      return c ? c.getBoundingClientRect().width : 0; })();
+    const Wchart = document.getElementById('chart').clientWidth;
     const mctx = document.createElement('canvas').getContext('2d');
     mctx.font = '12px -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif';
     const tw = mctx.measureText('等确认').width;
@@ -1270,14 +1290,25 @@ const shotChart = async (p, tag) => {
     const wins = [];
     for (const span of [1, 3, 8, 30]) for (let from = 4000; from <= 16000; from += 271) wins.push({ from, span });
     let nWin = 0, nWithStrip = 0, orphans = 0, mismatch = 0, fellBack = 0, maxLabels = 0, worst = null;
+    // ★ 这一格绿的时候也得让人看见**它真的走到过门槛附近**：记下"离门槛最近的那条带子"。
+    //   不记的话，"0 个不平"可能只是因为所有带子都在门槛外老远 —— 那种绿是够不着的绿。
+    //   顺带把**旧那把尺**（`#chart` 的 clientWidth）会怎么判也带上：这就是假红的那个窗口。
+    let near = { d: Infinity };
     for (const s of wins) {
       ts.setVisibleLogicalRange({ from: s.from, to: s.from + s.span });
       await frame(); await frame();
       const D = st.trendDrawn || {};
       const bs = (D.bounds || []).map((b) => { const x0 = px(b.i0), x1 = px(b.i1);
         const vis = (x0 === null || x1 === null) ? 0 : Math.min(x1, W) - Math.max(x0, 0);
+        const visC = (x0 === null || x1 === null) ? 0 : Math.min(x1, Wchart) - Math.max(x0, 0);
         return { x0: x0 === null ? null : Math.round(x0), x1: x1 === null ? null : Math.round(x1),
-          vis: Math.round(vis), roomy: vis > 0 && vis >= tw + 12 }; });
+          vis: Math.round(vis), visChart: Math.round(visC), roomy: vis > 0 && vis >= tw + 12 }; });
+      for (const b of bs) {
+        if (b.vis <= 0) continue;
+        const d = Math.abs(b.vis - (tw + 12));
+        if (d < near.d) near = { d: Math.round(d * 10) / 10, from: s.from, span: s.span,
+          x0: b.x0, vis: b.vis, visChart: b.visChart, roomy: b.roomy, roomyChart: b.visChart >= tw + 12 };
+      }
       const labs = (D.labels || []).filter((L) => L[4] === '等确认');
       const roomy = bs.filter((b) => b.roomy);
       const vis = bs.filter((b) => b.vis > 0);
@@ -1290,14 +1321,24 @@ const shotChart = async (p, tag) => {
         if (labs.length !== roomy.length) { mismatch++; if (!worst) worst = { from: s.from, span: s.span, vis: bs.map((b) => b.vis), labs: labs.length }; }
       } else if (vis.length) fellBack++;
     }
-    return { nWin, nWithStrip, orphans, mismatch, fellBack, maxLabels, tw: Math.round(tw * 10) / 10, worst };
+    return { nWin, nWithStrip, orphans, mismatch, fellBack, maxLabels, tw: Math.round(tw * 10) / 10, worst,
+      near: near.d === Infinity ? null : near, W: Math.round(W), Wchart };
   });
   await dW.c.close();
   ck('「够宽的带子**每条都写字**、一个字都不许落在没有带子的地方」在**很多个视口**上都成立（不是"默认那一屏碰巧"）',
      SW54.nWithStrip >= 20 && SW54.orphans === 0 && SW54.mismatch === 0 && SW54.maxLabels >= 1,
-     `扫了 ${SW54.nWin} 个视口（其中 ${SW54.nWithStrip} 个屏上有带子）　孤儿字 ${SW54.orphans} 个　`
+     `画布宽（mediaSize，跟图层同一把尺）${SW54.W} ／ \`#chart\` ${SW54.Wchart}（差 ${SW54.Wchart - SW54.W} ＝ 右轴那一条）　`
+     + `字宽 ${SW54.tw} px ⇒ 「够宽」的门槛 ${Math.round((SW54.tw + 12) * 10) / 10} px　`
+     + `扫了 ${SW54.nWin} 个视口（其中 ${SW54.nWithStrip} 个屏上有带子）　孤儿字 ${SW54.orphans} 个　`
      + `"写字数 ≠ 够宽的条数"的视口 ${SW54.mismatch} 个${SW54.worst ? '　★ ' + JSON.stringify(SW54.worst) : ''}　`
-     + `一屏最多写了 ${SW54.maxLabels} 个字　（★「一条都放不下就只写最近那一段」这一趟被走到 ${SW54.fellBack} 次`
+     + `一屏最多写了 ${SW54.maxLabels} 个字　`
+     // ★ 绿也要让人看见"这颗牙咬到过门槛附近"，否则"0 个不平"可能只是所有带子都离门槛老远。
+     + `离门槛最近的那条带子：宽 ${SW54.near ? SW54.near.vis : '—'} px（门槛 ${Math.round((SW54.tw + 12) * 10) / 10}，`
+     + `差 ${SW54.near ? SW54.near.d : '—'}）@from=${SW54.near ? SW54.near.from : '—'} `
+     + `⇒ 同一刻按旧那把尺（\`#chart\` ${SW54.Wchart}）算是 ${SW54.near ? SW54.near.visChart : '—'} px、`
+     + `判「${SW54.near && SW54.near.roomyChart ? '够宽' : '不够宽'}」（图层判「${SW54.near && SW54.near.roomy ? '够宽' : '不够宽'}」）`
+     + `${SW54.near && SW54.near.roomyChart !== SW54.near.roomy ? '　★ 两把尺在这一格判反了 ⇒ 修前这里就是假红/假绿的现场' : ''}　`
+     + `（★「一条都放不下就只写最近那一段」这一趟被走到 ${SW54.fellBack} 次`
      + ` ⇒ ${SW54.fellBack ? '量到了' : '**没量到**，那半句这格不算数'}）`);
 
   await b.close();
