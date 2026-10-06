@@ -4,7 +4,8 @@
 //   {symbol, tf, name, updated, closed, bars[], pens[], segs[], centers[], seg_centers[], signals{seg,pen}, meta{tick,pen_rule}}
 // 取不到后台就退回 `fixtures/`（离线也能看、也能截图对账）；两边都没有就老实说取不到，不画半张图。
 import { CHART, PAGE, CANDLE, WIDTH, SUB, TREND } from './theme.js';
-import { makeBoxPrimitive, makeAnnotPrimitive, makeTrendPrimitive, shownOf, ghostHitAt } from './layers.js';
+import { makeBoxPrimitive, makeAnnotPrimitive, makeTrendPrimitive, shownOf, ghostHitAt,
+         refTfName } from './layers.js';
 
 const LWC = window.LightweightCharts;
 
@@ -81,7 +82,12 @@ opts.trend = SUB_Q.get('trend') !== '0';
 // ★ 字母挂哪一级**这一层不猜**：载荷的 `trend_reading` 说了算（A 挂合成出来的高一级中枢、
 //   B 挂本级别）。⇒ D3 保持 A 还是换 P6，是**后台一个字段**的事，前端这一行一个字都不用改。
 opts.trendNum = SUB_Q.get('trendnum') === '1';
-const state = { data: null, opts, candleSeries: null };
+// 级别对照那一层（卡 card-01961644-68f，接口规则 L-9）：**默认开** —— 它是"合成框跟**对照图**
+// （后台 `ref_tf` 那一档）对不上"的那一句标，藏起来等于没做。跟「走势分段」同一条写法：地址栏 `?lv=0` 才关（可分享、可截图复现）。
+// ★ 它画在**合成框**上（那层归「高一级」）⇒ `shownOf` 里跟 `up` 与过；「高一级」默认关着，所以
+//   这一颗**默认开也画不出东西**，得先把「高一级」打开才有框可标。这不是 bug，是那一层的从属关系。
+opts.lv = SUB_Q.get('lv') !== '0';
+const state = { data: null, opts, candleSeries: null, levels: null };
 const primitives = [];
 // 往左拖那套状态：span＝现在手上是第几档，spanMax＝后台给的封顶，earliest＝币安真没有了。
 // viewSet＝**我们自己摆的那个视口**（用来认事件回声，见 setView）；reqId＝在飞的那一份的号（换品种就作废）。
@@ -195,6 +201,121 @@ for (const [c, p] of [[candle, makeBoxPrimitive(state)], [overlay, makeAnnotPrim
   primitives.push(p);
 }
 const repaint = () => primitives.forEach((p) => p._request && p._request());
+// ★ 级别对照那一趟（`/api/levels`）回来时**只重画走势那一层**（卡 card-01961644-68f）：它是异步的，
+//   比图表那份小得多、通常先到 —— 到了不能走整条 `paint()`（那会 setData、重排、fitContent，
+//   首屏还没画完就再来一遍）也不能不管（框已经在屏上了，标得补上去）。所以按住**那一个** primitive
+//   单独 `_request()`。`primitives` 里最后那个就是 `makeTrendPrimitive`（顺序见上面那个 for）。
+const trendPrim = primitives[primitives.length - 1];
+const redrawTrend = () => { if (trendPrim && trendPrim._request) trendPrim._request(); };
+
+// ---------------------------------------------------------------- 级别对照那一行话（card-01961644-68f，L-7／L-9）
+// 「这一层到底说了什么」全落在一个**浮层**里（`#lvhead`），**不进图脚** —— 图脚是流内布局，
+// 多一行就把 `#chart` 挤矮（`#ghostc` 那一格栽过的同一条，见 index.html 里那段账）。
+// 它有两个来源，各自「有才说、没有一个字都不说」：
+//   ① 起点那一句（L-7）：只认 `start.status`，`same`／`unmeasured`／没有 start ⇒ 不出现；
+//   ② 覆盖率那一句（L-9）：把 `unmeasured`／`partial` 如实报出来 —— 这是"没比成"不被读成"对得上"的**唯一**出口。
+// ★ 代号 → 人话：这几个周期名跟图脚那几格一样，**只有一处**（`TF_LABEL`）。认不出来 ⇒ 空串 ⇒ 那句少半截、
+//   不编（跟 CUT_NAME／MEASURE_NAME 同一条规矩）。
+const TF_LABEL = { '15m': '15 分钟图', '30m': '30 分钟图', '1h': '1 小时图', '2h': '2 小时图', '4h': '4 小时图' };
+/** 载荷里的时刻 → `MM-DD`（本地时区，跟 shortLocal／clockLocal 同一处口径）。
+ *  ★ 认不出来 ⇒ 空串（不编一个假日子）。`t` 可能给 unix **秒**、unix **毫秒** 或 ISO 串：
+ *    数字 >1e12 当毫秒（2026 年的秒数才 1.7e9，差三个数量级，分得开），否则当秒乘 1000。
+ *    `new Date(null)` 不是 Invalid 而是 1970 —— 所以 `null`／`''` 先挡掉，别让它安安静静印出个假日子。 */
+const mmdd = (t) => {
+  if (t == null || t === '') return '';
+  const ms = typeof t === 'number' ? (t > 1e12 ? t : t * 1000) : Date.parse(t);
+  const d = new Date(ms);
+  if (isNaN(d.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+/** 起点那一句（L-7）。★ 返回 '' ＝ 这一格不说 —— **这是常态，不是省略**：只有 `differs`／`window`
+ *  才开口；`same`（一样）、`unmeasured`（没量成）、`start` 没有，都**什么都不写**（不知道的事不编）。
+ *  ★ `start.status` 是后台 `start_link` 定的四个词（`web/levels.py`）：`same`＝**一样、不标**
+ *    ／`differs`＝真分歧／`window`＝窗口不同（印下面那句，不算分歧）／`unmeasured`。
+ *    ⇒ `same` **一个字都不许说**：在"一样"上贴一句话，等于**凭空捏一个分歧**出来（跟"没比成说成对得上"
+ *      是同一种假账的两个方向）。Bram 的原文就是「一样，不标」。
+ *  ★★ **`differs` 只报事实，不下判断**（Nova 14:09Z，card-6e338490）。这句里**没有**任何
+ *    「谁对」「算不算分歧」的裁决 —— 原因：`status:'differs'` 只证明**两刀不一样**，**不证明为什么**。
+ *    报文的 `differs` 有两种来源：fixture 那次是 spec §四 4 说的**真分歧**（最细 191.35 vs 对照 205.07），
+ *    线上那次是**换窗口**把图头挪了 —— 两件事在报文上**逐字节一样**，任何写死的裁决
+ *    必然在其中一种上说错（Bram 14:05Z）。⇒ 跟 `unmeasured` 同一条老规矩：**没量到根因就不下结论**。
+ *    ★ 所以先前那半句 L-7 disclaimer（「…到 X 才有中枢，这不是级别分歧」）**整条拿掉**，别再加回来。
+ *  ★ 「会变」这半句**无条件**（Bram）：`start.finest` 就是最细那张图的 `bounds[0]`，也就是它的
+ *    **图头那一刀** —— 「会变」的前提**每次都成立**，拿 `first_center_t` 之类的谓词去分是分不开的。
+ *    先前那个 `finest.t < first_center_t` 判据作废。
+ *  ★ 第三句「本图第一个中枢 <MM-DD> 开始」—— **这才是 `first_center_t` 的用处**：不是拿它当判据，
+ *    是把对照图第一个中枢的日子**印出来**（读者自己看两刀差在哪）。它**可以缺**（后台没给就整句不印），
+ *    前两句和「会变」**不能缺**。 */
+function levelsStartText(lv) {
+  const st = lv && lv.start;
+  if (!st) return '';
+  if (st.status === 'window') return '图里没有更早的数据 —— 两张图的窗口不同，起点没法比，不算分歧。';
+  if (st.status !== 'differs') return '';           // same／unmeasured：不写（后台 start_link 的 `same`＝一样、不标）
+  const who = TF_LABEL[lv.finest_tf] || '';
+  const dFine = mmdd(st.finest && st.finest.t);
+  const tick = state.data && state.data.meta ? state.data.meta.tick : undefined;
+  const fine = (st.finest && st.finest.price != null) ? fmtPrice(st.finest.price, tick) : '';
+  if (!who || !dFine || !fine) return '';           // 前两句拼不齐（缺周期名／日子／价）⇒ 整句不说，不写半截
+  const seg = [
+    `起点按 ${who}算在 ${dFine}（${fine}），以细图为准`,
+    `这是${who}的图头那一刀，窗口一变会跟着挪（「会变」）`,
+  ];
+  const dC = mmdd(st.first_center_t);
+  if (dC) seg.push(`本图第一个中枢 ${dC} 开始`);
+  return seg.join('｜') + '。';
+}
+/** 覆盖率那一句（L-9）——「没比成」的诚实出口。★★ **先看 `ref_tf`，再看缓存**（这两件事在报文上
+ *  长得像、意思相反，Nova 五个档全探过）：
+ *   · `ref_tf == null` ⇒ 这一档**根本没有对照图**（阶梯最顶那几档）⇒ 说「跨度最大的一档，没有对照图」。
+ *     ★ **绝不**说「还没取到」—— 那是在承诺一张**永远不会来**的图（2h／4h 的单个框在报文上也是
+ *       `unmeasured`，跟"对照图没缓存"**逐字节一样**，所以只能靠 `ref_tf` 分这条叉）。
+ *   · `ref_tf != null && data_at.ref == null` ⇒ 冷缓存 ⇒ 说「对照图（X）还没取到 —— 这一层先不标」。
+ *     ★ 这时候**不逐框报数**：23 个框全是 unmeasured，报出来是「23 个框：23 个没比成」——
+ *       新开一页就砸这么一句在脸上，是噪音不是信息（说的是"还没到"，不是"出了事"）。
+ *   · 有对照图、但个别框没比成（`unmeasured`）或只有一部分比了（`partial`）⇒ 报那一栏数：
+ *       `N 个框：M 个比过、[P 个部分没比、]K 个没比成`。★「比过」＝ match ＋ mismatch（都真比了，
+ *       只是一个对一个对不上）；`unmeasured` 是**没比**。混成一句就把"没量"说成了"量过"。
+ *   · 全比过（match／mismatch，无 partial／unmeasured）⇒ 不占这一格（没话找话）。 */
+function levelsCoverageText(lv) {
+  if (!lv) return '';
+  if (lv.ref_tf == null) return '跨度最大的一档，没有对照图';
+  const times = lv.data_at || {};
+  if (times.ref == null) {
+    const rn = refTfName(lv.ref_tf).replace(/图$/, '');
+    // ★ 认不出 ref_tf ⇒ 不编一个名字，也不说这句（名字都念不出来，"还没取到"也指不清是哪个）。
+    return rn ? `对照图（${rn}）还没取到 —— 这一层先不标` : '';
+  }
+  const us = Array.isArray(lv.units) ? lv.units : [];
+  const N = us.length;
+  if (!N) return '';
+  let k = 0, p = 0;
+  for (const u of us) { const s = u && u.status; if (s === 'unmeasured') k++; else if (s === 'partial') p++; }
+  if (!k && !p) return '';
+  const m = N - k - p;                              // 比过 = match + mismatch
+  const seg = [`${m} 个比过`];
+  if (p) seg.push(`${p} 个部分没比`);
+  if (k) seg.push(`${k} 个没比成`);
+  return `${N} 个框：${seg.join('、')}`;
+}
+/** 那一行话 = 起点那一句 ＋ 覆盖率那一句，中间用 ` ｜ ` 接。开关关着 ⇒ 整行收掉。 */
+function renderLevelsHead() {
+  const e = el('lvhead');
+  if (!e) return;
+  const lv = state.levels;
+  let txt = '';
+  if (opts.lv && lv) {
+    const a = levelsStartText(lv), b = levelsCoverageText(lv);
+    txt = [a, b].filter(Boolean).join(' ｜ ');
+  }
+  e.textContent = txt;
+  e.classList.toggle('on', !!txt);
+}
+/** levels 那一趟落地：存到 state 上、只重画走势那一层、更新那一行话（**不走整条 paint**）。 */
+function renderLevels() {
+  redrawTrend();
+  renderLevelsHead();
+}
 
 // ---------------------------------------------------------------- 取数
 function fixtureNames(symbol, tf) {
@@ -236,6 +357,25 @@ async function load(symbol, tf, span, measure, cut = paging.cut) {
     if (r.ok) return vetted({ ...(await r.json()), source: `样本 ${n}`, span: 1, span_max: 1, earliest: true });
   }
   throw new Error(`取不到 ${symbol} ${tf}（后台没起、仓里也没有这一份样本）`);
+}
+
+// ---------------------------------------------------------------- 级别对照那一趟（card-01961644-68f，L-9）
+/** `GET /api/levels?symbol=&tf=&span=` —— 拿本图（最细那张）的合成框跟**对照图**（后台 `ref_tf`
+ *  那一档）的中枢逐框比。
+ *  ★ 它**只做一件事**：把载荷原样拿回来交给 layers.js 画、交给浮层写那一行话。前端**不判状态**
+ *    （match/partial/mismatch/unmeasured 是后台按 L-9 算的）、**不重算占比** —— 重算就是第二份规矩，
+ *    跟后台那份迟早在某一格上错开。
+ *  ★ 跟 `/api/chart` 一个写法：`span` 照发；静态打开/旧后台没有这个口 ⇒ **返回 null**（这一层不存在），
+ *    页面上一个字都不多、一个标都不画。**不抛**：它不是首屏必需品，拿不到就当没有（fail-closed）。
+ *  ★ 它**不参与** `load()` 那个「取不到后台就退回 fixtures」的兜底 —— 仓里没有 levels 样本，
+ *    而且这一层的语义就是"后台算了才有"，退回一份假样本等于编数据。 */
+async function loadLevels(symbol, tf, span) {
+  try {
+    const q = new URLSearchParams({ symbol, tf, span: String(span) });
+    const r = await fetch(`/api/levels?${q}`);
+    if (r.ok) return await r.json();
+  } catch (e) { /* 没有后台／没有这个口：这一层不存在 */ }
+  return null;
 }
 
 // >>> EARLIER_PAGING （tools/web_more_check.py 抠出来在 node 里真跑；纯函数，不碰 DOM、不碰图）
@@ -356,9 +496,17 @@ let noticeTimer = 0;
 //   默认就是关的 —— 那些层重算了用户屏幕上什么也没动，这时候喊一句「结构重算了」就是喊狼。
 //   `shown`（＝ shownOf(opts)）由调用点传进来，**跟 layers.js 画图用的是同一个函数**：判据那边
 //   绝不另写一份过滤（两份迟早在某一格上错开）。不传 `shown` ＝ 五层全比（老口径，尺里量窗口取法的用例走这条）。
-function structKey(d, t0, t1, shown) {
+// ★ `levels`（card-01961644-68f，L-9，**可选第五个参数**）＝ 级别对照那一趟的载荷。它跟图表那份
+//   **并行**来，换档（往左补数据）时不重取 ⇒ 这里**只在传了它、且 `lv` 开着**时才算它那一栏；
+//   不传/为 null ⇒ 跟以前逐字节一样（尺里那些用例走的还是四个参数的老路）。★ 记的是**画出来的那件事**
+//   （这个框多标了一个「对不上」的字），不是把载荷序列化 —— 同下面那句"不序列化 trend"的账。
+function structKey(d, t0, t1, shown, levels) {
   const sh = shown || null;
   const on = (k) => !sh || !!sh[k];        // 这一层画没画（没给开关就当作画着）
+  // 级别对照：`levels.units` 按 **X0** 对到框上（★ 不按下标 —— 跟 layers.js `lvByX0` 同一条账：
+  //   两份独立载荷一旦错位，按下标会把标安到旁边那个框上，而屏上看不出来）。X0 对不上的框不标。
+  const lvStat = new Map();
+  if (levels && on('lv')) for (const u of (levels.units || [])) if (u && u.X0 != null) lvStat.set(u.X0, u.status || '');
   const ts = (i) => (d.bars[i] || {}).t;
   const ov = (a, b) => a != null && b != null && b >= t0 && a <= t1;   // 区间跟窗口有重叠（含边界）
   const at = (t) => t != null && t >= t0 && t <= t1;                   // 单个时间点落在窗口里
@@ -397,8 +545,13 @@ function structKey(d, t0, t1, shown) {
     //   卡 card-113a3b16-026；`layers.js` 里那两个 if 用的是同一个 `shownOf`）。⇒ 可见性也得各按各的开关取：
     //   `trend` 关着的时候前四样不画，`up` 关着的时候合成框不画 —— 谁关着就不算谁"看得见"，
     //   否则"开关关着的层变了"会被算成"屏幕变了"，正是这一段开头那句喊狼。
+    // ★★ 级别对照那枚短标也要进账：`match`／`partial`／`unmeasured` 都**不出字**，只有 `mismatch`
+    //   会在框右沿多写一句（见 layers.js ⑥）—— 所以只有 `mismatch` 算"屏幕变了"。
+    //   ★ 记的是**画出来的那件事**（这个框多标了「对不上」），不是把 levels 载荷序列化（同上面那句账）；
+    //     对不上的框（`lvStat` 里没有 / 状态不是 mismatch）一个字节都不加 ⇒ 旧用例仍逐字节一样。
+    //   ★ 这里顺手复用的是 `lvStat`（按 X0 的对位表）：X0 对不上 ⇒ 没标 ⇒ 不加 —— 跟画那半边走同一条判据。
     const un = (on('up') ? (T.units || []) : []).filter((u) => ov(ts(u.X0), ts(u.X1)))
-      .map((u) => `${ts(u.X0)}>${ts(u.X1)}@${u.DD},${u.GG}`).join('|');
+      .map((u) => `${ts(u.X0)}>${ts(u.X1)}@${u.DD},${u.GG}${lvStat.get(u.X0) === 'mismatch' ? ',对标' : ''}`).join('|');
     return (on('trend') ? [b, pd, rt, sg].join('/') : '') + '/' + un;
   };
   return [on('pen') ? part(d.pens) : '', on('seg') ? part(d.segs) : '',
@@ -803,12 +956,15 @@ async function loadEarlier(span) {
     // ★ 判据只比**用户当前打开的那几层**，开关照 layers.js 实际画图用的那份（shownOf）取；
     //   前后两次用**同一个** sh：要是两次之间开关自己变了，那跟换档没关系，别算进去。
     const sh = shownOf(state.opts);
-    const keyBefore = win && structKey(own, win.t0, win.t1, sh);
+    // ★ 把 levels 也带进来（第 5 个参数）：让「框上多标了一个『对不上』」也算进"这一屏变没变"，
+    //   跟「升级」那个标签同一条账（见 structKey 里 `un` 那段）。★ 这也意味着 levels 缺席
+    //   （go() 没取到 / 已清）时，前后两次都给 `null`，这一栏两边都不加 —— 不喊狼。
+    const keyBefore = win && structKey(own, win.t0, win.t1, sh, state.levels);
     Object.assign(paging, adopt(paging, d, own.bars.length));   // 回显说了算（钳档 / earliest / 有没有多出来）
     setUrl();
     draw(d, anchor);
     // 同一段时间、换完之后再取一次：不一样 ⇒ 用户正看着的那一屏被重算了 ⇒ 说一句，3 秒自己收
-    if (win && structKey(d, win.t0, win.t1, sh) !== keyBefore) showNotice();
+    if (win && structKey(d, win.t0, win.t1, sh, state.levels) !== keyBefore) showNotice();
     renderMore({ stop: stopReason(paging) }, 2600);
   } catch (e) {
     paging.failedAt = Date.now();
@@ -1165,6 +1321,7 @@ function applyToggles() {
   volSeries.applyOptions({ visible: !!opts.vol && sub.hasVol });
   repaint();
   renderLegend();
+  renderLevelsHead();        // 那一行话（起点／覆盖率）的可见性跟着这一层的开关走，见那一节
   // ★ 只扫**图层那排**（带 data-key 的）。底下「背驰看法」那一组也长着 .chip 的皮（同一个药丸尺寸），
   //   但它是**单选**（aria-checked，归 renderMeasures 管），没有 data-key ——
   //   扫进来就会对着 undefined 取 .startsWith，整张图连带图脚一起炸（2026-10-04 真撞过）。
@@ -1179,7 +1336,11 @@ function applyToggles() {
       : k === 'trend' ? !(state.data && state.data.trend)
         // 框编号画在走势那一层**里面**（字母说的是"这一段里的第几个中枢"）⇒ 那一层关着时它按灰：
         // 能点却画不出东西的开关是骗人的（跟上面那条同一条账，不是新规矩）。
-        : k === 'trendNum' ? !(state.data && state.data.trend) || !opts.trend : false;
+        : k === 'trendNum' ? !(state.data && state.data.trend) || !opts.trend
+          // 级别对照标的字挂在**合成框**上（`shownOf` 里 `lv` 跟 `up` 与着）⇒「高一级」关着时它按灰。
+          // ★ 判据必须跟画图用的是**同一个** `up`（不能用 `shownOf(opts).lv` 反推 —— 那正是这条账
+          //   要防的"两处各写一份"）：这里读的就是 `opts.up` 本身，跟 `shownOf` 那个 `&& !!o.up` 同一个来源。
+          : k === 'lv' ? !opts.up : false;
   }
   // 「关着的层不许有能点的开关」这条账，看法那组也算：买卖点一关，它就得跟着灰（或反过来亮回来）。
   renderMeasures();
@@ -1209,6 +1370,10 @@ function buildChips() {
   add('类中枢', 'pc', CHART.pen);
   add('线段中枢', 'sc', CHART.seg);
   add('高一级', 'up', CHART.up_seg);
+  // 级别对照（卡 card-01961644-68f，接口规则 L-9）：**紧挨着「高一级」放** —— 它标的就是那一层
+  // 合成出来的框（跟对照图的 `ref_tf` 中枢对不上的那些，在框右沿标一句）。跟「框编号紧挨走势分段」
+  // 是同一条理由：标的是哪一层的字，就住在哪一层的芯片旁边。**默认开**（跟 `up` 与着，`up` 关着时按灰）。
+  add('级别对照', 'lv', TREND.lv);
   // 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）：背景带／分界／中阴／待定／撤回／升级框。
   // 排在「高一级」后面 —— 它俩都跟"升级"沾边，挨着放；但**不是一个东西**（那颗是第 33 课"满 9 段"
   // 升出来的框，这一层是 v3 的 D3"连续扩展合成"），标题里说清楚。
@@ -2114,6 +2279,8 @@ function setUrl() {
   // 走势分段那一层：**默认开**（Nova 17:09Z），所以这一头反过来写 —— **关着才写上去**（`?trend=0`）。
   // 跟上面两颗（vol/macd 缺省写不写）同一条账，方向相反而已。
   if (opts.trend) q.delete('trend'); else q.set('trend', '0');
+  // 级别对照同理（card-01961644-68f）：**默认开** ⇒ 也是关着才写上去（`?lv=0`）。
+  if (opts.lv) q.delete('lv'); else q.set('lv', '0');
   // 框编号：**默认关**（跟「走势分段」那颗反着来）⇒ 开着才写上去。
   if (opts.trendNum) q.set('trendnum', '1'); else q.delete('trendnum');
   history.replaceState(null, '', `?${q}`);            // 可分享、可截图复现
@@ -2132,6 +2299,15 @@ async function go(span = 1) {
   dataStale = true;      // ★ 而且**整段压住**，不只是这一下：这段时间里光标一动读数也不许亮回来（见 dataStale 那段）
   hideRead();
   el('state').textContent = '取数…'; el('state').className = 'badge';
+  // ★ 级别对照那一趟（card-01961644-68f）跟图表那份**并行**发 —— 绝不 `await` 在 `draw()` 之前：
+  //   它是附加层，比图表那份小、通常先到，但**先到也不许把首屏推后**（首屏画完它再落上来，
+  //   只重画走势那一层，见 `renderLevels`）。`loadLevels` 自己吞掉所有失败 ⇒ 拿不到就是 `null`。
+  const lvReq = loadLevels(symbol, tf, paging.span);
+  // ★ 新的这一趟一开跑，**上一份 levels 当场作废**：它按 `X0`（框下标）指框，换了品种/周期/档位
+  //   之后同一个 `X0` 已经不是同一个框了 —— 留着只会把标安到旁边那个框上（保守那一边：先全撤）。
+  //   `renderLevels` 顺手把浮层那一行话也收干净（state.levels 已是 null ⇒ 那句话自己就没词了）。
+  state.levels = null;
+  renderLevels();
   try {
     const d = await load(symbol, tf, paging.span, paging.measure);
     if (id !== paging.reqId) return;
@@ -2142,6 +2318,16 @@ async function go(span = 1) {
     renderCuts();
     el('state').textContent = d.closed ? '已收盘' : '未收盘（最后一根还在走）';
     el('state').className = 'badge ' + (d.closed ? '' : 'live');
+    // ★ levels 到这儿才落上来 —— **在 `draw()` 之后登记 `.then`**：先画图、标后补，顺序写死在这儿
+    //   （levels 哪怕早就在手里，回调也是"登记之后"的微任务才跑，赶不上这次 draw 之前）。
+    //   到了只重画走势那一层（`renderLevels`），**不 setData、不重排、不 fitContent** ——
+    //   首屏那份已经画好了，再来一遍整图的活是白干，还会让视口跳一下。
+    //   ★ 老规矩：这一趟要是已经被更新的一趟顶掉（`id` 对不上），这份丢掉 —— 别把上一趟的标画到下一种图上。
+    lvReq.then((lv) => {
+      if (id !== paging.reqId) return;
+      state.levels = lv;
+      renderLevels();
+    });
   } catch (e) {
     if (id !== paging.reqId) return;
     el('state').textContent = String(e.message || e);

@@ -81,6 +81,12 @@
           <line x1="0.5" y1="12.5" x2="14.5" y2="0.5" stroke="currentColor" stroke-width="1.4"/>
         </svg><span id="ghostc-tx"></span>
       </div>
+      <!-- 级别对照那一行话（卡 card-01961644-68f）：起点那一句（L-7）＋ 覆盖率那一句（L-9）。
+           ★ 为什么**不挂图脚**（跟 #ghostc 一模一样的账，见上）：图脚是流内布局，多一行就把 #chart
+             挤矮 —— 那会让「图本身没变」的验收红（figure 高度一变，宽屏/尺寸那道闸就不认了）。
+             ⇒ 挂进这个**绝对定位**的浮层盒子：不占流、图的尺寸一个字不动。
+           ★ 内容由 app.js 的 `renderLevelsHead` 填（`state.levels` 有才说、没有就整格收掉）。 -->
+      <div id="lvhead" class="lvhead" role="status" aria-live="polite"></div>
     </div>
     <!-- 全屏那颗按钮（卡 card-5014b0cb-e4d）。挂在 #chart 里、**不在 .overlays 里**：
          那个盒子整块 pointer-events:none（浮层不许吃拖拽），按钮得能点 ⇒ 它是 #chart 的另一个孩子。

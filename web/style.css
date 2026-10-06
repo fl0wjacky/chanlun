@@ -176,6 +176,24 @@ body.fs-fake main { position: fixed; inset: 0; z-index: 50; height: 100dvh; back
 .ghostc.on { opacity: 1; visibility: visible; }
 .ghostc .gs { flex: 0 0 auto; display: block; }
 
+/* 级别对照那一行话（card-01961644-68f）：起点那一句（L-7）＋ 覆盖率那一句（L-9）。
+   ★ 为什么**不进图脚**：图脚（`.foot` / `#legend`）是流内布局，多一行就把 #chart 挤矮 ——
+     `#ghostc` 那一格栽过同一条（index.html 里那段账）：宽屏一折行，legend 32→54px、#chart 少 23px，
+     而「图本身没变」的验收正是按图的高度判的。⇒ 住进 `.overlays`（绝对定位的盒子），**不占流**，
+     图的尺寸一个字不动（开/关这一格，`#chart` 的高度量不出差别）。
+   ★ 有才出现：没有 levels 那一层（`/api/levels` 取不到、或这一层被关掉）⇒ 整格收掉，不占眼。
+   色只用变量（尺 ①：:root 之外一个裸色值都不许写）—— 正文色 `--tx`，跟 #ghostc 同一个口径。 */
+.lvhead {
+  max-width: min(62ch, 100%);              /* 那一句话可以很长：限宽换行，别横着冲出图外 */
+  padding: 3px 9px; border-radius: 8px;
+  font-size: 11px; line-height: 1.5; color: var(--tx);
+  background: var(--panel); border: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;      /* 起点那两个价：位数一变，这一格不许跟着抖 */
+  opacity: 0; visibility: hidden; transition: opacity .15s;
+  pointer-events: none;                    /* 跟 .overlays 同一条：浮层不许吃掉拖拽/缩放 */
+}
+.lvhead.on { opacity: 1; visibility: visible; }
+
 /* 光标读数（card-4cdf628c-c84）：十字线停在哪一根，就把那一根摊开。
    数字用 `tabular-nums`：**光标一路扫过去，数字的位宽不许抖** —— 读数块是"扫一眼"的东西，
    每换一根就缩一下宽、抖一下行，眼睛根本读不住。

@@ -49,11 +49,26 @@
 //      这一格是 Atlas 核 readout-hold 时点的缺口：变异「换看法时也立起 dataStale」全绿、没一格看见。
 //      摆法上三个坑都绕开了（换看法在**页面里**点，指针不许离开图；先开买卖点那层，不然芯片是灰的；
 //      先断言「换之前就亮着 ＋ 回显真换了」）—— 理由写在 ㉑ 那一节。
+//   ㉓–㉙ **级别联动那一层**（卡 card-01961644-68f，L-9；后台 `GET /api/levels` 这一支**不在 main 上**，
+//      所以一律用 Playwright 的 `page.route` 把那一趟拦下来喂载荷）。这一族量的都是**"该不该出字"**：
+//      ㉓ 三档 mismatch 各出各的那句话、且锚在框**右沿**｜㉔ match/partial **不出字**（★ 必须在
+//      **同一份载荷**里跟 mismatch 一起量：整层没画也是"没字"，那种绿是假的）｜㉕ 两颗芯片的从属
+//      关系（`lv` 与 `up` 与过：关掉 lv 标全没、框还在；关掉 up 标也没，且 lv 那颗按灰）｜
+//      ㉖ 起点那句（L-7）报三截事实，且**不许下"算不算分歧"的裁决**（Nova 14:09Z）｜
+//      ㉗ `levels: null`（这一层不存在）⇒ 一个标都不画、一个字都不说（fail-closed），而且那一行话
+//      摆在 `.overlays` 里、**不占流**（`#chart` 高度跟有那一行话时一模一样 —— 图脚的账见 `#ghostc`）｜
+//      ㉘ `unmeasured` 只许说「没比成」，读不出"对得上"｜㉙ `start.status: 'same'` ⇒ 一个字都不说
+//      （在"一样"上贴一句话＝凭空捏一个分歧出来）。★ 认框一律按 **`X0`**（框起点）配对，
+//      不按数组下标 —— 两台机器数框的口径不一样，按下标就是把字挂到别人身上；配不上就不画。
 //
 // 判据的牙齿（每一条都跑得红，跑法与数在 `tools/web_readout_swap_probe.js` 的 D/E 段）：
 //   摘掉 `showRead` 里那道闸 ⇒ ⑰ 红；摘掉 `refreshSubVals` 里那道 ⇒ ⑱ 红；
 //   那个标志**永不放开** ⇒ ⑯⑲⑳ 红。⑮ 的牙还是原来那条（摘 go() 里那句）。
 //   **在 `setMeasure()` 里也立起 `dataStale`** ⇒ ㉑ 红（只红这一格：㉑ 自己一页，不牵连后面）。
+//   级别那一族（㉓–㉙）逐格变异验过，改法与结果见 `tools/web_readout_e2e.js` 那一节末尾 ——
+//   一句话：㉓ 把 `share.length >= 2` 那句掐空 ⇒ 红；㉔ 让没状态的框也出「对标」⇒ 红；
+//   ㉕ `lv` 的 disabled 恒 false ⇒ 红；㉖ 摘掉「会变」那截 ⇒ 红；㉗ 把浮层搬进 `.foot`（流内）
+//   ⇒ 高度那一句红；㉘ `unmeasured` 不计数 ⇒ 红；㉙ 放行 `same` ⇒ 红。
 //
 // 假后台：拿仓里 zec_1h.json 的真 bars/结构，只改 `meta.tick`（精度那几条的被测量）、
 // 以及**第二份**（span≥2）把笔和线段的价格乘 1.002（⑪ 要的那句「结构重算了」得真够格触发）。
@@ -102,8 +117,12 @@ const FULL = JSON.parse(fs.readFileSync(path.join(WEB, 'fixtures/zec_1h.json'), 
 //   holdMeasure：㉑ 用 —— 把**带 measure 的那一趟**（＝换看法那一趟）扣住。
 //          ★ 不扣住就没有「看法还在换」这段窗口可量：静态假后台秒回，㉑ 那一眼会落在换完之后，
 //            于是「换的那一刻压一下、换完才放开」这个形状**量不出来**（那正是 ㉑ 要防的）。
+//   units  ：㉓–㉗ 用 —— 塞进 `/api/chart` 的 `trend.units`（合成框）。仓里样本一个 units 都没有，
+//            这一族不自己合成就没框可标（见上面 lvBox 那段）。默认 null ⇒ 老的那些格逐字节不变。
+//   levels ：㉓–㉗ 用 —— `/api/levels` 回什么。默认 **null** ⇒ 回一个 JSON `null`（＝这一层不存在），
+//            页面一个字、一个标都不出。★ 回 `'fail'` 就是 503（留给"接口挂了"那条路，这一套不摆它）。
 const DEFAULT_SCEN = { tick: 0.1, bend: false, fail: false, failSym: null, symShift: false, hold: 0,
-                       holdSym: 'BTCUSDT', holdMeasure: 0 };
+                       holdSym: 'BTCUSDT', holdMeasure: 0, units: null, levels: null };
 const SCEN = Object.assign({}, DEFAULT_SCEN);
 const scen = (o) => { Object.assign(SCEN, DEFAULT_SCEN, o || {}); };
 
@@ -130,6 +149,8 @@ function payload(span, sym, measure) {
     d.pens = d.pens.map((p) => Object.assign({}, p, { p0: p.p0 * 1.002, p1: p.p1 * 1.002 }));
     d.segs = d.segs.map((s) => Object.assign({}, s, { p0: s.p0 * 1.002, p1: s.p1 * 1.002 }));
   }
+  // ★ ㉓–㉗：这一族要「屏上有合成框」才谈得上标 —— 样本里一个都没有 ⇒ 自己塞（`trendWith` 见上）。
+  if (SCEN.units) d.trend = trendWith(SCEN.units);
   return d;
 }
 
@@ -192,6 +213,47 @@ const inDrawn = (p) => p.evaluate(() => {
 const NEW_FIRST = 250;
 const rgbOf = (hex) => 'rgb(' + [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ') + ')';
 
+// ---------------------------------------------------------------- 级别对照（㉓–㉗，卡 card-01961644-68f，L-9）
+// ★ 仓里三份样本的 `d.trend` 都**没有 `units`**（1h 那份连 `trend` 键都没有）⇒ 这一族必须**自己合成**
+//   几个「合成框」喂给 `/api/chart`，再拿**同一批 X0** 去喂 `/api/levels`。两边 X0 对上了，框右沿才可能有标。
+//   ★ DD/GG 取那一段**真 bars 的低/高**（不是编一个价）：框一定落在价格轴的可见范围里，不会因为
+//     "纵坐标出屏"被跳过 —— 被跳过就成了"根本没摆出来"，那种绿是假的。
+//   ★ X0/X1 落在**最后 200 根**里（这一族一律带 `?last=200` 打开）⇒ 一定在可视窗口里。
+const lvBox = (i0, i1, n) => {
+  let lo = Infinity, hi = -Infinity;
+  for (let i = i0; i <= i1; i++) { const b = FULL.bars[i]; if (b.l < lo) lo = b.l; if (b.h > hi) hi = b.h; }
+  return { X0: i0, X1: i1, DD: lo, GG: hi, n: n || 2, seg: 0, live: false };
+};
+// `trendOf()` 只认 `T.segments` 是数组的那份载荷（不是数组 ⇒ 整层不画）⇒ 合成 units 时必须
+// 连这一层最小的壳一起给：一条盖住全序列的「走势分段」（图头那条，画灰，不影响这一族量的东西）。
+const SEG_ALL = () => [{ i0: 0, i1: FULL.bars.length - 1, type: '盘整', head: true, live: false, upgraded: false }];
+const trendWith = (units) => ({ segments: SEG_ALL(), bounds: [], pending: [], retracted: [], units });
+// 那一趟 levels 的报文字段（前端只读 ref_tf／finest_tf／start／units／data_at；其余按真报文补齐，读起来像真的）。
+const LV_BASE = { engine: 'v3', symbol: 'ZECUSDT', tf: '1h', span: 1, finest_tf: '15m', ref_tf: '1h',
+                  start: null, data_at: { here: '2026-10-06', finest: '2026-10-06', ref: '2026-10-06' } };
+// 探针：把「这一帧真画上去的标」和「浮层那一行话」一次读齐。
+//   ★ 标从 `state.trendDrawn.labels` 读 —— 跟价签/图脚同一个**只读出口**（layers.js 里 `haloText` 记的），
+//     不截屏、不数像素；`tx` 就是那一句字本身。
+const lvProbe = (p) => p.evaluate(() => {
+  const s = window.__app.state;
+  const lab = ((s.trendDrawn || {}).labels || []).map((l) => ({ x0: l[0], y0: l[1], x1: l[2], y1: l[3], tx: String(l[4]) }));
+  const boxes = ((s.trendDrawn || {}).units || []).map((u) => ({ X0: u.X0, X1: u.X1 }));
+  const h = document.getElementById('lvhead');
+  return { labels: lab, boxes,
+           head: h ? (h.textContent || '') : null,
+           headOn: h ? h.classList.contains('on') : null,
+           headVis: h ? getComputedStyle(h).visibility : null,
+           chartH: document.getElementById('chart').getBoundingClientRect().height };
+});
+// 「框右沿那枚标」的锚点真值：走**跟 layers.js 同一个坐标变换**（`timeToCoordinate(bars[X1].t/1000)`），
+//   不自己另推一份 —— 锚点 = 那个 x 减 6（⑥ 那段写死的 6）。
+const tagAnchor = (p, X1) => p.evaluate((k) => {
+  const { chart, state } = window.__app;
+  const b = state.data.bars[k];
+  const c = b ? chart.timeScale().timeToCoordinate(b.t / 1000) : null;
+  return c === null ? null : c - 6;
+}, X1);
+
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
   const b = await chromium.launch();
@@ -248,6 +310,14 @@ const rgbOf = (hex) => 'rgb(' + [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2
           symbol: 'ZECUSDT', tf: '1h' }, macdOf(d.bars, false))) });
     });
     await ctx.route('**/fixtures/**', (r) => r.fulfill({ status: 404, body: '' }));
+    // 级别对照那个口（card-01961644-68f）。★ **一定要铺**：页面每次 go() 都会去要它，
+    //   不铺就落到静态服务拿 404 —— 那会在控制台留一条与本事无关的报错，而这一套把页面报错也算红。
+    //   默认回 `null`（＝这一层不存在，页面一个字都不出）；SCEN.levels 给了就回那份；`'fail'` ⇒ 503。
+    await ctx.route('**/api/levels*', (r) => {
+      if (SCEN.levels === 'fail') return r.fulfill({ status: 503, body: '' });
+      const body = SCEN.levels == null ? 'null' : JSON.stringify(Object.assign({}, LV_BASE, SCEN.levels));
+      return r.fulfill({ status: 200, contentType: 'application/json', body });
+    });
     return ctx;
   };
   const open = async (ctx, q) => {
@@ -728,6 +798,155 @@ const rgbOf = (hex) => 'rgb(' + [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2
     + `${TZ_B}(UTC−11) ⇒ ${todayB}（该是 ${expB.join('／')}）`
     + `｜UTC 今天 = ${dateIn('UTC')}`
     + (todayA === todayB ? '　★ 两边印成同一天 ⇒ 这格印的是 UTC 那版' : ''));
+
+  // ================================================================ ㉓–㉗ 级别对照（卡 card-01961644-68f，L-9）
+  // ★ 怎么摆才不是替身（这一族的全部摆法都在这几行里）：
+  //   ① 样本里**一个合成框都没有** ⇒ 自己合成五个（`lvBox`，见上），X0/X1 全落在最后 200 根里、
+  //      `?last=200` 一定看得见；DD/GG 取真 bars 的低/高 ⇒ 一定不会被"纵坐标出屏"跳过。
+  //   ② `/api/levels` 跟 `/api/chart` 用的是**同一批 X0** ⇒ 这才谈得上"框上有没有标"。
+  //   ③ 时区钉成 UTC：起点／第一个中枢那两个 `MM-DD` 是拿浏览器本地钟印的，不钉死就是在量机器的钟。
+  const U_A = lvBox(4860, 4880, 3), U_B = lvBox(4890, 4910, 3), U_C = lvBox(4920, 4940, 3),
+        U_D = lvBox(4950, 4970, 3), U_E = lvBox(4980, 5000, 3);
+  // 五档摆成这样（share 的档数就是 L-9 分三档的依据）：
+  //   A mismatch：share 2 档            ⇒ 「1 小时图上不一样」
+  //   B mismatch：share 1 档 ＋ gap 40 ⇒ 「中间一段空着」
+  //   C mismatch：share 0 档 ＋ gap 100⇒ 「1 小时图没有中枢」
+  //   D match / E partial              ⇒ **一个字都不出**（L-9：match 是整个落在同一个中枢里，
+  //                                        partial 只落在图头/图尾那两截、不算分歧）
+  const LVM = [
+    [U_A, 'mismatch', [{ i: 1, pct: 40 }, { i: 2, pct: 45 }], { pre: 15, gap: 0, post: 0 }],
+    [U_B, 'mismatch', [{ i: 2, pct: 60 }],                     { pre: 0, gap: 40, post: 0 }],
+    [U_C, 'mismatch', [],                                      { pre: 0, gap: 100, post: 0 }],
+    [U_D, 'match',    [{ i: 3, pct: 100 }],                    { pre: 0, gap: 0, post: 0 }],
+    [U_E, 'partial',  [],                                      { pre: 0, gap: 0, post: 100 }],
+  ];
+  const lvUnits = (rows) => rows.map(([u, status, share, outside]) => ({ X0: u.X0, status, share, outside }));
+  const LV_START_DIFF = { status: 'differs',
+    finest: { price: 191.35, t: Date.UTC(2026, 2, 8) / 1000 },
+    here:   { price: 205.07, t: Date.UTC(2026, 2, 29) / 1000 },
+    first_center_t: Date.UTC(2026, 2, 29) / 1000 };
+  const ALL5 = [U_A, U_B, U_C, U_D, U_E];
+  // 「高一级」默认关着 ⇒ 合成框不画、标也没地方挂。这一族一律先把它点开（页面里点，跟用户一模一样）。
+  const openLv = async (ctx, q) => {
+    const p = await open(ctx, q);
+    await p.evaluate(() => { const c = document.querySelector('button.chip[data-key="up"]');
+      if (c && c.getAttribute('aria-pressed') !== 'true') c.click(); });
+    await sleep(500);
+    return p;
+  };
+  // 每一枚标都钉在某个框的**右沿**（x1−6）⇒ 拿锚点去认领："这个框被标了没有"。
+  //   ★ 认领时把「升级」那两字滤掉（它钉在**左沿** x0+6，是这一层的另一批字，不是级别对照的字）。
+  const anchorsOf = async (p, units) => {
+    const m = {};
+    for (const u of units) m[u.X0] = await tagAnchor(p, u.X1);
+    return m;
+  };
+  const lvAt = (probe, anchors, X0) => probe.labels.filter((l) =>
+    l.tx !== '升级' && anchors[X0] !== null && anchors[X0] !== undefined && Math.abs(l.x1 - anchors[X0]) <= 1.5);
+
+  // ㉓ 三档 mismatch（＋三档短标都 ≤8 字）＋ 锚点真在框右沿
+  //   ★ 字数：brief 那条「≤8 字」是**约数**，三档的**原话**才是判据（`1 小时图上不一样` 数是 9 个字符）——
+  //     这一格锁的是**原话**；字数只用来挡"跑飞的长句"，不是拿来裁掉一个字的。
+  scen({ tick: 0.1, units: ALL5, levels: { ref_tf: '1h', start: LV_START_DIFF, units: lvUnits(LVM) } });
+  const lctx = await newCtx({ viewport: { width: 1280, height: 800 }, timezoneId: 'UTC' });
+  const lp = await openLv(lctx, '?symbol=ZECUSDT&tf=1h&last=200');
+  const lv1 = await lvProbe(lp);
+  const anc = await anchorsOf(lp, ALL5);
+  const tA = lvAt(lv1, anc, U_A.X0), tB = lvAt(lv1, anc, U_B.X0), tC = lvAt(lv1, anc, U_C.X0);
+  t('㉓ 三档 mismatch 各有各的一句话（照原话），且钉在**框右沿** x1−6（右对齐、不夹回视口）',
+    lv1.boxes.length === 5 && tA.length === 1 && tA[0].tx === '1 小时图上不一样' && tA[0].tx.length <= 10
+      && tB.length === 1 && tB[0].tx === '中间一段空着' && tB[0].tx.length <= 10
+      && tC.length === 1 && tC[0].tx === '1 小时图没有中枢' && tC[0].tx.length <= 10
+      && tA[0].x0 < tA[0].x1 && anc[U_A.X0] !== null && Math.abs(tA[0].x1 - anc[U_A.X0]) <= 1.5,
+    `屏上 ${lv1.boxes.length} 个合成框｜A⇒「${tA.map((l) => l.tx).join('') || '（没标）'}」（锚距 ${tA[0] ? Math.abs(tA[0].x1 - anc[U_A.X0]).toFixed(2) : '?'} px）`
+    + `｜B⇒「${tB.map((l) => l.tx).join('') || '（没标）'}」｜C⇒「${tC.map((l) => l.tx).join('') || '（没标）'}」`);
+
+  // ㉔ match／partial **不出字**（L-9）—— 而且必须在**同一份载荷里**跟三档 mismatch 一起量：
+  //    整层没画（比如「高一级」关了）也是"没字"，那种绿是假的。⇒ 先认领 A 有字，才认 D／E 的"没字"。
+  const tD = lvAt(lv1, anc, U_D.X0), tE = lvAt(lv1, anc, U_E.X0);
+  t('㉔ match／partial **不出字**（L-9）—— 同一份载荷里 mismatch 照旧出字，所以这不是"整层没画"',
+    tA.length === 1 && tD.length === 0 && tE.length === 0,
+    `A（mismatch）标了 ${tA.length} 枚｜D（match）标了 ${tD.length} 枚｜E（partial）标了 ${tE.length} 枚`
+    + `（D/E 要 0；A 要 ≥1，否则这一格量的是"整层没画"）`);
+
+  // ㉕ 开关的**从属关系**：`lv` 与 `up` 与过（shownOf）⇒「高一级」关着时它按灰、也没地方挂字
+  const chipOf = () => lp.evaluate(() => {
+    const g = (k) => { const c = document.querySelector(`button.chip[data-key="${k}"]`);
+      return c ? { on: c.getAttribute('aria-pressed') === 'true', dis: !!c.disabled } : null; };
+    return { up: g('up'), lv: g('lv') };
+  });
+  const tap = (k) => lp.evaluate((k) => { const c = document.querySelector(`button.chip[data-key="${k}"]`); if (c) c.click(); }, k);
+  await tap('lv'); await sleep(400); const lvOff = await lvProbe(lp);
+  await tap('lv'); await sleep(400);
+  await tap('up'); await sleep(400); const upOff = await lvProbe(lp); const csOff = await chipOf();
+  await tap('up'); await sleep(400); const lv2 = await lvProbe(lp); const csOn = await chipOf();
+  const lvCount = (pr) => ALL5.reduce((n, u) => n + lvAt(pr, anc, u.X0).length, 0);
+  t('㉕ 「级别对照」那颗芯片关掉 ⇒ 标全没（框还在）；「高一级」关掉 ⇒ 标也没（lv 与 up 与过），且它按灰',
+    lvCount(lv1) === 3 && lvOff.boxes.length === 5 && lvCount(lvOff) === 0
+      && upOff.boxes.length === 0 && lvCount(upOff) === 0 && csOff.up.on === false && csOff.lv.dis === true
+      && csOn.up.on === true && csOn.lv.dis === false && lvCount(lv2) === 3,
+    `开＝${lvCount(lv1)} 枚｜关 lv⇒${lvCount(lvOff)} 枚（框仍有 ${lvOff.boxes.length} 个）`
+    + `｜关 up⇒标 ${lvCount(upOff)} 枚、框 ${upOff.boxes.length} 个，lv 芯片 disabled=${csOff.lv.dis}`
+    + `｜开回来⇒${lvCount(lv2)} 枚（lv disabled=${csOn.lv.dis}）`);
+
+  // ㉖ 起点那句话（L-7）：`differs` ⇒ 报事实的三截（起点／图头那一刀「会变」／本图第一个中枢）；
+  //    ★ **不许有裁决** —— 后台的 `differs` 只证明"两刀不一样"、不证明"为什么"，写死一句"这不是分歧"
+  //      必然在另一种来源（换窗口）上说错（Nova 14:09Z，card-6e338490）。
+  const head1 = lv1.head || '';
+  t('㉖ 起点那句话（L-7）：`differs` ⇒ 起点按细图算 ＋「会变」＋ 本图第一个中枢；**不下"算不算分歧"的裁决**',
+    head1.includes('起点按 15 分钟图算在 03-08（') && head1.includes('），以细图为准')
+      && head1.includes('这是15 分钟图的图头那一刀') && head1.includes('窗口一变会跟着挪（「会变」）')
+      && head1.includes('本图第一个中枢 03-29 开始')
+      && !head1.includes('这不是级别分歧'),
+    `那一行话＝「${head1}」`);
+  await lp.screenshot({ path: path.join(OUT, 'level-link.png'), clip: { x: 0, y: 0, width: 1280, height: 400 } });
+  await lp.close();
+  await lctx.close();
+
+  // ㉗ `levels: null`（接口没有这一层）⇒ **一个标都不画、一个字都不说**（fail-closed），
+  //    而且浮层那点内容**不占流** —— `#chart` 的高度跟 ㉑ 那页（那一行话老长）**一模一样**。
+  scen({ tick: 0.1, units: ALL5, levels: null });
+  const nctx = await newCtx({ viewport: { width: 1280, height: 800 }, timezoneId: 'UTC' });
+  const np = await openLv(nctx, '?symbol=ZECUSDT&tf=1h&last=200');
+  const null1 = await lvProbe(np);
+  const nullLv = null1.labels.filter((l) => l.tx !== '升级').length;
+  t('㉗ `levels: null`（这一层不存在）⇒ 不画标、不说话；且浮层**不占流**（#chart 高度跟有那一行话时一致）',
+    null1.boxes.length === 5 && nullLv === 0 && !(null1.head || '').trim() && null1.headOn === false
+      && Math.abs(null1.chartH - lv1.chartH) < 0.6,
+    `框 ${null1.boxes.length} 个（还画着）｜非「升级」的标 ${nullLv} 枚｜那一行话「${null1.head || ''}」（on=${null1.headOn}）`
+    + `｜#chart 高 ${null1.chartH.toFixed(1)} vs 有那一行话时 ${lv1.chartH.toFixed(1)}`);
+  await np.close();
+  await nctx.close();
+
+  // ㉘ `unmeasured` ⇒ 覆盖率那句**老老实实说"没比成"**，读不出"对得上"；而且不给它画标
+  scen({ tick: 0.1, units: [U_A, U_B],
+         levels: { ref_tf: '1h', start: null,
+                   units: lvUnits([[U_A, 'unmeasured', [], null], [U_B, 'unmeasured', [], null]]) } });
+  const uctx = await newCtx({ viewport: { width: 1280, height: 800 }, timezoneId: 'UTC' });
+  const up2 = await openLv(uctx, '?symbol=ZECUSDT&tf=1h&last=200');
+  const un1 = await lvProbe(up2);
+  const unLv = un1.labels.filter((l) => l.tx !== '升级').length;
+  t('㉘ `unmeasured`（对照图没缓存）⇒ 覆盖率老实说「没比成」，读不出"对得上"；且不给它画标',
+    un1.boxes.length === 2 && unLv === 0 && /2 个框/.test(un1.head || '')
+      && /0 个比过/.test(un1.head || '') && /2 个没比成/.test(un1.head || '')
+      && !/对得上|一样/.test(un1.head || ''),
+    `那一行话＝「${un1.head || ''}」｜非「升级」的标 ${unLv} 枚`);
+  await up2.close();
+  await uctx.close();
+
+  // ㉙ `start.status: 'same'` ⇒ **一个字都不说**（后台 `start_link`：一样＝不标；见 app.js `levelsStartText`）
+  scen({ tick: 0.1, units: [U_D],
+         levels: { ref_tf: '1h', start: { status: 'same', finest: { price: 205.07, t: Date.UTC(2026, 2, 29) / 1000 },
+                   here: { price: 205.07, t: Date.UTC(2026, 2, 29) / 1000 }, first_center_t: Date.UTC(2026, 2, 29) / 1000 },
+                   units: lvUnits([[U_D, 'match', [{ i: 3, pct: 100 }], { pre: 0, gap: 0, post: 0 }]]) } });
+  const smctx = await newCtx({ viewport: { width: 1280, height: 800 }, timezoneId: 'UTC' });
+  const smp = await openLv(smctx, '?symbol=ZECUSDT&tf=1h&last=200');
+  const same1 = await lvProbe(smp);
+  t('㉙ 起点 `same`（后台判"一样"）⇒ 一个字都不说 —— 在"一样"上贴一句话＝凭空捏一个分歧出来',
+    same1.boxes.length === 1 && !(same1.head || '').trim() && same1.headOn === false,
+    `那一行话「${same1.head || ''}」（要空）｜on=${same1.headOn}｜框 ${same1.boxes.length} 个`);
+  await smp.close();
+  await smctx.close();
 
   await b.close();
   console.log(`\n${ok.length}/${ok.length + bad.length} 绿`
