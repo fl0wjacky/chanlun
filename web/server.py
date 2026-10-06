@@ -63,6 +63,7 @@ from fetch_klines import BASE as BINANCE_KLINES, UA, fetch as binance_fetch   # 
 from make_web_fixture import iso, shape                 # noqa: E402
 from core.analyze import analyze                        # noqa: E402
 from core.trend import trend_v3                         # noqa: E402
+import levels as LV                                     # noqa: E402  （web/levels.py：级别联动，不进引擎版本）
 from core.signals import MEASURES, MEASURE_ORIG, macd_lines, signals as engine_signals   # noqa: E402
 import core.signals as _engine_signals_mod              # noqa: E402,F401  （见下行：模块对象从 sys.modules 取）
 _ENGINE = sys.modules["core.signals"]                    # core/__init__ 把 signals 导成了函数，模块要从这里拿
@@ -345,6 +346,51 @@ TREND_READING = "B"                      # D3 读法（A＝整段升一级／B�
 CUT_KEY = "__cut__"                      # mbodies 里切法结果那一份的键（一格只算一次，各看法共用：v3 不读背驰）
 
 
+def _cut_cc(slot, symbol):
+    """在 slot.lock 里调用 → (seg_centers, trend, reading)：v3 只用线段 ⇒ 跟看法无关，一格算一次（数据一刷新随 mbodies 清掉）。"""
+    cc = slot.mbodies.get(CUT_KEY)
+    if cc is None:
+        r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"))
+        v = trend_v3(r, reading=TREND_READING)
+        cc = slot.mbodies[CUT_KEY] = (v["seg_centers"], {k: v[k] for k in
+                                      ("bounds", "retracted", "pending", "segments", "units")}, v["reading"])
+    return cc
+
+
+def _level_view(symbol, tf, span):
+    """级别联动要的「视图」，**只从缓存取、不碰币安**：先找同 span 那格，没有就退到 span=1；都没有 ⇒ None
+    （上层据此写 unmeasured，绝不当成对得上）。→ (view, 数据拉取时间 epoch 秒) 或 (None, None)。"""
+    for k in dict.fromkeys((min(span, SPAN_MAX[tf]), 1)):
+        slot = SLOTS[(symbol, tf, k)]
+        with slot.lock:
+            if slot.body is None or slot.bars is None:
+                continue
+            centers, trend, _ = _cut_cc(slot, symbol)
+            return dict(t=[b["t"] for b in slot.bars], step=TFS[tf], bounds=trend["bounds"], centers=centers,
+                        units=trend["units"]), slot.data_at
+    return None, None
+
+
+def get_levels(symbol, tf, span=1):
+    """→ /api/levels 的 JSON bytes，或 None（本图一次都没拉成功过）。本图走 get_chart 同一条路（冷就同步拉）；
+    最细那张、对照那张只看缓存（levels.py 的口径：缓存里没有 ⇒ unmeasured）。"""
+    if get_chart(symbol, tf, span, prefetch=False) is None:
+        return None
+    here, here_at = _level_view(symbol, tf, span)
+    if here is None:
+        return None
+    fin_tf, rf = LV.finest_tf(TFS), LV.ref_tf(tf, TFS)
+    fin, fin_at = (None, None) if fin_tf == tf else _level_view(symbol, fin_tf, span)
+    ref, ref_at = (None, None) if rf is None else _level_view(symbol, rf, span)
+    at = lambda x: iso(int(x * 1000)) if x else None
+    return json.dumps(dict(
+        symbol=symbol, tf=tf, span=span, engine=ENGINE, finest_tf=fin_tf, ref_tf=rf,
+        start=None if fin_tf == tf else LV.start_link(here, fin, TFS[tf]),
+        units=LV.unit_links(here, ref),
+        data_at=dict(here=at(here_at), finest=at(fin_at), ref=at(ref_at)),   # 三张各自是哪一刻的数据，前端对得上号
+    ), ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+
 def _measure_body(slot, symbol, tf, measure, cut=DEFAULT_CUT):
     """在 slot.lock 里调用 → 这一格在某种背驰看法下的 JSON。买卖点之外的一切跟默认那份是同一份：
     K 线、笔、段、中枢跟看法无关，只有 signals 两层重算（懒算、按 measure 各存一份，数据刷新就作废）。
@@ -355,12 +401,7 @@ def _measure_body(slot, symbol, tf, measure, cut=DEFAULT_CUT):
         b = slot.mbodies.get((measure, cut))
         if b is None:
             d = json.loads(_measure_body(slot, symbol, tf, measure, "extend"))   # 从不切的那份派生
-            cc = slot.mbodies.get(CUT_KEY)
-            if cc is None:                                # v3 只用线段 ⇒ 跟看法无关，一格算一次
-                r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"))
-                v = trend_v3(r, reading=TREND_READING)
-                cc = slot.mbodies[CUT_KEY] = (v["seg_centers"], {k: v[k] for k in
-                                              ("bounds", "retracted", "pending", "segments", "units")}, v["reading"])
+            cc = _cut_cc(slot, symbol)
             d["seg_centers"], d["trend"], d["cut"] = _clean(cc[0]), _clean(cc[1]), cut
             d["trend_reading"] = cc[2]                    # D3 读法回显：前端据此决定字母挂哪一级（Nova 10-05 16:4x）
             b = slot.mbodies[(measure, cut)] = json.dumps(d, ensure_ascii=False, separators=(",", ":"),
@@ -616,6 +657,23 @@ class Handler(BaseHTTPRequestHandler):
             if got is None:
                 return self._err(503)
             return self._send(200, got[0], gz=got[1])
+        if u.path == "/api/levels":                       # 级别联动（card-6e338490）：只给数据，文案归前端
+            try:
+                q = urllib.parse.parse_qs(u.query, keep_blank_values=True, strict_parsing=True, max_num_fields=3)
+            except ValueError:
+                return self._err(400)
+            if not {"symbol", "tf"} <= set(q) <= {"symbol", "tf", "span"} or any(len(v) != 1 for v in q.values()):
+                return self._err(400)
+            symbol, tf = q["symbol"][0].upper(), q["tf"][0]
+            if symbol not in SYMBOLS or tf not in TFS:
+                return self._err(400)
+            raw = q.get("span", ["1"])[0]
+            if raw not in {str(v) for v in SPAN_VALUES}:
+                return self._err(400)
+            body = get_levels(symbol, tf, min(int(raw), SPAN_MAX[tf]))
+            if body is None:
+                return self._err(503)
+            return self._send(200, body)
         if u.path == "/api/tick":
             try:
                 q = urllib.parse.parse_qs(u.query, keep_blank_values=True, strict_parsing=True, max_num_fields=2)
