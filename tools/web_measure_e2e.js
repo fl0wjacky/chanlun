@@ -1282,6 +1282,11 @@ const shotChart = async (p, tag) => {
     const W = (() => { const c = document.querySelector('#chart canvas');
       return c ? c.getBoundingClientRect().width : 0; })();
     const Wchart = document.getElementById('chart').clientWidth;
+    // ★ 第三个数：**问图自己要**轴有多宽 —— 这样印出来那句话自带验算（`W ＋ 轴宽 == Wchart`），
+    //   读的人不用信我"这两把尺差的就是那条轴"，当场能加一遍。加不平就说明 W 取错了地方。
+    const psW = (() => { const p = a.chart.panes()[0];
+      if (!p) return null; const ps = p.priceScale('right');
+      return ps && typeof ps.width === 'function' ? Math.round(ps.width() * 10) / 10 : null; })();
     const mctx = document.createElement('canvas').getContext('2d');
     mctx.font = '12px -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif';
     const tw = mctx.measureText('等确认').width;
@@ -1322,12 +1327,18 @@ const shotChart = async (p, tag) => {
       } else if (vis.length) fellBack++;
     }
     return { nWin, nWithStrip, orphans, mismatch, fellBack, maxLabels, tw: Math.round(tw * 10) / 10, worst,
-      near: near.d === Infinity ? null : near, W: Math.round(W), Wchart };
+      near: near.d === Infinity ? null : near, W: Math.round(W), Wchart, psW };
   });
   await dW.c.close();
   ck('「够宽的带子**每条都写字**、一个字都不许落在没有带子的地方」在**很多个视口**上都成立（不是"默认那一屏碰巧"）',
-     SW54.nWithStrip >= 20 && SW54.orphans === 0 && SW54.mismatch === 0 && SW54.maxLabels >= 1,
-     `画布宽（mediaSize，跟图层同一把尺）${SW54.W} ／ \`#chart\` ${SW54.Wchart}（差 ${SW54.Wchart - SW54.W} ＝ 右轴那一条）　`
+     // ★ 最后那一条是**这把尺自己的牙**：`W ＋ 轴宽 == #chart 的 clientWidth`。加不平就说明
+     //   `document.querySelector('#chart canvas')` 拿到的**不是主图那一格的画布**（`#chart` 里有 11 张画布：
+     //   主图 1182、右轴 68、副图 1182……），那这一格量的是个来路不明的矩形 ⇒ **必须红**，不许绿。
+     SW54.nWithStrip >= 20 && SW54.orphans === 0 && SW54.mismatch === 0 && SW54.maxLabels >= 1
+       && SW54.psW !== null && Math.abs(SW54.W + SW54.psW - SW54.Wchart) <= 1,
+     // ★ 这句自带验算：`画布宽 ＋ 轴宽 == #chart 的 clientWidth`。加不平 ⇒ W 取错了地方（读的人当场能加一遍，不用信我）。
+     `画布宽（mediaSize，跟图层同一把尺）${SW54.W} ＋ 轴宽（问图要的）${SW54.psW} = ${SW54.Wchart}`
+     + `（＝ \`#chart\` 的 clientWidth ⇒ 差的正好是右轴那一条）　`
      + `字宽 ${SW54.tw} px ⇒ 「够宽」的门槛 ${Math.round((SW54.tw + 12) * 10) / 10} px　`
      + `扫了 ${SW54.nWin} 个视口（其中 ${SW54.nWithStrip} 个屏上有带子）　孤儿字 ${SW54.orphans} 个　`
      + `"写字数 ≠ 够宽的条数"的视口 ${SW54.mismatch} 个${SW54.worst ? '　★ ' + JSON.stringify(SW54.worst) : ''}　`
