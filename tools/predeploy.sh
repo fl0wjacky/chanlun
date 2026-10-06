@@ -3,6 +3,9 @@
 #
 #   tools/predeploy.sh          # 五套 Python 检查 + trend_check --self-test + seg_prefix_check（含 --self-test）+ 4 套前端回归（ghost / more / readout / measure）
 #   tools/predeploy.sh --all    # 再加 4 套单卡证据工装（macd_axis / mobile_share / readout_swap_probe / subhead_slot_probe）
+#   tools/predeploy.sh --expect <sha> [--all]   # 只在 HEAD 就是这笔、且没有未提交改动时才跑；对不上 ⇒ exit=2（没比成），一格都不跑
+#                                               # （也认环境变量 EXPECT_SHA）。card-a1ea0209-015：10-06 worktree 没建成，
+#                                               # 闸在旧树 8b9537b 上照跑、报全绿 —— 闸照实印了 HEAD，但没人拿它跟「要测的那笔」比。
 #
 # 环境变量（都可不给）：
 #   PYTHON     跑 Python 检查和临时后台用的解释器，默认 python3
@@ -16,7 +19,15 @@ cd "$(dirname "$0")/.." || exit 2
 PY=${PYTHON:-python3}
 NODE=${NODE:-node}
 ALL=0
-[ "${1:-}" = "--all" ] && ALL=1
+EXPECT=${EXPECT_SHA:-}
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --all) ALL=1 ;;
+    --expect) shift; EXPECT=${1:-} ;;
+    *) echo "不认识的参数：$1" >&2; exit 2 ;;
+  esac
+  shift
+done
 
 RESULTS=()
 RED=0
@@ -50,7 +61,22 @@ PIL=$("$PY" -c 'import PIL; print(PIL.__version__)' 2>/dev/null || echo 无)
 NODEV=$("$NODE" --version 2>/dev/null || echo 无)
 PWV=$("$NODE" -e "console.log(require('playwright/package.json').version)" 2>/dev/null || echo 无)
 HEAD_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo 不在 git 里)
-git diff --quiet HEAD -- 2>/dev/null || HEAD_SHA="$HEAD_SHA（有未提交的改动）"
+DIRTY=0
+git diff --quiet HEAD -- 2>/dev/null || { DIRTY=1; HEAD_SHA="$HEAD_SHA（有未提交的改动）"; }
+if [ -n "$EXPECT" ]; then
+  # 要测的那笔先解析成全 sha（给的是短 sha／分支名都行）；解析不了、HEAD 不是它、或有未提交改动 ⇒ 一格都不跑，exit=2
+  WANT=$(git rev-parse --verify --quiet "$EXPECT^{commit}" 2>/dev/null || true)
+  HAVE=$(git rev-parse HEAD 2>/dev/null || true)
+  if [ -z "$WANT" ] || [ "$WANT" != "$HAVE" ] || [ $DIRTY = 1 ]; then
+    echo "================ 上线前检查 ================"
+    if [ -z "$WANT" ]; then why="这台仓库里解析不出这笔：没 fetch？"
+    elif [ "$WANT" != "$HAVE" ]; then why="HEAD 不是这笔"
+    else why="HEAD 对，但有未提交的改动"; fi
+    echo "HEAD $HEAD_SHA ≠ 要测的 $EXPECT（$why）"
+    echo "⇒ 测的不是要测的那笔：一格都没跑，不算通过（exit=2）"
+    exit 2
+  fi
+fi
 
 # ---- 数据那半：Python 检查（每一套自己就是 0 过 / 非 0 不过）----
 # trend_check --self-test：反向验证（拿掉规则 ⇒ 必须变／必须报）每趟都跑，不靠手动记得（Nova 10-06，card-3edd7fb3）。
