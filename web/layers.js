@@ -52,24 +52,32 @@ export function lvTagText(u, refName) {
   if (share.length === 0 && gap > 0) return refName ? `${refName}没有中枢` : '';
   return '';
 }
-// ★ 按 `X0`（框的起始 bar 下标）把 `levels.units` 对到**画出来的框**上：**绝不按下标**。
-//   `levels.units` 号称跟 `trend.units` 逐位对齐，但那是**两份独立的载荷** —— 后台任何一处少算/多算
-//   一个框，下标就整体错位，而错位会把标**安到旁边那个框上**（屏幕上完全看不出，标还是"有字的"）。
-//   按下标取 = 拿一个可能错的假设去换"看起来更简单"。X0 对不上 ⇒ 这个框不标（保守那一边）。
-//   ★ 拿的是 `D.units`（**这一帧真画出来的**框），不是 `T.units` 原始载荷 ⇒ 开关关着时不会
-//     「框没了、字还在」（跟上面「升级」第 ③ 条一字不差）。
-export function lvTagFor(u, byX0, refName) {
-  if (!byX0 || !byX0.size) return '';
-  const hit = byX0.get(u.X0);
-  return hit ? lvTagText(hit, refName) : '';
-}
-/** `levels.units` → `Map(X0 → 那一条)`。X0 缺的条目**跳过**（按 X0 匹配是唯一一条路；没有 X0 就没法对）。 */
-export function lvByX0(levels) {
-  const m = new Map();
-  if (levels && Array.isArray(levels.units)) {
-    for (const u of levels.units) if (u && u.X0 != null) m.set(u.X0, u);
-  }
-  return m;
+// ★★ 把 `levels.units` 对到框上 —— **今天能走的只有"位置"这一条路**，先把代价说破：
+//   实拍的载荷里，`levels.units` 每一条**只有一个 `{status, share, outside}`** —— 没有 `X0`、没有 `X1`、
+//   没有 id，**一个身份字段都没有**（曾按 `X0` 配过，线上一个标都出不来：`u.X0 != null` 对每一条都是假，
+//   字典是空的、字全没了，而屏上什么都看不出来）。
+//   ⇒ 唯一有契约的凭据是**同下标**：`levels.py` 写的是「本图每个合成框（trend.units，**同下标**）」。
+//     这是"今天只有这一条路"，不是"这条路最稳"：两份载荷的框数/次序一旦对不上，按下标就**整体错位**
+//     （错位＝标安到旁边那个框上，屏上一样是"有字的"，看不出来）。
+//   ⇒ 所以位置配对**必须另加闸**，`lvAligned` 就是那道闸：对不上就一个都不标（保守那一边）。
+//   ★ 往后后台要是给每个框一个**身份字段**（哪怕就是 `X0`），按身份配严格更稳 —— 那时把这一支换掉，
+//     别留着这段话当"已经够好了"。Bram 那边当作可选加固在要，不是拦路的。
+/** 三道闸都过 ⇒ 返回可以按下标取的 `levels.units`；任何一条不过 ⇒ `null`（＝一个标都不画）。
+ *  ① **框数**：跟这一帧的 `T.units` 一样多吗？少算/多算一个框，同下标就整体错位。
+ *  ② **周期**：载荷回显的 `tf` 跟屏上这一份（`state.tf`）一样吗？
+ *  ③ **档位**：`span` 一样吗？★ 这一道专治**旧快照** —— 往左补数据之后 span 变了，两份载荷的框数
+ *     往往还一样（① 拦不住），而同一个下标在新旧两档上指的不是同一个框。
+ *  ★ ②③ 比的是**屏上这一份**（`state.tf`/`state.span`），不是我们刚才发出去的请求参数：后台会钳档
+ *    （15m 要 16 钳到 4），"我发了什么"不算数、回显才算 —— 跟 `adopt()` 那条账同一条。
+ *  ★ **不拿 `symbol` 比**：换品种/换周期一律走 `go()`，那儿当场把 `state.levels` 清成 null（见 app.js），
+ *    比 `symbol` 是第二道保险，而它一错（后台回显的写法跟请求不完全一致）就会把这一层整片关掉。
+ *  ★ `span` 用字符串比：后台给 `1` 还是 `"1"` 都不该决定这一层画不画，缺字段（`null`/`undefined`）才算不过。 */
+export function lvAligned(T, lv, tf, span) {
+  if (!T || !Array.isArray(T.units) || !lv || !Array.isArray(lv.units)) return null;
+  if (lv.units.length !== T.units.length) return null;
+  if (lv.tf !== tf) return null;
+  if (lv.span == null || span == null || String(lv.span) !== String(span)) return null;
+  return lv.units;
 }
 
 const FONT = '12px -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif';
@@ -1005,38 +1013,49 @@ function trendMarkView(target, state, prim) {
     //      ① 锚点搬到**右边线内侧** `x1 - 6`、`align:'right'` —— 左边已经住着「升级」，两个挤一块儿；
     //      ② 右沿**出屏就一个字都不画**（`x1 > W` 也 skip），**绝不夹回来** —— 夹回来就是
     //         card-113a3b16-026 那个「钉在视口边上不动」的旧 bug 的翻版（那段长注释在 ⑤ 里）；
-    //      ③ 只给**这一帧真画出来的框**写字（`D.units`），不是 `T.units` 载荷 ⇒ 开关关着不出字；
+    //      ③ 只给**这一帧真画出来的框**写字：★ 这一条比「升级」难 —— `levels.units` 跟框**没有**共同的
+    //         身份字段（见 `lvAligned`），只能**同下标**。所以不遍历 `D.units`（那是筛过的子集，按下标取
+    //         会错位），改为**遍历 `T.units` 取下标的 `levels.units[i]`**，再把下面这几条**画框那一趟
+    //         一模一样的判据**重放一遍（x/y 取不到、横向出屏、纵向出屏）—— 同一个谓词 ⇒ 被标的那几个框
+    //         跟真画出来的那几个框**是同一批**。开关关着时整支不跑，也就没有「框没了、字还在」。
     //      ④ 让位走**同一张表**（`mine` + `fitLabel`）：跟「升级」不许压在一起，也不压这一层别的字。
     //    ★ 颜色是中性灰（`TREND.lv`）：它讲的是"跟另一张图对不上"，不是涨跌 —— 不跟价签抢读法。
     //    ★ 开关 `sh.lv`（默认开），而它跟 `up` 与过（合成框那一层不画就没有地方挂字，见 `shownOf`）。
     if (sh.lv) {
-      const refName = refTfName((state.levels || {}).ref_tf);
-      const byX0 = lvByX0(state.levels);            // 按 X0 对齐；X0 对不上的框一个字都不标
-      for (const u of D.units) {
-        const txt = lvTagFor(u, byX0, refName);
-        if (!txt) continue;
-        const x0 = vp.xOfBar(u.X0), x1 = vp.xOfBar(u.X1);
-        const yt = vp.yOfPrice(u.GG), yb = vp.yOfPrice(u.DD);
-        if (x0 === null || x1 === null || yt === null || yb === null) continue;
-        // 框整个出了屏 ⇒ 不画；★ 右沿出屏（`x1 > W`）也**不画** —— 这一句就是"不许夹回来"的牙
-        //   （「升级」那头没有这一条是因为它锚在左沿；这一头锚在右沿，右沿出去了就没地方站）。
-        if (x1 <= 0 || x0 >= W || x1 > W) continue;
-        // 框纵向也整个出了屏 ⇒ 画面上根本没有这个框，别给它写字（跟 ⑤ 同一条）
-        if (yb < 0 || yt > H) continue;
-        // ★★ 上面那条右沿 guard 只管"**锚点**在屏内"；右对齐的字是往**左**铺的 —— 锚点离左沿太近时
-        //   整块会被画布左边切掉（「升级」那头的对偶：它是锚在左沿、用 `x0 < 0 ⇒ continue` 守的）。
-        //   ⇒ 量出这一句的宽，`lx - w < 0` 就整块不画。**不夹、不截**，跟右沿同一条规矩
-        //     （夹回来就是 card-113a3b16-026 那个「钉在视口边上」的旧 bug）。
-        ctx.font = FONT;
-        const tw = ctx.measureText(txt).width;
-        const lx = x1 - 6;
-        if (lx - tw < 0) continue;
-        // y 跟「升级」同一条规矩：贴着框上沿往下 15；框比屏幕高就落在可见那一段的顶上。
-        let ly = Math.max(yt, 0) + 15;
-        if (ly > H - 6) ly = H - 6;
-        // ★ `fitLabel` 必须收到跟 `haloText` 同一个 `align`（'right'）：测的盒子和登记的盒子要同向，
-        //   否则它会去躲右边、留下左边真压着的「升级」/框线/编号（Nova 指出，见 fitLabel 那段账）。
-        D.labels.push(haloText(ctx, lx, fitLabel(ctx, lx, ly, txt, mine, H, 'right'), txt, TREND.lv, 'right', mine));
+      const lv = state.levels;
+      // 三道闸（框数／周期／档位）全过才拿得到能按下标取的数组；任何一条不过 ⇒ `null` ⇒ 一个字都不标。
+      const us = lvAligned(T, lv, state.tf, state.span);
+      if (us) {
+        const refName = refTfName(lv.ref_tf);
+        for (let i = 0; i < T.units.length; i++) {
+          const txt = lvTagText(us[i], refName);
+          if (!txt) continue;
+          // ★ 下标 `i` 是**同一把尺子**量出来的那一个框：`us[i]` 是后台对它的结论，`T.units[i]` 才是
+          //   画它用的几何（下面的判据跟 `trendBandView` ③ 那一趟逐条对应）。
+          const u = T.units[i];
+          const x0 = vp.xOfBar(u.X0), x1 = vp.xOfBar(u.X1);
+          const yt = vp.yOfPrice(u.GG), yb = vp.yOfPrice(u.DD);
+          if (x0 === null || x1 === null || yt === null || yb === null) continue;
+          // 框整个出了屏 ⇒ 不画；★ 右沿出屏（`x1 > W`）也**不画** —— 这一句就是"不许夹回来"的牙
+          //   （「升级」那头没有这一条是因为它锚在左沿；这一头锚在右沿，右沿出去了就没地方站）。
+          if (x1 <= 0 || x0 >= W || x1 > W) continue;
+          // 框纵向也整个出了屏 ⇒ 画面上根本没有这个框，别给它写字（跟 ⑤ 同一条）
+          if (yb < 0 || yt > H) continue;
+          // ★★ 上面那条右沿 guard 只管"**锚点**在屏内"；右对齐的字是往**左**铺的 —— 锚点离左沿太近时
+          //   整块会被画布左边切掉（「升级」那头的对偶：它是锚在左沿、用 `x0 < 0 ⇒ continue` 守的）。
+          //   ⇒ 量出这一句的宽，`lx - w < 0` 就整块不画。**不夹、不截**，跟右沿同一条规矩
+          //     （夹回来就是 card-113a3b16-026 那个「钉在视口边上」的旧 bug）。
+          ctx.font = FONT;
+          const tw = ctx.measureText(txt).width;
+          const lx = x1 - 6;
+          if (lx - tw < 0) continue;
+          // y 跟「升级」同一条规矩：贴着框上沿往下 15；框比屏幕高就落在可见那一段的顶上。
+          let ly = Math.max(yt, 0) + 15;
+          if (ly > H - 6) ly = H - 6;
+          // ★ `fitLabel` 必须收到跟 `haloText` 同一个 `align`（'right'）：测的盒子和登记的盒子要同向，
+          //   否则它会去躲右边、留下左边真压着的「升级」/框线/编号（Nova 指出，见 fitLabel 那段账）。
+          D.labels.push(haloText(ctx, lx, fitLabel(ctx, lx, ly, txt, mine, H, 'right'), txt, TREND.lv, 'right', mine));
+        }
       }
     }
   });

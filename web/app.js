@@ -87,7 +87,10 @@ opts.trendNum = SUB_Q.get('trendnum') === '1';
 // ★ 它画在**合成框**上（那层归「高一级」）⇒ `shownOf` 里跟 `up` 与过；「高一级」默认关着，所以
 //   这一颗**默认开也画不出东西**，得先把「高一级」打开才有框可标。这不是 bug，是那一层的从属关系。
 opts.lv = SUB_Q.get('lv') !== '0';
-const state = { data: null, opts, candleSeries: null, levels: null };
+// ★ `tf` / `span` 是「**此刻屏上这一份**是哪一档」，由 `noteView()`（在 `draw()` 里）每次摆图时记一笔。
+//   级别对照那一层要用它：`levels` 是**另一次**请求的载荷，跟图表那份没有共同的身份字段，
+//   只能靠"同一档"来判断那份还在不在讲这一张图（见 layers.js `lvAligned`）。
+const state = { data: null, opts, candleSeries: null, levels: null, tf: '', span: null };
 const primitives = [];
 // 往左拖那套状态：span＝现在手上是第几档，spanMax＝后台给的封顶，earliest＝币安真没有了。
 // viewSet＝**我们自己摆的那个视口**（用来认事件回声，见 setView）；reqId＝在飞的那一份的号（换品种就作废）。
@@ -503,10 +506,15 @@ let noticeTimer = 0;
 function structKey(d, t0, t1, shown, levels) {
   const sh = shown || null;
   const on = (k) => !sh || !!sh[k];        // 这一层画没画（没给开关就当作画着）
-  // 级别对照：`levels.units` 按 **X0** 对到框上（★ 不按下标 —— 跟 layers.js `lvByX0` 同一条账：
-  //   两份独立载荷一旦错位，按下标会把标安到旁边那个框上，而屏上看不出来）。X0 对不上的框不标。
-  const lvStat = new Map();
-  if (levels && on('lv')) for (const u of (levels.units || [])) if (u && u.X0 != null) lvStat.set(u.X0, u.status || '');
+  // 级别对照：`levels.units` 跟框**只有"同下标"这一条契约**（它没有身份字段，连 X0 都没有 ——
+  //   见 layers.js `lvAligned` 那段账）⇒ 这里也按**下标**取，并把 layers 那三道闸的第一道
+  //   （框数一样）抄过来：框数不一样就当这一层不存在，否则下标错位会把「对标」记到旁边那个框上。
+  //   ★ tf／span 那两道闸这儿不比 —— 换档那条路（loadEarlier）当场把 `state.levels` 清成 null，
+  //     压根轮不到拿旧档位的快照来算账（见那儿）。
+  const tv = d.trend || {};
+  const lvUnits = Array.isArray((levels || {}).units) ? levels.units : null;
+  const lvStat = (lvUnits && Array.isArray(tv.units) && on('lv') && lvUnits.length === tv.units.length)
+    ? lvUnits.map((u) => (u && u.status) || '') : [];
   const ts = (i) => (d.bars[i] || {}).t;
   const ov = (a, b) => a != null && b != null && b >= t0 && a <= t1;   // 区间跟窗口有重叠（含边界）
   const at = (t) => t != null && t >= t0 && t <= t1;                   // 单个时间点落在窗口里
@@ -549,9 +557,11 @@ function structKey(d, t0, t1, shown, levels) {
     //   会在框右沿多写一句（见 layers.js ⑥）—— 所以只有 `mismatch` 算"屏幕变了"。
     //   ★ 记的是**画出来的那件事**（这个框多标了「对不上」），不是把 levels 载荷序列化（同上面那句账）；
     //     对不上的框（`lvStat` 里没有 / 状态不是 mismatch）一个字节都不加 ⇒ 旧用例仍逐字节一样。
-    //   ★ 这里顺手复用的是 `lvStat`（按 X0 的对位表）：X0 对不上 ⇒ 没标 ⇒ 不加 —— 跟画那半边走同一条判据。
-    const un = (on('up') ? (T.units || []) : []).filter((u) => ov(ts(u.X0), ts(u.X1)))
-      .map((u) => `${ts(u.X0)}>${ts(u.X1)}@${u.DD},${u.GG}${lvStat.get(u.X0) === 'mismatch' ? ',对标' : ''}`).join('|');
+    //   ★ 这里顺手复用的是 `lvStat`（按下标的对位表）：先记**原下标**再按窗口筛 —— 筛完还认得出是哪一条。
+    //     没标的那几条（状态不是 mismatch）一个字节都不加 ⇒ 跟画那半边走同一条判据。
+    const un = (on('up') ? (T.units || []) : []).map((u, i) => [u, i])
+      .filter(([u]) => ov(ts(u.X0), ts(u.X1)))
+      .map(([u, i]) => `${ts(u.X0)}>${ts(u.X1)}@${u.DD},${u.GG}${lvStat[i] === 'mismatch' ? ',对标' : ''}`).join('|');
     return (on('trend') ? [b, pd, rt, sg].join('/') : '') + '/' + un;
   };
   return [on('pen') ? part(d.pens) : '', on('seg') ? part(d.segs) : '',
@@ -807,7 +817,13 @@ function paint(d) {
 }
 
 // 装一张新数据：**先画，再摆视口**。keep 是补数据前抓的锚点（见 paging）；给了它就走「按时间放回原位」。
+/** ★ 记下「此刻屏上这一份是哪一档」（品种/周期/档位）。**放在 `draw()` 头一行**：每一条会把载荷
+ *  摆上屏的路（首屏／换看法／换切法／换品种／往左补数据）都得走这个口，一处漏写就漏一处。
+ *  ★ 记的是**回显过的**档位（`paging.span` 是 `adopt()` 从响应里认来的，不是我们发出去的那个数），
+ *    跟"后台会钳档"那条账同一条 —— 级别对照的对齐守卫要拿它比（layers.js `lvAligned`）。 */
+function noteView() { state.tf = el('tf').value; state.span = paging.span; }
 function draw(d, keep) {
+  noteView();
   paint(d);
   if (keep) { place(d, keep); return; }
   chart.timeScale().fitContent();
@@ -956,12 +972,18 @@ async function loadEarlier(span) {
     // ★ 判据只比**用户当前打开的那几层**，开关照 layers.js 实际画图用的那份（shownOf）取；
     //   前后两次用**同一个** sh：要是两次之间开关自己变了，那跟换档没关系，别算进去。
     const sh = shownOf(state.opts);
-    // ★ 把 levels 也带进来（第 5 个参数）：让「框上多标了一个『对不上』」也算进"这一屏变没变"，
-    //   跟「升级」那个标签同一条账（见 structKey 里 `un` 那段）。★ 这也意味着 levels 缺席
-    //   （go() 没取到 / 已清）时，前后两次都给 `null`，这一栏两边都不加 —— 不喊狼。
+    // ★★ 补数据**一换档，手上那份 levels 当场作废**（card-01961644-68f）：它是对着**旧那一档**的
+    //   `trend.units` 逐框数出来的（`levels.units` 跟框只有"同下标"这一条契约），档位一变，
+    //   同一个下标在新图上指的就不是同一个框了 —— 标会整批错位，而屏上照样是"有字的"。
+    //   它也不重取（`/api/levels` 是跟首屏 `go()` 并行发的那一趟）⇒ 只能**先全撤**，保守那一边。
+    //   ★ 摆在**取基准之前**：前后两次 `structKey` 都给 `null`，那一栏两边都不加 —— 不喊狼
+    //     （levels 缺席时本来就一个字节都不加，见 structKey 里 `un` 那段）。
+    if (paging.span !== span) { state.levels = null; renderLevelsHead(); }
     const keyBefore = win && structKey(own, win.t0, win.t1, sh, state.levels);
     Object.assign(paging, adopt(paging, d, own.bars.length));   // 回显说了算（钳档 / earliest / 有没有多出来）
     setUrl();
+    // ★ 摆图之前再看一眼：`adopt()` 可能把档钳回去（15m 要 16 钳到 4）⇒ 真换了档，仍要作废。
+    if (paging.span !== state.span) { state.levels = null; }
     draw(d, anchor);
     // 同一段时间、换完之后再取一次：不一样 ⇒ 用户正看着的那一屏被重算了 ⇒ 说一句，3 秒自己收
     if (win && structKey(d, win.t0, win.t1, sh, state.levels) !== keyBefore) showNotice();
@@ -2303,8 +2325,9 @@ async function go(span = 1) {
   //   它是附加层，比图表那份小、通常先到，但**先到也不许把首屏推后**（首屏画完它再落上来，
   //   只重画走势那一层，见 `renderLevels`）。`loadLevels` 自己吞掉所有失败 ⇒ 拿不到就是 `null`。
   const lvReq = loadLevels(symbol, tf, paging.span);
-  // ★ 新的这一趟一开跑，**上一份 levels 当场作废**：它按 `X0`（框下标）指框，换了品种/周期/档位
-  //   之后同一个 `X0` 已经不是同一个框了 —— 留着只会把标安到旁边那个框上（保守那一边：先全撤）。
+  // ★ 新的这一趟一开跑，**上一份 levels 当场作废**：`levels.units` 跟框只有"同下标"这一条契约
+  //   （没有身份字段，见 layers.js `lvAligned`），换了品种/周期/档位之后同一个下标指的不是同一个框
+  //   —— 留着只会把标安到旁边那个框上（保守那一边：先全撤）。
   //   `renderLevels` 顺手把浮层那一行话也收干净（state.levels 已是 null ⇒ 那句话自己就没词了）。
   state.levels = null;
   renderLevels();
