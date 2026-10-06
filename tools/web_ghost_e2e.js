@@ -233,6 +233,11 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   //   `{symbol, tf, t, o, h, l, c, v, fetched_at, stale, engine}`，`t` ＝ 那根的**开盘时间**。
   //   ★ 收价在 [低, 高] **里面**动（五个值轮着来）：价格轴一点都不会被撑动 —— 不然"已收盘那根一个
   //     像素没动"那一格，会被我们自己把整幅图挪了而假红。
+  // ★ 后台"最后一次成功取数"的那一刻，**只此一份**：假后台回它、⑯g/⑯g2 拿它当期望值。
+  //   原来是四个字面量散在假后台里 + 两个字面量写在判据里 —— 判据里那两个现在必须**由页面印**
+  //   （card-e7554dd2-44a：角上改成按浏览器本地时区印了，写死 "2026-10-05 03:41" 的判据在这台
+  //    机器上是绿是红，取决于跑它的机器在哪个时区 —— 那种判据量的是机器，不是页面）。
+  const STALE_AT = '2026-10-05T03:41:00.000Z';
   const TICK_BASE = base.bars[base.bars.length - 1];
   const tickC = (k) => TICK_BASE.l + (TICK_BASE.h - TICK_BASE.l) * (0.2 + 0.1 * (k % 5));
   const tickBody = (which, k, shift) => {
@@ -243,16 +248,18 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
     // ⑯k：跳价**在飞的那两秒里换了品种**（Atlas 10-05 的建议）。这一趟回的是**老品种**的价，收价给一个
     //   一眼认得出的离谱值（真动了就看得见）；而它的 `t` 与新图上最后一根**一模一样**（同周期、同一份平移）
     //   —— 所以能挡住它的**只有**「symbol/tf 对不上就不动」那道闸。拆掉那道闸，这一格必须红。
-    if (which === 'tickslow') return { ...good('2026-10-05T03:41:00.000Z', 1), c: TICK_BASE.c + 500 };
+    if (which === 'tickslow') return { ...good(STALE_AT, 1), c: TICK_BASE.c + 500 };
     // ⑯f：后台说**这一根已经收盘、新的一根开盘了**（t 比图上新）⇒ 页面该一个字都不动
     //   （收盘那一刻交给已有的自动重取）。收价给个一眼认得出的离谱值：真动了就看得见。
     if (which === 'tickroll') {
-      return { ...good('2026-10-05T03:41:00.000Z', 0), t: t + STEP_MS, c: TICK_BASE.c + 500 };
+      return { ...good(STALE_AT, 0), t: t + STEP_MS, c: TICK_BASE.c + 500 };
     }
     // ⑯g：前两趟好着，之后后台**拉不到币安**了 ⇒ 回上一次的值 ＋ stale=true ＋ fetched_at
-    //   **冻在**上次成功那一刻（03:41）。页面该：价停住、页头写「价格停在 03:41」、角上认账。
-    if (which === 'tickstale' && k >= 3) return { ...good('2026-10-05T03:41:00.000Z', 2), stale: true };
-    return good('2026-10-05T03:41:00.000Z', k);
+    //   **冻在**上次成功那一刻（`STALE_AT`）。页面该：价停住、页头写「价格停在 那一刻」、角上认账。
+    //   ★ 那一刻在屏上印成几点，取决于**跑这台工装的机器在哪个时区**（页头按本地印）——
+    //     所以下面判据拿的是页面自己印出来的字，不写死。
+    if (which === 'tickstale' && k >= 3) return { ...good(STALE_AT, 2), stale: true };
+    return good(STALE_AT, k);
   };
 
   const b = await chromium.launch();
@@ -372,7 +379,9 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   };
 
   // 页面上那份数据的要点 ＋ 那一格浮层
-  const snap = (p) => p.evaluate(() => {
+  // ★ `frozen` 得**当参数递进去**：`p.evaluate` 的函数是序列化到浏览器里跑的，闭包拿不到这一侧的
+  //   `STALE_AT` —— 写了就是 `ReferenceError`（不是"取到 undefined"，是整块当场炸）。
+  const snap = (p) => p.evaluate((frozen) => {
     const d = window.__app.state.data;
     const g = document.getElementById('ghostc');
     const t = document.getElementById('ghostc-tx');
@@ -392,6 +401,14 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
              lastBar: (d.bars && d.bars.length) ? { ...d.bars[d.bars.length - 1] } : null,
              lastTxt: (document.getElementById('last') || {}).textContent || '',
              updated: (document.getElementById('updated') || {}).textContent || '',
+             // ⑯g/⑯g2 的期望值：把假后台冻住那一刻（`STALE_AT`）**用页面自己那个本地格式器**印一遍。
+             // ★ 工装自己写 `new Date().getHours()` 就是第二份规矩（跟 fmtPrice 那条同一个理由），
+             //   而且那样写出来的判据在 UTC 机器上恒真 —— 正好放走本次要防的那个错（印的是 UTC）。
+             //   页头那两格现在按本地时区印（card-e7554dd2-44a），只有它自己是这份口径的出处。
+             //   认不出来（后台换了格式）会返回空串 ⇒ 判据当场红，不静默。
+             fixedAt: window.__app.clockLocal(frozen),        // "HH:MM"  —— 页头「价格停在 …」
+             fixedStamp: window.__app.shortLocal(frozen),     // "YYYY-MM-DD HH:MM" —— 角上「数据 … 刷新」
+             fixedZone: window.__app.zoneTag(new Date(frozen)),   // "UTC+8"
              // 「画在图上」的最后一根：读的是**系列自己**那份数据（跟十字线读数同一个出处，不是读 state）
              drawn: (() => { const a = window.__app.chart.panes()[0].getSeries()[0].data();
                              return a && a.length ? { ...a[a.length - 1] } : null; })(),
@@ -400,7 +417,7 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
                                 return a && a.length
                                   ? window.__app.fmtPrice(a[a.length - 1].close, d.meta && d.meta.tick) : ''; })(),
              tip: (document.getElementById('ghosttip') || {}).textContent || '' };
-  });
+  }, STALE_AT);      // ← 上面那几个 `fixed*` 要用的那一刻（Node 这一侧的常量，得递进去）
   const tipState = (p) => p.evaluate(() => {
     const t = document.getElementById('ghosttip');
     return t ? { on: t.classList.contains('on'), txt: t.textContent } : null;
@@ -1033,13 +1050,27 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   { const t = Date.now(); while (TS.tick.n < 6 && Date.now() - t < 40000) await sleep(400); }
   await sleep(800);
   const g2 = await snap(stp);
+  // ★ 这两格的期望值 `g2.fixedAt` / `g2.fixedStamp` 是**页面自己**印的（见 snap 里那几条注释）：
+  //   判据量的是"页头印的那个时刻，跟后台冻住的那一刻，是不是同一刻"，跟这台机器在哪个时区无关。
+  //   ★★ 两处 `fixedAt === ''` 必须先挡掉：空串会让 `价格停在 ` 这种**恒真**的判据通过（假绿）。
   ck('⑯g 后台拉不到新的（stale=true、fetched_at 冻住）⇒ 价**停住**，页头写出来停在哪一刻',
      TS.tick.n >= 6 && eq(g1.drawn.close, tickC(2)) && eq(g2.drawn.close, g1.drawn.close)
-       && /价格停在 03:41/.test(g2.lastTxt),
+       && !!g2.fixedAt && g2.lastTxt.includes(`价格停在 ${g2.fixedAt}`),
      `跳价 ${TS.tick.n} 趟｜图上收价 ${g1.drawn.close} → ${g2.drawn.close}（该停在第 2 趟那个 ${tickC(2)}）`
-     + `｜页头「${g2.lastTxt}」`);
+     + `｜页头「${g2.lastTxt}」｜这一刻本地念 ${g2.fixedAt || '（页面印不出来 ⇒ 红）'}`);
+  // ★ 这一格正好压在 `sameDay` 那条分支上：假后台冻住的取数时刻（`STALE_AT`）跟图上那根差着
+  //   **27h34m** —— 比一天还长 ⇒ 不管跑在哪台机器上，两者**必定不同天**（时区只是整体平移，
+  //   挪不动这个差值）。⇒ 页面**必须**把日期写全（"同一天才省"在这里恒不成立）。
+  //   所以下面钉的是**带日期**那种写法：这条判据守的是"跨天时那个日期一个字都不许省"
+  //   （省了的话「数据 11:41 刷新」配着今天的本根会被读成今天 11:41 —— 后台停了一夜之后最容易误读的一刻）。
+  //   （同一天里省掉日期的另一种写法，归 tools/web_mobile_share.js ⑥ 那条管：那边跑真后台，正常就是同一天。）
   ck('⑯g2 价停住的时候角上也得承认（`★ 旧数据`），而且「数据 … 刷新」印的**必须**是后台冻住的那个时刻',
-     /旧数据/.test(g2.updated) && /数据 2026-10-05 03:41 刷新/.test(g2.updated), `角上「${g2.updated}」`);
+     /旧数据/.test(g2.updated) && !!g2.fixedStamp
+       && g2.updated.includes(`数据 ${g2.fixedStamp} 刷新`)
+       // 同一行末尾那个偏移量也得在，而且得跟这一刻对得上：它是"这两个时刻按哪个钟印"的唯一交代，
+       // 掉了的话屏幕上是两个裸时刻，用户没处知道它跟右边那根 UTC 轴不是一回事。
+       && g2.updated.includes(`｜ ${g2.fixedZone}`),
+     `角上「${g2.updated}」｜这一刻本地念 ${g2.fixedStamp || '（页面印不出来 ⇒ 红）'} ${g2.fixedZone}`);
 
   // ⑯j：后台**从来没取成功过**（503）⇒ 屏上那份一个字都不改，页头也不许编一个"停在几点"
   const T5 = await open('tick503');

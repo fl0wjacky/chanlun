@@ -23,7 +23,9 @@
   <div class="badges">
     <span id="last" class="badge"></span>
     <span id="state" class="badge">取数…</span>
-    <span id="updated" class="badge" title="最后一根 K 线的开盘时间（UTC）">—</span>
+    <!-- ★ 这里的 title 只在**数据落地之前**露脸（一有 data，stamp() 就把它整句换掉，见 app.js）。
+         所以它写的是口径、不是某个时刻：本地时区那几个字必须对 —— 原来是「（UTC）」。 -->
+    <span id="updated" class="badge" title="最后一根 K 线的开盘时间（按你机器的本地时区）">—</span>
   </div>
 </header>
 
