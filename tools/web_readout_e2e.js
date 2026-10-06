@@ -49,7 +49,7 @@
 //      这一格是 Atlas 核 readout-hold 时点的缺口：变异「换看法时也立起 dataStale」全绿、没一格看见。
 //      摆法上三个坑都绕开了（换看法在**页面里**点，指针不许离开图；先开买卖点那层，不然芯片是灰的；
 //      先断言「换之前就亮着 ＋ 回显真换了」）—— 理由写在 ㉑ 那一节。
-//   ㉓–㉚ **级别联动那一层**（卡 card-01961644-68f，L-9；后台 `GET /api/levels` 这一支**不在 main 上**，
+//   ㉓–㉛ **级别联动那一层**（卡 card-01961644-68f，L-9；后台 `GET /api/levels` 这一支**不在 main 上**，
 //      所以一律用 Playwright 的 `page.route` 把那一趟拦下来喂载荷）。这一族量的都是**"该不该出字"**：
 //      ㉓ 三档 mismatch 各出各的那句话、且锚在框**右沿**｜㉔ match/partial **不出字**（★ 必须在
 //      **同一份载荷**里跟 mismatch 一起量：整层没画也是"没字"，那种绿是假的）｜㉕ 两颗芯片的从属
@@ -60,7 +60,9 @@
 //      ㉘ `unmeasured` 只许说「没比成」，读不出"对得上"｜㉙ `start.status: 'same'` ⇒ 一个字都不说
 //      （在"一样"上贴一句话＝凭空捏一个分歧出来）｜㉚ **对齐闸**：`levels.units` 跟框只有"同下标"这一条
 //      契约（实拍的那一条**没有身份字段**，连 X0 都没有）⇒ 回显的周期／档位／条数有一条对不上，
-//      就一个标都不画。
+//      就一个标都不画｜㉛ **首屏那一刻**（「高一级」默认关着、`opts.lv` 却是开的）：那一行话必须跟
+//      框、标**一起收着** —— 判据跟画图走同一个开关（`shownOf(opts).lv`），不是那颗芯片自己的标志。
+//      这一格**不许点芯片**（点出来的状态看不见"屏幕刚起来"那个错）。
 //      ★★ 这一族第一版是**假绿**：工装自己给 `levels.units` 每条编了个 `X0`（照 spec 想当然），
 //        七格全绿、线上一个标都出不来 —— 量的是替身。教训写在这儿：**假后台要照实拍载荷写**，
 //        不是照 spec 写；spec 里那句"按 box start 对齐"跟线上报文对不上（Bram 抓的载荷里没有这个字段）。
@@ -69,11 +71,13 @@
 //   摘掉 `showRead` 里那道闸 ⇒ ⑰ 红；摘掉 `refreshSubVals` 里那道 ⇒ ⑱ 红；
 //   那个标志**永不放开** ⇒ ⑯⑲⑳ 红。⑮ 的牙还是原来那条（摘 go() 里那句）。
 //   **在 `setMeasure()` 里也立起 `dataStale`** ⇒ ㉑ 红（只红这一格：㉑ 自己一页，不牵连后面）。
-//   级别那一族（㉓–㉚）逐格变异验过，改法与结果见 `tools/web_readout_e2e.js` 那一节末尾 ——
+//   级别那一族（㉓–㉛）逐格变异验过，改法与结果见 `tools/web_readout_e2e.js` 那一节末尾 ——
 //   一句话：㉓ 把 `share.length >= 2` 那句掐空 ⇒ 红；㉔ 让没状态的框也出「对标」⇒ 红；
-//   ㉕ `lv` 的 disabled 恒 false ⇒ 红；㉖ 摘掉「会变」那截 ⇒ 红；㉗ 把浮层搬进 `.foot`（流内）
+//   ㉕ `lv` 的 disabled 恒 false ⇒ 红；㉖ 摘掉「会变」那截 ⇒ 红（掐掉 `这是 ${who}` 里那个空格、
+//   或把句号缀回某一段上也红）；㉗ 把浮层搬进 `.foot`（流内）
 //   ⇒ 高度那一句红；㉘ `unmeasured` 不计数 ⇒ 红；㉙ 放行 `same` ⇒ 红；㉚ 把对齐闸摘掉（`lvAligned`
-//   恒返回 `units`）⇒ 红。★ 另有一条**假绿**的旧账（值得记）：第一版工装给载荷编了个 `X0` 身份字段，
+//   恒返回 `units`）⇒ 红；㉛ 把那一行的闸退回裸 `opts.lv` ⇒ 红。
+//   ★ 另有一条**假绿**的旧账（值得记）：第一版工装给载荷编了个 `X0` 身份字段，
 //   七格全绿而线上全瞎 —— 那一版的绿，量的是工装自己编的替身。
 //
 // 假后台：拿仓里 zec_1h.json 的真 bars/结构，只改 `meta.tick`（精度那几条的被测量）、
@@ -123,9 +127,9 @@ const FULL = JSON.parse(fs.readFileSync(path.join(WEB, 'fixtures/zec_1h.json'), 
 //   holdMeasure：㉑ 用 —— 把**带 measure 的那一趟**（＝换看法那一趟）扣住。
 //          ★ 不扣住就没有「看法还在换」这段窗口可量：静态假后台秒回，㉑ 那一眼会落在换完之后，
 //            于是「换的那一刻压一下、换完才放开」这个形状**量不出来**（那正是 ㉑ 要防的）。
-//   units  ：㉓–㉗ 用 —— 塞进 `/api/chart` 的 `trend.units`（合成框）。仓里样本一个 units 都没有，
+//   units  ：㉓–㉛ 用 —— 塞进 `/api/chart` 的 `trend.units`（合成框）。仓里样本一个 units 都没有，
 //            这一族不自己合成就没框可标（见上面 lvBox 那段）。默认 null ⇒ 老的那些格逐字节不变。
-//   levels ：㉓–㉗ 用 —— `/api/levels` 回什么。默认 **null** ⇒ 回一个 JSON `null`（＝这一层不存在），
+//   levels ：㉓–㉛ 用 —— `/api/levels` 回什么。默认 **null** ⇒ 回一个 JSON `null`（＝这一层不存在），
 //            页面一个字、一个标都不出。★ 回 `'fail'` 就是 503（留给"接口挂了"那条路，这一套不摆它）。
 const DEFAULT_SCEN = { tick: 0.1, bend: false, fail: false, failSym: null, symShift: false, hold: 0,
                        holdSym: 'BTCUSDT', holdMeasure: 0, units: null, levels: null };
@@ -155,7 +159,7 @@ function payload(span, sym, measure) {
     d.pens = d.pens.map((p) => Object.assign({}, p, { p0: p.p0 * 1.002, p1: p.p1 * 1.002 }));
     d.segs = d.segs.map((s) => Object.assign({}, s, { p0: s.p0 * 1.002, p1: s.p1 * 1.002 }));
   }
-  // ★ ㉓–㉗：这一族要「屏上有合成框」才谈得上标 —— 样本里一个都没有 ⇒ 自己塞（`trendWith` 见上）。
+  // ★ ㉓–㉛：这一族要「屏上有合成框」才谈得上标 —— 样本里一个都没有 ⇒ 自己塞（`trendWith` 见上）。
   if (SCEN.units) d.trend = trendWith(SCEN.units);
   return d;
 }
@@ -219,7 +223,7 @@ const inDrawn = (p) => p.evaluate(() => {
 const NEW_FIRST = 250;
 const rgbOf = (hex) => 'rgb(' + [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(', ') + ')';
 
-// ---------------------------------------------------------------- 级别对照（㉓–㉚，卡 card-01961644-68f，L-9）
+// ---------------------------------------------------------------- 级别对照（㉓–㉛，卡 card-01961644-68f，L-9）
 // ★ 仓里三份样本的 `d.trend` 都**没有 `units`**（1h 那份连 `trend` 键都没有）⇒ 这一族必须**自己合成**
 //   几个「合成框」喂给 `/api/chart`。
 //   ★★ 假的 `/api/levels` 必须照着**实拍载荷**写，不是照着 spec 写：Bram 线上抓回来的那一条
@@ -820,7 +824,7 @@ const tagAnchor = (p, X1) => p.evaluate((k) => {
     + `｜UTC 今天 = ${dateIn('UTC')}`
     + (todayA === todayB ? '　★ 两边印成同一天 ⇒ 这格印的是 UTC 那版' : ''));
 
-  // ================================================================ ㉓–㉚ 级别对照（卡 card-01961644-68f，L-9）
+  // ================================================================ ㉓–㉛ 级别对照（卡 card-01961644-68f，L-9）
   // ★ 怎么摆才不是替身（这一族的全部摆法都在这几行里）：
   //   ① 样本里**一个合成框都没有** ⇒ 自己合成五个（`lvBox`，见上），X0/X1 全落在最后 200 根里、
   //      `?last=200` 一定看得见；DD/GG 取真 bars 的低/高 ⇒ 一定不会被"纵坐标出屏"跳过。
@@ -922,8 +926,14 @@ const tagAnchor = (p, X1) => p.evaluate((k) => {
   const head1 = lv1.head || '';
   t('㉖ 起点那句话（L-7）：`differs` ⇒ 起点按细图算 ＋「会变」＋ 本图第一个中枢；**不下"算不算分歧"的裁决**',
     head1.includes('起点按 15 分钟图算在 03-08（') && head1.includes('），以细图为准')
-      && head1.includes('这是15 分钟图的图头那一刀') && head1.includes('窗口一变会跟着挪（「会变」）')
+      // ★ 「这是 15 分钟图」那个**空格**（跟同一句里「起点按 15 分钟图」一字不差）：名字是插值，
+      //   空格是字面量 ⇒ 漏一个就印成「这是15 分钟图」，同一句里同一个名字两种样子。
+      && head1.includes('这是 15 分钟图的图头那一刀') && head1.includes('窗口一变会跟着挪（「会变」）')
       && head1.includes('本图第一个中枢 03-29 开始')
+      // ★ 句号归**整行**（Nova 2026-10-06 定）：这一行里起点那句后面还缀着覆盖率那一句，
+      //   所以结尾必须有句号，而**中间不许**出现「。 ｜」—— 那是"一句话说完了还接着说"。
+      //   加在起点段末尾上就是这样：1h（没有覆盖率句子）看不出来，2h／这一格一眼就出来。
+      && head1.endsWith('。') && !head1.includes('。 ｜') && !head1.includes('。｜')
       && !head1.includes('这不是级别分歧'),
     `那一行话＝「${head1}」`);
   await lp.screenshot({ path: path.join(OUT, 'level-link.png'), clip: { x: 0, y: 0, width: 1280, height: 400 } });
@@ -956,6 +966,9 @@ const tagAnchor = (p, X1) => p.evaluate((k) => {
   t('㉘ `unmeasured`（对照图没缓存）⇒ 覆盖率老实说「没比成」，读不出"对得上"；且不给它画标',
     un1.boxes.length === 2 && unLv === 0 && /2 个框/.test(un1.head || '')
       && /0 个比过/.test(un1.head || '') && /2 个没比成/.test(un1.head || '')
+      // ★ 只有覆盖率、没有起点那一句（`start: null`）⇒ **不缀句号**：一栏读数不是一句话
+      //   （句号归整行，见 `renderLevelsHead`；这一格跟 ㉖ 合起来把两半边都咬住）。
+      && !/。/.test(un1.head || '')
       && !/对得上|一样/.test(un1.head || ''),
     `那一行话＝「${un1.head || ''}」｜非「升级」的标 ${unLv} 枚`);
   await up2.close();
@@ -1001,6 +1014,49 @@ const tagAnchor = (p, X1) => p.evaluate((k) => {
     await ap.close();
     await actx.close();
   }
+
+  // ㉛ **首屏那一刻**（「高一级」默认关着）：那一行话必须跟框、标**一起收着**。
+  //    ★ 这一格量的是真出过的一个错：`renderLevelsHead` 当时判的是**裸标志** `opts.lv`（＝开），
+  //      而框和标判的是 `shownOf(opts).lv`（＝ `lv && up`）。「高一级」默认关着 ⇒ 首屏上零个框、
+  //      零个标，那一行话却照样印「5 个框：4 个比过、1 个部分没比」—— **它在描述用户看不见的那几个框**，
+  //      而旁边那颗「级别对照」芯片正按灰（"用不了"）。芯片说"没有"、字说"这是结果"，同一屏自相矛盾。
+  //    ★ 所以这一格**故意不用 `openLv()`**（这一族别的格都先点开「高一级」）—— 摆的就是首屏原样，
+  //      也就是**每一个新用户看到的第一眼**。★ 而且它自带正对照：点开「高一级」那一行话必须出来，
+  //      不然"关着时没有"这句在"整层压根没做"上也照样绿。
+  //    ★ 断言里比的是 `opts.lv === true`（不是"lv 也关着"）⇒ 这一格量的确实是**两个谓词打架**，
+  //      不是"整个功能关掉了"。
+  scen({ tick: 0.1, units: ALL5, levels: { ref_tf: '1h', start: null, units: lvUnits(LVM) } });
+  const dctx = await newCtx({ viewport: { width: 1280, height: 800 }, timezoneId: 'UTC' });
+  const dp = await open(dctx, '?symbol=ZECUSDT&tf=1h&last=200');            // ★ 一次芯片都不点
+  const dRead = () => dp.evaluate(() => {
+    const s = window.__app.state, h = document.getElementById('lvhead');
+    const c = document.querySelector('button.chip[data-key="lv"]');
+    // 只数**级别对照那三句话**：这一层别的字（分界价、待定、等确认、编号）跟它同住一个出口，
+    // 拿"非升级的都算"去数会把它们一起数进来（㉗ 那一格能那么写是因为它只要"有没有那一层的字"）。
+    const lvTag = (l) => /上不一样|中间一段空着|没有中枢/.test(String(l[4]));
+    return { lv: s.opts.lv, up: s.opts.up, head: h ? (h.textContent || '') : null,
+             on: h ? h.classList.contains('on') : null,
+             chipDis: c ? !!c.disabled : null,
+             nTag: ((s.trendDrawn || {}).labels || []).filter(lvTag).length };
+  });
+  const tapUp = () => dp.evaluate(() => { const c = document.querySelector('button.chip[data-key="up"]'); if (c) c.click(); });
+  const dOff = await dRead();
+  await tapUp(); await sleep(500); const dOn = await dRead();
+  await tapUp(); await sleep(500); const dOff2 = await dRead();
+  t('㉛ 首屏那一刻（「高一级」默认关着，`opts.lv` 却是**开**的）：那一行话跟框、标**一起收着**'
+    + ' —— 它不许描述屏上没有的那几个框',
+    dOff.lv === true && dOff.up === false && dOff.on === false && !(dOff.head || '').trim()
+      && dOff.nTag === 0 && dOff.chipDis === true
+      // ★ 点开那一头**两样一起要**（读数 AND 画出来的标）：只断一头的话，"读数说没有、图上其实有"
+      //   或者反过来，都能蒙过去 —— 这一格要的正是"这两个永远一致"，两个方向都得咬得住。
+      && dOn.on === true && (dOn.head || '').includes('5 个框') && dOn.nTag === 3
+      && dOff2.on === false && !(dOff2.head || '').trim(),
+    `默认：opts.lv=${dOff.lv}／opts.up=${dOff.up}、那一行话「${dOff.head || ''}」(on=${dOff.on})、`
+    + `芯片 disabled=${dOff.chipDis}、这一层的标 ${dOff.nTag} 枚`
+    + `｜点开「高一级」⇒「${dOn.head || ''}」(on=${dOn.on})`
+    + `｜再关掉 ⇒ on=${dOff2.on}「${dOff2.head || ''}」`);
+  await dp.close();
+  await dctx.close();
 
   await b.close();
   console.log(`\n${ok.length}/${ok.length + bad.length} 绿`
