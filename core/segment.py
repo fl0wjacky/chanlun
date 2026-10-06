@@ -165,6 +165,22 @@ def _reverse_scan(pens, end_pen, seg_dir, mode=FEAT_STD_DEFAULT):
     return len(hits) > 0, brk
 
 
+def _reverse_confirm_pen(pens, end_pen, seg_dir, mode=FEAT_STD_DEFAULT, e3=None):
+    """第二种情况在哪一笔到来时才算确认：E3 那一笔、和反向序列第一次出分型的那一笔，取晚的。"""
+    rev_dir = "down" if seg_dir == "up" else "up"
+    want2 = "bot" if rev_dir == "down" else "top"
+    pivot = pens[end_pen]["p1"]
+    tail = []
+    for j in range(end_pen + 1, len(pens)):
+        p = pens[j]
+        if (seg_dir == "up" and p["hi"] > pivot) or (seg_dir != "up" and p["lo"] < pivot):
+            break
+        tail.append(p)
+        if len(tail) >= 3 and _fractals_of(tail, 0, rev_dir, want2, mode)[0]:
+            return max(j, e3 or 0)
+    return len(pens)
+
+
 def _reverse_confirms(pens, end_pen, seg_dir, mode=FEAT_STD_DEFAULT):
     """只要『确认与否』（旧整序列口径在用）。"""
     return _reverse_scan(pens, end_pen, seg_dir, mode)[0]
@@ -238,8 +254,10 @@ def _opening_overlaps(pens, i):
     return max(p["lo"] for p in p3) < min(p["hi"] for p in p3)
 
 
-def check_segments(segs, pens):
-    """自检线段的不变量。返回违规列表。"""
+def check_segments(segs, pens, unmeasured=None):
+    """自检线段的不变量。返回违规列表。
+    unmeasured：给了 list 就把「量不了」的格子收进去（自检 A 取不到 X 之后第一个反向线段时）——
+    那种情况**不许**退回「段内后来破了就算」的宽版（那正是旧程序的漏），也不算违规，记「未量」由调用方印出来。"""
     bad = []
     for k, s in enumerate(segs):
         if s["npens"] < 3:
@@ -248,6 +266,28 @@ def check_segments(segs, pens):
             bad.append(("开头三笔无公共重叠", k, s["PI0"]))
         if s["npens"] % 2 == 0 and not s.get("live"):
             bad.append(("笔数不是单数", k, s["npens"]))
+        if not s.get("live"):
+            up = s["dir"] == "up"
+            if (s["p1"] <= s["p0"]) if up else (s["p1"] >= s["p0"]):    # L78:9-10：完成段的顶高于底
+                bad.append(("完成段顶不高于底", k, s["p0"], s["p1"]))
+            # L78:34-35（card-753bd03a）：起点不是段内极值 ⇒ 必须是 ① 型 —— 段内造出极值的那一笔 X（反向笔），
+            #   其后段内价格又破了 X 的起点（第一个反向线段破了 X 的底／顶，旧段延续）。不是 ⇒ 漏切。
+            ext = s["lo"] if up else s["hi"]
+            if s["p0"] != ext:
+                xs = [j for j in range(s["PI0"], s["PI1"] + 1)
+                      if (pens[j]["lo"] == ext if up else pens[j]["hi"] == ext) and _dir(pens[j]) != s["dir"]]
+                x = xs[0] if xs else None
+                # 破位必须发生在 X 之后**第一个反向线段**被确认之前（L78:33）—— 不是「后来某时破了」（那正是旧程序的漏）
+                rev = _first_seg(pens, x + 1) if x is not None else None
+                if x is not None and (rev is None or rev["dir"] != s["dir"]):
+                    if unmeasured is not None:
+                        unmeasured.append(("起点非段内极值，但 X 之后取不到第一个反向线段（A 量不了）", k, s["i0"]))
+                else:
+                    last = min(s["PI1"], rev["confirm"] - 1) if rev is not None else s["PI1"]
+                    broke = x is not None and any((pens[j]["hi"] > pens[x]["p0"]) if up else (pens[j]["lo"] < pens[x]["p0"])
+                                                  for j in range(x + 1, last + 1))
+                    if not broke:
+                        bad.append(("起点非段内极值且不是 L78 ① 型", k, s["i0"]))
         if k > 0:
             if s["PI0"] != segs[k - 1]["PI1"] + 1:
                 bad.append(("与上一段不相接", k))
@@ -256,7 +296,7 @@ def check_segments(segs, pens):
     return bad
 
 
-def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT):
+def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT, memo=None):
     """第 71 课：假设 pens[k] 的终点 V 是分界点，按原文程序考察。
 
     返回 (case, at)：
@@ -299,15 +339,26 @@ def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT):
         return None, None                         # V 不高于（低于）前一特征元素，谈不上顶（底）
     gap = (E1["h"] < E2["l"]) if up else (E1["l"] > E2["h"])
 
-    if not gap:                                   # ③ 第一种情况：第一笔在中间地带，看先破哪一头
-        L = pens[k + 1]["p1"]                     # 第一笔的结束位置
-        for r in range(k + 2, len(pens)):
+    if not gap:                                   # ③ 第一种情况：第一笔 X 在中间地带
+        # L78:32-38（spec/线段.md S-待定-1..3，card-753bd03a-780）：判据是 X 之后的**第一个反向线段**
+        #   （从 X 终点出发、方向同旧段）：破了 X 的起点 V ⇒ ① 旧段延续；走完了没破 ⇒ ② V 是终点；没走完 ⇒ 待定。
+        #   L71:27-28「先破哪一头」降为反向线段走完**之前**的提前定。旧程序只有提前定，反向线段走完、
+        #   两头都没破时一直等下去（BTC 4h 2024-02-23 那段等到 08-05 才判 ①）。
+        L = pens[k + 1]["p1"]                     # X 的结束位置
+        rev = _first_seg(pens, k + 2, mode, memo)  # X 之后的第一个反向线段（没走完 ⇒ None）
+        ok_rev = rev is not None and rev["dir"] == seg_dir
+        # 「走完」＝ 被确认的那一笔到来（L77:89-94：被线段破坏才算完成），不是它最后一笔 —— 在那之前的破位都算提前定。
+        #   用最后一笔当界会让先前已定的提前定被后来的确认翻掉（zec15 第 836 笔实测撤销过一段）。
+        stop = rev["confirm"] - 1 if ok_rev else len(pens) - 1
+        for r in range(k + 2, stop + 1):
             p = pens[r]
             if (up and p["hi"] > V) or (not up and p["lo"] < V):
-                return None, r                    # 先破开始位置：旧线段延续，从 r 起再找
+                return None, r                    # 破了 X 的起点：① 旧线段延续，从 r 起再找
             if (up and p["lo"] < L) or (not up and p["hi"] > L):
-                return 1, r                       # 先破结束位置：V 是终点，新段在 r 才确立
-        return None, len(pens)                    # 都没破：待定，其后候选一律不判
+                return 1, r                       # 先破 X 的结束位置：V 是终点，新段在 r 才确立
+        if ok_rev:
+            return 1, rev["confirm"]              # ② 反向线段走完、没破 V：V 是终点，新段到反向线段确认时才确立
+        return None, len(pens)                    # 反向线段还没走完：待定，其后候选一律不判
 
     E3 = None                                     # ④ 第二种情况
     for j in range(k + 3, len(pens), 2):          # V 之后的同类元素，按分型方向做包含
@@ -327,11 +378,26 @@ def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT):
             return None, None
     ok, brk = _reverse_scan(pens, k, seg_dir, mode)
     if ok:
-        return 2, None
+        return 2, _reverse_confirm_pen(pens, k, seg_dir, mode, j)
     return None, (brk if brk is not None else len(pens))   # 新高/新低 → 从破位处再找；否则待定
 
 
-def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT):
+def _first_seg(pens, start, mode=FEAT_STD_DEFAULT, memo=None):
+    """从 pens[start] 起划出来的第一个**已完成**线段（全局下标，带 confirm＝确认它的那一笔）；没有 ⇒ None。
+    memo：同一次划段里共用（键＝起点）。递归只会往右走（起点严格变大），每个起点最多算一次。"""
+    if memo is not None and start in memo:
+        return memo[start]
+    segs = build_segments(pens, mode=mode, start=start, first_only=True, _memo=memo)
+    s = None
+    if segs and not segs[0].get("live"):
+        s = dict(segs[0])
+        s["confirm"] = max(s["PI1"] + 1, s.pop("_born", None) or 0)   # _born ＝ 确认它的那一笔（两种情况都有）
+    if memo is not None:
+        memo[start] = s
+    return s
+
+
+def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=False, _memo=None):
     """把笔聚合成线段 —— 第 67 课的定义 + 第 71 课的当下程序（逐个假设分界点）。
 
     原文：
@@ -341,7 +407,8 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT):
     两个元素只决定「是哪种情况」，不是判据本身 —— 仍要按第 67 课的定义确认分型（见 _case_at）。
     旧『两点法』漏了最后这一步：只要 E1、E2 不重叠就收，线段被切得过碎（30 分钟 72 段）。
     """
-    segs, i, n = [], 0, len(pens)
+    segs, i, n = [], start, len(pens)
+    memo = {} if _memo is None else _memo
     born = 0                                  # 本段方向确立的那一笔（上一段第一种情况确认时的破位笔）
     while i + min_pens - 1 < n:
         # ★ L65:50-51／L77:69-70：线段开始的那三笔必须有重合。没有公共重叠 ⇒ i 处**构不成线段**
@@ -367,7 +434,7 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT):
         while k < born:                       # 方向确立之前，本段不能结束
             k += 2
         while k < n - 1:
-            case, resume = _case_at(pens, i, k, seg_dir, mode)
+            case, resume = _case_at(pens, i, k, seg_dir, mode, memo)
             if case:
                 found = (k, case, resume); break
             k += 2
@@ -376,8 +443,8 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT):
                     k += 2
         if found is None:
             break
-        end_pen, case, born = found
-        born = born or 0
+        end_pen, case, at = found
+        born = (at or 0) if case == 1 else 0      # 方向确立只对第一种情况有意义；第二种情况的 at 只给 _first_seg 当「确认那一笔」
         segs.append(dict(
             PI0=i, PI1=end_pen,
             i0=pens[i]["i0"], i1=pens[end_pen]["i1"],
@@ -386,6 +453,9 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT):
             hi=max(pens[k]["hi"] for k in range(i, end_pen + 1)),
             lo=min(pens[k]["lo"] for k in range(i, end_pen + 1)),
         ))
+        if first_only:
+            segs[-1]["_born"] = at                # 只给 _first_seg 用：确认这一段的那一笔
+            return segs
         i = end_pen + 1
 
     if n - i >= 3:
@@ -451,8 +521,34 @@ def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
             out.append((h, l))
         return [dict(h=h, l=l, ih=0, il=0) for h, l in out]
 
+    memo = {}
+
+    def first_seg_def(start):
+        """从 pens[start] 起按定义找出的第一个已完成线段 → dict(dir, PI0, PI1, confirm)；没有 ⇒ None。
+        另写一遍（不调 build_segments）：开头三笔要有公共重叠，逐个候选按 judge 判，待定区间里的候选跳过。"""
+        if start in memo:
+            return memo[start]
+        out, i = None, start
+        while i + 2 < N and max(p["lo"] for p in pens[i:i + 3]) > min(p["hi"] for p in pens[i:i + 3]):
+            i += 1                                # 开头三笔没有公共重叠：构不成线段，往后挪
+        if i + 2 < N:
+            up_ = pens[i]["p1"] > pens[i]["p0"]
+            k2, skip_ = i + 2, 0
+            while k2 + 1 < N:
+                if k2 >= skip_:
+                    verdict, r = judge(i, k2, up_)
+                    if verdict == "yes":
+                        out = dict(dir="up" if up_ else "down", PI0=i, PI1=k2, confirm=max(k2 + 1, r or 0))
+                        break
+                    if verdict == "wait":
+                        skip_ = r
+                k2 += 2
+        memo[start] = out
+        return out
+
     def judge(i, k, up):
-        """候选 k 的判决：("yes", None) / ("no", None) / ("wait", r) —— r 为待定区间终止处。"""
+        """候选 k 的判决：("yes", r) / ("no", None) / ("wait", r)。
+        yes 时 r ＝ 新段方向确立的那一笔（第二种情况为 None）；wait 时 r ＝ 待定区间终止处。"""
         if k + 1 >= N:
             return "no", None
         pre = [dict(h=pens[j]["hi"], l=pens[j]["lo"]) for j in range(i + 1, k, 2)]
@@ -464,13 +560,17 @@ def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
         if (up and not v > e1["h"]) or (not up and not v < e1["l"]):
             return "no", None
         no_gap = first["lo"] <= e1["h"] if up else first["hi"] >= e1["l"]
-        if no_gap:                                # 第一种情况：第一笔在中间地带
+        if no_gap:                                # 第一种情况：第一笔 X 在中间地带 —— L78:32-38 看第一个反向线段
             end = first["p1"]
-            for r in range(k + 2, N):
+            rev = first_seg_def(k + 2)
+            ok_rev = rev is not None and rev["dir"] == ("up" if up else "down")
+            for r in range(k + 2, rev["confirm"] if ok_rev else N):   # 反向线段被确认那一笔之前的破位都算提前定
                 if beyond_v(pens[r]):
-                    return "wait", r
+                    return "wait", r              # 反向线段破了 X 的起点：① 旧段延续
                 if (pens[r]["lo"] < end) if up else (pens[r]["hi"] > end):
-                    return "yes", None
+                    return "yes", r               # 反向线段走完前先破 X 的结束位置：提前定（L71:27）
+            if ok_rev:
+                return "yes", rev["confirm"]      # ② 反向线段走完没破 X 的起点
             return "wait", N
         # 第二种情况：V 之后的同类元素可以包含，找 E3
         mid, right, j = [first["hi"], first["lo"]], None, k + 3
@@ -497,6 +597,10 @@ def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
         feat = [dict(h=p["hi"], l=p["lo"]) for p in tail if (p["p1"] > p["p0"]) == up]
         want = "bot" if up else "top"
         if len(tail) >= 3 and len(feat) >= 3 and any(f["type"] == want for f in fractals(std_feats(feat, not up))):
+            for m in range(3, len(tail) + 1):     # 确认是在第几笔到来时发生的（反向序列第一次出分型；E3 那一笔也得到了）
+                ft = [dict(h=p["hi"], l=p["lo"]) for p in tail[:m] if (p["p1"] > p["p0"]) == up]
+                if len(ft) >= 3 and any(f["type"] == want for f in fractals(std_feats(ft, not up))):
+                    return "yes", max(k + m, j)
             return "yes", None
         return "wait", brk
 
@@ -509,9 +613,8 @@ def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
             bad.append(("终点处不满足定义", n, k))
         skip = 0                                  # 方向确立前 / 待定区间：其间候选不判
         if n > 0 and segs[n - 1].get("case") == 1:
-            end1 = pens[i]["p1"]                  # 本段第一笔的结束位置
-            r = next((j for j in range(i + 1, N)
-                      if ((pens[j]["hi"] > end1) if up else (pens[j]["lo"] < end1))), N)
+            p = segs[n - 1]                       # 上一段第一种情况结束：本段方向在它被确立的那一笔才确立
+            r = judge(p["PI0"], p["PI1"], p["dir"] == "up")[1] or 0
             if k < r:
                 bad.append(("本段在方向确立前就结束", n, r))
             skip = r
