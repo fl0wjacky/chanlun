@@ -53,6 +53,24 @@
 //        该红的是 ⑤/④。这一支只在变异跑里出现，干净树上不会。
 //     4. 第一屏量不出来时（凑不齐三根／拉不开）会自动换「柱子最大的那一屏」再试一次，两次都量不出来
 //        才认「量不出来」；用的哪一屏、两次各量到几根、各多高，都印在那一行里。
+//     5. ★★ **2026-10-06 那次红（卡 card-016a62a3-b36）：柱尖是被线盖住的，柱子本身没画矮。**
+//        病症：`缩放后⑧` 在干净的 main（0c56820）上红 —— BTCUSDT 4h，值 316 那根量到 7.5px、偏差 1.7px。
+//        当时的猜测是「柱距只有 2.78px，抗锯齿吃掉了柱尖那半像素」。**量下来不是**：
+//          · 按轴映射反推，那根柱尖该在 119.4，量到 121 ⇒ 短 1.6px（不是半像素，是一整行还多）；
+//          · 而且**放大到柱距 3.22px 反而更差**（该在 130.8，量到 133 ⇒ 短 2.2px）
+//            ⇒ 「太挤」这个解释当场不成立（真要是挤，放大就该变好）；
+//          · 那两行到底是谁画的？逐行看颜色：柱尖上一行是 rgb(186,220,223)、再上一行 rgb(85,183,176)
+//            —— 都是**白线色 (234,238,246) 跟柱子色 (38,166,154) 的混合**（0.75/0.25 与 0.25/0.75，
+//            对得上）；而白线（DIF）本身在这一列正好落在 120.5，离柱尖 1.1px。
+//          · **判决实验**：把 dif/dea 两条线 `applyOptions({visible:false})` 藏起来，同一屏、同三根再量
+//            ⇒ 柱尖差 0.2/0.1/0.2px（没藏时 0.1/2.2/0）。**柱子一分不差，是线把它盖住了。**
+//        ⇒ 修的是**量法**（跟 Nova 定的同一路：画法不动、±1.5px 不放宽）：
+//          柱尖被白线／黄线压住的那一根**跳过**（新增 `跳过.被线穿`），换下一根 —— 跟「被页头盖住的柱尖」同一类。
+//        ⇒ **没有**按「把挑窗口要求从 ≥2px 提到 ≥4px」改：证据说那不是病因（放大更差），而且今天那三根
+//          跨度 297 根，一屏塞进 297 根时柱距只有 3.22px —— ≥4px 与「同屏同三根」本身就凑不到一起。
+//          真按 ≥4px 挑，挑到的是**另一屏另三根**，绿了也证明不了什么（Atlas 10-06 提醒的正是这条）。
+//        ⇒ 三态落地（Nova＋Bram 10-06）：绿 / 红（量到了、形状错）/ **未量**（判据没被行使）；
+//          退出码 有红退 1、只有未量退 2、全绿 0。
 //   ⑦ **重建也管用**：点一次「MACD」那颗 chip（关 ⇒ 窗格收回去；开 ⇒ 重新建格、重新要数据），
 //      回来之后 ①②③④ 必须照样绿 —— 修法长在 `buildSub()` 里，这条防的是「只在第一次打开生效」。
 //      ★ 量之前先 `waitLayoutSettle()` 等页头贴住那一格的上沿（见那个函数的注释）——
@@ -114,6 +132,10 @@ const SITES = {
 
 const CELLS = [];
 const ok = (id, name, pass, detail) => CELLS.push({ id, name, pass, detail });
+// ★ 第三种结局：**未量**（判据没被行使 —— 挑不到能量的一屏、凑不齐三根、柱子太小）。
+//   不是绿（没比过就不能算通过），也不是红（形状没被判决过，别冤枉页面）。
+//   单独一栏印出来，计进 exit 2（Bram 2026-10-06：同一套里红压过未量 —— 有红退 1，只有未量才退 2）。
+const 未量 = (id, name, detail) => CELLS.push({ id, name, pass: null, 未量: true, detail });
 const r2 = (v) => Math.round(v * 100) / 100;
 
 async function readAxis(page) {
@@ -237,7 +259,22 @@ async function readPixels(page) {
     // 按「离目标量级多近」排，逐个试到能用为止
     const byNear = (base, f) => ranked.slice().sort((a, b) =>
       Math.abs(Math.abs(a.value) - Math.abs(base.value) * f) - Math.abs(Math.abs(b.value) - Math.abs(base.value) * f));
-    const taken = []; const 跳过 = { 太挤: 0, 盖住: 0, 量不到: 0 };
+    const taken = []; const 跳过 = { 太挤: 0, 盖住: 0, 被线穿: 0, 量不到: 0 };
+    // ★ 白线／黄线画在柱子**上头**（LWC 的绘制次序），穿过某一列时会把那根柱子的**柱尖那几行改画成线色**。
+    //   那不是「柱子画矮了」，是**柱尖被盖住**了 —— 2026-10-06 查这一格红的时候抓到的，账记在文件头上。
+    //   量柱尖得先知道柱尖在哪儿，所以这一关放在算出 `柱尖` 之后：线心离柱尖 ≤3px 就跳过这一根。
+    //   3px 是这么来的：线宽 1px ＋ 上下各半像素抗锯齿 ≈ 2px，留 1px 余量。
+    const 线的值 = new Map();
+    for (const q of S.dif.data()) 线的值.set('dif:' + q.time, q.value);
+    for (const q of S.dea.data()) 线的值.set('dea:' + q.time, q.value);
+    const 被哪条线穿 = (柱尖, time) => {
+      for (const [名, 键] of [['白线DIF', 'dif:'], ['黄线DEA', 'dea:']]) {
+        const v = 线的值.get(键 + time);
+        if (v == null) continue;
+        if (Math.abs(S.dif.priceToCoordinate(v) - 柱尖) <= 3) return 名;
+      }
+      return null;
+    };
     // 三个目标量级是相对**第一根真量到的那根**算的，不是死对 mx：最大那根要是被页头盖住/太挤被跳过，
     //   后面两根还按 mx 的 1/2、1/4 找，就会出现「第一根比第二根还小」—— 判据里的「拉得开」当场假红。
     let base = null;
@@ -271,6 +308,8 @@ async function readPixels(page) {
         if (best.px === 0) { 跳过.量不到++; continue; }
         // 正柱看顶、负柱看底 —— 那一个才是柱尖
         const 柱尖 = Math.round((pt.value >= 0 ? best.top : best.bot) * 10) / 10;
+        // 柱尖被白线／黄线压着 ⇒ 量到的「最上面那个柱色像素」是线画的，不是柱子的边 —— 换下一根
+        if (被哪条线穿(柱尖, pt.time)) { 跳过.被线穿++; continue; }
         // ★ 这里的字段名要跟上面那个对象**一模一样**（`bot`，不是 `bottom`）：第一版写成 `band.bottom`，
         //   对象里没这个键 ⇒ `108 <= undefined + 2` ⇒ **恒 false** —— 这条闸一直是死的（量出来永远
         //   「盖住 0」）。手工把带子撑大才逮到：跟 readout 那次 ⑯ 的死条件同一个形状。
@@ -476,7 +515,11 @@ async function judge(page, tag) {
     const 量具前提 = meta.柱距 >= PX_SEP * 0.9;          // 每根柱子得有自己的一列（首屏 0.5px 就是这么红的）
     if (px.length < 3 || !量具前提) {
       // ★ 这一支是**量不出来**（不是画错了）：柱距不够／凑不齐三根。写在名字里，别让复核的人把它读成形状的判决。
-      ok(`${tag}⑧ 像素形状`, '**量不出来**（柱距不够／凑不齐三根，不是画错了）；判据本身不降级', false,
+      // ★★ 它**既不算绿、也不算红**：走「未量」这一档 —— 不计进 `red`，但计进 exit code 的 2（见文件尾）。
+      //    理由（Nova 2026-10-06）：不算绿是显然的；不算红是因为它**没比成**，
+      //    而「红」这个词得留给「量到了、形状确实不对」。两者混在一个 `pass:false` 里，
+      //    复核的人分不清「这格坏了」和「这格今天没量着」。
+      未量(`${tag}⑧ 像素形状`, '**量不出来**（柱距不够／凑不齐三根，不是画错了）；判据本身不降级',
          (px.length < 3 ? `只量到 ${px.length} 根` : `柱距只有 ${meta.柱距}px（< ${PX_SEP}）—— 一列里挤着不止一根，量不准`)
          + `；${JSON.stringify(meta)}`);
     } else {
@@ -487,16 +530,23 @@ async function judge(page, tag) {
       // 「拉得开」按**数据**判（数据比 2× / 4× 才谈得上比高度比），像素上是 8px 起步才量得准
       const d0 = Math.abs(px[0].value);
       const 缩得开 = px[0].高 >= 8 && px[2].高 >= 5 && d0 / Math.abs(px[1].value) >= 1.5 && d0 / Math.abs(px[2].value) >= 2.0;
-      ok(`${tag}⑧ 像素形状`, '三根柱子的高度比＝数据比（±1.5px）、符号对、且比例拉得开',
-         量具前提 && 符号对 && 缩得开 && 偏差.every((x) => x <= 1.5),
-         (缩得开 ? '' : '★ 这一屏的柱子太小／拉不开 ⇒ **这一格量不出来**（不是画错了）；')
+      // 三态在这里分开：符号错／偏差超 ⇒ **红**（量到了，形状确实不对）；
+      //   这三根太小够不着、比例拉不开 ⇒ **未量**（判据没被行使）；两者都不是 ⇒ 绿。
+      const 判词 = (缩得开 ? '' : '★ 这一屏的柱子太小／拉不开 ⇒ **这一格量不出来**（不是画错了）；')
          + (符号对 ? '' : '★ 符号错了（正柱跑到零线下边／负柱跑到上边）；')
          + px.map((q, i) => `值 ${Math.round(q.value)}→柱尖 ${q.柱尖}（零线 ${q.零线y}，高 ${q.高}px，偏差 ${偏差[i]}px）`).join('；')
          + `；px/单位 ${比值.join('/')}`
          + `｜量在哪一屏：${meta.用的哪一屏}（试了 ${JSON.stringify(meta.试了)}）、柱距 ${meta.柱距}px、屏内 ${meta.屏内根数} 根、三根数据比 ${meta.三根数据比}`
-         + `｜跳过 太挤 ${meta.跳过.太挤}/盖住 ${meta.跳过.盖住}/量不到 ${meta.跳过.量不到}`
+         + `｜跳过 太挤 ${meta.跳过.太挤}/盖住 ${meta.跳过.盖住}/**被线穿 ${meta.跳过.被线穿}**/量不到 ${meta.跳过.量不到}`
          + `｜页头盖住 y=${JSON.stringify((meta.页头盖住的一段 || {}).y)}`
-         + `｜原区间还回去了：${meta.还回去了 && meta.还回去了.一样 ? '是' : `否（${JSON.stringify(meta.还回去了)}）`}`);
+         + `｜原区间还回去了：${meta.还回去了 && meta.还回去了.一样 ? '是' : `否（${JSON.stringify(meta.还回去了)}）`}`;
+      if (!符号对 || (缩得开 && !偏差.every((x) => x <= 1.5))) {
+        ok(`${tag}⑧ 像素形状`, '三根柱子的高度比＝数据比（±1.5px）、符号对、且比例拉得开', false, 判词);
+      } else if (!缩得开) {
+        未量(`${tag}⑧ 像素形状`, '**量不出来**（这三根太小／拉不开，判据没被行使；不是画错了）', 判词);
+      } else {
+        ok(`${tag}⑧ 像素形状`, '三根柱子的高度比＝数据比（±1.5px）、符号对、且比例拉得开', true, 判词);
+      }
     }
   }
   return a;
@@ -559,9 +609,15 @@ async function judge(page, tag) {
     if (back && data) { await sleep(800); await judge(c, '重建后'); }
   }
 
-  const red = CELLS.filter((x) => !x.pass);
-  for (const x of CELLS) console.log(`${x.pass ? '✓' : '✗'} ${x.id} ${x.name} —— ${x.detail}`);
-  console.log(`\n${CELLS.length - red.length}/${CELLS.length} 绿`);
+  const red = CELLS.filter((x) => x.pass === false);
+  const 未 = CELLS.filter((x) => x.pass === null);
+  for (const x of CELLS) console.log(`${x.pass === true ? '✓' : x.pass === null ? '◻' : '✗'} ${x.id} ${x.name} —— ${x.detail}`);
+  console.log(`\n${CELLS.filter((x) => x.pass === true).length}/${CELLS.length} 绿`
+    + (未.length ? `、${未.length} 未量（不是红：判据没被行使）` : '')
+    + (red.length ? `、${red.length} 红` : ''));
+  // 红压过未量（Bram）：有红退 1，没红只有未量退 2（＝「没比成」，predeploy 不放行），否则 0
+  if (red.length) console.log(`红的：${red.map((x) => x.id).join('、')}`);
+  if (未.length) console.log(`未量的：${未.map((x) => x.id).join('、')}`);
   await b.close();
-  process.exit(red.length ? 1 : 0);
+  process.exit(red.length ? 1 : (未.length ? 2 : 0));
 })().catch((e) => { console.error('炸了：', e.message); process.exit(2); });
