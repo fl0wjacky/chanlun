@@ -1799,6 +1799,14 @@ function renderLegend() {
   if (opts.seg) items.push(['line', CHART.seg, 2, '线段'], ['line-dash', CHART.seg, 2, '未完成的线段']);
   if (opts.pc) items.push(['box', CHART.pen, 2, '类中枢（与笔同色）'], ['box-split', CHART.pen, 2, '前三实线 / 延续虚线']);
   if (opts.sc) items.push(['box', CHART.seg, 4, '线段中枢（与线段同色）']);
+  // ★ 「会变」那一档（§八 8，卡 card-06d7f9a1-3ad，小栋选的 C+）。挂**照旧那一格样例**：
+  //   一个跟屏上同档淡下来的框，右边「会变」两个字 —— 屏上那个字就是这两个字，一眼对得上。
+  //   ★ 判据是**框层开着**（`pc`/`sc`），不是 `trend`：淡的是框，阈值虽然读走势分段的 `bounds[1]`，
+  //     但「这几个框靠不靠得住」跟「要不要把带子画出来」是两件事 —— 关掉走势分段，框该淡还是淡。
+  //   ★ 样例文字就两个字、说明进 `title`（卡上那句原话就是「图例加一行」，上一回记的那笔
+  //     "1280 下再加一格就折行"是在层开满的时候量的；默认这一档实测还有 479px 余量）。
+  if (opts.pc || opts.sc) items.push(['box-fade', CHART.seg, 4, '会变',
+    '第 2 条分界线之前的框：那一段的位置会随窗口起点变']);
   if (opts.up) items.push(['box', CHART.up_pen, 2, '高一级：类中枢升的'], ['box', CHART.up_seg, 4, '高一级：线段中枢升的']);
   // ★ 「等确认」那条斜线带（§八 3，卡 card-60678062-8c2）。**这是补的，不是改的** ——
   //   走势分段那一层（card-c73ab37d-5a1）当初上线时**一条图例都没上**，这个器件在屏上就是一条斜线，
@@ -1821,8 +1829,11 @@ function renderLegend() {
         ? `<svg width="30" height="14"><polygon points="15,1 6,13 24,13" fill="${col}"/></svg>`
         : kind === 'tri-hollow'
           ? `<svg width="30" height="14"><polygon points="15,1 6,13 24,13" fill="none" stroke="${col}" stroke-width="2"/></svg>`
-          : kind === 'box' || kind === 'box-split'
-            ? `<svg width="30" height="14"><rect x="1" y="2" width="28" height="10" fill="${col}22" stroke="${col}" stroke-width="${Math.min(3, w * 0.6)}" ${kind === 'box-split' ? 'stroke-dasharray="6 4"' : ''}/></svg>`
+          : kind === 'box' || kind === 'box-split' || kind === 'box-fade'
+            // 「会变」那一格：**同一支样例，只是整格降权**（`opacity` 把填充和框线一起乘下去 ——
+            // 跟画布上 `drawFrame` 的 `fillAlpha * fade` ／ `235 * fade` 是同一条账）。
+            // ★ 不换色、不改虚线：屏上变的也只有这一件事，图例自己变了样就不叫图例了。
+            ? `<svg width="30" height="14"${kind === 'box-fade' ? ` opacity="${TREND.willChangeFade}"` : ''}><rect x="1" y="2" width="28" height="10" fill="${col}22" stroke="${col}" stroke-width="${Math.min(3, w * 0.6)}" ${kind === 'box-split' ? 'stroke-dasharray="6 4"' : ''}/></svg>`
             // 「等确认」那条带：样例要跟**屏上那条**同构 —— 一条贴顶的矮带子，里面 45° 斜线。
             // 画成一条细横线（就是下面那个兜底分支）会让人以为是"一条线"，而这一层最容易被读错的地方
             // 恰恰就是这个（见 layers.js 那句「不是一条从左下斜到右上的连线」）。

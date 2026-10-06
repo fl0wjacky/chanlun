@@ -190,6 +190,9 @@ export function makeBoxPrimitive(state) {
             target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
               const W = mediaSize.width;
               const vp = viewport(this._chart, state.candleSeries || this._series, data);
+              // C+（卡 card-06d7f9a1）：第 2 条分界线**之前**的那一片框整体降一档 —— 那片的位置会随
+              //   窗口起点变。阈值只算一次，两个 tier 共用（判据跟层无关，别在两处各推一遍）。
+              const cutBar = willChangeCut(data);
               for (const tier of ['pen', 'seg']) {              // 类中枢先、线段中枢后
                 const on = tier === 'seg' ? sh.sc : sh.pc;
                 if (!on) continue;
@@ -207,10 +210,18 @@ export function makeBoxPrimitive(state) {
                   //   那条路退了（卡 card-3edd7fb3-412），标注层整个 ③.5／③.6 都撤了。这条判定本身
                   //   **留着**：它读的是载荷的 `z.provisional`，跟「先看切后」那颗开关无关。
                   const openL = !!bx.z.provisional;
-                  drawFrame(ctx, x0, yt, x1, yb, col, w, fill, splitAt, solid, W, openL);
+                  // C+：**整格落在第 2 条分界线之前**才算「会变」。判据取 `i1`（右沿）——
+                  //   框是「这一段在哪儿」的画法，只要它的尾巴还压在会变的那片里，读者就不能拿它当定论。
+                  //   ★ 严格不等号：`i1 === cutBar` 的框右沿正好停在分界线上，那片是**定住**的。
+                  const wc = bx.i1 < cutBar;
+                  const fade = wc ? TREND.willChangeFade : 1;
+                  drawFrame(ctx, x0, yt, x1, yb, col, w, fill, splitAt, solid, W, openL, fade);
                   // 只记**底下那个框**：升级框跟它同 i0/i1，记进去会让「同一格只许出现一次」这把尺子
                   // 把自己量红（它们本来就是同一个框的另一种说法，不是画了两遍）。
-                  state.boxesDrawn.push({ tier, i0: bx.i0, i1: bx.i1, provisional: openL });
+                  // `willChange` 一并记下：验收要能问「这格该淡不该淡」，靠肉眼数框数不出来。
+                  //   ★ 记的是**事实**（`wc`），不是「淡没淡」—— 哪天把 `willChangeFade` 调成 1，
+                  //     这一格照样说得出「这些框本来是会变的那一批」。
+                  state.boxesDrawn.push({ tier, i0: bx.i0, i1: bx.i1, provisional: openL, willChange: wc });
                   if (sh.up && bx.z.up && bx.z.up.length) {
                     for (const u of bx.z.up) {                  // 高一级别：满 9 段（第 33 课）
                       const uyt = vp.yOfPrice(u.ZG), uyb = vp.yOfPrice(u.ZD);
@@ -218,7 +229,9 @@ export function makeBoxPrimitive(state) {
                       const ucol = upColor(tier);
                       // 升级框**不跟着拆两截**：高一级的「前三笔」没有定义（Python 同）
                       // 升级框跟它下面那个框同命：底下那个是 provisional，它也是（同一个切点撑着的）
-                      drawFrame(ctx, x0, uyt, x1, uyb, ucol, w, CHART.up_fill, null, !bx.z.live, W, openL);
+                      // 升级框跟底下那个框**同一个 i0/i1** ⇒ 同一个 fade，不另算（它对「靠不靠得住」的
+                      //   判断跟底框是同一件事；两处各算一遍就会出现半深半浅的一个框）。
+                      drawFrame(ctx, x0, uyt, x1, uyb, ucol, w, CHART.up_fill, null, !bx.z.live, W, openL, fade);
                     }
                   }
                 }
@@ -234,13 +247,18 @@ export function makeBoxPrimitive(state) {
 /** `openL`（可缺省）＝ 左沿是不是「还没立住的切点」（provisional，卡 card-e346ede6-996）⇒ 左沿改虚线。
  *  只动**左沿那条竖线**，不整框变虚：这个框的价位区间和右端都还是真的事实，不确定的只有起点。
  *  ★ 为什么不整框虚：**整框虚/尾截虚已经是「未完成」的信号**（`boxSplit` 那三种），再叠一层就没法分了。 */
-function drawFrame(ctx, x0, ytop, x1, ybot, col, width, fillAlpha, splitAt, solid, W, openL) {
+function drawFrame(ctx, x0, ytop, x1, ybot, col, width, fillAlpha, splitAt, solid, W, openL, fade = 1) {
   if (x0 > x1) [x0, x1] = [x1, x0];
   const y0 = Math.min(ytop, ybot), y1 = Math.max(ytop, ybot);
   // 填充整块只铺一次（Python 的注释：两截各铺一遍会在分界处叠出一条深缝）
-  ctx.fillStyle = rgba(col, fillAlpha);
+  // `fade`（可缺省 1）＝ C+ 那一档「会变」的整体降权（卡 card-06d7f9a1）：**框线 ＋ 填充同乘**。
+  //   ★ 为什么乘、不换色：形状和色相都要留着 —— 变的只是「这个位置靠不靠得住」，
+  //     不是「这是另一种框」。换色会让人以为多了一个类别（§八 1 立过的账）。
+  //   ★ 也不改成灰点线：灰点线在这一层**已经有主**（「待定」§八 3、「撤回」§八 4），再借一次
+  //     三件事就糊成一件了。
+  ctx.fillStyle = rgba(col, fillAlpha * fade);
   ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
-  ctx.strokeStyle = rgba(col, 235);
+  ctx.strokeStyle = rgba(col, 235 * fade);
   ctx.lineWidth = width;
   const split = splitAt !== null && splitAt !== undefined && splitAt > x0 && splitAt < x1 ? splitAt : null;
   const solidL = !!solid && !openL;                                  // 左沿：'provisional' ⇒ 虚（见上面那句）
@@ -337,6 +355,57 @@ export function makeAnnotPrimitive(state) {
                 ghostHits.boxes.push([...drawSignalGhost(ctx, x, y, g, g.tier), g]);
               }
 
+              // ②.9 C+（卡 card-06d7f9a1）：「会变」**只标一次** —— 标在最靠右的那个淡框的**框内右上角**。
+              //   为什么只一次：这一片框淡下去交代的是**同一件事**（"这一片的位置会随窗口起点变"）。
+              //     每个框都挂一个字，除了把图面糊满，还会读成"每个框各有一条不同的理由"。
+              //   为什么取最靠右（`i1` 最大）的那个：它离分界线最近，是这一片的**内边界** ——
+              //     标在那儿，读者顺着往左看，自然读出"往左这一串都打折"。
+              //   ★ 用 `haloText` 不是 `tag()`：`tag()` 是这一层的**实价签**（实底 ＋ 黑字），
+              //     价钱是这张图最响的一档，一句说明不该跟它抢。层级：价签 ＞ 这个字。
+              //   ★★ "挑最靠右的那个"要加个前提：**那个框的右上角装得下这句话**。两条硬条件 ——
+              //     ① 字得整个落在屏内（标一半等于没标）；② 不压格顶那条**「等确认」带**（§八 3 的东西，
+              //     两件事叠在一处就分不清哪个字在说哪件事）。装不下就往左退一个淡框 —— 退到的那个
+              //     还在同一串里，说明的还是同一件事；**一个都不合格就干脆不标**，不把字拖到边上凑
+              //     （同 `fitBox` 那条"落点看不见就不画"的老账）。
+              //   ★ 右沿**滚出屏外**不算不合格：那种框右边还有一大截在屏内，字贴着**屏右沿**里面画，
+              //     照样落在框里（框内的右端就是它）。反而是"右沿刚出屏就整句不标"会让读者看着一片
+              //     淡框找不到一句解释 —— 那是这条规矩唯一会伤到人的地方。所以夹的是**右沿本身**。
+              {
+                const WC = '会变';
+                const cut = willChangeCut(data);
+                ctx.font = FONT;                                  // ★ 量宽必须用 haloText 那一套字体
+                const tw = ctx.measureText(WC).width;
+                const yMin = TREND.hatchTop + TREND.hatchH + 2;   // 「等确认」那条带的下沿
+                let pick = null;
+                for (const tier of ['seg', 'pen']) {
+                  if (!(tier === 'seg' ? sh.sc : sh.pc)) continue;
+                  for (const bx of boxes(data, tier)) {
+                    if (bx.i1 >= cut) continue;                        // 定住的那一片，不标
+                    const bx1 = vp.xOfBar(bx.i1), yt = vp.yOfPrice(bx.z.ZG);
+                    if (bx1 === null || yt === null) continue;
+                    const xr = Math.min(bx1, W) - 8;
+                    if (xr - tw < 8) continue;                         // ① 左沿留不下 ⇒ 这个框装不下
+                    if (yt + 1 < yMin || yt + 15 > H) continue;        // ② 竖向也得出得来
+                    if (!pick || bx.i1 > pick.bx.i1) pick = { tier, bx, xr, yt };
+                  }
+                }
+                if (pick) {
+                  const col = pick.tier === 'seg' ? CHART.seg : CHART.pen;
+                  // 字落在**框内**：右沿退 8，基线压在框顶下 12（12px 那套的框顶在基线 −11 ⇒ 离框顶 1 px）。
+                  //   ★★ 这个字用**满墨**（`col`），不乘 `willChangeFade` —— 试过，都画出来比过：
+                  //     跟着框一起淡（0.55）跟淡一档（0.80）在 1 倍下都糊进框里，读不出来；满墨那一版
+                  //     一眼就认得。为什么满墨不算抢：这一层最响的一档是**实底 ＋ 黑字**的价签，
+                  //     这个字是 halo 字、两个字、小号，排在价签下面一档 —— 层级没乱（见上一条）。
+                  //   ★ 基线**显式写上**：`haloText` 自己不设 `textBaseline`，而上面的 `tag()` 把它设成
+                  //     `'middle'` 就没再改回来 —— 也就是说这里读到的是**上一位留下的**值。今天量出来是
+                  //     `'alphabetic'`（所以图是对的），但这是碰巧：换个画法、换个次序，这个字会自己往上
+                  //     挪半行，而且**不报错**。要的是「框顶下 1 px」这个确定的位置，就得自己把它钉住。
+                  ctx.textBaseline = 'alphabetic';
+                  placed.push(haloText(ctx, pick.xr, pick.yt + 12, WC, col, 'right').slice(0, 4));
+                  //   ★ 推 `placed` 是让后面的**价签避让它**（跟 `tag()` 同一条账：画的框＝登记的框）。
+                }
+              }
+
               // ③ 价签：线段中枢先（优先占位），类中枢后；升级标签跟着各自的框走
               //    （跟 Python 同序：`center_labels` 里价签在前、买卖点文字在后 ⇒ 价签优先占位）
               for (const tier of ['seg', 'pen']) {
@@ -416,6 +485,21 @@ const trendOf = (data) => {
   const T = data && data.trend;
   return T && Array.isArray(T.segments) ? T : null;
 };
+
+/** C+（卡 card-06d7f9a1-3ad，小栋 06:41Z 选）：**第 2 条分界线之前**的那一片框，位置会随窗口起点变。
+ *  返回「第 2 条分界线落在哪一根」这个阈值。★ **分界线少于 2 条 ⇒ `Infinity`** —— 那意味着
+ *  一个框都不受「第 2 刀之后」保护 ⇒ 卡面原话「所有框都算」自动成立，调用侧不必再写一支。
+ *  ★ 调用侧一律用**严格不等号** `bx.i1 < 阈值`：正好压在第 2 条分界线上算**不会变**
+ *    （沿用 card-e634f6e9-bb5 定下的口径：压边合法、共端点≠交叠；跨周期那一套判据一律严格）。
+ *  ★ 降的只是**框线 ＋ 框填充**，**第 1 条分界线本身照常画**（小栋选的是不动它）。
+ *  ★ 为什么读 `bounds[1]` 而不是 `bounds[0]`：会变的是「第 1 刀之前的一段跟着第 1 刀跳」
+ *    （Atlas 26 个起点重算 ZEC 30m：第 2 刀起的线和框 26/26 不变）—— 所以第 2 刀就是分水岭。
+ */
+export function willChangeCut(data) {
+  const T = trendOf(data);
+  const bnd = (T && Array.isArray(T.bounds)) ? T.bounds : [];
+  return bnd.length >= 2 ? bnd[1].bar : Infinity;
+}
 
 export function makeTrendPrimitive(state) {
   return {
