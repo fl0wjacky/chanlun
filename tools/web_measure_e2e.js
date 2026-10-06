@@ -1378,16 +1378,29 @@ const shotChart = async (p, tag) => {
                right: Math.round(r.right), bottom: Math.round(r.bottom) }; };
     const pane = window.__app.chart.panes()[0];
     const ps = pane && pane.priceScale('right');
-    const btn = document.querySelector('#fs');
+    // ★ 按钮的**矩形**必须跟 chart/main 一样过 q()：`btn` 本身另留一份（computed style／属性要从元素上读）。
+    //   头一版这里直接把 DOM 元素当矩形返回 ⇒ 61/62 两格读到的是 `undefined×undefined` 的假红。
+    const btnEl = document.querySelector('#fs');
+    const btn = q('#fs');
+    // ④ 要量的是**主图那一格自己那张画布**。不能拿"最高的那张"顶替：副图（成交量/MACD）在场时，
+    //   最高的那张跟 `#chart` 的高矮本来就不是一回事（实测 1182×653 vs 图那栏 900）。
+    const paneCv = (() => {
+      if (!pane || typeof pane.getHTMLElement !== 'function') return null;
+      const el = pane.getHTMLElement(); if (!el) return null;
+      const c = el.querySelector('canvas') || el; const r = c.getBoundingClientRect();
+      return { w: Math.round(r.width), h: Math.round(r.height) };
+    })();
     return {
-      btn, chart: q('#chart'), main: q('main'),
-      pe: btn ? getComputedStyle(btn).pointerEvents : null,
+      btn, hasBtn: !!btnEl, chart: q('#chart'), main: q('main'),
+      pe: btnEl ? getComputedStyle(btnEl).pointerEvents : null,
+      paneCv,
+      paneH: pane && typeof pane.getHeight === 'function' ? Math.round(pane.getHeight()) : null,
       inOverlays: !!(document.querySelector('.overlays #fs')),
       psVar: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ps-right')) || null,
       psW: ps && typeof ps.width === 'function' ? Math.round(ps.width()) : null,
       full: !!document.fullscreenElement, fake: document.body.classList.contains('fs-fake'),
       onCls: document.body.classList.contains('fs-on'),
-      pressed: btn ? btn.getAttribute('aria-pressed') : null,
+      pressed: btnEl ? btnEl.getAttribute('aria-pressed') : null,
       range: window.__app.chart.timeScale().getVisibleLogicalRange(),
       cvs: [...document.querySelectorAll('#chart canvas')].map((c) => ({ w: c.width, h: c.height })),
       vw: innerWidth, vh: innerHeight, dpr: devicePixelRatio,
@@ -1402,16 +1415,25 @@ const shotChart = async (p, tag) => {
     for (const cv of document.querySelectorAll('#chart canvas')) {
       const W = cv.width, H = cv.height;
       if (!W || !H) continue;
+      // ★ 印出来的必须是**页面里的位置**，不是"这张画布自己的第几像素列"。
+      //   头一版忘了加画布在页面里的偏移 ⇒ 68 宽那张轴画布的边框线（它自己的 x=0）
+      //   被印成「轴左沿 0.0」，判据就永远红（那一列实际在页面 x=1182）。
+      const r = cv.getBoundingClientRect();
+      const k = W ? r.width / W : 1;              // 画布像素 → CSS px
       const rows = Math.min(26, H);
       const d = cv.getContext('2d').getImageData(0, 0, W, rows).data;
       const hits = [];
       for (let x = 0; x < W; x++) {
-        let k = 0;
+        let k2 = 0;
         for (let y = 0; y < rows; y++) { const i = (y * W + x) * 4;
-          if (d[i] === want[0] && d[i + 1] === want[1] && d[i + 2] === want[2]) k++; }
-        if (k >= rows * 0.7) hits.push(x);
+          if (d[i] === want[0] && d[i + 1] === want[1] && d[i + 2] === want[2]) k2++; }
+        if (k2 >= rows * 0.7) hits.push(x);
       }
-      if (hits.length) cols.push({ cw: W, ch: H, x: Math.min(...hits) });
+      if (hits.length) {
+        const x0 = Math.min(...hits);
+        cols.push({ cw: W, ch: H, x: x0, page: Math.round((r.x + x0 * k) * 10) / 10,
+                    edge: x0 <= 1 });   // edge＝这条竖线就画在它自己那张画布的最左边（轴边框线长这样）
+      }
     }
     return { cols, dpr: devicePixelRatio, canvas: [...document.querySelectorAll('#chart canvas')].length };
   });
@@ -1428,7 +1450,9 @@ const shotChart = async (p, tag) => {
 
   // ② 别挡右轴（也就不会压住画在轴上的最新价标签）：像素找轴左沿 ＋ 布局算式两条一起印
   const AX = await axisEdge(dFS.p);
-  const axLeft = AX.cols.length ? Math.min(...AX.cols.map((c) => c.x)) / AX.dpr : null;
+  // 只认「竖线就画在它自己那张画布最左边」的那种命中列（面板之间的分隔线长这样），取**页面坐标**里最左的一条。
+  const edges = AX.cols.filter((c) => c.edge);
+  const axLeft = edges.length ? Math.min(...edges.map((c) => c.page)) : null;
   ck('按钮**不挡右轴那一条**：它的右沿落在轴的左沿左边（判据是**画布像素**找出来的轴边框线，不是我自己写的数）',
      axLeft !== null && !!FS.btn && FS.btn.right <= axLeft - 4,
      `按钮右沿 ${FS.btn ? FS.btn.right : '?'}　轴左沿 ${axLeft === null ? '★ 像素里没找到那条竖线' : axLeft.toFixed(1)}`
@@ -1451,13 +1475,19 @@ const shotChart = async (p, tag) => {
      + `　视口 [${before.range.from.toFixed(2)}, ${before.range.to.toFixed(2)}] → [${after.range.from.toFixed(2)}, ${after.range.to.toFixed(2)}]`
      + `（Δ＝${dFrom.toFixed(2)} / ${dTo.toFixed(2)} 根，要 ≤ 1.5）　body.fs-on=${after.onCls}　aria-pressed=${after.pressed}`);
 
-  // ④ 卡里 ⑤「自动重画」——**量**出来的：画布的高度跟着图的新尺寸走了，不是"读代码知道 autoSize 会重画"
-  // ★ 取**最高的那张**画布：`#chart` 里不止一张（时间轴那一条自己一张、矮），取第 0 张会量到它
-  const cs = after.cvs.reduce((a, c) => (!a || c.h > a.h ? c : a), null);
-  ck('卡里 ⑤ 那条（进出全屏自动重画）是**量**出来的：画布自己跟着新尺寸重排了（不是"读代码知道 autoSize 会重画"）',
-     !!cs && Math.abs(cs.h / after.dpr - after.chart.h) <= 2,
-     cs ? `画布 ${cs.w}×${cs.h}（dpr ${after.dpr} ⇒ ${(cs.h / after.dpr).toFixed(1)} CSS px）　图那栏 ${after.chart.h} px`
-       + `　差 ${(cs.h / after.dpr - after.chart.h).toFixed(1)} px（要 ≤ 2）` : '★ 读不到画布');
+  // ④ 卡里 ⑤「自动重画」——**量**出来的：画布跟着图的新尺寸重排了，不是"读代码知道 autoSize 会重画"
+  // ★ 量的是**主图那一格自己那张画布**（`panes()[0].getHTMLElement()` 里的），不是"最高的那张"：
+  //   副图（成交量/MACD）在场时，画布的高矮跟 `#chart` 的高矮本来就不是一回事 —— 头一版拿最高的那张
+  //   去比对图那栏（1182×653 vs 900），差 247px，量出来的是我自己的假设，不是页面。
+  //   这一格要的是两件事：① 它**长高了**（真重排，不是纹丝不动）② 它跟图自己报的那一格高**对得上**。
+  const pc = after.paneCv, pc0 = before.paneCv;
+  const dPane = pc && pc0 ? pc.h - pc0.h : NaN;
+  ck('卡里 ⑤ 那条（进出全屏自动重画）是**量**出来的：**主图那一格的画布**跟着新尺寸重排了（不是"读代码知道 autoSize 会重画"）',
+     !!pc && !!pc0 && dPane > 20 && (after.paneH === null || Math.abs(pc.h - after.paneH) <= 2),
+     pc ? `主图画布 ${pc0 ? pc0.w + '×' + pc0.h : '?'} → ${pc.w}×${pc.h} CSS px（长高 ${dPane} px，要 > 20）`
+       + `　图自己报的那一格高 ${after.paneH === null ? '（读不到 getHeight）' : after.paneH + ' px'}`
+       + `　差 ${after.paneH === null ? '?' : (pc.h - after.paneH).toFixed(1)} px（要 ≤ 2）`
+       : '★ 读不到主图那一格的画布（panes()[0].getHTMLElement()）');
 
   // ⑤ 全屏里开关照点（卡里 ②）：点一颗 chip，aria-pressed 真翻，且它**还在视口里**（点得着）
   // ★★ 必须挑**图层那排**的开关（`.chip[data-key]`，多选、`aria-pressed`），不能拿 `querySelector('.chip')`：
