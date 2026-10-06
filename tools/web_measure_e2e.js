@@ -830,6 +830,48 @@ const shotChart = async (p, tag) => {
      `屏上小写 ${loR.length} 枚、出屏 ${outLo.length} 枚　那一格 ${Math.round(paneW)}×${Math.round(paneH)}`
      + (outLo.length ? `　出界：${outLo.map((L) => `${L[4]}(${[L[0], L[1], L[2], L[3]].map(Math.round).join(',')})`).join('　')}` : ''));
 
+  // ㊴f ★ 「让位那条路」**到底有没有牙**：默认那一屏上 `movedLo` 是 0 ⇒ 上面 ㊴c 的绿只是"没遇到极短缺口"的绿。
+  //     这里换**很多个视口**再问同一个硬判据（大小写矩形两两不相交），并把让位被走到几次**照实印出来**：
+  //     120 根（贴脸放大）→ 2600 根（这一页缩到底，`barSpacing` 已压到它自己的下界 0.5）。
+  //     尾巴、腰上各扫一遍，扫完把视口**放回原样**（后面的 ㊶ 还要用这一页）。
+  //     ★ 跟 54 那格同一个形状、同一条账：走不到就把次数印出来 —— 不拿"没遇到"当"验过了"。
+  const r0 = await dN.p.evaluate(() => window.__app.chart.timeScale().getVisibleLogicalRange());
+  const swp = await dN.p.evaluate(async ({ spans }) => {
+    const a = window.__app, st = a.state, ts = a.chart.timeScale(), n = st.data.bars.length;
+    const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const rows = [];
+    for (const span of spans) for (const to of [n, Math.round(n * 0.5)]) {
+      ts.setVisibleLogicalRange({ from: to - span, to });
+      await frame(); await frame();
+      const D = st.trendDrawn || {};
+      const up = (D.labels || []).filter((L) => /^[A-H]$/.test(L[4]));
+      const lo = (D.labels || []).filter((L) => /^[a-h]$/.test(L[4]));
+      let hits = 0;
+      for (const u of up) for (const l of lo) {
+        if (u[0] < l[2] && l[0] < u[2] && u[1] < l[3] && l[1] < u[3]) hits++;
+      }
+      const num = D.num || [];
+      rows.push({ span, to, up: up.length, lo: lo.length, hits,
+        moved: num.reduce((t, r) => t + (r.movedLo || 0), 0),
+        nlo: num.reduce((t, r) => t + (r.nlo || 0), 0),
+        drawn: num.reduce((t, r) => t + (r.drawnLo || 0), 0) });
+    }
+    return rows;
+  }, { spans: [120, 300, 600, 1200, 2000, 2600] });
+  await dN.p.evaluate((r) => window.__app.chart.timeScale().setVisibleLogicalRange(r), r0);
+  await dN.p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  const swBad = swp.filter((x) => x.hits > 0);
+  const swBoth = swp.filter((x) => x.up >= 1 && x.lo >= 1);
+  const swMoved = swp.reduce((t, x) => t + x.moved, 0);
+  ck('缩放到**很多个视口**（120→2600 根，尾巴和腰上各一遍）大小写仍然不叠',
+     swBoth.length >= 2 && swBad.length === 0,
+     `扫 ${swp.length} 个视口，其中**大小写同时在屏上**（这一格才比得出东西）的 ${swBoth.length} 个　`
+     + `有叠的 ${swBad.length} 个${swBad.length ? `：${JSON.stringify(swBad.slice(0, 3))}` : ''}　让位合计 ${swMoved} 次　`
+     + `每格 [span, 大写, 小写, 叠, 让位, nlo, 画出]＝${JSON.stringify(swp.map((x) => [x.span, x.up, x.lo, x.hits, x.moved, x.nlo, x.drawn]))}　`
+     + `★ ${swMoved === 0
+       ? '让位那条路**这些视口上一次都没走到**（缺口都不算"极短"）⇒ 这一格验到的是"不叠"这条性质在多视口下成立，**让位分支本身仍是没走到的路**'
+       : '让位那条路真的走到了，这一格的牙是实的'}`);
+
   // ㊶ **钉在枢自己的范围中心**（不是段的左上角 —— 那是「升级」二字的锚法）
   //   牙齿：把锚改成 `s.i0`（"标在段头上"读起来很顺）⇒ 当场红。
   //   ★ 默认视口只开在**尾巴那 ~2683 根**上 ⇒ 第一次跑只量到 **1 枚**字母，那格的绿是"一枚样本的绿"。
