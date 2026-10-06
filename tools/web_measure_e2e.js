@@ -551,6 +551,9 @@ const shotChart = async (p, tag) => {
       // 而字母一定是 A–H 的单个字符 —— 段号不画，所以不会跟别的字撞）。
       num: D.num || [],
       letters: (D.labels || []).filter((L) => /^[A-H]$/.test(L[4])).map((L) => L[4]).join(''),
+      // 小写那一路（card-246fc7cf-a9e）：同一张表里挑小写单字母。★ 大写的正则 `[A-H]` 挑不到它们，
+      //   所以上面那格 `letters` 的口径一个字都没变（这一层照样只报大写）。
+      lettersLo: (D.labels || []).filter((L) => /^[a-h]$/.test(L[4])).map((L) => L[4]).join(''),
       // ★ 图层画字用的是**主图那一格的画布**尺寸（`useMediaCoordinateSpace` 给的 mediaSize），
       //   不是 `#chart` 的 clientWidth/clientHeight —— 后者连价格轴和副图一起算进去了
       //   （实测 1410×809 vs 那一格 1348×584）。判据要跟画图用**同一把尺**，所以另取一份。
@@ -780,6 +783,94 @@ const shotChart = async (p, tag) => {
      + `★ 另一种读法（${expN.reading === 'A' ? 'B' : 'A'}）在这份数据上是 ${JSON.stringify(expN.reading === 'A' ? expB.per : expN.per)}`
      + `　⇒ ${abSame ? '两种读法在这份数据上**恰好一样，这一格的牙现在是空的**（得换一份数据）'
        : '两种读法在这份数据上**确实不一样，牙是实的**'}`);
+
+  // ㊴b 小写 a、b、c（card-246fc7cf-a9e）：**每段小写个数 ＝ 框数 ＋ 1**；框数 0 的段 ⇒ **0 个**
+  //     （0 个框没有"框之间"，也没有"进第一个框之前" ⇒ 硬标一个 a 会跟 a 的定义打架。编者口径，已进 spec）
+  //     ★ 比的是**该画几个**（`nlo`），不是"画上去几个"：读法 A 下字母会整枚落到屏外，那一层不画它
+  //       （见 ㊼）⇒ 拿 `drawnLo` 去比会在那些段上假红。
+  const expLo = expN.per.map((n) => (n === 0 ? 0 : n + 1));
+  ck('小写那一层：**每段小写个数 ＝ 框数 ＋ 1**（逐段对 `nlo`），0 框的段是 0 个',
+     N.num.length >= 1 && same(N.num.map((r) => r.nlo), expLo),
+     `载荷（${expN.reading}）每段框数 ${JSON.stringify(expN.per)} ⇒ 该画小写 ${JSON.stringify(expLo)}　`
+     + `层里 nlo＝${JSON.stringify(N.num.map((r) => r.nlo))}　实际画上去 ${JSON.stringify(N.num.map((r) => r.drawnLo))}`
+     + `　★ 后两个数不一样是**正常的**（整枚落在屏外的那几枚不画）`);
+
+  // ㊴c ★★ 卡上点名的那条硬判据：**大小写不许叠**（缺口极短时小写往外让）。
+  //     ★ 这条之所以能做成硬量：`haloText` 返回的就是**矩形** `[x0,y0,x1,y1,字]`，
+  //       大小写进的是同一张 `trendDrawn.labels` ⇒ 直接两两做矩形相交，不用看图、不用另算几何。
+  //     ★★ 牙在哪儿：`movedLo` 记的是"真的让过位的枚数"。这份数据上一次都没让过位的话，
+  //       这一格的绿只是"没有极短缺口"的绿 —— 让位那半没验到。所以报告里必须把这个数说出来。
+  const upR = N.labels.filter((L) => /^[A-H]$/.test(L[4]));
+  const loR = N.labels.filter((L) => /^[a-h]$/.test(L[4]));
+  const hits = [];
+  for (const a of upR) for (const b of loR) {
+    if (a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]) hits.push(`${a[4]}×${b[4]}`);
+  }
+  const moved = N.num.reduce((t, r) => t + (r.movedLo || 0), 0);
+  ck('**大小写不叠**（缺口极短时小写往外让）：大写那组与小写那组矩形两两不相交',
+     loR.length >= 1 && upR.length >= 1 && hits.length === 0,
+     `屏上小写「${N.lettersLo}」／大写「${N.letters}」　相交 ${hits.length} 对 ${hits.slice(0, 6).join('／')}　`
+     + `★ 让位次数 ${moved} ⇒ ${moved === 0
+       ? '**这份数据上一次都没走到让位那条路**，这一格的绿是"没遇到极短缺口"的绿 —— 让位那半的牙是空的，得换数据／缩 span 才咬得到'
+       : '让位那条路真的走到了，这一格的牙是实的'}`);
+
+  // ㊴d 小写的账**要算得平**：`nlo` ≡ 画出来 ＋ x 出屏 ＋ y 出屏 ＋ 字母表不够用
+  //     （跟 ⑧ 那栏「挑了几根才凑够」是同一条账：循环里每一枚要么画、要么撞上某一栏跳过，没有第三条路）。
+  const bal = N.num.filter((r) => r.nlo !== r.drawnLo + r.offXLo + r.offYLo + r.overLo);
+  ck('小写的账**算得平**：每段 `nlo` ＝ 画出来 ＋ x 出屏 ＋ y 出屏 ＋ over（没有第三条路）',
+     N.num.length >= 1 && bal.length === 0,
+     `不平的段 ${bal.length} 个${bal.length ? `：${JSON.stringify(bal.slice(0, 3))}` : ''}　`
+     + `逐段 [nlo, 画, x屏外, y屏外, over]＝${JSON.stringify(N.num.map((r) => [r.nlo, r.drawnLo, r.offXLo, r.offYLo, r.overLo]))}`);
+
+  // ㊴e 画上去的小写**都在屏内**（沿用 ㊼：落点看不见就不画，不夹回画布）
+  const paneW = (N.pane || {}).w || 0, paneH = (N.pane || {}).h || 0;
+  const outLo = loR.filter((L) => L[0] < 0 || L[2] > paneW || L[1] < 0 || L[3] > paneH);
+  ck('小写字母也**不许出屏**（x、y 都要在屏上；不夹回画布假装它在那儿）',
+     loR.length >= 1 && outLo.length === 0,
+     `屏上小写 ${loR.length} 枚、出屏 ${outLo.length} 枚　那一格 ${Math.round(paneW)}×${Math.round(paneH)}`
+     + (outLo.length ? `　出界：${outLo.map((L) => `${L[4]}(${[L[0], L[1], L[2], L[3]].map(Math.round).join(',')})`).join('　')}` : ''));
+
+  // ㊴f ★ 「让位那条路」**到底有没有牙**：默认那一屏上 `movedLo` 是 0 ⇒ 上面 ㊴c 的绿只是"没遇到极短缺口"的绿。
+  //     这里换**很多个视口**再问同一个硬判据（大小写矩形两两不相交），并把让位被走到几次**照实印出来**：
+  //     120 根（贴脸放大）→ 2600 根（这一页缩到底，`barSpacing` 已压到它自己的下界 0.5）。
+  //     尾巴、腰上各扫一遍，扫完把视口**放回原样**（后面的 ㊶ 还要用这一页）。
+  //     ★ 跟 54 那格同一个形状、同一条账：走不到就把次数印出来 —— 不拿"没遇到"当"验过了"。
+  const r0 = await dN.p.evaluate(() => window.__app.chart.timeScale().getVisibleLogicalRange());
+  const swp = await dN.p.evaluate(async ({ spans }) => {
+    const a = window.__app, st = a.state, ts = a.chart.timeScale(), n = st.data.bars.length;
+    const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const rows = [];
+    for (const span of spans) for (const to of [n, Math.round(n * 0.5)]) {
+      ts.setVisibleLogicalRange({ from: to - span, to });
+      await frame(); await frame();
+      const D = st.trendDrawn || {};
+      const up = (D.labels || []).filter((L) => /^[A-H]$/.test(L[4]));
+      const lo = (D.labels || []).filter((L) => /^[a-h]$/.test(L[4]));
+      let hits = 0;
+      for (const u of up) for (const l of lo) {
+        if (u[0] < l[2] && l[0] < u[2] && u[1] < l[3] && l[1] < u[3]) hits++;
+      }
+      const num = D.num || [];
+      rows.push({ span, to, up: up.length, lo: lo.length, hits,
+        moved: num.reduce((t, r) => t + (r.movedLo || 0), 0),
+        nlo: num.reduce((t, r) => t + (r.nlo || 0), 0),
+        drawn: num.reduce((t, r) => t + (r.drawnLo || 0), 0) });
+    }
+    return rows;
+  }, { spans: [120, 300, 600, 1200, 2000, 2600] });
+  await dN.p.evaluate((r) => window.__app.chart.timeScale().setVisibleLogicalRange(r), r0);
+  await dN.p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  const swBad = swp.filter((x) => x.hits > 0);
+  const swBoth = swp.filter((x) => x.up >= 1 && x.lo >= 1);
+  const swMoved = swp.reduce((t, x) => t + x.moved, 0);
+  ck('缩放到**很多个视口**（120→2600 根，尾巴和腰上各一遍）大小写仍然不叠',
+     swBoth.length >= 2 && swBad.length === 0,
+     `扫 ${swp.length} 个视口，其中**大小写同时在屏上**（这一格才比得出东西）的 ${swBoth.length} 个　`
+     + `有叠的 ${swBad.length} 个${swBad.length ? `：${JSON.stringify(swBad.slice(0, 3))}` : ''}　让位合计 ${swMoved} 次　`
+     + `每格 [span, 大写, 小写, 叠, 让位, nlo, 画出]＝${JSON.stringify(swp.map((x) => [x.span, x.up, x.lo, x.hits, x.moved, x.nlo, x.drawn]))}　`
+     + `★ ${swMoved === 0
+       ? '让位那条路**这些视口上一次都没走到**（缺口都不算"极短"）⇒ 这一格验到的是"不叠"这条性质在多视口下成立，**让位分支本身仍是没走到的路**'
+       : '让位那条路真的走到了，这一格的牙是实的'}`);
 
   // ㊶ **钉在枢自己的范围中心**（不是段的左上角 —— 那是「升级」二字的锚法）
   //   牙齿：把锚改成 `s.i0`（"标在段头上"读起来很顺）⇒ 当场红。

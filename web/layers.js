@@ -41,6 +41,13 @@ const SIZE_LET = 14;
 //   画满 8 枚就停，超出的部分记在 `state.trendDrawn.num[].over` 里，让工装能看见，等人定。实测
 //   ZEC 30m 上每段最多 3 个，这个口子现在够不着。
 const TREND_LET = 'ABCDEFGH';
+// 小写：**连接段**（§八 6，card-246fc7cf-a9e）。大写说的是"段里**这一个中枢**"，小写说的是
+// "**两个中枢之间**那一段"。★ 跟大写**共用一切**：同一个开关（`trendNum`）、同一份框名单
+// （下面那个 `zs`）、同一套尺（`FONT_LET`／`SIZE_LET`／同一个 `capMid`）。
+//   ★ 为什么名单必须是同一份：§八 6 的语汇是 a A b B c —— 大小写**交替着读**。
+//     小写要是另挑一份框，a 和 A 就会来自两套坐标，交替当场断掉，而账面上看不出任何异常。
+// 字母表：一句里最多见 a+A+b+B+c，取 a…h 跟 A…H 一样富余（不够的那部分照大写的规矩记账、不发明记号）。
+const LOWER_LET = 'abcdefgh';
 
 // >>> SHOWN_LAYERS （tools/web_more_check.py 跟 app.js 的 EARLIER_PAGING 段一起抠出来、在 node 里真跑）
 /**
@@ -694,11 +701,38 @@ function trendMarkView(target, state, prim) {
       const reading = data.trend_reading === 'B' ? 'B' : 'A';
       const lv = data.seg_centers || [], uni = T.units || [];
       const capMid = Math.round(SIZE_LET * 0.36);   // 把字母的**中线**摆到 y 上（haloText 的 y 是基线）
+      // 一枚字母的宽 —— 小写让位要用（见下面 `letClear`）。★ 借 `ctx` 量一下就行，不用另开画布：
+      // `haloText` 每次调用都自己把 `ctx.font` 设回去，所以在这里动一下字体不会漏到后面去。
+      ctx.font = FONT_LET;
+      const CW_LET = ctx.measureText('a').width, PAD_LET = 2;
+      /** 小写那一枚落在哪儿：先按锚法给个位置，若跟**本段已经落下的字母**压上了就往外让。
+       *  ★ 为什么需要它（Nova 10-06 加的硬约束）：缺口"极短"的时候（一根 K 线／跳空）框只有一两根宽，
+       *    框的**中心**几乎就是缺口本身 ⇒ 小写正好落在旁边那枚大写上，两枚字叠成一团。
+       *  ★ 让法有顺序，且**每一档都要求落点仍在屏内**（`free` 里判）：
+       *    ① 沿 x 往外推（`dir` ＝ 往外那个方向；缺口两边都是框时 `dir` 为 0 ⇒ 两边都试，先近后远）
+       *    ② x 让不开就纵着错开一格（先往下、再往上）—— 纵着错开不改"这一枚指的是谁"（缝还是块）
+       *  ★ 都让不开就按原位落：宁可压一点，也**不许**把字母挪出屏（跟这一层 ㊼ 那条账同源）。
+       *    这种情况工装量得出来（大小写那两组矩形会相交），是要报的，不是要藏的。
+       *  ★ 只在**本段**里避让：这一层保证的是"自己不叠自己"；跟分界／待定／撤回那几层的避让是另一条账。 */
+      const letClear = (x, y, dir, placed) => {
+        const h0 = Math.round(SIZE_LET * 0.92), h1 = Math.round(SIZE_LET * 0.25), w = CW_LET / 2;
+        const free = (xx, yy) => onScreen(xx, W, 8) && onScreen(yy, H, 8) && !placed.some((b) =>
+          xx - w < b[2] + PAD_LET && b[0] < xx + w + PAD_LET
+          && yy - h0 < b[3] + PAD_LET && b[1] < yy + h1 + PAD_LET);
+        if (free(x, y)) return [x, y];
+        const step = CW_LET + PAD_LET, cand = [];
+        if (dir) for (let n = 1; n <= 3; n++) cand.push([x + dir * step * n, y]);
+        else for (let n = 1; n <= 3; n++) { cand.push([x + step * n, y]); cand.push([x - step * n, y]); }
+        for (const dy of [SIZE_LET + 3, -(SIZE_LET + 3)]) cand.push([x, y + dy]);
+        for (const c of cand) if (free(c[0], c[1])) return c;
+        return [x, y];
+      };
       for (let i = 0; i < T.segments.length; i++) {
         const s = T.segments[i];
         const zs = ((reading === 'A' && s.upgraded) ? uni : lv).filter((z) => z.seg === i);
         const col = s.live ? TREND.mut : TREND.edge;
         let drawn = 0, offY = 0;
+        const placed = [];   // 本段已经落下的字母矩形（大写先落）：小写拿它避让
         for (let k = 0; k < zs.length && k < TREND_LET.length; k++) {
           const z = zs[k];
           const lo = z.ZD !== undefined ? z.ZD : z.DD;      // 本级别是 ZD..ZG，高一级是 DD..GG
@@ -719,13 +753,69 @@ function trendMarkView(target, state, prim) {
             if (x !== null && onScreen(x, W, 8) && (y === null || !onScreen(y, H, 8))) offY++;
             continue;
           }
-          D.labels.push(haloText(ctx, x, y + capMid, TREND_LET[k], col, 'center', mine, FONT_LET, SIZE_LET));
+          const box = haloText(ctx, x, y + capMid, TREND_LET[k], col, 'center', mine, FONT_LET, SIZE_LET);
+          D.labels.push(box);
+          placed.push(box);
           drawn++;
         }
+        // ── 小写 a、b、c：**两个框之间**那一段（§八 6，card-246fc7cf-a9e）────────────────────
+        //    ★ 名单＝上面那个 `zs`，**不另挑一份**：交替 a A b B c 靠的就是"两套字母认同一份框"。
+        //    ★ 缺口比框多一个：进第一个框之前＝a，框与框之间依次 b、c…，出最后一个框之后＝最后一个
+        //      ⇒ 每段小写个数 ＝ **框数 ＋ 1**（框数 0 的段除外，见下）。
+        //    ★ 框数 0 ⇒ **一个小写都不画**（并记 `nlo: 0`）：没有框就没有"框之间"，"进第一个框之前"
+        //      也就无所指 —— 硬标一个 a 会跟 a 的定义打架。**编者口径**（已写进 spec）。
+        //      ⇒ "框数 ＋ 1"这条公式**在框数 0 处故意不算**，那是规矩，不是漏算。
+        //    锚法（Nova 10-06 认的这版）：x 取缺口在 bar 轴上的**中点**；y 取相邻两框中心价的**中点**，
+        //      首／尾那个缺口只有一框 ⇒ 退化成那一框的中心 y（不另立一套规则）。
+        //      ★ 中心价的取法跟大写**同一行**（`ZD..ZG`／高一级 `DD..GG`），不另写一套。
+        const ordered = zs.slice().sort((p, q) => p.X0 - q.X0);
+        // ★ `ord` 记的是"载荷给的就是按 X0 排好的吗"。为什么值得记：大写按**载荷顺序**发字母、
+        //   小写的缺口按**几何**切，两者只在载荷有序时才必然一致。哪天后台换了顺序，交替会断，
+        //   而这件事在别处**看不出来**（大写那格只数个数、不认位置）⇒ 记下来，让工装量得出来。
+        const ord = zs.every((z, k) => k === 0 || zs[k - 1].X0 <= z.X0);
+        const nlo = ordered.length === 0 ? 0 : ordered.length + 1;
+        let drawnLo = 0, offYLo = 0, offXLo = 0, movedLo = 0;
+        for (let k = 0; k < nlo && k < LOWER_LET.length; k++) {
+          const prev = k === 0 ? null : ordered[k - 1];
+          const next = k === nlo - 1 ? null : ordered[k];
+          const mid = (z) => (z.ZD !== undefined ? (z.ZD + z.ZG) / 2 : (z.DD + z.GG) / 2);
+          const pa = prev ? mid(prev) : null, na = next ? mid(next) : null;
+          const b0 = prev ? prev.X1 : s.i0, b1 = next ? next.X0 : s.i1;
+          const x0 = vp.xOfBar(Math.round((b0 + b1) / 2));
+          const y0 = vp.yOfPrice(pa === null ? na : na === null ? pa : (pa + na) / 2);
+          const xOk = x0 !== null && onScreen(x0, W, 8), yOk = y0 !== null && onScreen(y0, H, 8);
+          if (!xOk || !yOk) {
+            // 跟大写同一个账：「横着在屏上、纵着出去了」单独记一笔（读法 A 下真会发生）。
+            // ★ 这里判的是**让位之前**的落点 —— 让位本身也要求不出屏（`letClear` 的每一档都判），
+            //   所以"让完出屏"这件事在 `letClear` 里就被挡掉了，不会悄悄溜到屏外去。
+            // ★★★ 这两栏合起来是一条**可以不重不漏算平的账**：循环里的每一枚小写
+            //   **要么**画出来（`drawnLo`）、**要么**因为 x／y 出屏被跳过（`offXLo`／`offYLo`），
+            //   没有第三条路；再加"字母表不够用"的 `overLo` ⇒ **`nlo` ≡ 三者之和**。
+            //   ⇒ 将来谁在循环里加一条新的 `continue`，**必须同时给它一栏**，
+            //     否则这个等式会破 —— 而破了是**看得出来**的（工装直接算这个和）。
+            if (xOk) offYLo++; else offXLo++;
+            continue;
+          }
+          // 「往外」是哪个方向：头那个往左（离开第一框）、尾那个往右（离开最后一框）；
+          // 两边都是框时给 0，交给 `letClear` 两边都试。
+          const dir = prev === null ? -1 : next === null ? 1 : 0;
+          const [lx, ly] = letClear(x0, y0, dir, placed);
+          // ★ 记一笔"这一枚让过位"。为什么要记：卡上那条「缺口极短时往外让」的**牙**只在
+          //   **真的出现极短缺口**时才咬得到 —— 要是这份数据上一次都没走到这条路，
+          //   「大小写不重叠」那格的绿就是**空过**（它没验到让位那条路），得换数据／缩 span 才咬得到。
+          //   记下这个数，工装才能说清自己是"咬到了"还是"没遇到"。
+          if (lx !== x0 || ly !== y0) movedLo++;
+          const box = haloText(ctx, lx, ly + capMid, LOWER_LET[k], col, 'center', mine, FONT_LET, SIZE_LET);
+          D.labels.push(box);
+          placed.push(box);
+          drawnLo++;
+        }
+
         // ★ **每一段都记一笔，包括 0 枚的那些**。第一版是"有字母才记"，工装立刻逮到：
         //   出口里少了图头那一段 ⇒ 看的人分不清"这一段没有字母"和"这一段压根没算" ——
         //   而"图头 0 中枢 ⇒ 无字母"正是这一层最要说清的一件事之一。**零也要有行**。
-        D.num.push({ seg: i, n: zs.length, drawn, offY, over: Math.max(0, zs.length - TREND_LET.length) });
+        D.num.push({ seg: i, n: zs.length, drawn, offY, over: Math.max(0, zs.length - TREND_LET.length),
+          nlo, drawnLo, offXLo, offYLo, movedLo, overLo: Math.max(0, nlo - LOWER_LET.length), ord });
       }
     }
 
