@@ -386,6 +386,9 @@ def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT, memo=None):
     return None, (brk if brk is not None else len(pens))   # 新高/新低 → 从破位处再找；否则待定
 
 
+HEAD_DIR_FIX = True                       # 探针开关：图头那一段终点没越过起点就往后挪一笔（card-24dd71cb-003）
+
+
 def _first_seg(pens, start, mode=FEAT_STD_DEFAULT, memo=None):
     """从 pens[start] 起划出来的第一个**已完成**线段（全局下标，带 confirm＝确认它的那一笔）；没有 ⇒ None。
     memo：同一次划段里共用（键＝起点）。递归只会往右走（起点严格变大），每个起点最多算一次。"""
@@ -448,6 +451,15 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=
         if found is None:
             break
         end_pen, case, at = found
+        # ★ 图头那一段：终点没越过起点（向下段终点不低于起点 / 向上段不高于起点）⇒ 起点那一笔是图头外面上一段的尾巴，
+        #   这一段划错了（L78:9-10）。跟开头三笔无重叠同一个处理：往后挪一笔再划（card-24dd71cb-003，线上 AAPL 1h/2h）。
+        #   只管图头（segs 还空、且不是 _first_seg 从段中间起找）：段界之后的起点由上一段的终点定，不在这里挪。
+        if HEAD_DIR_FIX and not segs and start == 0 and (
+                (seg_dir == "down" and pens[end_pen]["p1"] >= pens[i]["p0"]) or
+                (seg_dir == "up" and pens[end_pen]["p1"] <= pens[i]["p0"])):
+            i += 1
+            born = 0
+            continue
         born = (at or 0) if case == 1 else 0      # 方向确立只对第一种情况有意义；第二种情况的 at 只给 _first_seg 当「确认那一笔」
         segs.append(dict(
             PI0=i, PI1=end_pen,

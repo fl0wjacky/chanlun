@@ -730,6 +730,10 @@ buildSegments(array<Unit> P) =>
                         k += 2
         if endPen < 0
             stop := true
+        else if segs.size() == 0 and (up ? P.get(endPen).p1 <= P.get(i).p0 : P.get(endPen).p1 >= P.get(i).p0)
+            // ★ 图头那一段终点没越过起点 ⇒ 起点那一笔是图头外面上一段的尾巴，往后挪一笔重划（同 Python HEAD_DIR_FIX，card-24dd71cb-003）
+            i += 1
+            born := 0
         else
             born := res
             segs.push(mkSeg(P, i, endPen, false))
@@ -815,6 +819,10 @@ zSegStep(array<Fx> fx, array<int> seq, array<Unit> pens, array<Unit> segs, array
                             k += 2
             if endPen < 0
                 stop := true
+            else if segs.size() == 0 and (up ? pens.get(endPen).p1 <= pens.get(i).p0 : pens.get(endPen).p1 >= pens.get(i).p0)
+                // ★ 图头那一段终点没越过起点 ⇒ 起点那一笔是图头外面上一段的尾巴，往后挪一笔重划（同 Python HEAD_DIR_FIX，card-24dd71cb-003）
+                i += 1
+                born := 0
             else
                 born := res
                 segs.push(mkSeg(pens, i, endPen, false))

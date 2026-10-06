@@ -410,6 +410,21 @@ count("preprocess 非恒等（不变量 C1）", 0 if (_adj == zbars and _brk == 
 # 这条改由下面 trend_check 的不变量 ②「框不跨分界」（D4-1）守，反向验证在 trend_check --self-test 的 P1。
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__))))
 
+# ---- 线段层图头：第一段终点要越过起点（L78:9-10，card-24dd71cb-003）----
+# 线上 AAPL 1h 冻成夹具（tools/fixtures/，不放 data/ 免得动到别的基线）：图头第一笔是窗口外上一段的尾巴，
+# 按它定方向会划出「向下但终点比起点高」的第一段。修法：图头那一段终点没越过起点就往后挪一笔重划。
+print("=" * 72)
+import json as _json                                         # noqa: E402
+_fx = [dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"])
+       for b in _json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "aapl1h_headdir.json")))]
+from config import tick_of as _tick_of                       # noqa: E402
+_rh = analyze(_fx, tick=_tick_of("aaplusdt_1h.json"))
+count("AAPL 1h 夹具线段不变量违规（图头段方向）", len(check_segments(_rh["segs"], _rh["pens"])))
+SG.HEAD_DIR_FIX = False                                       # 反向验证：拿掉这条修法，同一份夹具必须报出来
+_rh0 = analyze(_fx, tick=_tick_of("aaplusdt_1h.json"))
+SG.HEAD_DIR_FIX = True
+count("拿掉图头段方向修法后 AAPL 1h 夹具没报出来", 0 if check_segments(_rh0["segs"], _rh0["pens"]) else 1)
+
 # ---- 走势分界 v3（docs/spec/走势分段.md v3 §三，card-51571a5f-dc2）----
 # 基线（zec15／zec30 五个分界＋一次撤回）、不变量（交替、刀在同向线段终点、两刀间有中枢、框不跨分界、首尾相接）、
 # 367.77 不切框、不看未来。反向验证在 tools/trend_check.py --self-test（spec §四 的 P1／P2／P5 各自必须变）。

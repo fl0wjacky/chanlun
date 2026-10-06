@@ -22,7 +22,7 @@ import server                                                 # noqa: E402
 from core.segment import check_segments                       # noqa: E402
 
 # 已知例外：(品种, 周期) → 卡号。修好就删。
-KNOWN = {("AAPLUSDT", "1h"): "card-24dd71cb-003", ("AAPLUSDT", "2h"): "card-24dd71cb-003"}
+KNOWN = {}                                     # card-24dd71cb-003 修好以后清空（AAPL 1h／2h 图头段方向）
 
 
 def main():
