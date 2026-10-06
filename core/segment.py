@@ -254,8 +254,10 @@ def _opening_overlaps(pens, i):
     return max(p["lo"] for p in p3) < min(p["hi"] for p in p3)
 
 
-def check_segments(segs, pens):
-    """自检线段的不变量。返回违规列表。"""
+def check_segments(segs, pens, unmeasured=None):
+    """自检线段的不变量。返回违规列表。
+    unmeasured：给了 list 就把「量不了」的格子收进去（自检 A 取不到 X 之后第一个反向线段时）——
+    那种情况**不许**退回「段内后来破了就算」的宽版（那正是旧程序的漏），也不算违规，记「未量」由调用方印出来。"""
     bad = []
     for k, s in enumerate(segs):
         if s["npens"] < 3:
@@ -275,13 +277,17 @@ def check_segments(segs, pens):
                 xs = [j for j in range(s["PI0"], s["PI1"] + 1)
                       if (pens[j]["lo"] == ext if up else pens[j]["hi"] == ext) and _dir(pens[j]) != s["dir"]]
                 x = xs[0] if xs else None
-                # 破位必须发生在 X 之后**第一个反向线段**之内（L78:33）—— 不是「后来某时破了」（那正是旧程序的漏）
+                # 破位必须发生在 X 之后**第一个反向线段**被确认之前（L78:33）—— 不是「后来某时破了」（那正是旧程序的漏）
                 rev = _first_seg(pens, x + 1) if x is not None else None
-                last = min(s["PI1"], rev["confirm"] - 1) if rev is not None and rev["dir"] == s["dir"] else s["PI1"]
-                broke = x is not None and any((pens[j]["hi"] > pens[x]["p0"]) if up else (pens[j]["lo"] < pens[x]["p0"])
-                                              for j in range(x + 1, last + 1))
-                if not broke:
-                    bad.append(("起点非段内极值且不是 L78 ① 型", k, s["i0"]))
+                if x is not None and (rev is None or rev["dir"] != s["dir"]):
+                    if unmeasured is not None:
+                        unmeasured.append(("起点非段内极值，但 X 之后取不到第一个反向线段（A 量不了）", k, s["i0"]))
+                else:
+                    last = min(s["PI1"], rev["confirm"] - 1) if rev is not None else s["PI1"]
+                    broke = x is not None and any((pens[j]["hi"] > pens[x]["p0"]) if up else (pens[j]["lo"] < pens[x]["p0"])
+                                                  for j in range(x + 1, last + 1))
+                    if not broke:
+                        bad.append(("起点非段内极值且不是 L78 ① 型", k, s["i0"]))
         if k > 0:
             if s["PI0"] != segs[k - 1]["PI1"] + 1:
                 bad.append(("与上一段不相接", k))

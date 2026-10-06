@@ -100,7 +100,10 @@ for tag, r in R.items():
           "　｜ 诊断：端点非极值 %d（剧烈扩张震荡，两道回头修正都救不回，只报数）" % len(nonextreme_pens(P, std)))
     # 线段层
     S, P = r["segs"], r["pens"]
-    count("线段不变量违规", len(check_segments(S, P)))
+    _um = []
+    count("线段不变量违规", len(check_segments(S, P, _um)))
+    if _um:                                      # 自检 A 取不到第一个反向线段：不退回宽版、不算过（Nova 10-06，同 ⑧ 口径）
+        skip("线段自检 A（非极值起点 ① 型）", "%d 段取不到 X 之后第一个反向线段，例 %s" % (len(_um), _um[:2]))
     count("线段定义复核违规", len(verify_by_definition(S, P)),
           "　｜ 诊断：终点非段内极值 %d（原文未要求，只报数）" % len(nonextreme_endpoints(S)))
     # 中枢层
