@@ -1460,19 +1460,30 @@ const shotChart = async (p, tag) => {
        + `　差 ${(cs.h / after.dpr - after.chart.h).toFixed(1)} px（要 ≤ 2）` : '★ 读不到画布');
 
   // ⑤ 全屏里开关照点（卡里 ②）：点一颗 chip，aria-pressed 真翻，且它**还在视口里**（点得着）
+  // ★★ 必须挑**图层那排**的开关（`.chip[data-key]`，多选、`aria-pressed`），不能拿 `querySelector('.chip')`：
+  //    DOM 里第一颗 `.chip` 是「背驰看法」那组的**单选**（`aria-checked`、没有 `data-key`），而且
+  //    **买卖点那层关着的时候它是 disabled 的** ⇒ 点不动、`aria-pressed` 读出来是 `null → null`，
+  //    这一格会**假红**（实拍探针头一回就是这么红的：`{"id":"面积","before":null,"after":null}`）。
+  //    同理不能挑 disabled 的：`click()` 对 disabled 的按钮不产生任何事。
   const inFs = await dFS.p.evaluate(() => {
-    const c = document.querySelector('.chip');
+    const c = [...document.querySelectorAll('.chip[data-key]')].find((x) => !x.disabled);
     if (!c) return null;
+    const key = c.dataset.key;
     const b4 = c.getAttribute('aria-pressed');
     const r = c.getBoundingClientRect();
     c.click();
-    return { before: b4, after: c.getAttribute('aria-pressed'),
+    return { key, before: b4, after: c.getAttribute('aria-pressed'),
       inside: r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight };
   });
   ck('全屏里开关**照点**（卡里 ②）：点一颗 chip 它的状态真翻了，而且那颗**在视口里**（全屏没把图层栏挡掉或推出屏幕）',
      !!inFs && inFs.before !== inFs.after && inFs.inside,
-     inFs ? `chip ${inFs.before} → ${inFs.after}　在视口里=${inFs.inside}` : '★ 页面上没有 .chip');
-  if (inFs && inFs.before !== inFs.after) await dFS.p.evaluate(() => document.querySelector('.chip').click());   // 点回来
+     inFs ? `点的是图层那颗「${inFs.key}」：aria-pressed ${inFs.before} → ${inFs.after}　在视口里=${inFs.inside}`
+       : '★ 页面上没有可点的图层开关（`.chip[data-key]` 全 disabled 或一个都没有）');
+  // 点回来（按 key 找回同一颗 —— 再点别的就换了一颗，那不叫"点回来"）
+  if (inFs && inFs.before !== inFs.after) {
+    await dFS.p.evaluate((k) => document.querySelector(`.chip[data-key="${k}"]`).click(), inFs.key);
+    await dFS.p.waitForTimeout(900);   // 图例会跟着图层变（流内 ⇒ 挤高矮），等它落定再量⑥的尺寸
+  }
 
   // ⑥ 退出：再点一次 ⇒ 回原状（两条状态都清掉、图回到原来的尺寸、视口还是没跳）
   await dFS.p.locator('#fs').click();
@@ -1529,8 +1540,9 @@ const shotChart = async (p, tag) => {
   await pM.waitForTimeout(900);
   const mA = await fsState(pM);
   const mChip = await pM.evaluate(() => {
-    const c = document.querySelector('.chip'); const b4 = c.getAttribute('aria-pressed'); c.click();
-    return { before: b4, after: c.getAttribute('aria-pressed'), n: document.querySelectorAll('.chip').length };
+    const c = [...document.querySelectorAll('.chip[data-key]')].find((x) => !x.disabled);
+    const b4 = c.getAttribute('aria-pressed'); c.click();
+    return { before: b4, after: c.getAttribute('aria-pressed'), n: document.querySelectorAll('.chip[data-key]').length };
   });
   await pM.keyboard.press('Escape');
   await pM.waitForTimeout(700);
@@ -1544,7 +1556,7 @@ const shotChart = async (p, tag) => {
   ck('退路那一档（原生全屏被禁的手机档）：自己**铺满窗口**、图层开关照点、**Esc 退得掉**',
      covers && mChip.before !== mChip.after && !mE.fake && !mE.full,
      `原生被禁 ⇒ fake=${mA.fake}　main ${mB.main.w}×${mB.main.h} → ${mA.main.w}×${mA.main.h} @(${mA.main.x},${mA.main.y})　视口 ${mA.vw}×${mA.vh}`
-     + `　铺满=${covers}　chip ${mChip.before} → ${mChip.after}（共 ${mChip.n} 颗）`
+     + `　铺满=${covers}　图层开关 ${mChip.before} → ${mChip.after}（全屏里能点的图层开关共 ${mChip.n} 颗）`
      + `　Esc 之后 fake=${mE.fake}／full=${mE.full}`
      + `　★ 按钮在这档里 ${mA.btn.w}×${mA.btn.h}（触控目标要 ≥ 24）`);
 
