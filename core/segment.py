@@ -165,6 +165,22 @@ def _reverse_scan(pens, end_pen, seg_dir, mode=FEAT_STD_DEFAULT):
     return len(hits) > 0, brk
 
 
+def _reverse_confirm_pen(pens, end_pen, seg_dir, mode=FEAT_STD_DEFAULT, e3=None):
+    """第二种情况在哪一笔到来时才算确认：E3 那一笔、和反向序列第一次出分型的那一笔，取晚的。"""
+    rev_dir = "down" if seg_dir == "up" else "up"
+    want2 = "bot" if rev_dir == "down" else "top"
+    pivot = pens[end_pen]["p1"]
+    tail = []
+    for j in range(end_pen + 1, len(pens)):
+        p = pens[j]
+        if (seg_dir == "up" and p["hi"] > pivot) or (seg_dir != "up" and p["lo"] < pivot):
+            break
+        tail.append(p)
+        if len(tail) >= 3 and _fractals_of(tail, 0, rev_dir, want2, mode)[0]:
+            return max(j, e3 or 0)
+    return len(pens)
+
+
 def _reverse_confirms(pens, end_pen, seg_dir, mode=FEAT_STD_DEFAULT):
     """只要『确认与否』（旧整序列口径在用）。"""
     return _reverse_scan(pens, end_pen, seg_dir, mode)[0]
@@ -261,7 +277,7 @@ def check_segments(segs, pens):
                 x = xs[0] if xs else None
                 # 破位必须发生在 X 之后**第一个反向线段**之内（L78:33）—— 不是「后来某时破了」（那正是旧程序的漏）
                 rev = _first_seg(pens, x + 1) if x is not None else None
-                last = min(s["PI1"], rev["PI1"]) if rev is not None and rev["dir"] == s["dir"] else s["PI1"]
+                last = min(s["PI1"], rev["confirm"] - 1) if rev is not None and rev["dir"] == s["dir"] else s["PI1"]
                 broke = x is not None and any((pens[j]["hi"] > pens[x]["p0"]) if up else (pens[j]["lo"] < pens[x]["p0"])
                                               for j in range(x + 1, last + 1))
                 if not broke:
@@ -324,14 +340,17 @@ def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT, memo=None):
         #   两头都没破时一直等下去（BTC 4h 2024-02-23 那段等到 08-05 才判 ①）。
         L = pens[k + 1]["p1"]                     # X 的结束位置
         rev = _first_seg(pens, k + 2, mode, memo)  # X 之后的第一个反向线段（没走完 ⇒ None）
-        stop = rev["PI1"] if rev is not None and rev["dir"] == seg_dir else len(pens) - 1
+        ok_rev = rev is not None and rev["dir"] == seg_dir
+        # 「走完」＝ 被确认的那一笔到来（L77:89-94：被线段破坏才算完成），不是它最后一笔 —— 在那之前的破位都算提前定。
+        #   用最后一笔当界会让先前已定的提前定被后来的确认翻掉（zec15 第 836 笔实测撤销过一段）。
+        stop = rev["confirm"] - 1 if ok_rev else len(pens) - 1
         for r in range(k + 2, stop + 1):
             p = pens[r]
             if (up and p["hi"] > V) or (not up and p["lo"] < V):
                 return None, r                    # 破了 X 的起点：① 旧线段延续，从 r 起再找
             if (up and p["lo"] < L) or (not up and p["hi"] > L):
                 return 1, r                       # 先破 X 的结束位置：V 是终点，新段在 r 才确立
-        if rev is not None and rev["dir"] == seg_dir:
+        if ok_rev:
             return 1, rev["confirm"]              # ② 反向线段走完、没破 V：V 是终点，新段到反向线段确认时才确立
         return None, len(pens)                    # 反向线段还没走完：待定，其后候选一律不判
 
@@ -353,7 +372,7 @@ def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT, memo=None):
             return None, None
     ok, brk = _reverse_scan(pens, k, seg_dir, mode)
     if ok:
-        return 2, None
+        return 2, _reverse_confirm_pen(pens, k, seg_dir, mode, j)
     return None, (brk if brk is not None else len(pens))   # 新高/新低 → 从破位处再找；否则待定
 
 
@@ -366,7 +385,7 @@ def _first_seg(pens, start, mode=FEAT_STD_DEFAULT, memo=None):
     s = None
     if segs and not segs[0].get("live"):
         s = dict(segs[0])
-        s["confirm"] = max(s["PI1"] + 1, s.pop("_born", None) or 0)
+        s["confirm"] = max(s["PI1"] + 1, s.pop("_born", None) or 0)   # _born ＝ 确认它的那一笔（两种情况都有）
     if memo is not None:
         memo[start] = s
     return s
@@ -418,8 +437,8 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=
                     k += 2
         if found is None:
             break
-        end_pen, case, born = found
-        born = born or 0
+        end_pen, case, at = found
+        born = (at or 0) if case == 1 else 0      # 方向确立只对第一种情况有意义；第二种情况的 at 只给 _first_seg 当「确认那一笔」
         segs.append(dict(
             PI0=i, PI1=end_pen,
             i0=pens[i]["i0"], i1=pens[end_pen]["i1"],
@@ -429,7 +448,7 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=
             lo=min(pens[k]["lo"] for k in range(i, end_pen + 1)),
         ))
         if first_only:
-            segs[-1]["_born"] = born or None      # 只给 _first_seg 用：确认这一段的那一笔
+            segs[-1]["_born"] = at                # 只给 _first_seg 用：确认这一段的那一笔
             return segs
         i = end_pen + 1
 
@@ -539,7 +558,7 @@ def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
             end = first["p1"]
             rev = first_seg_def(k + 2)
             ok_rev = rev is not None and rev["dir"] == ("up" if up else "down")
-            for r in range(k + 2, (rev["PI1"] + 1) if ok_rev else N):
+            for r in range(k + 2, rev["confirm"] if ok_rev else N):   # 反向线段被确认那一笔之前的破位都算提前定
                 if beyond_v(pens[r]):
                     return "wait", r              # 反向线段破了 X 的起点：① 旧段延续
                 if (pens[r]["lo"] < end) if up else (pens[r]["hi"] > end):
@@ -572,6 +591,10 @@ def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
         feat = [dict(h=p["hi"], l=p["lo"]) for p in tail if (p["p1"] > p["p0"]) == up]
         want = "bot" if up else "top"
         if len(tail) >= 3 and len(feat) >= 3 and any(f["type"] == want for f in fractals(std_feats(feat, not up))):
+            for m in range(3, len(tail) + 1):     # 确认是在第几笔到来时发生的（反向序列第一次出分型；E3 那一笔也得到了）
+                ft = [dict(h=p["hi"], l=p["lo"]) for p in tail[:m] if (p["p1"] > p["p0"]) == up]
+                if len(ft) >= 3 and any(f["type"] == want for f in fractals(std_feats(ft, not up))):
+                    return "yes", max(k + m, j)
             return "yes", None
         return "wait", brk
 
