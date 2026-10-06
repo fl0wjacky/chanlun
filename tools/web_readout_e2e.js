@@ -61,7 +61,8 @@
 //      （在"一样"上贴一句话＝凭空捏一个分歧出来）｜㉚ **对齐闸**：`levels.units` 跟框只有"同下标"这一条
 //      契约（实拍的那一条**没有身份字段**，连 X0 都没有）⇒ 回显的周期／档位／条数有一条对不上，
 //      就一个标都不画｜㉛ **首屏那一刻**（「高一级」默认关着、`opts.lv` 却是开的）：那一行话必须跟
-//      框、标**一起收着** —— 判据跟画图走同一个开关（`shownOf(opts).lv`），不是那颗芯片自己的标志。
+//      框、标**一起收着** —— 判据跟画图走同一个开关（`shownOf(opts).lv`），不是那颗芯片自己的标志；
+//      **那颗芯片也不许亮**（亮 ⟺ 画，两边同一个 `shownOf(opts).lv`）。
 //      这一格**不许点芯片**（点出来的状态看不见"屏幕刚起来"那个错）。
 //      ★★ 这一族第一版是**假绿**：工装自己给 `levels.units` 每条编了个 `X0`（照 spec 想当然），
 //        七格全绿、线上一个标都出不来 —— 量的是替身。教训写在这儿：**假后台要照实拍载荷写**，
@@ -76,7 +77,8 @@
 //   ㉕ `lv` 的 disabled 恒 false ⇒ 红；㉖ 摘掉「会变」那截 ⇒ 红（掐掉 `这是 ${who}` 里那个空格、
 //   或把句号缀回某一段上也红）；㉗ 把浮层搬进 `.foot`（流内）
 //   ⇒ 高度那一句红；㉘ `unmeasured` 不计数 ⇒ 红；㉙ 放行 `same` ⇒ 红；㉚ 把对齐闸摘掉（`lvAligned`
-//   恒返回 `units`）⇒ 红；㉛ 把那一行的闸退回裸 `opts.lv` ⇒ 红。
+//   恒返回 `units`）⇒ 红；㉛ 把那一行的闸退回裸 `opts.lv` ⇒ 红、把芯片那颗的 `on` 退回裸 `opts.lv`
+//   ⇒ 红（这一格两条臂各管一头：话那一头、芯片那一头 —— 两条都跑过，见 2026-10-06 那一趟）。
 //   ★ 另有一条**假绿**的旧账（值得记）：第一版工装给载荷编了个 `X0` 身份字段，
 //   七格全绿而线上全瞎 —— 那一版的绿，量的是工装自己编的替身。
 //
@@ -1037,6 +1039,7 @@ const tagAnchor = (p, X1) => p.evaluate((k) => {
     return { lv: s.opts.lv, up: s.opts.up, head: h ? (h.textContent || '') : null,
              on: h ? h.classList.contains('on') : null,
              chipDis: c ? !!c.disabled : null,
+             chipOn: c ? c.getAttribute('aria-pressed') : null,   // 'true'/'false'：芯片**亮没亮**
              nTag: ((s.trendDrawn || {}).labels || []).filter(lvTag).length };
   });
   const tapUp = () => dp.evaluate(() => { const c = document.querySelector('button.chip[data-key="up"]'); if (c) c.click(); });
@@ -1044,17 +1047,23 @@ const tagAnchor = (p, X1) => p.evaluate((k) => {
   await tapUp(); await sleep(500); const dOn = await dRead();
   await tapUp(); await sleep(500); const dOff2 = await dRead();
   t('㉛ 首屏那一刻（「高一级」默认关着，`opts.lv` 却是**开**的）：那一行话跟框、标**一起收着**'
-    + ' —— 它不许描述屏上没有的那几个框',
+    + ' —— 它不许描述屏上没有的那几个框；**芯片也不许亮着**（亮 ⟺ 画）',
     dOff.lv === true && dOff.up === false && dOff.on === false && !(dOff.head || '').trim()
       && dOff.nTag === 0 && dOff.chipDis === true
+      // ★★ 芯片这一头（2026-10-06 19:2xZ Nova 拍，card-6e338490-f11）：`opts.lv` 是开、而这一层画不出来
+      //   ⇒ 芯片必须**不亮**。从前的读法「亮不亮＝裸标志」在这儿得到 `pressed=true` **且** `disabled=true`，
+      //   同一屏上芯片说"开着"、屏上零框零标、旁边同一颗又是灰的 —— 三种状态里只有它骗人。
+      //   ⇒ 现在**亮 ⟺ 画**（两边同一个 `shownOf(opts).lv`）。这一格把三个时点都钉住，两个方向都咬：
+      //   关着时不许亮、开起来必须亮、再关掉又不许亮 —— 只断一头的话，"永远不亮"也能蒙过去。
+      && dOff.chipOn === 'false'
       // ★ 点开那一头**两样一起要**（读数 AND 画出来的标）：只断一头的话，"读数说没有、图上其实有"
       //   或者反过来，都能蒙过去 —— 这一格要的正是"这两个永远一致"，两个方向都得咬得住。
-      && dOn.on === true && (dOn.head || '').includes('5 个框') && dOn.nTag === 3
-      && dOff2.on === false && !(dOff2.head || '').trim(),
+      && dOn.on === true && (dOn.head || '').includes('5 个框') && dOn.nTag === 3 && dOn.chipOn === 'true'
+      && dOff2.on === false && !(dOff2.head || '').trim() && dOff2.chipOn === 'false',
     `默认：opts.lv=${dOff.lv}／opts.up=${dOff.up}、那一行话「${dOff.head || ''}」(on=${dOff.on})、`
-    + `芯片 disabled=${dOff.chipDis}、这一层的标 ${dOff.nTag} 枚`
-    + `｜点开「高一级」⇒「${dOn.head || ''}」(on=${dOn.on})`
-    + `｜再关掉 ⇒ on=${dOff2.on}「${dOff2.head || ''}」`);
+    + `芯片 disabled=${dOff.chipDis}／pressed=${dOff.chipOn}、这一层的标 ${dOff.nTag} 枚`
+    + `｜点开「高一级」⇒「${dOn.head || ''}」(on=${dOn.on})、pressed=${dOn.chipOn}`
+    + `｜再关掉 ⇒ on=${dOff2.on}「${dOff2.head || ''}」pressed=${dOff2.chipOn}`);
   await dp.close();
   await dctx.close();
 
