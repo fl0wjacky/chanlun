@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 上线前一道门（card-9b0fe913-758）：数据那半（Python 检查）＋ 渲染那半（前端 e2e）按顺序跑，一张表收账。
 #
-#   tools/predeploy.sh          # 五套 Python 检查 + cut_check + 4 套前端回归（ghost / more / readout / measure）
+#   tools/predeploy.sh          # 五套 Python 检查 + 4 套前端回归（ghost / more / readout / measure）
 #   tools/predeploy.sh --all    # 再加 4 套单卡证据工装（macd_axis / mobile_share / readout_swap_probe / subhead_slot_probe）
 #
 # 环境变量（都可不给）：
@@ -53,7 +53,7 @@ HEAD_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo 不在 git 里)
 git diff --quiet HEAD -- 2>/dev/null || HEAD_SHA="$HEAD_SHA（有未提交的改动）"
 
 # ---- 数据那半：Python 检查（每一套自己就是 0 过 / 非 0 不过）----
-for chk in tools/selfcheck.py web/check_parity.py web/check_abuse.py web/check_assets.py tools/pine_lockstep.py tools/cut_check.py; do
+for chk in tools/selfcheck.py web/check_parity.py web/check_abuse.py web/check_assets.py tools/pine_lockstep.py; do
   log=$(mktemp)
   "$PY" "$chk" >"$log" 2>&1
   rc=$?

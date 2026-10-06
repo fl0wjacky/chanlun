@@ -20,7 +20,6 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 from core.analyze import analyze                              # noqa: E402
 import core.trend as T                                        # noqa: E402
-from cut_check import load, kline_files                      # noqa: E402
 import re                                                     # noqa: E402
 
 # 线上用哪种 D3 读法以 web/server.py 的 TREND_READING 为准（不 import server，免得起它那一摊）；这里的格子都按它跑
@@ -33,6 +32,27 @@ BASE = {
     "zec30_cut.json": [(134, "L", None), (3476, "H", None), (4219, "L", None), (6150, "H", None), (6805, "L", None)],
 }
 BASE_PRICE = {"btc_4h.json": [("H", 97932.1)], "zec_1h.json": [("L", 205.07)], "aaplusdt_30m.json": [("L", 300.50)]}
+def load(path):
+    raw = json.load(open(path))
+    raw = raw["bars"] if isinstance(raw, dict) else raw
+    return [dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"]) for b in raw]
+
+
+def kline_files():
+    """data/ 下所有「K 线数组」样本（每条有 t/o/h/l/c）；别的 JSON（标注、子图样本）跳过。"""
+    out = []
+    for fn in sorted(os.listdir(os.path.join(ROOT, "data"))):
+        if not fn.endswith(".json") or fn.endswith("_tmp.json"):
+            continue
+        try:
+            raw = json.load(open(os.path.join(ROOT, "data", fn)))
+        except ValueError:
+            continue
+        if isinstance(raw, list) and raw and isinstance(raw[0], dict) and {"t", "o", "h", "l", "c"} <= set(raw[0]):
+            out.append(fn)
+    return out
+
+
 # spec D3（小栋 10-05 定 B）：升级中枢留在本级别一起数。下面是**冻结夹具 data/zec15.json** 的段类型（下标 0 起），
 # 不是线上：线上窗口在滚，段数和中枢合法都会变（10-06 线上第 1 段 4 个中枢合成一个 n=4 ⇒ 本级别只剩一个 ⇒ 盘整，也对）。
 # 夹具里第 1 段（bar 490–7558）4 个中枢只合了 2 个 ⇒ 本级别 3 个 ⇒「上涨」；第 5 段同理。A 读法下两段都是「升级·盘整」。
@@ -190,6 +210,16 @@ def self_test():
     ok = (len(a3["bounds"]), len(a3["retracted"])) != (len(b3["bounds"]), len(b3["retracted"]))
     print("%s P3 拿掉「H 之后不再过 H」（zec_1h、不交替）⇒ 分界 %d、撤回 %d（留着 %d、%d）" % (
         "✓" if ok else "✗", len(b3["bounds"]), len(b3["retracted"]), len(a3["bounds"]), len(a3["retracted"])))
+    miss += not ok
+    # D4-1 的反向验证（原 cut_check --self-test 挪来）：重算中枢时不按刀分组 ⇒ ② 必须报出跨分界的框
+    real = T._centers_with_cuts
+    T._centers_with_cuts = lambda done, ks: real(done, [])
+    try:
+        cross = [x for x in invariants("zec15.json") if "跨过分界" in x]
+    finally:
+        T._centers_with_cuts = real
+    ok = bool(cross)
+    print("%s D4 拿掉「按刀分组」⇒ ② 报出跨分界的框 %d 个（例 %s）" % ("✓" if ok else "✗", len(cross), cross[:1]))
     miss += not ok
     for name, kw, changed in arms:
         _, v = run("zec15.json", **kw)
