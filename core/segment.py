@@ -257,7 +257,8 @@ def _opening_overlaps(pens, i):
 def check_segments(segs, pens, unmeasured=None):
     """自检线段的不变量。返回违规列表。
     unmeasured：给了 list 就把「量不了」的格子收进去（自检 A 取不到 X 之后第一个反向线段时）——
-    那种情况**不许**退回「段内后来破了就算」的宽版（那正是旧程序的漏），也不算违规，记「未量」由调用方印出来。"""
+    那种情况**不许**退回「段内后来破了就算」的宽版（那正是旧程序的漏），记「未量」由调用方印出来；
+    **没给 list ⇒ 当违规返回**（不读未量那一栏的调用方，不能因此把它静默放过）。"""
     bad = []
     for k, s in enumerate(segs):
         if s["npens"] < 3:
@@ -280,8 +281,11 @@ def check_segments(segs, pens, unmeasured=None):
                 # 破位必须发生在 X 之后**第一个反向线段**被确认之前（L78:33）—— 不是「后来某时破了」（那正是旧程序的漏）
                 rev = _first_seg(pens, x + 1) if x is not None else None
                 if x is not None and (rev is None or rev["dir"] != s["dir"]):
+                    item = ("起点非段内极值，但 X 之后取不到第一个反向线段（A 量不了）", k, s["i0"])
                     if unmeasured is not None:
-                        unmeasured.append(("起点非段内极值，但 X 之后取不到第一个反向线段（A 量不了）", k, s["i0"]))
+                        unmeasured.append(item)
+                    else:
+                        bad.append(item)          # 调用方没要「未量」那一栏 ⇒ 当违规报，不许静默放过（Atlas 10-06）
                 else:
                     last = min(s["PI1"], rev["confirm"] - 1) if rev is not None else s["PI1"]
                     broke = x is not None and any((pens[j]["hi"] > pens[x]["p0"]) if up else (pens[j]["lo"] < pens[x]["p0"])
