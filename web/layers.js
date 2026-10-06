@@ -22,6 +22,64 @@ const lighter = (h, d = 40) => '#' + hex2rgb(h).map((v) => Math.min(255, v + d).
 //   它扩展合成出来的当然是线段升一级 ⇒ 品红。不是"挑"的，是这一层在哪一级决定的。
 const upColor = (tier) => (tier === 'seg' ? CHART.up_seg : CHART.up_pen);
 
+// ---------------------------------------------------------------- 级别对照（卡 card-01961644-68f，L-9）
+// 「对照图」—— 就是后台 `levels.ref_tf` 那一档 —— 的名字怎么念。★ **不在前端拿 4× 去推**：
+// 2h／4h 这两档本来就**没有对照图**（后台给 `ref_tf: null`，屏上该说「跨度最大的一档，没有对照图」），
+// 拿「自己 ×4」算出来的名字在那儿是**一句假话**。载荷给的是**代号**（'1h'/'2h'/'4h'），名字在这儿翻。
+// ★ 认不出来（后台哪天加了第五档、或者载荷里是个没见过的词）⇒ 返回空串 ⇒ 不画、
+// 不编 —— 「不知道的事不编」跟 measure/cut 那两处是同一条账。
+// ★ `同名` 那张是给「对照图（…）还没取到」那句短话用的（去掉尾字「图」，括号里那一格不带"图"）。
+const REF_TF_NAME = { '1h': '1 小时图', '2h': '2 小时图', '4h': '4 小时图' };
+export const refTfName = (tf) => REF_TF_NAME[tf] || '';
+/** 合成框的对照结论 → 框右沿那句短标（**≤8 字**，见 L-9 三档）。**只在 `mismatch` 上出字**：
+ *   `match`（整个落在同一个对照中枢里）、`partial`（只落在图头/图尾那两截、不算分歧）、
+ *   `unmeasured`（对照图没缓存）—— 这三档**一个字都不出**（L-9／Nova 13:37Z）。
+ *  ★ 三档 mismatch 是**实拍**分出来的（Bram 线上 ZEC 15m 对 1h 真回了三档）：
+ *    ① `share.length >= 2`：跨了两个以上对照中枢 ⇒ 「<对照图>上不一样」；
+ *    ② `share.length === 1 且 gap>0`：一段落进中枢、一段落进两个中枢之间的空档 ⇒「中间一段空着」；
+ *    ③ `share.length === 0 且 gap>0`（gap 100）：整个框落在空档里、一个中枢都没碰到 ⇒「<对照图>没有中枢」。
+ *  ★ ①②③ 都要求 **gap>0**：L-9 说 mismatch 的两种来源是「有 gap」或「跨 ≥2 中枢」。`share.length>=2`
+ *    就是跨了两个以上；`share.length===1` 只剩 gap 这一条路。三档之外的（比如 share 空又没 gap）
+ *    ⇒ 返回空串：**宁可漏一个标，也不标错**（保守的那一边）。
+ *  ★ `share[].pct` 的分母是**整个框**（`sum(share)+pre+gap+post=100`），所以这里只看档数、不看占比 ——
+ *    占比是判状态时后台的事，前端不再算第二份。 */
+export function lvTagText(u, refName) {
+  if (!u || u.status !== 'mismatch') return '';
+  const share = u.share || [];
+  const gap = (u.outside || {}).gap || 0;
+  if (share.length >= 2) return refName ? `${refName}上不一样` : '';
+  if (share.length === 1 && gap > 0) return '中间一段空着';
+  if (share.length === 0 && gap > 0) return refName ? `${refName}没有中枢` : '';
+  return '';
+}
+// ★★ 把 `levels.units` 对到框上 —— **今天能走的只有"位置"这一条路**，先把代价说破：
+//   实拍的载荷里，`levels.units` 每一条**只有一个 `{status, share, outside}`** —— 没有 `X0`、没有 `X1`、
+//   没有 id，**一个身份字段都没有**（曾按 `X0` 配过，线上一个标都出不来：`u.X0 != null` 对每一条都是假，
+//   字典是空的、字全没了，而屏上什么都看不出来）。
+//   ⇒ 唯一有契约的凭据是**同下标**：`levels.py` 写的是「本图每个合成框（trend.units，**同下标**）」。
+//     这是"今天只有这一条路"，不是"这条路最稳"：两份载荷的框数/次序一旦对不上，按下标就**整体错位**
+//     （错位＝标安到旁边那个框上，屏上一样是"有字的"，看不出来）。
+//   ⇒ 所以位置配对**必须另加闸**，`lvAligned` 就是那道闸：对不上就一个都不标（保守那一边）。
+//   ★ 往后后台要是给每个框一个**身份字段**（哪怕就是 `X0`），按身份配严格更稳 —— 那时把这一支换掉，
+//     别留着这段话当"已经够好了"。Bram 那边当作可选加固在要，不是拦路的。
+/** 三道闸都过 ⇒ 返回可以按下标取的 `levels.units`；任何一条不过 ⇒ `null`（＝一个标都不画）。
+ *  ① **框数**：跟这一帧的 `T.units` 一样多吗？少算/多算一个框，同下标就整体错位。
+ *  ② **周期**：载荷回显的 `tf` 跟屏上这一份（`state.tf`）一样吗？
+ *  ③ **档位**：`span` 一样吗？★ 这一道专治**旧快照** —— 往左补数据之后 span 变了，两份载荷的框数
+ *     往往还一样（① 拦不住），而同一个下标在新旧两档上指的不是同一个框。
+ *  ★ ②③ 比的是**屏上这一份**（`state.tf`/`state.span`），不是我们刚才发出去的请求参数：后台会钳档
+ *    （15m 要 16 钳到 4），"我发了什么"不算数、回显才算 —— 跟 `adopt()` 那条账同一条。
+ *  ★ **不拿 `symbol` 比**：换品种/换周期一律走 `go()`，那儿当场把 `state.levels` 清成 null（见 app.js），
+ *    比 `symbol` 是第二道保险，而它一错（后台回显的写法跟请求不完全一致）就会把这一层整片关掉。
+ *  ★ `span` 用字符串比：后台给 `1` 还是 `"1"` 都不该决定这一层画不画，缺字段（`null`/`undefined`）才算不过。 */
+export function lvAligned(T, lv, tf, span) {
+  if (!T || !Array.isArray(T.units) || !lv || !Array.isArray(lv.units)) return null;
+  if (lv.units.length !== T.units.length) return null;
+  if (lv.tf !== tf) return null;
+  if (lv.span == null || span == null || String(lv.span) !== String(span)) return null;
+  return lv.units;
+}
+
 const FONT = '12px -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif';
 const FONT_SM = '11px -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif';
 // 框编号那几个字母（§八 6，card-c6644f52-2fa）：**加粗、比这一层别的字大半档（14px）**。
@@ -70,6 +128,10 @@ export function shownOf(opts) {
     // 框编号（§八 6，card-c6644f52-2fa）：**默认关**的独立一层，但它画在走势那一层里面
     // ⇒ 走势层关着时它也没地方挂（字母说的是"这一段里的第几个中枢"）。两个都开才算画了。
     trendNum: !!o.trend && !!o.trendNum,
+    // 级别对照（卡 card-01961644-68f，接口规则 L-9）：合成框跟**对照图**（后台 `ref_tf` 那一档）
+    // 中枢对不上的那些，在框右沿标一句。★ 它标的是**合成框**（`T.units`），那一层归 `up` —— 框不画就没有地方挂字
+    // ⇒ `lv` 跟 `up` **与**一下（跟 `trendNum` 跟 `trend` 与一下是同一条写法）。默认开。
+    lv: !!o.lv && !!o.up,
     // 单个买卖点画不画：跟下面画三角那一段用的是**同一条**（大开关 ＋ kind chip ＋ 待确认）
     sigAt: (s) => !!o.sig && !!kinds[s.kind] && (!!s.confirmed || !!(o.sigPend && CHART.sig_pending)),
   };
@@ -944,6 +1006,58 @@ function trendMarkView(target, state, prim) {
         D.labels.push(haloText(ctx, lx, fitLabel(ctx, lx, ly, '升级', mine, H), '升级', upColor('seg'), 'left', mine));
       }
     }
+
+    // ⑥ 级别对照（卡 card-01961644-68f，接口规则 L-9）：合成框跟**对照图**（后台 `levels.ref_tf`
+    //    那一档，不是前端拿 4× 推的）的中枢对不上的
+    //    那些，在**框的右沿**标一句短话（三档见 `lvTagText`）。★ 这是「升级」的**镜像**，四条一条不省：
+    //      ① 锚点搬到**右边线内侧** `x1 - 6`、`align:'right'` —— 左边已经住着「升级」，两个挤一块儿；
+    //      ② 右沿**出屏就一个字都不画**（`x1 > W` 也 skip），**绝不夹回来** —— 夹回来就是
+    //         card-113a3b16-026 那个「钉在视口边上不动」的旧 bug 的翻版（那段长注释在 ⑤ 里）；
+    //      ③ 只给**这一帧真画出来的框**写字：★ 这一条比「升级」难 —— `levels.units` 跟框**没有**共同的
+    //         身份字段（见 `lvAligned`），只能**同下标**。所以不遍历 `D.units`（那是筛过的子集，按下标取
+    //         会错位），改为**遍历 `T.units` 取下标的 `levels.units[i]`**，再把下面这几条**画框那一趟
+    //         一模一样的判据**重放一遍（x/y 取不到、横向出屏、纵向出屏）—— 同一个谓词 ⇒ 被标的那几个框
+    //         跟真画出来的那几个框**是同一批**。开关关着时整支不跑，也就没有「框没了、字还在」。
+    //      ④ 让位走**同一张表**（`mine` + `fitLabel`）：跟「升级」不许压在一起，也不压这一层别的字。
+    //    ★ 颜色是中性灰（`TREND.lv`）：它讲的是"跟另一张图对不上"，不是涨跌 —— 不跟价签抢读法。
+    //    ★ 开关 `sh.lv`（默认开），而它跟 `up` 与过（合成框那一层不画就没有地方挂字，见 `shownOf`）。
+    if (sh.lv) {
+      const lv = state.levels;
+      // 三道闸（框数／周期／档位）全过才拿得到能按下标取的数组；任何一条不过 ⇒ `null` ⇒ 一个字都不标。
+      const us = lvAligned(T, lv, state.tf, state.span);
+      if (us) {
+        const refName = refTfName(lv.ref_tf);
+        for (let i = 0; i < T.units.length; i++) {
+          const txt = lvTagText(us[i], refName);
+          if (!txt) continue;
+          // ★ 下标 `i` 是**同一把尺子**量出来的那一个框：`us[i]` 是后台对它的结论，`T.units[i]` 才是
+          //   画它用的几何（下面的判据跟 `trendBandView` ③ 那一趟逐条对应）。
+          const u = T.units[i];
+          const x0 = vp.xOfBar(u.X0), x1 = vp.xOfBar(u.X1);
+          const yt = vp.yOfPrice(u.GG), yb = vp.yOfPrice(u.DD);
+          if (x0 === null || x1 === null || yt === null || yb === null) continue;
+          // 框整个出了屏 ⇒ 不画；★ 右沿出屏（`x1 > W`）也**不画** —— 这一句就是"不许夹回来"的牙
+          //   （「升级」那头没有这一条是因为它锚在左沿；这一头锚在右沿，右沿出去了就没地方站）。
+          if (x1 <= 0 || x0 >= W || x1 > W) continue;
+          // 框纵向也整个出了屏 ⇒ 画面上根本没有这个框，别给它写字（跟 ⑤ 同一条）
+          if (yb < 0 || yt > H) continue;
+          // ★★ 上面那条右沿 guard 只管"**锚点**在屏内"；右对齐的字是往**左**铺的 —— 锚点离左沿太近时
+          //   整块会被画布左边切掉（「升级」那头的对偶：它是锚在左沿、用 `x0 < 0 ⇒ continue` 守的）。
+          //   ⇒ 量出这一句的宽，`lx - w < 0` 就整块不画。**不夹、不截**，跟右沿同一条规矩
+          //     （夹回来就是 card-113a3b16-026 那个「钉在视口边上」的旧 bug）。
+          ctx.font = FONT;
+          const tw = ctx.measureText(txt).width;
+          const lx = x1 - 6;
+          if (lx - tw < 0) continue;
+          // y 跟「升级」同一条规矩：贴着框上沿往下 15；框比屏幕高就落在可见那一段的顶上。
+          let ly = Math.max(yt, 0) + 15;
+          if (ly > H - 6) ly = H - 6;
+          // ★ `fitLabel` 必须收到跟 `haloText` 同一个 `align`（'right'）：测的盒子和登记的盒子要同向，
+          //   否则它会去躲右边、留下左边真压着的「升级」/框线/编号（Nova 指出，见 fitLabel 那段账）。
+          D.labels.push(haloText(ctx, lx, fitLabel(ctx, lx, ly, txt, mine, H, 'right'), txt, TREND.lv, 'right', mine));
+        }
+      }
+    }
   });
 }
 
@@ -968,12 +1082,19 @@ function haloText(ctx, x, y, text, col, align, mine, font, size) {
   return box;
 }
 
-/** 只给「升级」用：拿同一套 `fitBox` 在自己这张表上找一个不压人的基线（先上后下、最多 12 行，
- *  跟价签那条尺子是同一个函数）。找不到就按原位画 —— 宁可压一点，也不许挪出画布。 */
-function fitLabel(ctx, x, y, text, mine, H) {
+/** 给「升级」（左对齐）和「级别对照」（右对齐）共用的让位：拿同一套 `fitBox` 在自己这张表上找一个
+ *  不压人的基线（先上后下、最多 12 行，跟价签那条尺子是同一个函数）。找不到就按原位画 ——
+ *  宁可压一点，也不许挪出画布。
+ *  ★★ `align` 必须跟 `haloText` 收到的那一个**一模一样**（Nova 指出）：`fitBox` 只挪 y，可 x 是用来
+ *    `hits()` 的 —— 盒子测错了方向，右对齐那句就会「不去躲它左边真压着的东西（升级／框线／编号），
+ *    反倒空躲右边没东西的地方」。而且 `haloText` **登记**的是 `align` 修正后的盒子（`x0 = x - w`），
+ *    测试盒子若还是 `[x, x+w]`，就变成"测的是一块、占的是另一块"—— 让位表当场说谎。
+ *    ⇒ 这里跟 `haloText` 用同一行 `x0` 算法，两处永远同向。不传 `align` ＝ left（「升级」原样）。 */
+function fitLabel(ctx, x, y, text, mine, H, align) {
   ctx.font = FONT;
   const w = ctx.measureText(text).width;
-  return fitBox([x, y - 11, x + w, y + 3], mine, H)[3] - 3;
+  const x0 = align === 'center' ? x - w / 2 : align === 'right' ? x - w : x;
+  return fitBox([x0, y - 11, x0 + w, y + 3], mine, H)[3] - 3;
 }
 
 // >>> FMT_G —— tools/web_fmt_check.py 把这一段抠出来单跑，逐值与 Python 的 `"%g" % round(v, 2)`
