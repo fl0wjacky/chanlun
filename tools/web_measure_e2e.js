@@ -1487,6 +1487,33 @@ const shotChart = async (p, tag) => {
      `full=${out.full} fs-fake=${out.fake} fs-on=${out.onCls} aria-pressed=${out.pressed}`
      + `　图 ${after.chart.w}×${after.chart.h} → ${out.chart.w}×${out.chart.h}（原来是 ${before.chart.w}×${before.chart.h}）`
      + `　视口 Δ＝${oFrom.toFixed(2)} / ${oTo.toFixed(2)} 根`);
+
+  // ⑧ 「换档那句话」（`.notice`）**跟按钮同一条横带**：它是 `align-self: stretch`（横贯整栏），
+  //    而按钮就摆在右上角 ⇒ 字会不会钻到按钮底下。★ 这句是**最长的那句**（NOTICE_TEXT，31 字），
+  //    手机那一档（⑨）才是真会撞的地方 —— 桌面 1230px 宽，一句 31 字根本够不着右端。
+  //    判据量的是**字的墨迹**（Range 的盒子），不是那个横贯盒子的边 —— 盒子照样横贯（设计如此）。
+  //    ★ 这一格是**给我自己那处改动的牙**：`.notice` 的左右内边距改成 `ps+44` 就是为了这件事，
+  //    没有这一格，"我让开了"就只是我一句推测。
+  const inkOf = (pg) => pg.evaluate((txt) => {
+    const n = document.getElementById('notice');
+    if (!n) return null;
+    n.textContent = txt; n.classList.add('on');          // 造出真身那一档：字最长、横贯整栏
+    const rg = document.createRange(); rg.selectNodeContents(n);
+    const k = rg.getBoundingClientRect();                 // 墨迹（不含内边距）
+    const b = document.getElementById('fs').getBoundingClientRect();
+    const hit = !(k.right <= b.left || k.left >= b.right || k.bottom <= b.top || k.top >= b.bottom);
+    return { ink: { l: Math.round(k.left), r: Math.round(k.right), t: Math.round(k.top), b: Math.round(k.bottom) },
+      btn: { l: Math.round(b.left), r: Math.round(b.right), t: Math.round(b.top), b: Math.round(b.bottom) },
+      hit, gap: Math.round(b.left - k.right), pad: getComputedStyle(n).paddingLeft,
+      box: Math.round(n.getBoundingClientRect().width), vw: innerWidth };
+  }, '已接上更早的K线，左侧的笔、线段、中枢和买卖点按新的起点重算');
+  const INK = await inkOf(dFS.p);
+  await dFS.p.evaluate(() => document.getElementById('notice').classList.remove('on'));
+  ck('「换档那句话」的**字**不钻到全屏按钮底下（桌面档：那个横贯盒子照样横贯，让开的是字）',
+     !!INK && !INK.hit && INK.gap >= 4,
+     INK ? `字 ${INK.ink.l}→${INK.ink.r}（宽 ${INK.ink.r - INK.ink.l}）　按钮 ${INK.btn.l}→${INK.btn.r}`
+       + `　⇒ 字右沿离按钮左沿 ${INK.gap} px（要 ≥ 4）　那句话的盒子宽 ${INK.box}（视口 ${INK.vw}）`
+       + `　左右内边距 ${INK.pad}` : '★ 页面上没有 #notice');
   await dFS.c.close();
 
   // ⑦ 退路那一档（卡里 ④）：注入「浏览器不给原生全屏」（iPhone Safari 对非 video 元素就是这样），
@@ -1508,6 +1535,9 @@ const shotChart = async (p, tag) => {
   await pM.keyboard.press('Escape');
   await pM.waitForTimeout(700);
   const mE = await fsState(pM);
+  // ⑨ 同一件事在**手机那一档**（真会撞的地方）：一句 31 字在 390px 宽里装不下，
+  //    没让开的话它的右端正好从按钮底下穿过去。★ 这一格在没改内边距时会红 —— 那正是我要的牙。
+  const mINK = await inkOf(pM);
   await cM.close();
   const covers = mA.fake && Math.abs(mA.main.x) <= 1 && Math.abs(mA.main.y) <= 1
     && Math.abs(mA.main.w - mA.vw) <= 1 && Math.abs(mA.main.h - mA.vh) <= 1;
@@ -1517,6 +1547,12 @@ const shotChart = async (p, tag) => {
      + `　铺满=${covers}　chip ${mChip.before} → ${mChip.after}（共 ${mChip.n} 颗）`
      + `　Esc 之后 fake=${mE.fake}／full=${mE.full}`
      + `　★ 按钮在这档里 ${mA.btn.w}×${mA.btn.h}（触控目标要 ≥ 24）`);
+
+  ck('手机那一档：同一句话（31 字）在窄屏里也**不许钻到按钮底下**（桌面宽，这一格量不出来才要单开）',
+     !!mINK && !mINK.hit && mINK.gap >= 4,
+     mINK ? `屏 ${mINK.vw}　字 ${mINK.ink.l}→${mINK.ink.r}（宽 ${mINK.ink.r - mINK.ink.l}）　按钮 ${mINK.btn.l}→${mINK.btn.r}`
+       + `　⇒ 字右沿离按钮左沿 ${mINK.gap} px（要 ≥ 4）　那句话的盒子宽 ${mINK.box}　左右内边距 ${mINK.pad}`
+       + `　字换了几行：${mINK.ink.b - mINK.ink.t} px 高` : '★ 页面上没有 #notice');
 
   await b.close();
   console.log(`\n${n - bad}/${n} 过${bad ? `，${bad} 条红` : ''}　截图：${OUT}`);
