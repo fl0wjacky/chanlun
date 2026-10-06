@@ -1258,6 +1258,95 @@ el('fold').addEventListener('click', () => setFold(document.body.classList.conta
 addEventListener('resize', reserveFold);
 setFold(false);
 
+// ---------------------------------------------------------------- 全屏看图（卡 card-5014b0cb-e4d）
+// 进全屏的是 **`main`**（`#chart` ＋ 右边那一栏开关），**不是** `#chart` —— 小栋要的是「图跟开关栏一起
+// 撑满」，不是「把开关栏挡掉」。这一条定下之后，卡里 ② 就是白送的：`#panel` 还是 `main` 的孩子，
+// 全屏里各颗开关照点。
+//
+// ★ 卡里 ⑤（进出全屏自动重画）**也是白送的**：建图时就是 `autoSize: true`（见上面 createChart），
+//   LWC 自己挂着 ResizeObserver，`#chart` 一变尺寸它自己重排。这儿**不另写一套重画** ——
+//   两套重画迟早会在某一刻各画一半。⇒ 剩下的活只有三件：按钮摆哪、进出怎么走、退路。
+//
+// ★★ 进出全屏**唯一要自己管的是视口**：尺寸一变，LWC 按新的宽度重排可视窗（同一段 K 线往边上挪）。
+//   所以进/出各做一次「先记下这一屏 → 等它重排完 → 摆回去」，走的就是页面自己那套 setView/holdView
+//   ——它认得「这是我们自己摆的」，不会把这一下当成用户在往左拖、跑去要更早的数据（那笔账见上面
+//   holdView 那一大段：认的是**输入设备**，脚本摆视口不算）。
+const fsMain = document.querySelector('main');
+const fsBtn = el('fs');
+const fsNative = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+const fsFake = () => document.body.classList.contains('fs-fake');
+const fsOn = () => fsNative() || fsFake();
+
+// 按钮的 right 让开**右轴那一条**：轴宽是图自己算的（随价位位数变），所以**问图要**，不抄一个数。
+// 这就是卡里 ①「别挡轴和最新价标签」那条约束在代码里的**唯一出处**；验收那一格量的也是它。
+function placeFs() {
+  const pane = chart.panes()[0];
+  const ps = pane && pane.priceScale('right');
+  const w = ps && typeof ps.width === 'function' ? ps.width() : 0;
+  if (w > 0) cssVar('--ps-right', `${Math.ceil(w)}px`);
+}
+// 进/出全屏：把「刚才那一屏」记下来，等 LWC 按新尺寸排完，摆回去。两次 rAF 是**让 LWC 先重排**——
+// 它的重排挂在 ResizeObserver 上，同一拍里读回来的还是旧尺寸。
+function keepView(r) {
+  const want = r || viewSet || chart.timeScale().getVisibleLogicalRange();
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (want) setView(want);
+    placeFs();
+    placeSubhead();
+  }));
+}
+// ★ `#fs` 不在就当没这回事（浏览器缓存着旧 index.html、或谁把它删了）：**不许让整支 js 挂在这里** ——
+//   这颗按钮没了只是少个功能，一个 null 上去抛出去，整页就只剩白板跟顶栏（比没按钮坏得多）。
+function syncFs() {
+  const on = fsOn();
+  document.body.classList.toggle('fs-on', on);          // 只用来换那两副箭头（CSS 认这个类）
+  if (!fsBtn) return;
+  fsBtn.setAttribute('aria-pressed', String(on));
+  fsBtn.setAttribute('aria-label', on ? '退出全屏' : '全屏看图');
+  fsBtn.title = on ? '退出全屏（Esc）' : '全屏看图（Esc 退出）';
+}
+async function toggleFs() {
+  const r = viewSet || chart.timeScale().getVisibleLogicalRange();   // 进/出都摆回这一屏
+  if (fsOn()) {
+    if (fsNative()) {
+      try { await document.exitFullscreen(); } catch (e) { /* 已经退了：下面 syncFs 会认掉 */ }
+    } else {
+      document.body.classList.remove('fs-fake');
+    }
+    syncFs(); keepView(r);
+    return;
+  }
+  // 原生那条路走不通就别硬走：`fullscreenEnabled` 为假（iPhone Safari 对非 video 元素就是）**或者**
+  // requestFullscreen 当场被拒（没有用户手势/被策略拦），都落到自铺那一档。
+  let ok = false;
+  try {
+    if (fsMain && fsMain.requestFullscreen && document.fullscreenEnabled) {
+      await fsMain.requestFullscreen();
+      ok = true;
+    }
+  } catch (e) { ok = false; }
+  if (!ok) document.body.classList.add('fs-fake');
+  syncFs(); keepView(r);
+}
+if (fsBtn) fsBtn.addEventListener('click', toggleFs);
+// 原生那条路**退出是全浏览器包办的**（Esc、手势、系统返回都可能触发）⇒ 状态跟着 `fullscreenchange` 走，
+// 不自己记一个布尔（自己记：迟早出现「按钮说在全屏、其实已经退了」）。
+for (const ev of ['fullscreenchange', 'webkitfullscreenchange']) {
+  document.addEventListener(ev, () => { syncFs(); keepView(); });
+}
+// 退路那一档：Esc 得**自己听**（原生那条路浏览器包办）。
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && fsFake()) {
+    document.body.classList.remove('fs-fake');
+    syncFs();
+    keepView();
+  }
+});
+// 轴宽不是固定的：价位位数变、换档、转屏、窗格增减都会变 ⇒ 每次布局重量一次（跟 placeSubhead 同一个触发点）。
+if ('ResizeObserver' in window) new ResizeObserver(() => placeFs()).observe(el('chart'));
+addEventListener('resize', placeFs);
+placeFs();
+
 // ---------------------------------------------------------------- 背驰看法那一组（卡 card-84091d2d-c97）
 // 放在图层那一排**前面**：它决定的是「买卖点按哪种力度比较算出来」（算什么），比「画哪几层」还靠上一步。
 // ★ 样式上跟图层开关**刻意分开**：图层是一排可多选的开关（`aria-pressed`，虚边），这一组是**单选**

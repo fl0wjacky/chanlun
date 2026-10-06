@@ -80,6 +80,20 @@
         </svg><span id="ghostc-tx"></span>
       </div>
     </div>
+    <!-- 全屏那颗按钮（卡 card-5014b0cb-e4d）。挂在 #chart 里、**不在 .overlays 里**：
+         那个盒子整块 pointer-events:none（浮层不许吃拖拽），按钮得能点 ⇒ 它是 #chart 的另一个孩子。
+         位置由 style.css 摆（right 让开右轴那一条，宽度问图自己要，见 .fs 那段注释）。
+         两副箭头＝两个含义，靠 body.fs-on 换（不是把一颗按钮改成另一颗）：朝外＝进全屏，朝里＝退全屏。 -->
+    <button id="fs" class="fs" type="button" aria-pressed="false" aria-label="全屏看图" title="全屏看图（Esc 退出）">
+      <svg class="fs-out" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"
+           fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+        <path d="M1.6 6.4V1.6h4.8M14.4 6.4V1.6h-4.8M1.6 9.6v4.8h4.8M14.4 9.6v4.8h-4.8"/>
+      </svg>
+      <svg class="fs-in" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"
+           fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+        <path d="M6.4 1.6v4.8H1.6M9.6 1.6v4.8h4.8M6.4 14.4v-4.8H1.6M9.6 14.4v-4.8h4.8"/>
+      </svg>
+    </button>
   </div>
   <!-- 往左拖要更早 K 线时的话（加载中 / 已到最早）。挂在图上、不塞顶栏：用户在图左边做动作，话就说在他眼睛在的地方 -->
   <div id="more" class="more" role="status" aria-live="polite"></div>

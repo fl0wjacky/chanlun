@@ -61,6 +61,17 @@
 //      退休时的**接班的**：那格原先钉的就是"待定画在 `cut_bar` 那一根上"，位置守卫不能跟着退休。
 //      ★ 判据的色号和不透明度都从 `/theme.js` 现读（`await import('/theme.js')`）：改配色这几格跟着走。
 //
+//   ★★ **全屏看图**（2026-10-06 补，card-5014b0cb-e4d）：卡里六条 ——
+//      ① 别挡右轴/最新价标签：判据是**画布像素**里那条轴边框线（`--line` 色、顶部 26 行通高的一列），
+//         按钮右沿必须落在它左边 ≥4px。**不用**"按钮 right ≥ 某个数"：那个数是我自己写进 CSS 的，
+//         自己给自己判卷（跟 ⑤ 那条"不读自报出口"同一条账）。最新价标签就画在那条竖栏里。
+//      ② 全屏里点一颗 chip 状态真翻、且那颗**在视口里**；③ 进全屏**视口一根 K 线都不跳**（Δ ≤ 1.5 根，
+//         LWC 会把视口归一化微调一下，所以不是全等）；④ 退路（原生被禁的手机档自铺满窗口 ＋ Esc 退得掉）；
+//      ⑤ 卡里"自动重画"那条是**量**出来的（画布高度跟着图的新尺寸走，不是"读代码知道 autoSize 会重画"）；
+//      ⑥ 再点一次退得掉、尺寸和视口都回原样。
+//      ★ 原生全屏在无头浏览器里可能被拒 ⇒ 每格都**印出走的是哪条路**：落到退路还把绿说成"原生验过了"，
+//        那是假绿。⑦ 那一格用 `addInitScript` 把 `fullscreenEnabled` 按成 false，专门咬退路那条。
+//
 //   ★ 牙齿（2026-10-04 我补的）：把页面弄坏、看它**是红还是炸**。做法：去掉 web/app.js 里那句
 //     `b.dataset.measure = id;`（芯片照常渲染四颗按钮，只是工装点不着 `.mchip[data-measure="lines"]`）。
 //       摘掉修法 ⇒ rc=2「炸了：locator.click: Timeout 30000ms exceeded」——只印了 7 格，**没有判词**；
@@ -1351,6 +1362,161 @@ const shotChart = async (p, tag) => {
      + `${SW54.near && SW54.near.roomyChart !== SW54.near.roomy ? '　★ 两把尺在这一格判反了 ⇒ 修前这里就是假红/假绿的现场' : ''}　`
      + `（★「一条都放不下就只写最近那一段」这一趟被走到 ${SW54.fellBack} 次`
      + ` ⇒ ${SW54.fellBack ? '量到了' : '**没量到**，那半句这格不算数'}）`);
+
+  // ---------------------------------------------------------------- 全屏看图（卡 card-5014b0cb-e4d）
+  // 卡里六条，逐个对着量：
+  //   ① **别挡右轴和最新价标签** —— 判据是**像素**：从画布上找出右轴那条竖栏的左沿（`--line` 色的
+  //      一列、通高），按钮的右沿必须落在它左边。为什么不用「按钮的 right ≥ 某个数」：那个数是我自己
+  //      写进 CSS 的，等于自己给自己判卷（跟 ⑤ 那条「不读自报出口」同一条账）。
+  //      最新价标签就画在那条竖栏里 ⇒ 压在轴上就是压住标签。
+  //   ② 开关照点　③ 视口不跳　④ 退路　⑤ 自动重画（**真量**，不是"读代码知道 autoSize 会重画"）　⑥ 退出
+  // ★ 原生全屏在无头浏览器里**可能被拒**（那条路要用户手势/浏览器策略）—— 被拒就落到自铺那一档。
+  //   所以这组每格都**印出走的是哪条路**：落到退路还把绿说成"原生验过了"，那是假绿。
+  const fsState = (p) => p.evaluate(() => {
+    const q = (s) => { const n = document.querySelector(s); if (!n) return null; const r = n.getBoundingClientRect();
+      return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height),
+               right: Math.round(r.right), bottom: Math.round(r.bottom) }; };
+    const pane = window.__app.chart.panes()[0];
+    const ps = pane && pane.priceScale('right');
+    const btn = document.querySelector('#fs');
+    return {
+      btn, chart: q('#chart'), main: q('main'),
+      pe: btn ? getComputedStyle(btn).pointerEvents : null,
+      inOverlays: !!(document.querySelector('.overlays #fs')),
+      psVar: parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ps-right')) || null,
+      psW: ps && typeof ps.width === 'function' ? Math.round(ps.width()) : null,
+      full: !!document.fullscreenElement, fake: document.body.classList.contains('fs-fake'),
+      onCls: document.body.classList.contains('fs-on'),
+      pressed: btn ? btn.getAttribute('aria-pressed') : null,
+      range: window.__app.chart.timeScale().getVisibleLogicalRange(),
+      cvs: [...document.querySelectorAll('#chart canvas')].map((c) => ({ w: c.width, h: c.height })),
+      vw: innerWidth, vh: innerHeight, dpr: devicePixelRatio,
+    };
+  });
+  // 右轴那条竖栏的左沿在哪一列：顶部那几行里，某一列**通高**都是 `--line` 色 ⇒ 那是轴的边框线。
+  // （顶部那 8% 是比例尺留白，那儿不会有 K 线；时间轴那条横线、窗格分隔线都不在这几行里。）
+  const axisEdge = (p) => p.evaluate(() => {
+    const hx = getComputedStyle(document.documentElement).getPropertyValue('--line').trim().replace('#', '');
+    const want = [parseInt(hx.slice(0, 2), 16), parseInt(hx.slice(2, 4), 16), parseInt(hx.slice(4, 6), 16)];
+    const cols = [];
+    for (const cv of document.querySelectorAll('#chart canvas')) {
+      const W = cv.width, H = cv.height;
+      if (!W || !H) continue;
+      const rows = Math.min(26, H);
+      const d = cv.getContext('2d').getImageData(0, 0, W, rows).data;
+      const hits = [];
+      for (let x = 0; x < W; x++) {
+        let k = 0;
+        for (let y = 0; y < rows; y++) { const i = (y * W + x) * 4;
+          if (d[i] === want[0] && d[i + 1] === want[1] && d[i + 2] === want[2]) k++; }
+        if (k >= rows * 0.7) hits.push(x);
+      }
+      if (hits.length) cols.push({ cw: W, ch: H, x: Math.min(...hits) });
+    }
+    return { cols, dpr: devicePixelRatio, canvas: [...document.querySelectorAll('#chart canvas')].length };
+  });
+  const dFS = await open(QS);
+  let FS = await fsState(dFS.p);
+
+  // ① 那颗按钮在图上、是**能点**的一颗（不在 .overlays 里 —— 那个盒子整块 pointer-events:none）
+  ck('全屏那颗按钮在图的右上角、而且**点得着**（不是挂在 `.overlays` 那个 pointer-events:none 的盒子里）',
+     !!FS.btn && FS.pe !== 'none' && !FS.inOverlays && !!FS.chart
+       && FS.btn.right <= FS.chart.right + 1 && FS.btn.x > FS.chart.x + FS.chart.w / 2
+       && FS.btn.y < FS.chart.y + FS.chart.h / 2 && FS.btn.w >= 24 && FS.btn.h >= 24,
+     FS.btn ? `按钮 ${FS.btn.w}×${FS.btn.h} @(${FS.btn.x},${FS.btn.y})　图 x[${FS.chart.x}, ${FS.chart.right}] y[${FS.chart.y}, ${FS.chart.bottom}]`
+       + `　pointer-events=${FS.pe}　在 .overlays 里=${FS.inOverlays}` : '★ 页面上没有 #fs');
+
+  // ② 别挡右轴（也就不会压住画在轴上的最新价标签）：像素找轴左沿 ＋ 布局算式两条一起印
+  const AX = await axisEdge(dFS.p);
+  const axLeft = AX.cols.length ? Math.min(...AX.cols.map((c) => c.x)) / AX.dpr : null;
+  ck('按钮**不挡右轴那一条**：它的右沿落在轴的左沿左边（判据是**画布像素**找出来的轴边框线，不是我自己写的数）',
+     axLeft !== null && !!FS.btn && FS.btn.right <= axLeft - 4,
+     `按钮右沿 ${FS.btn ? FS.btn.right : '?'}　轴左沿 ${axLeft === null ? '★ 像素里没找到那条竖线' : axLeft.toFixed(1)}`
+     + `（画布 ${AX.canvas} 张／命中列 ${JSON.stringify(AX.cols)}／dpr ${AX.dpr}）`
+     + `　页面自己读的轴宽 ${FS.psW}、CSS 变量 --ps-right=${FS.psVar}`
+     + `　⇒ 让开的距离 ${axLeft === null ? '?' : (axLeft - (FS.btn ? FS.btn.right : 0)).toFixed(1)} px（要 ≥ 4）`);
+
+  // ③ 进全屏：走的是哪条路 ＋ **视口不跳** ＋ 图真的变大
+  const before = FS;
+  await dFS.p.locator('#fs').click();
+  await dFS.p.waitForTimeout(900);
+  const after = await fsState(dFS.p);
+  const path = after.full ? '原生全屏' : after.fake ? '自铺（退路）' : '★ 两条都没走成';
+  const dFrom = after.range && before.range ? Math.abs(after.range.from - before.range.from) : NaN;
+  const dTo = after.range && before.range ? Math.abs(after.range.to - before.range.to) : NaN;
+  const grew = !!before.chart && !!after.chart && (after.chart.h > before.chart.h + 20 || after.main.h > before.main.h + 20);
+  ck('点一下进全屏：图那栏**真的变大**，而**可视窗一根 K 线都没跳**（进全屏要的是"这一屏放大"，不是"换一屏看"）',
+     (after.full || after.fake) && grew && dFrom <= 1.5 && dTo <= 1.5 && after.onCls && after.pressed === 'true',
+     `走的是 **${path}**　图 ${before.chart.h}px → ${after.chart.h}px 高、main ${before.main.h}px → ${after.main.h}px`
+     + `　视口 [${before.range.from.toFixed(2)}, ${before.range.to.toFixed(2)}] → [${after.range.from.toFixed(2)}, ${after.range.to.toFixed(2)}]`
+     + `（Δ＝${dFrom.toFixed(2)} / ${dTo.toFixed(2)} 根，要 ≤ 1.5）　body.fs-on=${after.onCls}　aria-pressed=${after.pressed}`);
+
+  // ④ 卡里 ⑤「自动重画」——**量**出来的：画布的高度跟着图的新尺寸走了，不是"读代码知道 autoSize 会重画"
+  // ★ 取**最高的那张**画布：`#chart` 里不止一张（时间轴那一条自己一张、矮），取第 0 张会量到它
+  const cs = after.cvs.reduce((a, c) => (!a || c.h > a.h ? c : a), null);
+  ck('卡里 ⑤ 那条（进出全屏自动重画）是**量**出来的：画布自己跟着新尺寸重排了（不是"读代码知道 autoSize 会重画"）',
+     !!cs && Math.abs(cs.h / after.dpr - after.chart.h) <= 2,
+     cs ? `画布 ${cs.w}×${cs.h}（dpr ${after.dpr} ⇒ ${(cs.h / after.dpr).toFixed(1)} CSS px）　图那栏 ${after.chart.h} px`
+       + `　差 ${(cs.h / after.dpr - after.chart.h).toFixed(1)} px（要 ≤ 2）` : '★ 读不到画布');
+
+  // ⑤ 全屏里开关照点（卡里 ②）：点一颗 chip，aria-pressed 真翻，且它**还在视口里**（点得着）
+  const inFs = await dFS.p.evaluate(() => {
+    const c = document.querySelector('.chip');
+    if (!c) return null;
+    const b4 = c.getAttribute('aria-pressed');
+    const r = c.getBoundingClientRect();
+    c.click();
+    return { before: b4, after: c.getAttribute('aria-pressed'),
+      inside: r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight };
+  });
+  ck('全屏里开关**照点**（卡里 ②）：点一颗 chip 它的状态真翻了，而且那颗**在视口里**（全屏没把图层栏挡掉或推出屏幕）',
+     !!inFs && inFs.before !== inFs.after && inFs.inside,
+     inFs ? `chip ${inFs.before} → ${inFs.after}　在视口里=${inFs.inside}` : '★ 页面上没有 .chip');
+  if (inFs && inFs.before !== inFs.after) await dFS.p.evaluate(() => document.querySelector('.chip').click());   // 点回来
+
+  // ⑥ 退出：再点一次 ⇒ 回原状（两条状态都清掉、图回到原来的尺寸、视口还是没跳）
+  await dFS.p.locator('#fs').click();
+  await dFS.p.waitForTimeout(900);
+  const out = await fsState(dFS.p);
+  const oFrom = out.range && before.range ? Math.abs(out.range.from - before.range.from) : NaN;
+  const oTo = out.range && before.range ? Math.abs(out.range.to - before.range.to) : NaN;
+  ck('再点一次**退得掉**：全屏状态清干净、图回到原来的尺寸、视口还是那一屏（进出全屏都不许换档）',
+     !out.full && !out.fake && !out.onCls && out.pressed === 'false'
+       && Math.abs(out.chart.h - before.chart.h) <= 1 && Math.abs(out.chart.w - before.chart.w) <= 1
+       && oFrom <= 1.5 && oTo <= 1.5,
+     `full=${out.full} fs-fake=${out.fake} fs-on=${out.onCls} aria-pressed=${out.pressed}`
+     + `　图 ${after.chart.w}×${after.chart.h} → ${out.chart.w}×${out.chart.h}（原来是 ${before.chart.w}×${before.chart.h}）`
+     + `　视口 Δ＝${oFrom.toFixed(2)} / ${oTo.toFixed(2)} 根`);
+  await dFS.c.close();
+
+  // ⑦ 退路那一档（卡里 ④）：注入「浏览器不给原生全屏」（iPhone Safari 对非 video 元素就是这样），
+  //    手机档 390×844 ⇒ 必须自铺满窗口、chip 照点、**Esc 退得掉**（原生那条路 Esc 归浏览器，这儿得自己听）
+  const cM = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
+  const pM = await cM.newPage();
+  await pM.addInitScript(() => { Object.defineProperty(document, 'fullscreenEnabled', { get: () => false }); });
+  await pM.goto(PAGE + QS, { waitUntil: 'domcontentloaded' });
+  await waitData(pM);
+  await pM.waitForTimeout(1500);
+  const mB = await fsState(pM);
+  await pM.locator('#fs').click();
+  await pM.waitForTimeout(900);
+  const mA = await fsState(pM);
+  const mChip = await pM.evaluate(() => {
+    const c = document.querySelector('.chip'); const b4 = c.getAttribute('aria-pressed'); c.click();
+    return { before: b4, after: c.getAttribute('aria-pressed'), n: document.querySelectorAll('.chip').length };
+  });
+  await pM.keyboard.press('Escape');
+  await pM.waitForTimeout(700);
+  const mE = await fsState(pM);
+  await cM.close();
+  const covers = mA.fake && Math.abs(mA.main.x) <= 1 && Math.abs(mA.main.y) <= 1
+    && Math.abs(mA.main.w - mA.vw) <= 1 && Math.abs(mA.main.h - mA.vh) <= 1;
+  ck('退路那一档（原生全屏被禁的手机档）：自己**铺满窗口**、图层开关照点、**Esc 退得掉**',
+     covers && mChip.before !== mChip.after && !mE.fake && !mE.full,
+     `原生被禁 ⇒ fake=${mA.fake}　main ${mB.main.w}×${mB.main.h} → ${mA.main.w}×${mA.main.h} @(${mA.main.x},${mA.main.y})　视口 ${mA.vw}×${mA.vh}`
+     + `　铺满=${covers}　chip ${mChip.before} → ${mChip.after}（共 ${mChip.n} 颗）`
+     + `　Esc 之后 fake=${mE.fake}／full=${mE.full}`
+     + `　★ 按钮在这档里 ${mA.btn.w}×${mA.btn.h}（触控目标要 ≥ 24）`);
 
   await b.close();
   console.log(`\n${n - bad}/${n} 过${bad ? `，${bad} 条红` : ''}　截图：${OUT}`);

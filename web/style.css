@@ -91,6 +91,41 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
 .more.on { opacity: 1; visibility: visible; }
 .more.end { color: var(--mu); }   /* 「已到最早」这类是收尾的话，比加载中弱一档 */
 
+/* ---- 全屏那颗按钮（卡 card-5014b0cb-e4d）----
+   摆在图的右上角，**让开右轴那一条**。★ right 里的 `--ps-right` 是 app.js 每次布局**量出来的**
+   （`chart.panes()[0].priceScale('right').width()` 写进这个变量）：右轴会随**价位位数**变宽
+   （1699.00 和 50512.7 的标签不是一样宽），写死一个数迟早正好压在轴上或者压住最新价标签
+   —— 卡里 ① 那条「别挡」是硬约束，不是"看着差不多"。变量没到位时的 56px 只是兜底。
+   ★ z-index 4：画布是 1/2、`.overlays` 是 3，而**那条 notice 横贯图的上沿、会从按钮底下过**
+   （`.overlays` 是 left:10 right:10）⇒ 这个数不写就是被画布/notice 盖住 —— 跟 `.more` 那一格同一条账。
+   ★ 不进 `.overlays`：那个盒子整块 `pointer-events:none`，按钮得能点。 */
+.fs {
+  position: absolute; top: 8px; right: calc(var(--ps-right, 56px) + 8px);
+  z-index: 4; width: 26px; height: 26px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--mu); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;      /* 手机上点它不要闪一块灰 */
+}
+.fs:hover { color: var(--tx); }
+.fs:focus-visible { outline: 2px solid var(--am); outline-offset: 1px; }
+.fs svg { display: block; }
+/* 两副箭头：换的是**形状**（朝外／朝里），不是把一颗按钮换成另一颗 */
+.fs .fs-in { display: none; }
+body.fs-on .fs .fs-out { display: none; }
+body.fs-on .fs .fs-in { display: block; }
+
+/* 进全屏时 `main` 是那个全屏元素：它自己没有底色（平时露的是 body 的 --bg），得补上。
+   不补的话浏览器给的那块底（默认是黑的）会从图例条、图层栏的缝里透出来。 */
+main:fullscreen { background: var(--bg); }
+
+/* 退路那一档：浏览器**不给**原生全屏的时候（卡里 ④）—— iPhone Safari 对非 video 元素就是不给
+   ⇒ 自己把它铺满窗口。★ 高用 `100dvh` 不是 `100vh`：手机上地址栏一收一放，`100vh` 会让整块图跳一下。
+   ★ z-index 50：顶栏/图例/页脚跟它是**同级的 body 子项**，不抬这一层就会露在下面。
+   ★ 列数**不在这儿写**：手机那一档是单列，写死两列就等于把手机的规矩踩掉（宽度不变，媒体查询照旧生效）。 */
+body.fs-fake { overflow: hidden; }
+body.fs-fake main { position: fixed; inset: 0; z-index: 50; height: 100dvh; background: var(--bg); }
+
 /* ---- 图上那两块浮层共用的一竖排（换档那句话 ＋ 光标读数）----
    为什么要一个盒子：两块都在左上角，**同时在的时候不许互相压住**。排进同一个 flex 竖列，
    这件事就是结构保证的 —— 不用 JS 去量对方多高（量出来的数会在换行/字号变化时过期）。
@@ -111,7 +146,11 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
      它是「说明」，不是「状态」，别一晃而过。 */
 .notice {
   align-self: stretch;                       /* 横贯图那一栏（定位归外面的 .overlays） */
-  padding: 6px 10px; border-radius: 10px; text-align: center;
+  /* ★ 左右各让开全屏按钮那一格（卡 card-5014b0cb-e4d）：这句话是 stretch 的，横贯整栏 ——
+     右上角那颗按钮就压在它的**右端**上。让的是**字**，不是盒子：盒子（底色）照旧横贯，
+     两边的内边距**一样宽** ⇒ 字仍然居中在图的正中，只是不到按钮底下那一条去。
+     （只让右边的话，字的中心会往左偏 ps+34 的一半 —— 平时看不出，全屏里一眼就看出"没居中"。） */
+  padding: 6px calc(var(--ps-right, 56px) + 44px); border-radius: 10px; text-align: center;
   font-size: 11px; line-height: 1.45; color: var(--tx);
   background: var(--panel); border: 1px solid var(--line);
   box-shadow: 0 0 0 3px var(--panel-hi);
@@ -311,6 +350,9 @@ main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 
   /* 收起时开关跟 `.panel` 同一条账（两处一起加、一起不加 —— 差一截就是「开关飘起来压住图」） */
   body.m-fold .fold { bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
   .chip { flex: 0 0 auto; }
+  /* 全屏那颗按钮在手机上大一点（26px 的触控目标太小；这颗在手机上比桌面上更值钱）——
+     仍是右上角、仍让开右轴那一条（--ps-right 那条账不分宽窄）。 */
+  .fs { width: 30px; height: 30px; top: 6px; }
   /* ★ 手机上这一组**排到最后**（`order` 只在窄屏挂）。竖着排的时候它在最上面合情合理（决定算什么），
      可手机是一根横滑条：插在最前面会把**天天用的** 笔/线段/线段中枢 挤到屏幕外，得先滑一下才点得到。
      排到最后，前面那 13 颗的位置一个没动；右边还有东西本来就有渐隐提示，图脚也一直写着当前用的是哪种。 */
