@@ -187,7 +187,7 @@ def find_bounds(r, regroup=True, alternate=True, check_empty=True, no_exceed=Tru
                     want = prev["kind"]
                     break
             ks.append(j + 1)
-            bounds.append(dict(line_seg=j, bar=done[j]["i1"], kind=typ, price=done[j]["p1"], pullback_line_seg=t,
+            bounds.append(dict(rule="D2-2", line_seg=j, bar=done[j]["i1"], kind=typ, price=done[j]["p1"], pullback_line_seg=t,
                                pullback_end_bar=done[t]["i1"], ZD=z["ZD"], ZG=z["ZG"]))
             want = None if not alternate else ("L" if typ == "H" else "H")
             break
@@ -418,7 +418,7 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
                 ks2.append(j + 1)
                 b2.append(dict(line_seg=j, bar=done[j]["i1"], kind=c["kind"], price=done[j]["p1"],
                                pullback_line_seg=c["confirm"], pullback_end_bar=done[min(c["confirm"], len(done) - 1)]["i1"],
-                               ZD=c["U"].get("ZD", c["U"]["DD"]), ZG=c["U"].get("ZG", c["U"]["GG"]), via="D2-8"))
+                               ZD=c["U"].get("ZD", c["U"]["DD"]), ZG=c["U"].get("ZG", c["U"]["GG"]), rule="D2-8"))
             ks2.sort()
             b2.sort(key=lambda x: x["bar"])
             s2, u2, c2 = _layer(done, ks2, b2, reading, n)

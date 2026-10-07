@@ -127,7 +127,7 @@ def invariants(fn):
             # D2-3 只约束趋势段（D2-8，10-07）：同类型相邻只许是 D2-8 补的那一刀，前一段升级·盘整、后一段同方向本级别趋势
             pre = next((x for x in seg_ if x["i1"] == b["bar"]), None)
             post = next((x for x in seg_ if x["i0"] == b["bar"]), None)
-            ok = b.get("via") == "D2-8" and pre and post and pre["type"] == "盘整" and pre["upgraded"] \
+            ok = b.get("rule") == "D2-8" and pre and post and pre["type"] == "盘整" and pre["upgraded"] \
                 and post["type"] == ("上涨" if b["kind"] == "L" else "下跌") and not post["upgraded"]
             if not ok:
                 bad.append("不交替 %d/%d" % (a["bar"], b["bar"]))
@@ -149,6 +149,9 @@ def invariants(fn):
         g = z.get("seg")
         if g is None or not (0 <= g < len(seg)) or not (seg[g]["i0"] <= z["X0"] and z["X1"] <= seg[g]["i1"]):
             bad.append("框 %d–%d 的 seg=%r 不对" % (z["X0"], z["X1"], g))
+    for b in bs:                                  # 每一刀都要说清按哪条规则落的（前端只读 rule，card-22888623-1a7）
+        if b.get("rule") not in ("D2-2", "D2-8"):
+            bad.append("刀 %d 没有 rule 或 rule 不认识：%r" % (b["bar"], b.get("rule")))
     for b in bs:                                  # 对外 seg 只指走势段号：bounds 不许带同名键（用 line_seg）
         if "seg" in b:
             bad.append("bounds 带了 seg 键（该叫 line_seg）")
@@ -277,7 +280,7 @@ def extreme_between():
         for k, b in enumerate(bs):
             if k == 0:
                 continue                                 # 图头那一刀两头都开（D2-1），更极端的点若前面没中枢就永远确立不了（D2-2 第 1 步）⇒ 不适用
-            if b.get("via") == "D2-8":
+            if b.get("rule") == "D2-8":
                 pre_c = [x for x in v["seg_centers"] if x["X1"] <= b["bar"]]
                 post_c = [x for x in v["seg_centers"] if x["X0"] >= b["bar"]]
                 if not pre_c or not post_c:
@@ -412,7 +415,7 @@ def self_test():
     #   ② 自检兜底：关掉方向限制（_DIR_RULE）⇒ 补刀后那截照不限方向读成盘整 ⇒ 这一刀必须撤掉，不许硬切。
     def has_cut():
         _, vv = run("zec15.json")
-        return any(b.get("via") == "D2-8" and round(b["price"], 2) == 787.96 for b in vv["bounds"])
+        return any(b.get("rule") == "D2-8" and round(b["price"], 2) == 787.96 for b in vv["bounds"])
     on = has_cut()
     T._D28 = False
     off = has_cut()
