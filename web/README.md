@@ -77,13 +77,13 @@ python3 tools/web_theme_sync.py              # ① 色/线宽跟 style.py ＋ ch
 python3 tools/web_theme_sync.py --selftest   #    探针：改错一格必须变红（证明这把尺真会红）
 python3 tools/web_footer_check.py            # ② 图脚「买卖点」那段在 390px 下放不放得下一行 ＋「数据源」「背驰看法」「中枢切法」三格印得出真实的值
 python3 tools/web_footer_check.py --selftest #    探针：十七格都得变红
-python3 web/check_parity.py                  # ③ 结构与 Python 逐根对账（9 份数据 / 2707 个结构；要 PIL）
+python3 web/check_parity.py                  # ③ 结构与 Python 逐根对账（9 份数据 / 2733 个结构；要 PIL）
 python3 tools/web_fmt_check.py               # ④ 价签数字 ≡ Python 的 `"%g" % round(v, 2)`（逐字相同）
 python3 tools/web_fmt_check.py --selftest    #    探针：六格都得变红（含「取整交给 toFixed」那版）
 python3 tools/web_fitbox_check.py            # ⑤ 文字落框：不出视口 / 有空格子就不许压 / 横不动 / 高不变
 python3 tools/web_fitbox_check.py --selftest #    探针：八格都得变红（含 tag() 里「夹右边界」的顺序）
 python3 tools/web_more_check.py              # ⑥ 往左加载更早：换档后左沿那根的时间不许动 ＋ 触发线/停法/两句话 ＋ 回显
-python3 tools/web_more_check.py --selftest   #    探针：十八格都得变红，且**红在对的那条判据上**
+python3 tools/web_more_check.py --selftest   #    探针：三十四格都得变红，且**红在对的那条判据上**
 ```
 
 浏览器工装（**不是第七把尺**：要真浏览器，慢且脆，谁改接线谁跑）：
