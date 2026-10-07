@@ -342,7 +342,7 @@ def _macd_body(slot, symbol, tf):
 CUT_MODES = ("extend", "trend")          # 线段中枢的切法：extend＝延伸/扩展（可切换的一档）／trend＝走势分界 v3（docs/spec/走势分段.md）
 DEFAULT_CUT = "trend"                    # v3 上线后的默认（Nova 10-05 16:1x）；不带 cut 就是它
 CUT_ALIAS = {"turn": "trend"}            # 旧的笔层出刀删了，老链接照收（回显新名字）
-TREND_READING = "B"                      # D3 读法（A＝整段升一级／B＝升级中枢留在本级别一起数）；小栋 10-05 定 B（spec D3）
+TREND_READING = "A"                      # D3 读法（A＝整段升一级／B＝升级中枢留在本级别一起数）；小栋 10-05 定 B，10-07 07:04Z 改回 A（card-0374e640-127）
 CUT_KEY = "__cut__"                      # mbodies 里切法结果那一份的键（一格只算一次，各看法共用：v3 不读背驰）
 
 

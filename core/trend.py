@@ -209,16 +209,63 @@ def pending(done, ks, want):
     return out
 
 
-def _units(zz):
-    """D3-2：同一段走势里连续扩展的中枢合成一个单元。"""
-    units = []
+_D3_REGROUP = True                               # 只给 trend_check --self-test 的探针关：合成框退回拼 DD／GG（旧 D3-2）
+_D6_BASE_ONLY = True                             # 只给 trend_check --self-test 的探针关：升级·上涨／下跌的段也套 D6 方向限制
+_D3_LIVE_TAIL = True                             # 只给 trend_check --self-test 的探针关：最后一个中枢还在走也照样合成（D3-4）
+
+
+def _regroup(done, a, b):
+    """D3-2（二A，小栋 10-07；推广口径 (iii) 编者口径，Nova 10-07 07:12Z）：已完成线段 done[a..b] 按高一级重新找中枢。
+    头 9 段按 3+3+3 分三组（每组＝3 条线段，区间取那 3 条的最低～最高），ZD＝三组低点的最大值、ZG＝三组高点的最小值（中枢公式 L20:47）；
+    之后每 3 段一组、跟 [ZD, ZG] 有重叠就算延伸（只扩 DD／GG），碰到第一组没重叠、或者剩下不足 3 段就停。
+    → dict(ZD, ZG, DD, GG, a, e)（e＝用到的最后一条线段），或 None：不足 9 段（L32:118-120）／头 9 段三组无重叠 ⇒ 构不成。"""
+    if b - a + 1 < 9:
+        return None
+    grp = lambda k: (min(done[q]["lo"] for q in range(k, k + 3)), max(done[q]["hi"] for q in range(k, k + 3)))
+    g = [grp(a + 3 * m) for m in range(3)]
+    zd, zg = max(x[0] for x in g), min(x[1] for x in g)
+    if zd > zg:
+        return None
+    e = a + 8
+    while e + 3 <= b:
+        lo, hi = grp(e + 1)
+        if lo > zg or hi < zd:
+            break
+        g.append((lo, hi))
+        e += 3
+    return dict(ZD=zd, ZG=zg, DD=min(x[0] for x in g), GG=max(x[1] for x in g), a=a, e=e)
+
+
+def _units(zz, done=None):
+    """D3-2：同一段走势里连续扩展的中枢（一条扩展链）合成一个高一级中枢 → 计数用的单元列表（按时间）。
+    · 合成成功 ⇒ 一个单元：区间按 _regroup 重算（不拼 DD／GG）；n＝落在它用到的线段里的本级别中枢个数（≥2）。
+      延伸停下以后链上剩下的中枢不并进框，照本级别各算一个单元（Nova 10-07 ③；读法 A 下段型只数合成单元，不受它们影响）。
+    · 构不成（不足 9 段／头 9 段无重叠）、或链上最后一个中枢还在走（D3-4，L36:44-45）⇒ 链上每个中枢各算一个单元（n=1）。
+    done 不给 ⇒ 旧写法（拼 DD／GG），只留给没有线段的调用方；探针 _D3_REGROUP=False 也走它。"""
+    chains = []
     for i, z in enumerate(zz):
         if i and z["kind"] == "扩展":
-            u = units[-1]
-            units[-1] = dict(DD=min(u["DD"], z["DD"]), GG=max(u["GG"], z["GG"]), n=u["n"] + 1,
-                             X0=u["X0"], X1=max(u["X1"], z["X1"]))
+            chains[-1].append(z)
         else:
-            units.append(dict(DD=z["DD"], GG=z["GG"], n=1, X0=z["X0"], X1=z["X1"]))
+            chains.append([z])
+    one = lambda z: dict(DD=z["DD"], GG=z["GG"], n=1, X0=z["X0"], X1=z["X1"])
+    units = []
+    for ch in chains:
+        if len(ch) == 1:
+            units.append(one(ch[0]))
+            continue
+        if done is None or not _D3_REGROUP:
+            units.append(dict(DD=min(z["DD"] for z in ch), GG=max(z["GG"] for z in ch), n=len(ch),
+                              X0=ch[0]["X0"], X1=max(z["X1"] for z in ch)))
+            continue
+        hz = None if (_D3_LIVE_TAIL and ch[-1]["live"]) else _regroup(done, ch[0]["PI0"], ch[-1]["PI1"])
+        if hz is None:
+            units += [one(z) for z in ch]
+            continue
+        inside = [z for z in ch if z["PI0"] <= hz["e"]]
+        units.append(dict(DD=hz["DD"], GG=hz["GG"], ZD=hz["ZD"], ZG=hz["ZG"], n=max(2, len(inside)),
+                          X0=done[hz["a"]]["i0"], X1=done[hz["e"]]["i1"]))
+        units += [one(z) for z in ch if z["PI0"] > hz["e"]]
     return units
 
 
@@ -232,9 +279,9 @@ def _trend_of(units):
     return None
 
 
-def classify(zz, reading="A"):
-    """D3-3：一段走势的类型 → (类型, 升级?)。reading ∈ A（整段升一级，只数合成中枢）/ B（合成中枢留在本级别一起数）。"""
-    units = _units(zz)
+def classify(zz, reading="A", done=None):
+    """D3-3：一段走势的类型 → (类型, 升级?)。reading ∈ A（整段升一级，只数合成中枢；小栋 10-07 07:04Z 定 A）/ B（合成中枢留在本级别一起数）。"""
+    units = _units(zz, done)
     if not units:
         return "无中枢", False
     up = [u for u in units if u["n"] > 1]
@@ -265,36 +312,47 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
                                    n_centers_level=0)])
     zs = _centers_with_cuts(done, ks)
     edges = [0] + ks + [len(done)]
-    # ★ L24:84-85（card-40f4ce13，小栋 10-07 选 A）：「如果是向上的走势，里面的中枢一定是下-上-下的，向下的相反」。
-    #   走势方向靠中枢判，中枢又要看走势方向 ⇒ 两遍、不回头（Atlas 10-07 spec 写法）：
-    #   ① 分界（find_bounds）和每段的段型都用**不加限制**的中枢先算一遍，冻住；
-    #   ② 只在第一遍判成上涨／下跌的段里按方向重找中枢（上涨段的框从向下那条起，下跌段反过来）。
-    #      豁免（L45:122-124）：前一走势段（第一遍）是反向的 ⇒ 段内第一个框不限。图头那段不限（前面是什么不知道）；
-    #   ③ 段型用第二遍的中枢重分一次 —— 不再回头改分界、不再重新决定限不限。
-    #   ★ 所以 D4「同一套中枢既画框又判分界」在上涨／下跌段里不再成立：分界和 bounds[].ZD／ZG 用的是第一遍。
-    kinds0 = [classify([z for z in zs if a <= z["PI0"] < b], reading)[0] for a, b in zip(edges, edges[1:])]
-    if _DIR_RULE:
-        grouped = []
-        for g, (a, b) in enumerate(zip(edges, edges[1:])):
-            last = g == len(edges) - 2
-            if g and kinds0[g] in ("上涨", "下跌"):
-                opp = "下跌" if kinds0[g] == "上涨" else "上涨"
-                grouped += _group_centers(done, a, b, g, last, start_dir="down" if kinds0[g] == "上涨" else "up",
-                                          free_first=kinds0[g - 1] == opp)
-            else:
-                grouped += _group_centers(done, a, b, g, last)
-        zs = classify_relations(grouped)
-        for z in zs:
-            z.pop("seg", None)
+    bounds_ = res["bounds"]
+    # ★ L24:84-85（card-40f4ce13）：上涨走势里的中枢只认下上下、下跌里只认上下上（D6）。
+    #   ★ D4「同一套中枢既画框又判分界」在上涨／下跌段里不成立：分界和 bounds[].ZD／ZG 用不限方向的，画框用限方向的。
+    # ★ D6-4（2026-10-07 09:16Z Nova 改，card-66a0fd73-b30；spec bd5872b）：段型**先按方向判**。
+    #   图头以外每段：照这段的方向（从低点起 ⇒ 首段须向下；从高点起 ⇒ 首段须向上）限方向找中枢，豁免照 D6-2
+    #   （前一段的最终段型是本级别反向趋势 ⇒ 段内第一个框不限）。这组中枢按 D3 判得出**同方向的本级别趋势**
+    #   （上涨／下跌、不是升级段）⇒ 段型就是它、画框也用它；判不出 ⇒ 改用不限方向的中枢按 D3 判（盘整／升级·…）。
+    #   为什么：先不限方向定段型，从极值出发的那一笔（连接段 a）会被吞成第一个中枢的首段，趋势被遮成盘整，D6 就不再限了。
+    #   不打转：分界只用不限方向那一套（find_bounds），每段最多试两次、从左到右、不回头。
+    bks = {b["line_seg"] + 1: b["kind"] for b in bounds_}
+    grouped, final_kind = [], []
+    for g, (a, b) in enumerate(zip(edges, edges[1:])):
+        last = g == len(edges) - 2
+        free = [z for z in zs if a <= z["PI0"] < b]
+        pick = None
+        if _DIR_RULE and g and bks.get(a) in ("L", "H"):
+            want = "上涨" if bks[a] == "L" else "下跌"
+            opp = "下跌" if want == "上涨" else "上涨"
+            prev = final_kind[g - 1]
+            cz = _group_centers(done, a, b, g, last, start_dir="down" if want == "上涨" else "up",
+                                free_first=(prev[0] == opp and not prev[1]))
+            cz = classify_relations(cz)
+            k, up = classify(cz, reading, done)
+            if k == want and not (_D6_BASE_ONLY and up):
+                pick = cz
+        if pick is None:
+            pick = [dict(z, seg=g) for z in free]
+        grouped += pick
+        final_kind.append(classify(classify_relations([dict(z) for z in pick]), reading, done))
+    zs = classify_relations(grouped)
+    for z in zs:
+        z.pop("seg", None)
     segments, units_out, centers_out = [], [], []
     for g, (a, b) in enumerate(zip(edges, edges[1:])):
         zz = [z for z in zs if a <= z["PI0"] < b]
         centers_out += [dict(z, seg=g) for z in zz]
-        kind, upgraded = classify(zz, reading)
+        kind, upgraded = classify(zz, reading, done)
         last = g == len(edges) - 2
         segments.append(dict(i0=0 if g == 0 else done[a - 1]["i1"], i1=n - 1 if last else done[b - 1]["i1"],
                              type=kind, upgraded=upgraded, head=g == 0, live=last, n_centers_level=len(zz)))
-        units_out += [dict(u, seg=g) for u in _units(zz) if u["n"] > 1]
+        units_out += [dict(u, seg=g) for u in _units(zz, done) if u["n"] > 1]
     assert len(centers_out) == len(zs)                # 每个中枢恰好属于一段（PI0 落在组内）
     return dict(seg_centers=centers_out, bounds=res["bounds"], retracted=res["retracted"],
                 pending=pending(done, ks, res["want"]), segments=segments, units=units_out, reading=reading)
