@@ -535,7 +535,7 @@ PROBES = [
         "    def m(self):\n"
         "        return attr\n"
     )}),
-    ("★ 真形状③：解析不了的文件要进「没扫成」、不进那个 0", 1, "zz_bad", {
+    ("★ 真形状③：解析不了的文件要进「没扫成」、不进那个 0", 0, "zz_bad", {
         "zz_bad.py": "def build(:\n    pass\n",
     }),
 ]
@@ -556,7 +556,7 @@ def run(verbose=False):
         # 解析不了的探针：0 命中 **且** 正好 1 个没扫成 —— 两样都要对
         if must_name == "zz_bad":
             hits, skipped = scan_paths(d, [os.path.join(d, "zz_bad.py")])
-            ok = (len(hits) == 0 and len(skipped) == 1)
+            ok = (len(hits) == want and len(skipped) == 1)   # want=0：这一支也读表里的期望数（原来写 1、没人读，card-141916ed）
             got = "命中 %d 处 · 没扫成 %d 个" % (len(hits), len(skipped))
         else:
             hits, skipped = scan_paths(d, [os.path.join(d, f) for f in sorted(files)])
