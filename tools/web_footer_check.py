@@ -53,7 +53,7 @@
      所以这格「切不到」**不是错**，跟「数据源」那格必须有个值不一样，两把切法分开写。
 
 跑法：
-  python3 tools/web_footer_check.py            # 主跑：拿实时规模的样本量 ＋ 数据源/背驰看法那两格
+  python3 tools/web_footer_check.py            # 主跑：拿实时规模的样本量 ＋ 数据源/背驰看法/中枢切法那三格
   python3 tools/web_footer_check.py --selftest # 探针：十七格都得变红（尺子自己先证明会红）
 """
 import json
