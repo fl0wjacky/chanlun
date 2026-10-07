@@ -472,6 +472,63 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
     });
   }, [bs, cols]);
 
+  /** 那一小块里画的到底是**哪一档** —— 判据是「**多数派**的墨是哪一档」，不是「幽灵档计数 ≤ 一个常数」。
+   *
+   *  ★★ 为什么必须换（card-3952b96d-09b，10-07）：实心记号是 `lineWidth 1.5` 的**细线**
+   *     （`layers.js` `drawSignalGlyph`，alpha 255；类中枢那档是 `stroke` —— **空心三角**，不是实心块）。
+   *     细线的**抗锯齿边**是一条**一路上爬到 255 的连续谱**，覆盖率落在 0.65~0.76 的那些边像素，
+   *     alpha 正好落进幽灵档窗口 [166,194]。于是"实心"那一趟也自带几点幽灵墨 ——
+   *     而且**点数跟着亚像素落点变**：同一个记号、同一份数据，只把视口挪不到一根，
+   *     实测在 0~6 之间跳（复现：`GHOST_DUMP=1` 跑一趟，看下面印的 alpha 直方图）。数据窗口一滑，
+   *     总会有一趟跳到 6 以上 ⇒ 这两格**随窗口红**，跟改动无关。
+   *     ★ 换句话说：**没有任何一个 alpha 窗口能把两档分开** —— 255 的描边抗锯齿会经过每一个 alpha。
+   *
+   *  ★ 换到**结构**上就分得开：一个记号只画**一种**形状，它落的墨就是**多数派**那一档；
+   *     抗锯齿的散点永远成不了多数。实测两边都不是刀刃上：
+   *       实心那一趟 full=60／ghost=2（30:1）　｜　出鬼那一趟 full=10／ghost=19。
+   *
+   *  ★ 不采用「那块里有幽灵墨就换一个点」：那是**可以静默跳过**的断言 —— 某个窗口下候选点全都带散点，
+   *     这一格就永远跳过、永远绿，比红还坏（见 `memory/verification-taxonomy.md` 那条）。
+   *     `ghost >= 12` 这个地板留着，是防"那块里本来就没墨"被算成出鬼。 */
+  const tierOf = (r) => {
+    const full = (r && r.full) || 0, ghost = (r && r.ghost) || 0;
+    return { full, ghost, solid: full > 24 && full > ghost, ghostly: ghost >= 12 && ghost > full };
+  };
+
+  /** 诊断（`GHOST_DUMP=1`，card-3952b96d-09b）：把那一小块的墨**按画布拆开**、印 alpha 直方图。
+   *  ★ 判据是「alpha ＋ 色相」两个数合起来定的，一旦对不上，光看 `{full,ghost,ink}` 三个数
+   *    是**看不出那点墨是谁画的** —— 是实心记号自己描边的抗锯齿边，还是压到了别的半透明元素。
+   *    直方图一眼分得开：抗锯齿是个**连续谱**（一路爬到 255 都有），别人画的是一根**常数柱**。 */
+  const dumpBox = async (p, bx, cols, label) => {
+    const lines = await p.evaluate(([bx, cols, label]) => {
+    if (!bx) return;
+    const near = (a, b, t) => Math.abs(a - b) <= t;
+    const cvs = [...document.querySelectorAll('#chart canvas')].map((c, i) => ({ c, i,
+      id: c.id || `#${i}`, r: c.getBoundingClientRect() }));
+    const pure = bx.buy ? cols.buy : cols.sell;
+    const lines = [`  ⟦${label}⟧ 框 ${bx.x},${bx.y},${bx.w},${bx.h}` +
+                   `　幽灵档判据 alpha∈[${cols.ghostAlpha - 14},${cols.ghostAlpha + 14}]`];
+    for (const { c, i, id, r } of cvs) {
+      if (bx.x < r.left || bx.y < r.top || bx.x + bx.w > r.right || bx.y + bx.h > r.bottom) continue;
+      const px = c.getContext('2d').getImageData(Math.round(bx.x - r.left), Math.round(bx.y - r.top), bx.w, bx.h).data;
+      const hist = {}; let full = 0, ghost = 0, ink = 0;
+      for (let k = 0; k < px.length; k += 4) {
+        const a = px[k + 3];
+        if (a < 24) continue;
+        ink++;
+        if (!near(px[k], pure[0], 10) || !near(px[k + 1], pure[1], 10) || !near(px[k + 2], pure[2], 10)) continue;
+        hist[a] = (hist[a] || 0) + 1;
+        if (a >= 250) full++; else if (Math.abs(a - cols.ghostAlpha) <= 14) ghost++;
+      }
+      const hs = Object.entries(hist).sort((x, y) => +x[0] - +y[0]).map(([a, n]) => `${a}×${n}`).join(' ');
+      lines.push(`    画布 #${i} ${id} ${c.width}×${c.height}  ink=${ink} full=${full} ghost=${ghost}`);
+      if (hs) lines.push(`      alpha： ${hs}`);
+    }
+    return lines;
+  }, [bx, cols, label]);
+    console.log(lines.join('\n'));   // ← 必须在 **Node 这一侧**印：写在浏览器回调里只会进页面控制台
+  };
+
   /** ⑯ 第 i 根 K 线在**屏上**占的那一小块（走图自己的 logicalToCoordinate/priceToCoordinate —— 跟记号
    *  那一套同一个出处）。★ 给的是**K 线那一根**（高→低那一竖条的宽度），不是记号。 */
   const barBox = async (p, i) => {
@@ -620,9 +677,12 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   //     记在卡上当发现 —— 换一次看法，整幅图的横向比例会动 6px。
   await measure(p, 'macd', target.bar);
   const A0 = await sample(p, [target, control], 'before');
-  ck('①b 空转那一趟（还是全给）那两块里量到的是**实心**的墨（没有幽灵那一档）',
-     (A0.read[0].ghost || 0) <= 6 && (A0.read[0].full || 0) > 24,
-     `目标点那块 ${JSON.stringify(A0.read[0])} ｜ 视图 ${JSON.stringify(A0.view)}`);
+  if (process.env.GHOST_DUMP) await dumpBox(p, A0.boxes[0], cols, '①b before：目标点那一小块（点还在）');
+  const tierBefore = tierOf(A0.read[0]);
+  ck('①b 空转那一趟（还是全给）那块里量到的是**实心**的墨（多数派是实心档）',
+     tierBefore.solid,
+     `目标点那块 ${JSON.stringify(A0.read[0])}（多数派：实心 ${tierBefore.full} vs 幽灵档 ${tierBefore.ghost}）`
+     + ` ｜ 视图 ${JSON.stringify(A0.view)}`);
 
   // 再转一圈：这一趟（第 3 趟）少掉目标点 ⇒ 该出鬼了
   await measure(p, 'lines', target.bar);
@@ -634,6 +694,7 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   await sleep(900);
   const s1 = await snap(p);
   const A1 = await sample(p, [target, control], 'after');
+  if (process.env.GHOST_DUMP) await dumpBox(p, A1.boxes[0], cols, '② after：同一小块（点已消失）');
   const r0 = A0.read, r1 = A1.read;
   const what = `第 1 趟 ${target.kind}@${target.bar} 在、第 2 趟不在；页面报 ${JSON.stringify(s1.ghosts.map((g) => g.kind + '@' + g.bar))}`;
   ck('少掉的那个点被记下来了（而且**只有它**一个）',
@@ -642,9 +703,11 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
      s1.gc.on && /^消失的点 1（本次打开）$/.test(s1.gc.txt), `那一格：「${s1.gc.txt}」（on=${s1.gc.on}）`);
   // ②③ 位置 ＋ 形状（像素）
   const dF = (r0[0].full || 0) - (r1[0].full || 0), dG = (r1[0].ghost || 0) - (r0[0].ghost || 0);
-  ck('② 记号画在**算出来的那个位置**上：那一小块里凭空长出了幽灵档的墨（别处没有）',
-     (r1[0].ghost || 0) >= 12 && (r0[0].ghost || 0) <= 6,
+  const tierAfter = tierOf(r1[0]);
+  ck('② 记号画在**算出来的那个位置**上：那一小块里凭空长出了幽灵档的墨（多数派翻到幽灵档）',
+     tierAfter.ghostly && tierAfter.ghost - tierBefore.ghost >= 6,     // ←「凭空长出」要有**增量**，不只是"那儿有幽灵墨"
      `记号那一块：之前 ${JSON.stringify(r0[0])}，之后 ${JSON.stringify(r1[0])}`
+     + `（多数派：实心 ${tierAfter.full} vs 幽灵档 ${tierAfter.ghost}，比之前多 ${tierAfter.ghost - tierBefore.ghost}）`
      + `（框 ${A1.boxes[0] && [A1.boxes[0].x, A1.boxes[0].y, A1.boxes[0].w, A1.boxes[0].h]}；视图 ${JSON.stringify(A1.view)}）`);
   ck('③ 形状真的换成了"作废"那支：实心的墨**掉了一颗三角那么多**',
      dF >= 24,
