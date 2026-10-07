@@ -141,6 +141,19 @@ def invariants(fn):
             bad.append("bounds 带了 seg 键（该叫 line_seg）")
         elif not any(s["i0"] == b["bar"] for s in seg[1:]):
             bad.append("分界 %d 不是某一段走势的起点" % b["bar"])
+    # ★ L24:84-85（card-40f4ce13）：上涨走势里的框只认下上下（首段向下），下跌里只认上下上。独立按定义查：
+    #   看框首段 done[PI0] 的 dir，不看引擎里那两遍怎么走。豁免：图头那段不查；前一段是反向走势 ⇒ 段内第一个框不查（L45:122-124）。
+    for g, sg in enumerate(seg):
+        if g == 0 or sg["type"] not in ("上涨", "下跌"):
+            continue
+        want = "down" if sg["type"] == "上涨" else "up"
+        zz = sorted((z for z in v["seg_centers"] if z.get("seg") == g), key=lambda z: z["X0"])
+        if zz and seg[g - 1]["type"] == ("下跌" if sg["type"] == "上涨" else "上涨"):
+            zz = zz[1:]
+        for z in zz:
+            if done[z["PI0"]]["dir"] != want:
+                bad.append("%s段 %d 里的框 %d–%d 首段向%s（L24:85 要向%s）" % (
+                    sg["type"], g, z["X0"], z["X1"], "上" if want == "down" else "下", "下" if want == "down" else "上"))
     if sum(s["n_centers_level"] for s in seg) != len(v["seg_centers"]):
         bad.append("各段 n_centers_level 之和 ≠ seg_centers 个数")
     if seg[0]["i0"] != 0 or seg[-1]["i1"] != len(r["bars"]) - 1 or any(
@@ -326,13 +339,28 @@ def self_test():
     # D4-1 的反向验证（原 cut_check --self-test 挪来）：重算中枢时不按刀分组 ⇒ ② 必须报出跨分界的框
     real = T._centers_with_cuts
     T._centers_with_cuts = lambda done, ks: real(done, [])
+    T._DIR_RULE = False                          # 方向规则那一遍是按组重找的，不关掉它探针就碰不到画出来的框
+    _R.clear()
     try:
         cross = [x for x in invariants("zec15.json") if "跨过分界" in x]
     finally:
         T._centers_with_cuts = real
+        T._DIR_RULE = True
+        _R.clear()
     ok = bool(cross)
     print("%s D4 拿掉「按刀分组」⇒ ② 报出跨分界的框 %d 个（例 %s）" % ("✓" if ok else "✗", len(cross), cross[:1]))
     miss += not ok
+    # L24:84-85 的反向验证（card-40f4ce13）：拿掉方向限制 ⇒ 不变量必须报出「上涨段里首段向上的框」
+    T._DIR_RULE = False
+    _R.clear()
+    try:
+        dirv = [x for fn in ("zec15.json", "zec30_cut.json", "zec_1h.json")
+                for x in invariants(fn) if "L24:85" in x]
+    finally:
+        T._DIR_RULE = True
+        _R.clear()
+    print("%s L24:85 拿掉中枢方向限制 ⇒ 报出 %d 个框（例 %s）" % ("✓" if dirv else "✗", len(dirv), dirv[:1]))
+    miss += not dirv
     for name, kw, changed in arms:
         _, v = run("zec15.json", **kw)
         ok = changed(v)

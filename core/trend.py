@@ -20,20 +20,26 @@ D2-5 死点类型（趋势背驰／盘整背驰／小转大）只标注、不决
 from .center import find_centers, classify_relations
 
 
+def _group_centers(done, lo, hi, gi, last_group, start_dir=None, free_first=False):
+    """一组（两刀之间）的中枢：从头 find_centers，PI 加回全局下标；被切点截断的最后一个中枢 live 改 False、
+    终结写『转折点切开』（跟段内类中枢『所在线段结束』同一个道理）。带 seg＝组号，给 classify_relations 在切点处不接续。"""
+    out = []
+    for z in find_centers(done[lo:hi], start_dir=start_dir, free_first=free_first):
+        z["PI0"] += lo
+        z["PI1"] += lo
+        z["seg"] = gi
+        if z["live"] and not last_group:
+            z["live"], z["term"] = False, "转折点切开"
+        out.append(z)
+    return out
+
+
 def _centers_with_cuts(done, ks):
-    """D2-4（原 core/cut.py 规则 4，笔层出刀退役后挪到这里）：按切点下标 ks（段序号，升序）把已完成线段分组，各组从头 find_centers，PI 加回全局下标。
-    组被切点截断的最后一个中枢 live 改 False、终结写『转折点切开』（跟段内类中枢『所在线段结束』同一个道理）。"""
-    out, bounds = [], [0] + list(ks) + [len(done)]
+    """D2-4（原 core/cut.py 规则 4，笔层出刀退役后挪到这里）：按切点下标 ks（段序号，升序）把已完成线段分组，各组从头 find_centers。"""
+    bounds = [0] + list(ks) + [len(done)]
+    out = []
     for gi in range(len(bounds) - 1):
-        lo, hi = bounds[gi], bounds[gi + 1]
-        last_group = gi == len(bounds) - 2
-        for z in find_centers(done[lo:hi]):
-            z["PI0"] += lo
-            z["PI1"] += lo
-            z["seg"] = gi                                # 只用来让 classify_relations 在切点处不接续
-            if z["live"] and not last_group:
-                z["live"], z["term"] = False, "转折点切开"
-            out.append(z)
+        out += _group_centers(done, bounds[gi], bounds[gi + 1], gi, gi == len(bounds) - 2)
     out = classify_relations(out)
     for z in out:
         z.pop("seg", None)                               # 线段中枢的对外形状不多一个键
@@ -43,6 +49,7 @@ def _centers_with_cuts(done, ks):
 _HEAD_FIRST = False                               # 只给 trend_check --self-test 的探针开：先挪图头／末段再挪中间
 _BLOCK_RETRACTED = True                           # 只给 trend_check --self-test 的探针关：D2-7 去掉过的那一对照旧反复确立／撤回
 _MOVE_ENDS = True                                 # 只给 trend_check --self-test 的探针关：图头起点／末段终点不挪
+_DIR_RULE = True                                  # 只给 trend_check --self-test 的探针关：L24:84-85 中枢方向不限（card-40f4ce13）
 
 
 def _standardize(done, bars):
@@ -258,6 +265,27 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
                                    n_centers_level=0)])
     zs = _centers_with_cuts(done, ks)
     edges = [0] + ks + [len(done)]
+    # ★ L24:84-85（card-40f4ce13，小栋 10-07 选 A）：「如果是向上的走势，里面的中枢一定是下-上-下的，向下的相反」。
+    #   走势方向靠中枢判，中枢又要看走势方向 ⇒ 两遍、不回头（Atlas 10-07 spec 写法）：
+    #   ① 分界（find_bounds）和每段的段型都用**不加限制**的中枢先算一遍，冻住；
+    #   ② 只在第一遍判成上涨／下跌的段里按方向重找中枢（上涨段的框从向下那条起，下跌段反过来）。
+    #      豁免（L45:122-124）：前一走势段（第一遍）是反向的 ⇒ 段内第一个框不限。图头那段不限（前面是什么不知道）；
+    #   ③ 段型用第二遍的中枢重分一次 —— 不再回头改分界、不再重新决定限不限。
+    #   ★ 所以 D4「同一套中枢既画框又判分界」在上涨／下跌段里不再成立：分界和 bounds[].ZD／ZG 用的是第一遍。
+    kinds0 = [classify([z for z in zs if a <= z["PI0"] < b], reading)[0] for a, b in zip(edges, edges[1:])]
+    if _DIR_RULE:
+        grouped = []
+        for g, (a, b) in enumerate(zip(edges, edges[1:])):
+            last = g == len(edges) - 2
+            if g and kinds0[g] in ("上涨", "下跌"):
+                opp = "下跌" if kinds0[g] == "上涨" else "上涨"
+                grouped += _group_centers(done, a, b, g, last, start_dir="down" if kinds0[g] == "上涨" else "up",
+                                          free_first=kinds0[g - 1] == opp)
+            else:
+                grouped += _group_centers(done, a, b, g, last)
+        zs = classify_relations(grouped)
+        for z in zs:
+            z.pop("seg", None)
     segments, units_out, centers_out = [], [], []
     for g, (a, b) in enumerate(zip(edges, edges[1:])):
         zz = [z for z in zs if a <= z["PI0"] < b]

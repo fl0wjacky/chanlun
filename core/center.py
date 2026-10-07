@@ -111,7 +111,7 @@ def upgrades(units, PI0, PI1):
     return out
 
 
-def find_centers(pens, start_dir=None):
+def find_centers(pens, start_dir=None, free_first=False):
     """pens: build_pens() 输出的笔列表。
 
     每个中枢返回区间 [ZD, ZG]、波动范围 [DD, GG]、覆盖的笔序号，
@@ -121,6 +121,9 @@ def find_centers(pens, start_dir=None):
     （L64:31 / L64:35-36，下跌段里类中枢是「上下上」，首笔反向）。笔方向严格交替，
     所以只要首笔落到反向、后面每个候选起笔照着这个方向筛即可。给 'up' 表首笔向上
     （下跌段）、'down' 表首笔向下（上涨段）；None = 不约束（线段中枢、独立调用）。
+
+    free_first（线段中枢 L24:84-85 的豁免，card-40f4ce13）：第一个中枢不受 start_dir 约束，找到它以后才开始约束
+    （L45:122-124：走势层反向走势之后的第一段反弹／回调可以算中枢第一段）。
     """
     zs, i = [], 0
     N = len(pens)
@@ -129,7 +132,7 @@ def find_centers(pens, start_dir=None):
         return "up" if pens[k]["p1"] > pens[k]["p0"] else "down"
 
     while i + 2 < N:
-        if start_dir is not None and pdir(i) != start_dir:
+        if start_dir is not None and not (free_first and not zs) and pdir(i) != start_dir:
             i += 1                                 # 候选起笔不是反向笔 → 挪一格（严格交替，一格即反向）
             continue
         a, b, c = pens[i], pens[i + 1], pens[i + 2]
