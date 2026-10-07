@@ -34,7 +34,8 @@ BASE = {
                    (12906, "H", None), (14215, "L", None)],
     "zec30_cut.json": [(134, "L", None), (3476, "H", None), (4219, "L", None), (6150, "H", None), (6805, "L", None)],
 }
-BASE_PRICE = {"btc_4h.json": [("H", 97932.1)], "zec_1h.json": [("L", 205.07)], "aaplusdt_30m.json": [("L", 300.50)],
+# btc_4h：线段 #1（缺口被之前同一特征序列元素盖住不算缺口，card-fff28d01-f13，小栋 10-07 A）以后 97932.1 → 107473.7
+BASE_PRICE = {"btc_4h.json": [("H", 107473.7)], "zec_1h.json": [("L", 205.07)], "aaplusdt_30m.json": [("L", 300.50)],
               # D2-0 先后（Nova 06:44Z）：中间接点先挪到不动、图头最后挪 ⇒ zec_2h 第一刀 191.35；图头先挪会卡住接点 1，变成 205.07
               "zec_2h.json": [("L", 191.35)]}
 def load(path):
@@ -422,6 +423,19 @@ def self_test():
     ok = on == free and off != free
     print("%s D6 只管本级别：第 6 段假装成升级·下跌 ⇒ 框跟不限时%s；拿掉这条 ⇒ %s" % ("✓" if ok else "✗",
           "一样" if on == free else "不一样（该一样）", "被限了（该这样）" if off != free else "没被限（牙没咬到）"))
+    miss += not ok
+    # 线段 #1 的反向验证（card-fff28d01-f13）：拿掉「被盖住的缺口不算」⇒ btc_4h 的分界回到旧的 97932.1
+    import core.segment as SG
+    SG.GAP_COVER = False
+    _R.clear()
+    try:
+        _, g0 = run("btc_4h.json")
+    finally:
+        SG.GAP_COVER = True
+        _R.clear()
+    got = [(b["kind"], round(b["price"], 2)) for b in g0["bounds"]]
+    ok = got == [("H", 97932.1)]
+    print("%s 线段 #1 拿掉缺口覆盖 ⇒ btc_4h 分界回到 %s（要 [('H', 97932.1)]）" % ("✓" if ok else "✗", got))
     miss += not ok
     # D3-2／D3-4 的反向验证（card-0374e640-127）：各拧回旧写法，不变量必须报
     for flag, fn, name in (("_D3_REGROUP", "zec15.json", "合成框退回拼 DD／GG"), ("_D3_LIVE_TAIL", "zec30_cut.json", "最后一个中枢还在走也合成")):
