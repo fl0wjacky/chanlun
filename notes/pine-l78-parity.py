@@ -38,6 +38,7 @@ def reverseConfirmPen(P, endPen, segUp, e3):
         j += 1
     return res
 
+GAP_COVER = True
 def caseAt(P, i, k, up, mEnd, mConf, mDir):
     n = len(P); cse = 0; at = -1
     eh = [P[j]["hi"] for j in range(i + 1, k) if isUp(P[j]) != up]
@@ -47,6 +48,9 @@ def caseAt(P, i, k, up, mEnd, mConf, mDir):
         V = P[k]["p1"]; e2h, e2l = P[k + 1]["hi"], P[k + 1]["lo"]
         if not ((V <= e1h) if up else (V >= e1l)):
             gap = (e1h < e2l) if up else (e1l > e2h)
+            if gap and GAP_COVER:                                  # 线段 #1（fff28d01）：E1 之前有元素整个盖住空档 ⇒ 不算缺口
+                g0, g1 = (e1h, e2l) if up else (e2h, e1l)
+                if any(l_ <= g0 and h_ >= g1 for (h_, l_) in m[:-1]): gap = False
             if not gap:
                 L = P[k + 1]["p1"]; s0 = k + 2
                 okRev = s0 < n and mEnd[s0] >= 0 and mDir[s0] == (1 if up else -1)

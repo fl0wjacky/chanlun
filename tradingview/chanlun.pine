@@ -594,7 +594,17 @@ caseAt(array<Unit> P, int i, int k, bool up, array<int> mEnd, array<int> mConf, 
         e2h = P.get(k + 1).hi
         e2l = P.get(k + 1).lo
         if not (up ? V <= e1h : V >= e1l)
-            gap = up ? e1h < e2l : e1l > e2h
+            bool gap = up ? e1h < e2l : e1l > e2h
+            // 线段 #1（L81:140-145，card-fff28d01-f13，同 Python GAP_COVER）：同一份特征序列里、E1 之前有元素整个盖住
+            //   E1 和 E2 之间那段空档 ⇒ 不算缺口（只会二→一）。E1、E2、分型判定不动。
+            if gap
+                float g0 = up ? e1h : e2h
+                float g1 = up ? e2l : e1l
+                int q = 0
+                while q < mh.size() - 1 and gap
+                    if ml.get(q) <= g0 and mh.get(q) >= g1
+                        gap := false
+                    q += 1
             if not gap                                    // 第一种情况：第一笔 X 在中间地带
                 // L78:32-38（card-753bd03a）：看 X 之后第一个反向线段 —— 它被确认之前先破 X 起点 ⇒ ① 旧段延续；
                 //   先破 X 结束位置 ⇒ 提前定（L71:27）；被确认时都没破 ⇒ ② V 是终点；还没确认 ⇒ 待定。
