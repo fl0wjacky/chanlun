@@ -1378,29 +1378,37 @@ function applyToggles() {
   //   扫进来就会对着 undefined 取 .startsWith，整张图连带图脚一起炸（2026-10-04 真撞过）。
   for (const b of document.querySelectorAll('.chip[data-key]')) {
     const k = b.dataset.key;
-    // ★ 「级别对照」这一颗**亮不亮，看的是这一层画不画** —— `shownOf(opts).lv`（＝ `opts.lv && opts.up`），
-    //   不是 `opts.lv` 那个裸标志（Nova 2026-10-06 19:2xZ 拍，card-6e338490-f11）。
-    //   ★ 这一颗跟别的"从属层"是同一个形状、**默认却相反**，骗人的正是那个差：
-    //     `trendNum` 长在「走势分段」上、**默认关** ⇒ 首屏"裸标志"和"画不画"都是关，看不出两套判据；
-    //     `lv` 长在「高一级」上、**默认开** ⇒ 首屏出现 `pressed=true` **且** `disabled=true` 那颗芯片：
-    //     它说"开着"，可屏上零个框零个标、旁边同一颗又是灰的（"用不了"）——**三种状态里只有它骗人**。
-    //   ⇒ 亮着 ⟺ 画着，**用同一个函数**算（`layers.js` 的 `shownOf`，跟 ⑥ 给框写字、跟
-    //     `renderLevelsHead` 都是同一个谓词），两处再也走不散。这是"一处判据"那条账的又一站。
-    //   ★ 注意它跟下面那个 `disabled` 判的是**两个不同的问题**，别合并：
-    //     亮不亮＝"这一层画没画"（`shownOf`）；能不能点＝"这颗芯片此刻有没有用"（`opts.up`）。
+    // ★★ 「亮不亮」＝"**这一层画不画**"，不是那颗开关的裸标志 —— 这两件事在"载荷里没这一层"时会分家，
+    //    分家的样子就是 `pressed=true` **且** `disabled=true`：它说"开着"，可屏上什么都没画、又点不动。
+    //    ★ 用这个文件自己的话：**三种状态里只有这一种骗人**。
+    //    · `lv`（Nova 2026-10-06 19:2xZ 拍，card-6e338490-f11）：亮 ⟺ `shownOf(opts).lv`（＝ `opts.lv && opts.up`），
+    //      跟 ⑥ 给框写字、跟 `renderLevelsHead` **同一个谓词** —— 「一处判据」那条账的又一站。
+    //    · `trend`（card-961dcef6-d1c，2026-10-07）：`CUT_HIDDEN` 里那个 `extend` 深链**照旧进得去**
+    //      （实测：参数不被归一、后台照发那一档），而那一档载荷**没有 `trend` 键**；`opts.trend` 又默认开
+    //      ⇒ 从前也是"亮着但按灰"。**跟 `lv` 同一个形状、同一条账，此前只修了 `lv` 那一半。**
+    //      现在：亮 ⟺ `opts.trend && hasTrend`。
+    //   ★ 这一族**首屏看不出来**：`trendNum` 长在「走势分段」上、默认关 ⇒ 首屏"裸标志"和"画不画"都是关，
+    //     两套判据不显形；要露头得**换一档**（`lv` 靠「高一级」默认开，`trend` 靠 `?cut=extend`）。
+    //     ⇒ 量这个形状的东西，**缺省那一趟是量不到的**。
+    //   ★ 注意 `on` 跟下面那个 `disabled` 判的是**两个不同的问题**，别合并：
+    //     亮不亮＝"这一层画没画"；能不能点＝"这颗芯片此刻有没有用"（`opts.trend` / `opts.up`）。
     //     前者管"说的是不是真的"，后者管"按了会不会白按"。
+    //     ★ 这两半现在共用下面那个 `hasTrend` —— 这**不是**把两条判据合成一条：`hasTrend` 是一个**事实**
+    //       （载荷里有没有这一层），两处各自拿它去回答自己的问题（"有没有用"←`opts`；"画没画"←`opts && 事实`）。
+    const hasTrend = !!(state.data && state.data.trend);
     const on = k === 'sigPend' ? opts.sigPend : k.startsWith('sig:') ? opts.sigKinds[k.slice(4)]
       : k === 'lv' ? shownOf(opts).lv
-        : opts[k];
+        : k === 'trend' ? opts.trend && hasTrend
+          : opts[k];
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
     const sigChip = k.startsWith('sig:') || k === 'sigPend';
     // 成交量那颗在**没有 v 的数据上**按灰（仓里的样本就是）：能点却画不出东西的开关是骗人的。
     // 走势分段那颗同理：`cut=extend` 那份载荷没有 `trend` 这个键 ⇒ 开着也画不出东西 ⇒ 按灰。
     b.disabled = sigChip ? !opts.sig : k === 'vol' ? !sub.hasVol
-      : k === 'trend' ? !(state.data && state.data.trend)
+      : k === 'trend' ? !hasTrend
         // 框编号画在走势那一层**里面**（字母说的是"这一段里的第几个中枢"）⇒ 那一层关着时它按灰：
         // 能点却画不出东西的开关是骗人的（跟上面那条同一条账，不是新规矩）。
-        : k === 'trendNum' ? !(state.data && state.data.trend) || !opts.trend
+        : k === 'trendNum' ? !hasTrend || !opts.trend
           // 级别对照标的字挂在**合成框**上（`shownOf` 里 `lv` 跟 `up` 与着）⇒「高一级」关着时它按灰。
           // ★ 按灰判的是**"这颗此刻有没有用"**（`!opts.up`），跟上面那个 `on` 判的**"这一层画没画"**
           //   （`shownOf(opts).lv`）是**两个问题、两条判据** —— 别合并。两个都从 `opts.up` 这同一个根上长出来：
