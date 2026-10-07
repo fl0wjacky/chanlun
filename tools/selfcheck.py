@@ -425,6 +425,17 @@ _rh0 = analyze(_fx, tick=_tick_of("aaplusdt_1h.json"))
 SG.HEAD_DIR_FIX = True
 count("拿掉图头段方向修法后 AAPL 1h 夹具没报出来", 0 if check_segments(_rh0["segs"], _rh0["pens"]) else 1)
 
+# ---- 同一家第二种：图头段起点非段内极值、且不是 L78 ① 型（card-2783fa1f-da8，线上 ZEC 4h 10-07）----
+# 窄版：判定跟检查器共用 SG._start_check —— 宽版（凡非极值就挪）会把 zec_2h 夹具 191.35 那个合法 ① 型图头挪丢。
+_fx4 = [dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"])
+        for b in _json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "zecusdt_4h_headext.json")))]
+_r4 = analyze(_fx4, tick=_tick_of("zecusdt_4h_headext.json"))
+count("ZEC 4h 夹具线段不变量违规（图头段起点非极值）", len(check_segments(_r4["segs"], _r4["pens"])))
+SG.HEAD_EXT_FIX = False                                       # 反向验证：拿掉这条修法，同一份夹具必须报出来
+_r40 = analyze(_fx4, tick=_tick_of("zecusdt_4h_headext.json"))
+SG.HEAD_EXT_FIX = True
+count("拿掉图头段起点修法后 ZEC 4h 夹具没报出来", 0 if check_segments(_r40["segs"], _r40["pens"]) else 1)
+
 # ---- 走势分界 v3（docs/spec/走势分段.md v3 §三，card-51571a5f-dc2）----
 # 基线（zec15／zec30 五个分界＋一次撤回）、不变量（交替、刀在同向线段终点、两刀间有中枢、框不跨分界、首尾相接）、
 # 367.77 不切框、不看未来。反向验证在 tools/trend_check.py --self-test（spec §四 的 P1／P2／P5 各自必须变）。

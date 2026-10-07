@@ -254,6 +254,27 @@ def _opening_overlaps(pens, i):
     return max(p["lo"] for p in p3) < min(p["hi"] for p in p3)
 
 
+def _start_check(s, pens, mode=FEAT_STD_DEFAULT, memo=None):
+    """自检 A 的判定（L78:34-35，card-753bd03a），检查器和图头那一条（card-2783fa1f）共用这一份：
+    起点不是段内极值 ⇒ 必须是 ① 型 —— 段内造出极值的那一笔 X（反向笔），其后段内价格又破了 X 的起点
+    （第一个反向线段破了 X 的底／顶，旧段延续）。→ "ok" / "bad"（不是 ① 型 ⇒ 漏切）/ "unmeasured"（X 之后取不到第一个反向线段）。
+    破位必须发生在 X 之后**第一个反向线段**被确认之前（L78:33）—— 不是「后来某时破了」（那正是旧程序的漏）。"""
+    up = s["dir"] == "up"
+    ext = s["lo"] if up else s["hi"]
+    if s["p0"] == ext:
+        return "ok"
+    xs = [j for j in range(s["PI0"], s["PI1"] + 1)
+          if (pens[j]["lo"] == ext if up else pens[j]["hi"] == ext) and _dir(pens[j]) != s["dir"]]
+    x = xs[0] if xs else None
+    rev = _first_seg(pens, x + 1, mode, memo) if x is not None else None
+    if x is not None and (rev is None or rev["dir"] != s["dir"]):
+        return "unmeasured"
+    last = min(s["PI1"], rev["confirm"] - 1) if rev is not None else s["PI1"]
+    broke = x is not None and any((pens[j]["hi"] > pens[x]["p0"]) if up else (pens[j]["lo"] < pens[x]["p0"])
+                                  for j in range(x + 1, last + 1))
+    return "ok" if broke else "bad"
+
+
 def check_segments(segs, pens, unmeasured=None):
     """自检线段的不变量。返回违规列表。
     unmeasured：给了 list 就把「量不了」的格子收进去（自检 A 取不到 X 之后第一个反向线段时）——
@@ -271,27 +292,15 @@ def check_segments(segs, pens, unmeasured=None):
             up = s["dir"] == "up"
             if (s["p1"] <= s["p0"]) if up else (s["p1"] >= s["p0"]):    # L78:9-10：完成段的顶高于底
                 bad.append(("完成段顶不高于底", k, s["p0"], s["p1"]))
-            # L78:34-35（card-753bd03a）：起点不是段内极值 ⇒ 必须是 ① 型 —— 段内造出极值的那一笔 X（反向笔），
-            #   其后段内价格又破了 X 的起点（第一个反向线段破了 X 的底／顶，旧段延续）。不是 ⇒ 漏切。
-            ext = s["lo"] if up else s["hi"]
-            if s["p0"] != ext:
-                xs = [j for j in range(s["PI0"], s["PI1"] + 1)
-                      if (pens[j]["lo"] == ext if up else pens[j]["hi"] == ext) and _dir(pens[j]) != s["dir"]]
-                x = xs[0] if xs else None
-                # 破位必须发生在 X 之后**第一个反向线段**被确认之前（L78:33）—— 不是「后来某时破了」（那正是旧程序的漏）
-                rev = _first_seg(pens, x + 1) if x is not None else None
-                if x is not None and (rev is None or rev["dir"] != s["dir"]):
-                    item = ("起点非段内极值，但 X 之后取不到第一个反向线段（A 量不了）", k, s["i0"])
-                    if unmeasured is not None:
-                        unmeasured.append(item)
-                    else:
-                        bad.append(item)          # 调用方没要「未量」那一栏 ⇒ 当违规报，不许静默放过（Atlas 10-06）
+            v = _start_check(s, pens)
+            if v == "unmeasured":
+                item = ("起点非段内极值，但 X 之后取不到第一个反向线段（A 量不了）", k, s["i0"])
+                if unmeasured is not None:
+                    unmeasured.append(item)
                 else:
-                    last = min(s["PI1"], rev["confirm"] - 1) if rev is not None else s["PI1"]
-                    broke = x is not None and any((pens[j]["hi"] > pens[x]["p0"]) if up else (pens[j]["lo"] < pens[x]["p0"])
-                                                  for j in range(x + 1, last + 1))
-                    if not broke:
-                        bad.append(("起点非段内极值且不是 L78 ① 型", k, s["i0"]))
+                    bad.append(item)              # 调用方没要「未量」那一栏 ⇒ 当违规报，不许静默放过（Atlas 10-06）
+            elif v == "bad":
+                bad.append(("起点非段内极值且不是 L78 ① 型", k, s["i0"]))
         if k > 0:
             if s["PI0"] != segs[k - 1]["PI1"] + 1:
                 bad.append(("与上一段不相接", k))
@@ -387,6 +396,7 @@ def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT, memo=None):
 
 
 HEAD_DIR_FIX = True                       # 探针开关：图头那一段终点没越过起点就往后挪一笔（card-24dd71cb-003）
+HEAD_EXT_FIX = True                       # 探针开关：图头那一段起点非段内极值、且不是 L78 ① 型（检查器会报的那种）就往后挪一笔（card-2783fa1f-da8）
 
 
 def _first_seg(pens, start, mode=FEAT_STD_DEFAULT, memo=None):
@@ -457,6 +467,17 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=
         if HEAD_DIR_FIX and not segs and start == 0 and (
                 (seg_dir == "down" and pens[end_pen]["p1"] >= pens[i]["p0"]) or
                 (seg_dir == "up" and pens[end_pen]["p1"] <= pens[i]["p0"])):
+            i += 1
+            born = 0
+            continue
+        # ★ 同一家的第二种样子（card-2783fa1f-da8，10-07 线上 ZEC 4h）：终点越过了起点，可起点不是段内极值、
+        #   而且不是 L78 ① 型（自检 A 会报的那种）⇒ 起点那一笔是图头外面上一段的尾巴，同样往后挪一笔（L78:14）。
+        #   窄版：判定跟 check_segments 共用 _start_check —— 宽版（凡起点非极值就挪）会把合法的 ① 型图头也挪掉，
+        #   zec_2h 夹具 191.35 那个真低点就这么丢过。「量不了」不挪（要等反向段出来才知道，先按现状划）。
+        if HEAD_EXT_FIX and not segs and start == 0 and _start_check(dict(
+                dir=seg_dir, PI0=i, PI1=end_pen, p0=pens[i]["p0"],
+                hi=max(pens[q]["hi"] for q in range(i, end_pen + 1)),
+                lo=min(pens[q]["lo"] for q in range(i, end_pen + 1))), pens, mode, memo) == "bad":
             i += 1
             born = 0
             continue

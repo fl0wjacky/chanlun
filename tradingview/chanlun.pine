@@ -698,6 +698,36 @@ firstSegFill(array<Unit> P, int from, array<int> mEnd, array<int> mConf, array<i
         s -= 1
     true
 
+// 图头段起点非段内极值、且不是 L78 ① 型（同 Python _start_check ＝ 自检 A，card-2783fa1f-da8）。
+// ① 型：段内造出极值的反向笔 X，之后、在 X 之后第一个反向线段被确认之前，价格又破了 X 的起点。
+// X 之后取不到第一个反向线段 ⇒ 量不了 ⇒ 不算坏（不挪）。memo 由 firstSegFill 填（起点 > i 的都已填好）。
+headStartBad(array<Unit> P, int i, int endPen, bool up, array<int> mEnd, array<int> mConf, array<int> mDir) =>
+    float ext = up ? P.get(i).lo : P.get(i).hi
+    for j = i to endPen
+        ext := up ? math.min(ext, P.get(j).lo) : math.max(ext, P.get(j).hi)
+    bool bad = false
+    if P.get(i).p0 != ext
+        int x = -1
+        for j = i to endPen
+            Unit pj = P.get(j)
+            if x < 0 and (pj.p1 > pj.p0) != up and (up ? pj.lo == ext : pj.hi == ext)
+                x := j
+        if x < 0
+            bad := true
+        else
+            int s = x + 1
+            bool hasRev = s < P.size() and mEnd.get(s) >= 0 and (mDir.get(s) == 1) == up
+            if hasRev
+                int last = math.min(endPen, mConf.get(s) - 1)
+                bool broke = false
+                if last >= x + 1
+                    float xs = P.get(x).p0
+                    for j = x + 1 to last
+                        if up ? P.get(j).hi > xs : P.get(j).lo < xs
+                            broke := true
+                bad := not broke
+    bad
+
 buildSegments(array<Unit> P) =>
     segs = array.new<Unit>()
     n = P.size()
@@ -736,6 +766,10 @@ buildSegments(array<Unit> P) =>
             stop := true
         else if segs.size() == 0 and (up ? P.get(endPen).p1 <= P.get(i).p0 : P.get(endPen).p1 >= P.get(i).p0)
             // ★ 图头那一段终点没越过起点 ⇒ 起点那一笔是图头外面上一段的尾巴，往后挪一笔重划（同 Python HEAD_DIR_FIX，card-24dd71cb-003）
+            i += 1
+            born := 0
+        else if segs.size() == 0 and headStartBad(P, i, endPen, up, mEnd, mConf, mDir)
+            // ★ 图头那一段起点非段内极值、且不是 L78 ① 型 ⇒ 同样往后挪一笔（同 Python HEAD_EXT_FIX，card-2783fa1f-da8）
             i += 1
             born := 0
         else
@@ -825,6 +859,10 @@ zSegStep(array<Fx> fx, array<int> seq, array<Unit> pens, array<Unit> segs, array
                 stop := true
             else if segs.size() == 0 and (up ? pens.get(endPen).p1 <= pens.get(i).p0 : pens.get(endPen).p1 >= pens.get(i).p0)
                 // ★ 图头那一段终点没越过起点 ⇒ 起点那一笔是图头外面上一段的尾巴，往后挪一笔重划（同 Python HEAD_DIR_FIX，card-24dd71cb-003）
+                i += 1
+                born := 0
+            else if segs.size() == 0 and headStartBad(pens, i, endPen, up, mEnd, mConf, mDir)
+                // ★ 图头那一段起点非段内极值、且不是 L78 ① 型 ⇒ 同样往后挪一笔（同 Python HEAD_EXT_FIX，card-2783fa1f-da8）
                 i += 1
                 born := 0
             else

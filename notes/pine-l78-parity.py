@@ -95,6 +95,17 @@ def firstSegFill(P, frm, mEnd, mConf, mDir):
             if e >= 0: mDir[s] = 1 if up else -1
         mEnd[s] = e; mConf[s] = c; s -= 1
 
+def headStartBad(P, i, endPen, up, mEnd, mConf, mDir):
+    ext = min(P[j]['lo'] for j in range(i, endPen + 1)) if up else max(P[j]['hi'] for j in range(i, endPen + 1))
+    if P[i]['p0'] == ext: return False
+    x = next((j for j in range(i, endPen + 1) if ((P[j]['p1'] > P[j]['p0']) != up) and (P[j]['lo'] == ext if up else P[j]['hi'] == ext)), -1)
+    if x < 0: return True
+    s_ = x + 1
+    if not (s_ < len(P) and mEnd[s_] >= 0 and (mDir[s_] == 1) == up): return False   # 量不了 ⇒ 不挪
+    last = min(endPen, mConf[s_] - 1)
+    broke = any((P[j]['hi'] > P[x]['p0']) if up else (P[j]['lo'] < P[x]['p0']) for j in range(x + 1, last + 1))
+    return not broke
+
 def scan(P, i, born, segs, mEnd, mConf, mDir):
     n = len(P); stop = False
     while i + 2 < n and not stop:
@@ -111,6 +122,7 @@ def scan(P, i, born, segs, mEnd, mConf, mDir):
                     while k < at: k += 2
         if endPen < 0: stop = True
         elif not segs and (P[endPen]['p1'] <= P[i]['p0'] if up else P[endPen]['p1'] >= P[i]['p0']): i += 1; born = 0   # 图头段方向（24dd）
+        elif not segs and headStartBad(P, i, endPen, up, mEnd, mConf, mDir): i += 1; born = 0   # 图头段起点非极值且非 ① 型（2783fa1f）
         else: born = res; segs.append((i, endPen)); i = endPen + 1
     return i, born
 
@@ -129,7 +141,9 @@ def incrementalPine(P):
 LIVE = sys.argv[1] if len(sys.argv) > 1 else None   # 可选：一份 /api/chart 载荷（线上永续），一起对账
 sets = [(fn, load(os.path.join('data', fn)), tick_of(fn)) for fn in kline_files()] + \
        ([('live', [dict(t=b['t'], o=b['o'], h=b['h'], l=b['l'], c=b['c']) for b in json.load(open(LIVE))['bars']], tick_of('btcusdt_4h.json'))] if LIVE else []) + \
-       [('aapl1h_headdir', [dict(t=b['t'], o=b['o'], h=b['h'], l=b['l'], c=b['c']) for b in json.load(open('tools/fixtures/aaplusdt_1h_headdir.json'))], tick_of('aaplusdt_1h.json'))]   # 图头段方向（24dd）只在这份上触发
+       [('aapl1h_headdir', [dict(t=b['t'], o=b['o'], h=b['h'], l=b['l'], c=b['c']) for b in json.load(open('tools/fixtures/aaplusdt_1h_headdir.json'))], tick_of('aaplusdt_1h.json'))] + \
+       [('zecusdt_4h_headext', [dict(t=b['t'], o=b['o'], h=b['h'], l=b['l'], c=b['c']) for b in json.load(open('tools/fixtures/zecusdt_4h_headext.json'))], tick_of('zecusdt_4h_headext.json'))]
+# 图头两份线上夹具：aapl1h_headdir 只触发图头段方向（24dd），zecusdt_4h_headext 只触发图头段起点非极值（2783fa1f）
 bad = 0
 for fn, bars, tk in sets:
     P = analyze(bars, tick=tk)["pens"]
