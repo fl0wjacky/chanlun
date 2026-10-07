@@ -228,6 +228,24 @@ export function ghostHitAt(clientX, clientY) {
   return null;
 }
 
+// 分界（竖虚线）的**命中带**（卡 card-22888623-1a7）。跟 `ghostHits` 是同一套账：画布上的东西没有
+// DOM，悬停得自己做；坐标换算只留在知道画布坐标系的地方（app.js 那边一行都不抄）。
+// ★ 为什么是"带"、不拿那根线当靶子：分界是 `lineWidth 1.5` 的**竖虚线**，拿 1.5px 当悬停目标
+//   等于瞄不中（手机上更别提）。**带只放宽命中，画法一个像素不动** —— 这是 Nova 10-06 拍的口径
+//   （「只放宽悬停范围、看上去不变，不算另做样式」）。
+// ★ 带里记的是**整条 bound**，不是某句话：哪一条该出哪句话是 app.js 的事（判据一处出处）。
+//   这一层只管"指针压在哪一根上"，将来别的分界要加说明，这里一个字都不用改。
+// ★ 竖线是**满高**的 ⇒ 只比 x，不比 y（y 怎么都在带子里）。
+export const boundHits = { bands: [], canvas: null };
+export function boundHitAt(clientX, clientY) {
+  const c = boundHits.canvas;
+  if (!c) return null;
+  const r = c.getBoundingClientRect();
+  const x = clientX - r.left;
+  for (const b of boundHits.bands) if (x >= b.x0 && x <= b.x1) return b.bound;
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // 框层：类中枢（与笔同色）→ 线段中枢（与线段同色）→ 各自的「↑高N级」框
 // 挂在 K 线系列上、zOrder=bottom ⇒ 画在 K 线底下，跟 Python 的落笔次序一致（框先、K 线后）。
@@ -715,6 +733,10 @@ function trendMarkView(target, state, prim) {
   const { data, opts } = state;
   const T = trendOf(data);
   const sh = shownOf(opts);
+  // ★ 命中带**每帧先清空**，而且清在早退**之前**：这一层没数据、或者两颗芯片都关着的时候也得清。
+  //   留着上一帧的带子就是"层关了、指针压上去还有字"—— 那条比画错更难被发现：**图上什么都没画**。
+  //   （这跟「关着的层不算看得见」不是同一条账：那条管**画**，这条管**命中**。）
+  boundHits.bands = [];
   if (!T || (!sh.trend && !sh.up)) return;
   // ★ 这一层的字**一律不登记 `placed`**（价签那张避让表），理由两条，都说破：
   //   ① 它们钉在**一条竖线和一个价**上（分界价格、待定、撤回）—— 挪开它就不是那个价了，避让没有意义；
@@ -730,6 +752,10 @@ function trendMarkView(target, state, prim) {
     const vp = viewport(prim._chart, state.candleSeries || prim._series, data);
     const D = state.trendDrawn || (state.trendDrawn = { bands: [], bounds: [], pending: [], retracted: [], units: [], num: [] });
     D.labels = [];
+    // 命中带的画布：跟 `ghostHits` 同一条账 —— `ctx.canvas` 就是这个窗格的画布，
+    // `useMediaCoordinateSpace` 给的坐标就是它的 CSS 像素，所以「客户端坐标 − getBoundingClientRect」
+    // 正好落在同一个系里。每帧重设：窗格重建过之后旧的 canvas 是个死元素，量出来的坐标全是错的。
+    boundHits.canvas = ctx.canvas;
     // 这一层**自己**那张占位表：不跟别的层互相避让（理由见上），但自己这几类字之间得让开 ——
     // 分界那条贴着极值写，段的左上角又紧挨着同一个分界，不避让就是几个数字叠一坨。
     // 谁最"钉死"谁先占位：分界价格 → 待定 → 撤回（都钉在一个价上，不许挪）→ 框编号（钉在某个中枢上）
@@ -747,6 +773,12 @@ function trendMarkView(target, state, prim) {
         ctx.strokeStyle = rgba(TREND.edge, 200); ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
         ctx.setLineDash([]);
+        // 命中带（卡 card-22888623-1a7）：**只记、不画** —— ±4px 的无形竖条，屏上跟改之前一模一样。
+        // ★ 为什么 ±4：那根线是 1.5px，瞄准它得把指针当手术刀。4px 是"手不用屏住呼吸就能压上"，
+        //   整条带子也才 8px 宽 —— 要误吃掉隔壁那根，两根得挨到 8px 以内，那时它们本来也读不成两根。
+        // ★ 带子按**已确认画出来的**这一批登（跟线的 for 循环同一个门槛 `onScreen`）——
+        //   屏外那根登进去，指针在边缘就会命中一根根本没画的线。
+        boundHits.bands.push({ x0: x - 4, x1: x + 4, bound: b });
         // 那个点：填结构色、外面描一圈**页面底色** —— 参考图那边是"深点 ＋ 白圈"，这边正好反过来，
         // 干的是同一件事：把点从背后的带子里"抠"出来，别糊成一片。
         ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2);
