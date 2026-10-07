@@ -210,6 +210,7 @@ def pending(done, ks, want):
 
 
 _D3_REGROUP = True                               # 只给 trend_check --self-test 的探针关：合成框退回拼 DD／GG（旧 D3-2）
+_D6_BASE_ONLY = True                             # 只给 trend_check --self-test 的探针关：升级·上涨／下跌的段也套 D6 方向限制
 _D3_LIVE_TAIL = True                             # 只给 trend_check --self-test 的探针关：最后一个中枢还在走也照样合成（D3-4）
 
 
@@ -318,15 +319,18 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
     #      豁免（L45:122-124）：前一走势段（第一遍）是反向的 ⇒ 段内第一个框不限。图头那段不限（前面是什么不知道）；
     #   ③ 段型用第二遍的中枢重分一次 —— 不再回头改分界、不再重新决定限不限。
     #   ★ 所以 D4「同一套中枢既画框又判分界」在上涨／下跌段里不再成立：分界和 bounds[].ZD／ZG 用的是第一遍。
-    kinds0 = [classify([z for z in zs if a <= z["PI0"] < b], reading, done)[0] for a, b in zip(edges, edges[1:])]
+    kinds0 = [classify([z for z in zs if a <= z["PI0"] < b], reading, done) for a, b in zip(edges, edges[1:])]
+    # ★ D6 只管**本级别**的上涨／下跌（Nova 10-07 08:00Z，card-0374e640-127）：含合成框的段（升级·上涨／下跌）
+    #   不是本级别走势（D3-3 一A），不限方向；首中枢豁免里「前一段是反向趋势」也只认本级别的，升级·趋势不算。
+    base = lambda k: kinds0[k][0] if (kinds0[k][0] in ("上涨", "下跌") and not (_D6_BASE_ONLY and kinds0[k][1])) else None
     if _DIR_RULE:
         grouped = []
         for g, (a, b) in enumerate(zip(edges, edges[1:])):
             last = g == len(edges) - 2
-            if g and kinds0[g] in ("上涨", "下跌"):
-                opp = "下跌" if kinds0[g] == "上涨" else "上涨"
-                grouped += _group_centers(done, a, b, g, last, start_dir="down" if kinds0[g] == "上涨" else "up",
-                                          free_first=kinds0[g - 1] == opp)
+            if g and base(g):
+                opp = "下跌" if base(g) == "上涨" else "上涨"
+                grouped += _group_centers(done, a, b, g, last, start_dir="down" if base(g) == "上涨" else "up",
+                                          free_first=base(g - 1) == opp)
             else:
                 grouped += _group_centers(done, a, b, g, last)
         zs = classify_relations(grouped)

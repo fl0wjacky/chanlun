@@ -146,12 +146,13 @@ def invariants(fn):
             bad.append("分界 %d 不是某一段走势的起点" % b["bar"])
     # ★ L24:84-85（card-40f4ce13）：上涨走势里的框只认下上下（首段向下），下跌里只认上下上。独立按定义查：
     #   看框首段 done[PI0] 的 dir，不看引擎里那两遍怎么走。豁免：图头那段不查；前一段是反向走势 ⇒ 段内第一个框不查（L45:122-124）。
+    #   只管本级别的上涨／下跌：升级·上涨／下跌（含合成框）不查，豁免里的「前一段反向」也只认本级别（Nova 10-07 08:00Z）。
     for g, sg in enumerate(seg):
-        if g == 0 or sg["type"] not in ("上涨", "下跌"):
+        if g == 0 or sg["type"] not in ("上涨", "下跌") or sg["upgraded"]:
             continue
         want = "down" if sg["type"] == "上涨" else "up"
         zz = sorted((z for z in v["seg_centers"] if z.get("seg") == g), key=lambda z: z["X0"])
-        if zz and seg[g - 1]["type"] == ("下跌" if sg["type"] == "上涨" else "上涨"):
+        if zz and not seg[g - 1]["upgraded"] and seg[g - 1]["type"] == ("下跌" if sg["type"] == "上涨" else "上涨"):
             zz = zz[1:]
         for z in zz:
             if done[z["PI0"]]["dir"] != want:
@@ -395,6 +396,32 @@ def self_test():
     ok = seg_ab(ra) != seg_ab(rb)
     print("%s D3 换回读法 B ⇒ ZEC 30m 夹具段型变（A %s ／ B %s）" % ("✓" if ok else "✗",
           [t for t, _ in seg_ab(ra)], [t for t, _ in seg_ab(rb)]))
+    miss += not ok
+    # D6 只管本级别（card-0374e640-127，Nova 08:00Z）—— 造出来的牙：把 zec15 第 6 段（本级别下跌、D6 会限它的方向）
+    #   第一遍段型硬改成「升级·下跌」。规则对 ⇒ 这段的框跟不限方向时一样；拿掉这条（_D6_BASE_ONLY=False）⇒ 照样被限、框不一样。
+    real_cls = T.classify
+    def fake(zz, reading="A", done=None):
+        k, up = real_cls(zz, reading, done)
+        return (k, True) if zz and zz[0]["PI0"] >= fake.lo and zz[0]["PI0"] < fake.hi and k == "下跌" else (k, up)
+    r15, v15 = run("zec15.json")
+    b6 = v15["segments"][6]
+    dn = T._done(r15)
+    fake.lo = next(k for k, x in enumerate(dn) if x["i0"] >= b6["i0"])
+    fake.hi = next((k for k, x in enumerate(dn) if x["i0"] >= b6["i1"]), len(dn))
+    box6 = lambda v: sorted((z["X0"], z["X1"]) for z in v["seg_centers"] if z["seg"] == 6)
+    T.classify = fake
+    try:
+        on = box6(T.trend_v3(r15, reading=READING))
+        T._DIR_RULE = False
+        free = box6(T.trend_v3(r15, reading=READING))
+        T._DIR_RULE = True
+        T._D6_BASE_ONLY = False
+        off = box6(T.trend_v3(r15, reading=READING))
+    finally:
+        T.classify, T._DIR_RULE, T._D6_BASE_ONLY = real_cls, True, True
+    ok = on == free and off != free
+    print("%s D6 只管本级别：第 6 段假装成升级·下跌 ⇒ 框跟不限时%s；拿掉这条 ⇒ %s" % ("✓" if ok else "✗",
+          "一样" if on == free else "不一样（该一样）", "被限了（该这样）" if off != free else "没被限（牙没咬到）"))
     miss += not ok
     # D3-2／D3-4 的反向验证（card-0374e640-127）：各拧回旧写法，不变量必须报
     for flag, fn, name in (("_D3_REGROUP", "zec15.json", "合成框退回拼 DD／GG"), ("_D3_LIVE_TAIL", "zec30_cut.json", "最后一个中枢还在走也合成")):
