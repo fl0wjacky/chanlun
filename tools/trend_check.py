@@ -31,7 +31,7 @@ BASE = {
     # D2-0（card-acbe5855，10-06）整层用标准化后的线段：zec15 多出 3699 H（394.0）、4575 L（299.56）—— 段 23 的真高点在下一段段内，
     #   以前候选是端点那个次高点、P3 又按区间判它「被过了」，卡到 7558 才确立；其余 5 刀不变。
     "zec15.json": [(490, "L", None), (3699, "H", None), (4575, "L", None), (7558, "H", None), (9043, "L", None),
-                   (12906, "H", None), (14215, "L", None)],
+                   (12906, "H", None), (14215, "L", None), (17604, "L", None)],
     "zec30_cut.json": [(134, "L", None), (3476, "H", None), (4219, "L", None), (6150, "H", None), (6805, "L", None)],
 }
 # btc_4h：线段 #1（缺口被之前同一特征序列元素盖住不算缺口，card-fff28d01-f13，小栋 10-07 A）以后 97932.1 → 107473.7
@@ -67,7 +67,8 @@ def kline_files():
 TYPES = {"zec15.json": ["盘整", "盘整", "盘整", "盘整", "盘整", "盘整", "下跌", "上涨"]}
 # ★ 10-07 D3 改 A（card-0374e640-127，一A二A）：读法 A、合成框按高一级 3+3+3 重算（D3-2 推广口径 (iii)）、
 #   最后一个中枢还在走不合成（D3-4）。zec15 八段（「·升」＝含合成出来的高一级中枢、整段升一级读）：
-TYPES = {"zec15.json": ["盘整", "盘整·升", "盘整", "上涨", "盘整", "盘整·升", "下跌", "盘整·升"]}
+TYPES = {"zec15.json": ["盘整", "盘整·升", "盘整", "上涨", "盘整", "盘整·升", "下跌", "盘整·升", "上涨"]}
+# ★ D2-8（10-07，card-22888623-1a7，Nova 定 ④）：第 7 段在 787.96 补一刀，切成「升级·盘整」＋「上涨」（9 段）。
 # ★ D6-4（10-07 09:16Z，先限方向判段型）：第 3 段从「盘整」变「上涨」（限方向找出两个依次上移的中枢）。
 FIX_D2STD = os.path.join(ROOT, "tools", "fixtures", "zec1m_d2std.json")
 # card-eecdfd08：ZEC 永续 1m 一段（04-08 前后），旧程序在这里把同一对 (308.24 L, 394.0 H) 确立又撤回 13 次
@@ -120,9 +121,16 @@ def invariants(fn):
             bad.append("%s 标准化后段 %d 端点不是段内极值" % (fn, k))
     ends = {s["i1"]: s for s in done}
     bs = v["bounds"]
+    seg_ = v["segments"]
     for a, b in zip(bs, bs[1:]):
         if a["kind"] == b["kind"]:
-            bad.append("不交替 %d/%d" % (a["bar"], b["bar"]))
+            # D2-3 只约束趋势段（D2-8，10-07）：同类型相邻只许是 D2-8 补的那一刀，前一段升级·盘整、后一段同方向本级别趋势
+            pre = next((x for x in seg_ if x["i1"] == b["bar"]), None)
+            post = next((x for x in seg_ if x["i0"] == b["bar"]), None)
+            ok = b.get("rule") == "D2-8" and pre and post and pre["type"] == "盘整" and pre["upgraded"] \
+                and post["type"] == ("上涨" if b["kind"] == "L" else "下跌") and not post["upgraded"]
+            if not ok:
+                bad.append("不交替 %d/%d" % (a["bar"], b["bar"]))
     for b in bs:
         s = ends.get(b["bar"])
         if s is None or (s["p1"] > s["p0"]) != (b["kind"] == "H"):
@@ -141,6 +149,9 @@ def invariants(fn):
         g = z.get("seg")
         if g is None or not (0 <= g < len(seg)) or not (seg[g]["i0"] <= z["X0"] and z["X1"] <= seg[g]["i1"]):
             bad.append("框 %d–%d 的 seg=%r 不对" % (z["X0"], z["X1"], g))
+    for b in bs:                                  # 每一刀都要说清按哪条规则落的（前端只读 rule，card-22888623-1a7）
+        if b.get("rule") not in ("D2-2", "D2-8"):
+            bad.append("刀 %d 没有 rule 或 rule 不认识：%r" % (b["bar"], b.get("rule")))
     for b in bs:                                  # 对外 seg 只指走势段号：bounds 不许带同名键（用 line_seg）
         if "seg" in b:
             bad.append("bounds 带了 seg 键（该叫 line_seg）")
@@ -269,6 +280,18 @@ def extreme_between():
         for k, b in enumerate(bs):
             if k == 0:
                 continue                                 # 图头那一刀两头都开（D2-1），更极端的点若前面没中枢就永远确立不了（D2-2 第 1 步）⇒ 不适用
+            if b.get("rule") == "D2-8":
+                pre_c = [x for x in v["seg_centers"] if x["X1"] <= b["bar"]]
+                post_c = [x for x in v["seg_centers"] if x["X0"] >= b["bar"]]
+                if not pre_c or not post_c:
+                    bad.append("%s D2-8 刀 %d 两边找不到框" % (fn, b["bar"]))
+                    continue
+                lo_, hi_ = max(x["X1"] for x in pre_c), min(x["X0"] for x in post_c)
+                seg = bars[lo_:hi_ + 1]
+                ext = min(x["l"] for x in seg) if b["kind"] == "L" else max(x["h"] for x in seg)
+                if ext != b["price"]:
+                    bad.append("%s D2-8 刀 %d %.2f 不是两框之间的逆向极值 %.2f" % (fn, b["bar"], b["price"], ext))
+                continue
             a = bs[k - 1]["bar"]
             z = bs[k + 1]["bar"] if k + 1 < len(bs) else len(bars) - 1
             seg = bars[a:z + 1]
@@ -388,6 +411,22 @@ def self_test():
         _R.clear()
     print("%s L24:85 拿掉中枢方向限制 ⇒ 报出 %d 个框（例 %s）" % ("✓" if dirv else "✗", len(dirv), dirv[:1]))
     miss += not dirv
+    # D2-8 的反向验证（card-22888623-1a7）：① 关掉 D2-8 ⇒ zec15 少 787.96 那刀；
+    #   ② 自检兜底：关掉方向限制（_DIR_RULE）⇒ 补刀后那截照不限方向读成盘整 ⇒ 这一刀必须撤掉，不许硬切。
+    def has_cut():
+        _, vv = run("zec15.json")
+        return any(b.get("rule") == "D2-8" and round(b["price"], 2) == 787.96 for b in vv["bounds"])
+    on = has_cut()
+    T._D28 = False
+    off = has_cut()
+    T._D28 = True
+    T._DIR_RULE = False
+    nodir = has_cut()
+    T._DIR_RULE = True
+    ok = on and not off and not nodir
+    print("%s D2-8：照常 %s 787.96 ／ 关掉 D2-8 %s ／ 关掉方向限制（兜底该撤刀）%s" % ("✓" if ok else "✗",
+          "有" if on else "没有", "有" if off else "没有", "有" if nodir else "没有"))
+    miss += not ok
     # D3-3 读法的反向验证。★ D3-2（3+3+3 重算）＋ D6-4（先限方向）以后，data/、tools/fixtures、线上 15 张**没有一份**
     #   读法 A／B 段型不同（10-07 实测），真数据咬不到了 ⇒ 造一段：一对扩展中枢（合成成一个单元）＋ 它上方一个不重叠的中枢。
     #   读法 A 只数合成单元 ⇒ 升级·盘整；读法 B 合成单元跟本级别中枢一起数 ⇒ 上涨。classify 不给 done ⇒ 走拼 DD／GG 那条，只为够到读法分支。
