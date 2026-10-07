@@ -294,22 +294,8 @@ def classify(zz, reading="A", done=None):
     return (_trend_of(units) or "盘整"), bool(up)
 
 
-def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_exceed=True, standardize=True):
-    """→ dict(seg_centers, bounds, retracted, pending, segments, units, reading)。
-    seg_centers：按确立的分界切开重算的线段中枢（D4，前端画框就用它），每个带 seg（属于第几段走势，跟 segments 下标对齐）；
-    segments：[dict(i0, i1, type, upgraded, head, live, n_centers_level)]，首尾相接盖满整张图；
-      ★ n_centers_level 是**本级别**中枢个数，跟读法无关；读法 A 的升级段，字母挂在 units 上，个数不是它；
-    units：D3 合成出来的高一级中枢（只列 n>1 的），带 seg，给前端画升级框；
-    reading：这一跑用的 D3 读法（A／B），前端据此决定字母挂哪一级（spec §八 第 6 条）。"""
-    res = find_bounds(r, regroup=regroup, alternate=alternate, check_empty=check_empty, no_exceed=no_exceed,
-                      standardize=standardize)
-    done, ks = res["done"], res["ks"]
-    n = len(r["bars"])
-    if not done:
-        return dict(seg_centers=[dict(z, seg=0) for z in r["seg_centers"]], bounds=[], retracted=[], pending=[],
-                    units=[], reading=reading,
-                    segments=[dict(i0=0, i1=n - 1, type="无中枢", upgraded=False, head=True, live=True,
-                                   n_centers_level=0)])
+def _layer(done, ks, reading, n):
+    """分界 ks 定了以后的那一层：中枢（含 D6 两遍）、段型（D3）、合成框 → (segments, units_out, centers_out, kinds0)。"""
     zs = _centers_with_cuts(done, ks)
     edges = [0] + ks + [len(done)]
     # ★ L24:84-85（card-40f4ce13，小栋 10-07 选 A）：「如果是向上的走势，里面的中枢一定是下-上-下的，向下的相反」。
@@ -346,5 +332,87 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
                              type=kind, upgraded=upgraded, head=g == 0, live=last, n_centers_level=len(zz)))
         units_out += [dict(u, seg=g) for u in _units(zz, done) if u["n"] > 1]
     assert len(centers_out) == len(zs)                # 每个中枢恰好属于一段（PI0 落在组内）
-    return dict(seg_centers=centers_out, bounds=res["bounds"], retracted=res["retracted"],
+    return segments, units_out, centers_out
+
+
+_D28 = True                                       # 只给 trend_check --self-test 的探针关：大盘整后接本级别趋势不切（D2-8）
+
+
+def _d28_cuts(done, ks, segments, units, centers):
+    """D2-8（card-22888623-1a7，小栋 08:45Z 要切，Nova 08:49Z 定落法 (b)）：一段里有合成出来的高一级中枢 U；
+    U 后面先是还跟 U 重叠的本级别中枢（仍在大一级盘整里），再往后有一串 ≥2 个本级别中枢依次同向、互不重叠（按 DD～GG），
+    而且这串第一个跟 U、也跟前面那些还在盘整里的中枢都不重叠 ⇒ 这串是一段本级别趋势，在中间补一刀，切成『升级·盘整』＋『趋势』。
+    切点＝盘整最后一个中枢结束到趋势第一个中枢开始之间、逆着趋势方向的那个线段端点里最极端的（向上取最低，一样低取后一个）。
+    确立＝趋势那串第二个中枢成立、跟第一个不重叠的那一刻（编者口径）；那以前这段照 D3-3 读。
+    → [dict(j, kind, line_seg_confirm, U)]：j ＝ 切点所在的已完成线段下标（刀落在 done[j] 终点、新组从 j+1 起）。"""
+    ov = lambda x, y: not (x["DD"] > y["GG"] or x["GG"] < y["DD"])
+    out = []
+    edges = [0] + ks + [len(done)]
+    for g, (a, b) in enumerate(zip(edges, edges[1:])):
+        us = [u for u in units if u["seg"] == g]
+        if not us:
+            continue                                  # 没有合成框的段不走这条（L29:39-41：盘整的中枢级别要更高）
+        U = us[-1]
+        zz = sorted((z for z in centers if z["seg"] == g and z["X0"] >= U["X1"]), key=lambda z: z["X0"])
+        k = 0
+        while k < len(zz) and ov(zz[k], U):
+            k += 1
+        pan, tr = zz[:k], zz[k:]
+        if len(tr) < 2:
+            continue
+        up = tr[1]["DD"] > tr[0]["GG"]
+        if not up and not tr[1]["GG"] < tr[0]["DD"]:
+            continue                                  # 头两个就重叠：不是趋势
+        run = [tr[0]]
+        for z in tr[1:]:
+            if (z["DD"] > run[-1]["GG"]) if up else (z["GG"] < run[-1]["DD"]):
+                run.append(z)
+            else:
+                break
+        if any(ov(run[0], x) for x in [U] + pan):
+            continue
+        x0 = pan[-1]["X1"] if pan else U["X1"]
+        x1 = run[0]["X0"]
+        cand = [q for q in range(a, b - 1) if x0 <= done[q]["i1"] <= x1 and (done[q]["dir"] == "down") == up]
+        if not cand:
+            continue
+        j = min(cand, key=lambda q: (done[q]["p1"], -q)) if up else max(cand, key=lambda q: (done[q]["p1"], q))
+        if not (a < j + 1 < b):
+            continue
+        out.append(dict(j=j, kind="L" if up else "H", confirm=run[1]["PI0"] + 2, U=U))
+    return out
+
+
+def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_exceed=True, standardize=True):
+    """→ dict(seg_centers, bounds, retracted, pending, segments, units, reading)。
+    seg_centers：按确立的分界切开重算的线段中枢（D4，前端画框就用它），每个带 seg（属于第几段走势，跟 segments 下标对齐）；
+    segments：[dict(i0, i1, type, upgraded, head, live, n_centers_level)]，首尾相接盖满整张图；
+      ★ n_centers_level 是**本级别**中枢个数，跟读法无关；读法 A 的升级段，字母挂在 units 上，个数不是它；
+    units：D3 合成出来的高一级中枢（只列 n>1 的），带 seg，给前端画升级框；
+    reading：这一跑用的 D3 读法（A／B），前端据此决定字母挂哪一级（spec §八 第 6 条）。
+    bounds 里 D2-8 补的那一刀带 via="D2-8"（不是 D2-2 的反方向三类点确立的；相邻同类型只许出现在它两侧）。"""
+    res = find_bounds(r, regroup=regroup, alternate=alternate, check_empty=check_empty, no_exceed=no_exceed,
+                      standardize=standardize)
+    done, ks = res["done"], list(res["ks"])
+    n = len(r["bars"])
+    if not done:
+        return dict(seg_centers=[dict(z, seg=0) for z in r["seg_centers"]], bounds=[], retracted=[], pending=[],
+                    units=[], reading=reading,
+                    segments=[dict(i0=0, i1=n - 1, type="无中枢", upgraded=False, head=True, live=True,
+                                   n_centers_level=0)])
+    segments, units_out, centers_out = _layer(done, ks, reading, n)
+    bounds = list(res["bounds"])
+    if _D28:
+        cuts = _d28_cuts(done, ks, segments, units_out, centers_out)
+        if cuts:                                      # 补刀以后整层重算一次，不再回头找第二轮（同 D6 的「不回头」）
+            for c in cuts:
+                j = c["j"]
+                ks.append(j + 1)
+                bounds.append(dict(line_seg=j, bar=done[j]["i1"], kind=c["kind"], price=done[j]["p1"],
+                                   pullback_line_seg=c["confirm"], pullback_end_bar=done[min(c["confirm"], len(done) - 1)]["i1"],
+                                   ZD=c["U"].get("ZD", c["U"]["DD"]), ZG=c["U"].get("ZG", c["U"]["GG"]), via="D2-8"))
+            ks.sort()
+            bounds.sort(key=lambda b: b["bar"])
+            segments, units_out, centers_out = _layer(done, ks, reading, n)
+    return dict(seg_centers=centers_out, bounds=bounds, retracted=res["retracted"],
                 pending=pending(done, ks, res["want"]), segments=segments, units=units_out, reading=reading)
