@@ -94,6 +94,8 @@
                            换一份旁档 = 换一次测量，不是旋钮（同 `--commit` 那一格）。
     --expect-speaker <语义指纹(key_sha1·判词) 前16位>
                          旁档的**语义指纹**对不上 ⇒ **exit=11、不出数**。
+                         ★ 先验形状（16 位小写十六进制）：打歪／变量没展开 ⇒ **exit=7**，
+                           不再冒充「指纹对不上」（card-2fb866c0）。
                          ★ 指纹对**排序后的 `(key_sha1, 判词)` 对**算 —— **不是**文件 sha256。
                            @iris-64a1 给旁档加了一行 `# columns` 机器可读表头，**一个判词都没改**，
                            文件 sha256 就变了 ⇒ **字节 sha 是"文件长相"的函数**，只能当
@@ -159,7 +161,7 @@
      一个是语料换了，一个是**判据换了**（换旧判据 ⇒ 331/302 → 336/307）
   6  **对象解析出来的树**对不上（--expect-tree）—— **名字一样 ≠ 对象一样**
      （`git tag 05f3e24 335e3a3` ⇒ 同一条命令 ⇒ 400/360）
-  7  某个 `--expect-*` 给的不是它该有的**形状**（三个是长度、`--expect-flags` 是成对的
+  7  某个 `--expect-*` 给的不是它该有的**形状**（四个是长度，含 `--expect-speaker`；`--expect-flags` 是成对的
      `--名 值`）—— **器还没开始量**。4 和 7 都停在"量之前"，可**原因不同**
      （谁没说清对象／谁把常数打歪了）；"共用一句红"正是今天反复栽的那格 ——
      文字分了，出口码也得跟着分
@@ -1627,6 +1629,8 @@ GATE_SITES = {
                           "旁档喂红例：rc=11 且 `脸 =` 必须是那一个", True),
     "旁档·指纹":          (("speaker", "expect_speaker"),
                           "指纹对不上 ⇒ rc=11 且 `脸 = 指纹`", True),
+    "旁档·指纹形状":      (("expect_speaker",),
+                          "指纹打歪（空串/变量没展开）⇒ rc=7、**不许**印成 `脸 = 指纹`（card-2fb866c0）", True),
     "探针·点名豁免":      ((), "点名豁免的那几根：**不出数** ≠ 「没红」（它们占位点、不占格）", False),
     "位点名册":           ((), "★ 本名册自己这道门：位点该有的都在、该说话的都说了", True),
 }
@@ -2425,6 +2429,15 @@ def selfcheck_gate(a, argv):
             red += 0 if ok else 1
             print("   %-14s rc=%d（要 11）· 脸 = %s（要 指纹）⇒ %s"
                   % ("红7 指纹", rc, got.group(1) if got else "**没印**", "✓" if ok else "✗ **没响**"))
+            # 红8 指纹形状（card-2fb866c0）：`--expect-speaker "$FP"` 变量没展开 ⇒ 空串。
+            #   它是**参数写坏了**，不是指纹不符 ⇒ 要走四道常数那条形状门（rc=7），不许冒充「脸 = 指纹」。
+            rc, out = _run_out(base + ["--speaker", q, "--expect-speaker", ""])
+            ok = (rc == 7 and "脸 = 指纹" not in out)
+            _hit("旁档·指纹形状")
+            red += 0 if ok else 1
+            print("   %-14s rc=%d（要 7）· %s ⇒ %s"
+                  % ("红8 指纹形状", rc, "印了「脸 = 指纹」" if "脸 = 指纹" in out else "没冒充指纹不符",
+                     "✓" if ok else "✗ **打歪被印成了指纹对不上**"))
     finally:
         shutil.rmtree(spdir, ignore_errors=True)
 
@@ -2756,7 +2769,11 @@ def main():
     #   ⇒ 判据：**"没给"和"给了个空的"不是一件事**，四个常数一起改成三态（不挑着改）。
     for flag, val, n, name in (("--expect-corpus", a.expect_corpus, 16, "sha256 前16位"),
                                ("--expect-judge", a.expect_judge, 16, "sha256 前16位"),
-                               ("--expect-tree", a.expect_tree, 40, "40位 tree sha")):
+                               ("--expect-tree", a.expect_tree, 40, "40位 tree sha"),
+                               # 第五道（card-2fb866c0）：旁档语义指纹 = sha256 前16位（:865），同一个形状。
+                               # 没有这一行，`--expect-speaker "$FP"` 变量没展开 ⇒ 落到比指纹那一格，
+                               # 印「指纹对不上」exit=11 —— 跟真不符同码同句，读者去找一个不存在的不符。
+                               ("--expect-speaker", a.expect_speaker, 16, "语义指纹前16位")):
         if val is not None and not re.fullmatch(r"[0-9a-f]{%d}" % n, val):
             print("★ %s 给的**不是一个%s**（你给的是 %r，%d 个字符）⇒ **器还没开始量**（exit=7）。"
                   % (flag, name, val, len(val)))
