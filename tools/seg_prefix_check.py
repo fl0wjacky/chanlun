@@ -11,10 +11,12 @@
     只有这条在 zec15 第 836 笔报了一次撤销 —— 那一版还据此误报了 1h 的分界变化。
 main 0760562 上全部样本撤销 0。
 """
+import json
 import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 from core.analyze import analyze                              # noqa: E402
@@ -42,6 +44,17 @@ def main():
         rv = revocations(pens)
         bad += len(rv)
         print("%s %s %d 笔 撤销 %d %s" % ("✓" if not rv else "✗", fn, len(pens), len(rv), rv[:2] if rv else ""))
+    for fn in ("aaplusdt_1h_headdir.json", "zecusdt_4h_headext.json"):   # 图头那两条修法的线上夹具（card-24dd71cb／card-2783fa1f）
+        bars = json.load(open(os.path.join(HERE, "fixtures", fn)))
+        pens = analyze([dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"]) for b in bars], tick=tick_of(fn))["pens"]
+        rv = revocations(pens)
+        bad += len(rv)
+        print("%s fixtures/%s %d 笔 撤销 %d %s" % ("✓" if not rv else "✗", fn, len(pens), len(rv), rv[:2] if rv else ""))
+    fz = json.load(open(os.path.join(HERE, "fixtures", "headfuzz_pens.json")))["seeds"]   # 直接是笔（Atlas 的随机反例）
+    for sd, pens in fz.items():
+        rv = revocations(pens)
+        bad += len(rv)
+        print("%s fixtures/headfuzz_pens.json seed %s %d 笔 撤销 %d %s" % ("✓" if not rv else "✗", sd, len(pens), len(rv), rv[:2] if rv else ""))
     print("全部通过（已确认段只增不撤）" if not bad else "%d 处撤销" % bad)
     return 1 if bad else 0
 
@@ -56,7 +69,17 @@ def self_test():
     pens = analyze(load(os.path.join(ROOT, "data", fn)), tick=tick_of(fn))["pens"]
     rv = revocations(pens, flaky)
     print("%s 故意撤销的划段函数（%s）⇒ 报出 %d 处" % ("✓" if rv else "✗", fn, len(rv)))
-    return 0 if rv else 3
+    # 图头那一条拿掉 cutoff（判 ① 型等到反向段确认）⇒ Atlas 的两组随机反例必须报撤回（card-2783fa1f-da8）
+    import core.segment as SG
+    fz = json.load(open(os.path.join(HERE, "fixtures", "headfuzz_pens.json")))["seeds"]
+    SG.HEAD_EXT_CUTOFF = False
+    try:
+        rv2 = {sd: len(revocations(p)) for sd, p in fz.items()}
+    finally:
+        SG.HEAD_EXT_CUTOFF = True
+    ok2 = all(rv2.values())
+    print("%s 图头那一条不设 cutoff ⇒ 随机反例撤回 %s" % ("✓" if ok2 else "✗", rv2))
+    return 0 if rv and ok2 else 3
 
 
 if __name__ == "__main__":
