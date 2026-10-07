@@ -387,6 +387,7 @@ def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT, memo=None):
 
 
 HEAD_DIR_FIX = True                       # 探针开关：图头那一段终点没越过起点就往后挪一笔（card-24dd71cb-003）
+HEAD_EXT_FIX = True                       # 探针开关：图头那一段起点不是段内极值就往后挪一笔（card-40f4ce13 上线门，线上 ZEC 4h 10-07）
 
 
 def _first_seg(pens, start, mode=FEAT_STD_DEFAULT, memo=None):
@@ -454,9 +455,16 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=
         # ★ 图头那一段：终点没越过起点（向下段终点不低于起点 / 向上段不高于起点）⇒ 起点那一笔是图头外面上一段的尾巴，
         #   这一段划错了（L78:9-10）。跟开头三笔无重叠同一个处理：往后挪一笔再划（card-24dd71cb-003，线上 AAPL 1h/2h）。
         #   只管图头（segs 还空、且不是 _first_seg 从段中间起找）：段界之后的起点由上一段的终点定，不在这里挪。
-        if HEAD_DIR_FIX and not segs and start == 0 and (
+        # ★ 同一家的第二种样子（10-07 线上 ZEC 4h）：终点越过了起点，可起点不是段内极值 —— 向下段段内最高不在起点
+        #   （向上段段内最低不在起点）。起点那一笔照样是图头外面上一段的尾巴（216.85→203.35 之后一路涨到 289.31），
+        #   check_segments A「起点非段内极值且不是 ① 型」报的就是它。同样往后挪一笔（L78:14「从近期的最高或最低点开始」）。
+        head = not segs and start == 0
+        if head and ((HEAD_DIR_FIX and (
                 (seg_dir == "down" and pens[end_pen]["p1"] >= pens[i]["p0"]) or
-                (seg_dir == "up" and pens[end_pen]["p1"] <= pens[i]["p0"])):
+                (seg_dir == "up" and pens[end_pen]["p1"] <= pens[i]["p0"]))) or
+                (HEAD_EXT_FIX and (
+                (seg_dir == "down" and max(pens[k]["hi"] for k in range(i, end_pen + 1)) > pens[i]["p0"]) or
+                (seg_dir == "up" and min(pens[k]["lo"] for k in range(i, end_pen + 1)) < pens[i]["p0"])))):
             i += 1
             born = 0
             continue
