@@ -361,6 +361,14 @@ def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT, memo=None):
     if (up and V <= E1["h"]) or (not up and V >= E1["l"]):
         return None, None                         # V 不高于（低于）前一特征元素，谈不上顶（底）
     gap = (E1["h"] < E2["l"]) if up else (E1["l"] > E2["h"])
+    # ★ 线段 #1（L81:140-145，小栋 10-07 A，card-fff28d01-f13；spec 线段.md #10）：缺口要不被**之前同一特征序列**里的元素盖住
+    #   才算真缺口。同一份包含处理后的序列里、E1 之前有元素整个盖住 E1 和 E2 之间那段空档 ⇒ 不算缺口（只会二→一）。
+    #   E1、E2、分型判定一律不动 —— 只改这一个布尔值（把被盖住的元素从序列里剔掉的读法会让段划不完，弃）。
+    if gap and GAP_COVER:
+        std_all = _feature_std([f[1] for f in feats], up, mode)
+        g0, g1 = (E1["h"], E2["l"]) if up else (E2["h"], E1["l"])
+        if any(F["l"] <= g0 and F["h"] >= g1 for F in std_all[:-1]):
+            gap = False
 
     if not gap:                                   # ③ 第一种情况：第一笔 X 在中间地带
         # L78:32-38（spec/线段.md S-待定-1..3，card-753bd03a-780）：判据是 X 之后的**第一个反向线段**
@@ -408,6 +416,7 @@ def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT, memo=None):
 HEAD_DIR_FIX = True                       # 探针开关：图头那一段终点没越过起点就往后挪一笔（card-24dd71cb-003）
 HEAD_EXT_FIX = True                       # 探针开关：图头那一段起点非段内极值、且不是 L78 ① 型（检查器会报的那种）就往后挪一笔（card-2783fa1f-da8）
 HEAD_EXT_CUTOFF = True                    # 探针开关：图头那一条判 ① 型只看到确认图头段的那一笔（关掉 ⇒ 随机 seed 2435／4750 撤回已确认段）
+GAP_COVER = True                          # 探针开关：缺口被之前同一特征序列元素盖住不算缺口（线段 #1，card-fff28d01-f13）
 
 
 def _first_seg(pens, start, mode=FEAT_STD_DEFAULT, memo=None):
@@ -603,12 +612,17 @@ def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
         pre = [dict(h=pens[j]["hi"], l=pens[j]["lo"]) for j in range(i + 1, k, 2)]
         if not pre:
             return "no", None
-        e1 = std_feats(pre, up)[-1]
+        sf = std_feats(pre, up)
+        e1 = sf[-1]
         v, first = pens[k]["p1"], pens[k + 1]
         beyond_v = (lambda p: p["hi"] > v) if up else (lambda p: p["lo"] < v)
         if (up and not v > e1["h"]) or (not up and not v < e1["l"]):
             return "no", None
         no_gap = first["lo"] <= e1["h"] if up else first["hi"] >= e1["l"]
+        # 线段 #1（L81:140-145，card-fff28d01-f13）：空档被 E1 之前的同序列元素整个盖住 ⇒ 不算缺口（独立按定义写，不调 _case_at）
+        if not no_gap and GAP_COVER:
+            lo_, hi_ = (e1["h"], first["lo"]) if up else (first["hi"], e1["l"])
+            no_gap = any(f["l"] <= lo_ and f["h"] >= hi_ for f in sf[:-1])
         if no_gap:                                # 第一种情况：第一笔 X 在中间地带 —— L78:32-38 看第一个反向线段
             end = first["p1"]
             rev = first_seg_def(k + 2)
