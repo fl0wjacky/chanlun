@@ -4,7 +4,7 @@
 //   {symbol, tf, name, updated, closed, bars[], pens[], segs[], centers[], seg_centers[], signals{seg,pen}, meta{tick,pen_rule}}
 // 取不到后台就退回 `fixtures/`（离线也能看、也能截图对账）；两边都没有就老实说取不到，不画半张图。
 import { CHART, PAGE, CANDLE, WIDTH, SUB, TREND } from './theme.js';
-import { makeBoxPrimitive, makeAnnotPrimitive, makeTrendPrimitive, shownOf, ghostHitAt,
+import { makeBoxPrimitive, makeAnnotPrimitive, makeTrendPrimitive, shownOf, ghostHitAt, boundHitAt,
          refTfName } from './layers.js';
 
 const LWC = window.LightweightCharts;
@@ -746,15 +746,41 @@ function ghostShow(e, g) {
       `极值在 ${ghostDate(g.t)} UTC 的这个${g.kind}，之前确认过 —— 本次打开 ${ghostTime(g.at)} UTC 那次取数时它已经不在了\n`
       + `（只在页面上记着，重开就清空）`;
   }
+  placeTip(e);
+}
+// 摆位置：两个来源（幽灵点、分界）共用这一支 —— 这条式子抄两份，迟早在某一格上错开
+// （跟"坐标换算只留一处"是同一条账）。`pointer-events:none` 见 style.css。
+function placeTip(e) {
   ghostTip.classList.add('on');
   const r = ghostTip.getBoundingClientRect();
   ghostTip.style.left = `${Math.max(8, Math.min(e.clientX + 14, innerWidth - r.width - 8))}px`;
   ghostTip.style.top = `${Math.max(8, Math.min(e.clientY + 14, innerHeight - r.height - 8))}px`;
 }
 function ghostHide() { ghostOn = null; ghostTip.classList.remove('on'); }
+
+// 分界那句（卡 card-22888623-1a7）：大横盘后补切的那一刀，凭什么在这儿（第 29 课）。
+// ★ 认人靠 `rule`，**判据只有一处出处**：后端在 bound 上标的那个值。前端不自己重推一遍
+//   「这一刀算不算 D2-8」—— 重推就是把判据写成两份，迟早在某一格上错开（app.js:130 那条账）。
+// ★★ 字段名**换过一次**，记在这儿免得以后有人去找一个不存在的 `via`：Nova 10-06 拍的是
+//    `via: "D2-8"`，Bram 落引擎时用的是 **`rule`**，而且给**每一刀**都带名字
+//    （普通的 `"D2-2"`＝反方向三类点确立，补的那刀 `"D2-8"`）。引擎是**产的那一头**，
+//    所以前端跟着改成 `rule`；`trend_check` 那边还有一条不变量「每刀都得有认得的 rule」。
+//    ⚠️ 两边名字不同时**不会报错**，浮层只是**静默不出** —— 这类错最费时间，所以才写这一段。
+// ★ 别的分界**不出浮层**：浮层冒出来却什么都不说，比不出来更让人以为这儿有事。
+// ★ 那句话是 Nova 10-06 定的原话，一个字没改（「按第 29 课：大横盘后接一段上涨，在这里切开」）。
+const BOUND_TIP = '按第 29 课：大横盘后接一段上涨，在这里切开';
+function boundShow(e, b) {
+  if (b !== ghostOn) { ghostOn = b; ghostTip.textContent = BOUND_TIP; }
+  placeTip(e);
+}
 el('chart').addEventListener('mousemove', (e) => {
+  // 幽灵点优先：它是个小方框，分界那条带是**满高**的一列 —— 两者叠上时该说话的是那个点
+  // （"这个点之前确认过"是这一眼下更具体的一件事）。
   const g = ghostHitAt(e.clientX, e.clientY);
-  if (g) ghostShow(e, g); else ghostHide();
+  if (g) { ghostShow(e, g); return; }
+  const b = boundHitAt(e.clientX, e.clientY);
+  if (b && b.rule === 'D2-8') { boundShow(e, b); return; }
+  ghostHide();
 });
 el('chart').addEventListener('mouseleave', ghostHide);
 // 图在动（滚轮/拖拽缩放）时记号会跟着挪，指针底下那个可能已经不是它了 ⇒ 收掉，等下一次 mousemove 再说。
@@ -2216,6 +2242,13 @@ function renderMeta(d) {
     + ` ｜ 买卖点 线段中枢层 ${sigTierText(d.signals?.seg || [])} · 类中枢层 ${sigTierText(d.signals?.pen || [])}`
     + measureText(d)
     + cutText(d)
+    // 分界那一刀的说明（卡 card-22888623-1a7）。★ 它**只在这儿写一次**：这句是"整句说明"，
+    // 图例那一行的写法（短名字 ＋ 整句进 `title`）本来就装不下它 —— 1280 ＋ 买卖点那档图例
+    // 只剩 23.9px 余量，加一格最低消费 46px，Nova 10-06 拍了「进图脚、图例不动」。
+    // ★ 措辞是 Nova 定稿的原话，一个字没改（第 29 课 L29:37-41）。
+    // ★ 不写"什么时候不出现"：虚线分界这一层本来就在高低点上，这句说的是**个别那一刀**的来由 ——
+    //   判据在后端（bound 上的 `rule`），前端不自己重推一遍。
+    + ' ｜ 虚线分界一般在高低点；个别是大横盘后接一段趋势时补切的（第 29 课）'
     + ` ｜ 数据源 ${sourceLabel(d.source, d.stale)}`;
   ghostText(d);          // 那一格是浮层（见上），不在这句话里 —— 两处各写一遍就会分家
 }
