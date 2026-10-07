@@ -95,13 +95,13 @@ def firstSegFill(P, frm, mEnd, mConf, mDir):
             if e >= 0: mDir[s] = 1 if up else -1
         mEnd[s] = e; mConf[s] = c; s -= 1
 
-def headStartBad(P, i, endPen, up, mEnd, mConf, mDir):
+def headStartBad(P, i, endPen, up, mEnd, mConf, mDir, cutoff):
     ext = min(P[j]['lo'] for j in range(i, endPen + 1)) if up else max(P[j]['hi'] for j in range(i, endPen + 1))
     if P[i]['p0'] == ext: return False
     x = next((j for j in range(i, endPen + 1) if ((P[j]['p1'] > P[j]['p0']) != up) and (P[j]['lo'] == ext if up else P[j]['hi'] == ext)), -1)
     if x < 0: return True
     s_ = x + 1
-    if not (s_ < len(P) and mEnd[s_] >= 0 and (mDir[s_] == 1) == up): return False   # 量不了 ⇒ 不挪
+    if not (s_ < len(P) and mEnd[s_] >= 0 and (mDir[s_] == 1) == up and mConf[s_] <= cutoff): return False   # 量不了（含反向段在确认那一笔之后才确认）⇒ 不挪
     last = min(endPen, mConf[s_] - 1)
     broke = any((P[j]['hi'] > P[x]['p0']) if up else (P[j]['lo'] < P[x]['p0']) for j in range(x + 1, last + 1))
     return not broke
@@ -115,14 +115,14 @@ def scan(P, i, born, segs, mEnd, mConf, mDir):
         endPen = res = -1
         while k < n - 1 and endPen < 0:
             cse, at = caseAt(P, i, k, up, mEnd, mConf, mDir)
-            if cse > 0: endPen = k; res = at if cse == 1 else 0
+            if cse > 0: endPen = k; res = at if cse == 1 else 0; conf = max(k + 1, at)
             else:
                 k += 2
                 if at >= 0:
                     while k < at: k += 2
         if endPen < 0: stop = True
         elif not segs and (P[endPen]['p1'] <= P[i]['p0'] if up else P[endPen]['p1'] >= P[i]['p0']): i += 1; born = 0   # 图头段方向（24dd）
-        elif not segs and headStartBad(P, i, endPen, up, mEnd, mConf, mDir): i += 1; born = 0   # 图头段起点非极值且非 ① 型（2783fa1f）
+        elif not segs and headStartBad(P, i, endPen, up, mEnd, mConf, mDir, conf): i += 1; born = 0   # 图头段起点非极值且非 ① 型（2783fa1f）
         else: born = res; segs.append((i, endPen)); i = endPen + 1
     return i, born
 
