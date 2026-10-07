@@ -462,6 +462,21 @@ def self_test():
     print("%s D6 只管本级别：第 6 段假装成升级·下跌 ⇒ 框跟不限时%s；拿掉这条 ⇒ %s" % ("✓" if ok else "✗",
           "一样" if on == free else "不一样（该一样）", "被限了（该这样）" if off != free else "没被限（牙没咬到）"))
     miss += not ok
+    # D6-4 在分界上（card-66a0fd73-b30，Nova 12:06Z 定（甲））：确立的参照中枢也先按方向找。刀的位置不动（25 份 0 差），
+    #   只有参照中枢换成限方向那个 ⇒ 看 bounds[].ZG：zecusdt_30m_d3read 的 H 1699.0 照常 ZG 1679.98，拿掉这条回到不限方向的 1494.19。
+    from config import tick_of
+    rd = analyze(json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "zecusdt_30m_d3read.json"))),
+             tick=tick_of("zec_.json"))
+    zg = lambda: [round(b["ZG"], 2) for b in T.trend_v3(rd, reading=READING)["bounds"] if round(b["price"], 2) == 1699.0]
+    on = zg()
+    T._DIR_BOUNDS = False
+    try:
+        off = zg()
+    finally:
+        T._DIR_BOUNDS = True
+    ok = on == [1679.98] and off == [1494.19]
+    print("%s D6-4 在分界上：H 1699.0 的参照中枢 ZG 照常 %s（要 [1679.98]）／拿掉 %s（要 [1494.19]）" % ("✓" if ok else "✗", on, off))
+    miss += not ok
     # 线段 #1 的反向验证（card-fff28d01-f13）：拿掉「被盖住的缺口不算」⇒ btc_4h 的分界回到旧的 97932.1
     import core.segment as SG
     SG.GAP_COVER = False

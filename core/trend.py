@@ -50,6 +50,7 @@ _HEAD_FIRST = False                               # 只给 trend_check --self-te
 _BLOCK_RETRACTED = True                           # 只给 trend_check --self-test 的探针关：D2-7 去掉过的那一对照旧反复确立／撤回
 _MOVE_ENDS = True                                 # 只给 trend_check --self-test 的探针关：图头起点／末段终点不挪
 _DIR_RULE = True                                  # 只给 trend_check --self-test 的探针关：L24:84-85 中枢方向不限（card-40f4ce13）
+_DIR_BOUNDS = True                                # 只给 trend_check --self-test 的探针关：分界的参照中枢照旧只用不限方向那组（D6-4 在分界上）
 
 
 def _standardize(done, bars):
@@ -117,8 +118,9 @@ def _is_up(s):
     return s["dir"] == "up"                      # 按线段自己的方向，不按端点高低（spec D2-0；线段层偶有终点不高于起点的坏段，card-24dd71cb-003）
 
 
-def _try_confirm(done, t, ks, typ, lo, no_exceed=True):
-    """第 t 步、方向 typ（'H'/'L'）能不能确立 → (j, Z) 或 None。j ＝ 死点所在线段（刀落在 done[j]['i1']）。"""
+def _try_confirm(done, t, ks, typ, lo, no_exceed=True, from_kind=None, reading="A"):
+    """第 t 步、方向 typ（'H'/'L'）能不能确立 → (j, Z) 或 None。j ＝ 死点所在线段（刀落在 done[j]['i1']）。
+    from_kind：上一刀的 kind（None ＝ 图头），给 D6-4 在分界上也先按方向找参照中枢用。"""
     cand = range(lo, t - 1)                      # 到 t-2 为止：后面要留离开段、回抽段
     if not cand:
         return None
@@ -134,7 +136,21 @@ def _try_confirm(done, t, ks, typ, lo, no_exceed=True):
     if no_exceed and after and (max(a["hi"] for a in after) > done[j]["p1"] if typ == "H"
                                 else min(a["lo"] for a in after) < done[j]["p1"]):
         return None
-    zs = _centers_with_cuts(done[:t + 1], ks)
+    zs = None
+    # ★ D6-4 在分界上（card-66a0fd73-b30，Nova 12:06Z 定（甲）：L45:127「同一分解不能用不同的结合」）：
+    #   参照中枢跟段型／画框用同一种找法 —— 这一组（上一刀 → t）先按方向找（从 L 起 ⇒ 首段向下、确立 H；H 反过来），
+    #   按 D3 判得出同方向的本级别趋势（非升级）就用这组，否则照旧不限方向。图头不限，跟 _layer 一致。
+    #   D6-2 豁免（前段是反向本级别趋势 ⇒ 第一个框不限）这里不放：前段的最终段型要到 _layer 才有。
+    #   为什么分界几乎不受影响：参照的是这组**最后一个**中枢，D6-4 的毛病出在**第一个**（Atlas 12:06Z 25 份 0 差）。
+    if _DIR_RULE and _DIR_BOUNDS and ks and from_kind and from_kind != typ:
+        want = "上涨" if typ == "H" else "下跌"
+        cz = classify_relations(_group_centers(done, lo, t + 1, len(ks), True,
+                                               start_dir="down" if typ == "H" else "up"))
+        k, up = classify(cz, reading, done)
+        if k == want and not (_D6_BASE_ONLY and up):
+            zs = cz
+    if zs is None:
+        zs = _centers_with_cuts(done[:t + 1], ks)
     ref = [z for z in zs if z["PI0"] >= lo and z["X0"] <= done[j]["i1"]]
     if not ref:
         return None                              # 本段走势里还没有中枢 ⇒ 一直中阴（D2-6）
@@ -147,7 +163,7 @@ def _try_confirm(done, t, ks, typ, lo, no_exceed=True):
     return (j, z) if ok else None
 
 
-def find_bounds(r, regroup=True, alternate=True, check_empty=True, no_exceed=True, standardize=True):
+def find_bounds(r, regroup=True, alternate=True, check_empty=True, no_exceed=True, standardize=True, reading="A"):
     """→ dict(bounds, retracted)。四个开关是 spec §四 的探针 P1／P2／P5／P3（默认全开 ＝ 规则本身）。
     bounds：[dict(line_seg=j, bar, kind 'H'/'L', price, pullback_line_seg=t, pullback_end_bar, ZD, ZG)]，按时间升序；
       ★ line_seg／pullback_line_seg 是**已完成线段**的下标（不是走势段号）—— 对外 `seg` 只指 segments[] 下标（Iris 10-05 17:51）；
@@ -163,7 +179,8 @@ def find_bounds(r, regroup=True, alternate=True, check_empty=True, no_exceed=Tru
         for typ in ("H", "L"):
             if want and typ != want:
                 continue
-            hit = _try_confirm(done, t, ks if regroup else [], typ, lo, no_exceed)
+            hit = _try_confirm(done, t, ks if regroup else [], typ, lo, no_exceed,
+                               bounds[-1]["kind"] if bounds else None, reading)
             if hit is None:
                 continue
             j, z = hit
@@ -398,7 +415,7 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
     units：D3 合成出来的高一级中枢（只列 n>1 的），带 seg，给前端画升级框；
     reading：这一跑用的 D3 读法（A／B），前端据此决定字母挂哪一级（spec §八 第 6 条）。"""
     res = find_bounds(r, regroup=regroup, alternate=alternate, check_empty=check_empty, no_exceed=no_exceed,
-                      standardize=standardize)
+                      standardize=standardize, reading=reading)
     done, ks = res["done"], res["ks"]
     n = len(r["bars"])
     if not done:
