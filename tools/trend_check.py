@@ -64,6 +64,9 @@ def kline_files():
 # D2-0（10-06）以后 zec15 是 8 段：多切出 3699／4575 两刀，原先第 1 段（490–7558，读法 B「上涨」）被切成三段，各自中枢不够两个以上
 #   不重叠 ⇒ 都是盘整；原先第 5 段（14215 起）照旧「上涨」。
 TYPES = {"zec15.json": ["盘整", "盘整", "盘整", "盘整", "盘整", "盘整", "下跌", "上涨"]}
+# ★ 10-07 D3 改 A（card-0374e640-127，一A二A）：读法 A、合成框按高一级 3+3+3 重算（D3-2 推广口径 (iii)）、
+#   最后一个中枢还在走不合成（D3-4）。zec15 八段（「·升」＝含合成出来的高一级中枢、整段升一级读）：
+TYPES = {"zec15.json": ["盘整", "盘整·升", "盘整", "盘整", "盘整", "盘整·升", "下跌", "盘整·升"]}
 FIX_D2STD = os.path.join(ROOT, "tools", "fixtures", "zec1m_d2std.json")
 # card-eecdfd08：ZEC 永续 1m 一段（04-08 前后），旧程序在这里把同一对 (308.24 L, 394.0 H) 确立又撤回 13 次
 FIX_RETRACT = os.path.join(ROOT, "tools", "fixtures", "zec1m_retract_loop.json")   # Atlas 10-06：ZEC 永续 1m，04-29 317.74 真低点在向上线段段内
@@ -154,6 +157,27 @@ def invariants(fn):
             if done[z["PI0"]]["dir"] != want:
                 bad.append("%s段 %d 里的框 %d–%d 首段向%s（L24:85 要向%s）" % (
                     sg["type"], g, z["X0"], z["X1"], "上" if want == "down" else "下", "下" if want == "down" else "上"))
+    # ★ D3-2／D3-4（card-0374e640-127）独立按定义查每个合成框：不调 _regroup，从框盖住的线段直接算 ——
+    #   线段数 ≥9 且 9＋3k；头三组（各 3 条线段，区间取最低～最高）的 [max 低, min 高] 就是 ZD／ZG 且有重叠；
+    #   之后每组都跟 [ZD, ZG] 有重叠；DD／GG＝各组最低／最高。它所在那条扩展链的最后一个中枢不许还在走。
+    for u in v["units"]:
+        cov = [k for k, x in enumerate(done) if x["i0"] >= u["X0"] and x["i1"] <= u["X1"]]
+        if len(cov) < 9 or (len(cov) - 9) % 3 or cov != list(range(cov[0], cov[0] + len(cov))):
+            bad.append("合成框 %d–%d 盖住 %d 条线段（要 9＋3k）" % (u["X0"], u["X1"], len(cov)))
+            continue
+        gs = [(min(done[q]["lo"] for q in cov[m:m + 3]), max(done[q]["hi"] for q in cov[m:m + 3])) for m in range(0, len(cov), 3)]
+        zd, zg = max(x[0] for x in gs[:3]), min(x[1] for x in gs[:3])
+        if zd > zg or u.get("ZD") != zd or u.get("ZG") != zg or any(x[0] > zg or x[1] < zd for x in gs[3:]) \
+                or (u["DD"], u["GG"]) != (min(x[0] for x in gs), max(x[1] for x in gs)):
+            bad.append("合成框 %d–%d 区间不是按 3+3+3 算的（%s～%s）" % (u["X0"], u["X1"], u["DD"], u["GG"]))
+        zz = sorted((z for z in v["seg_centers"] if z["seg"] == u["seg"]), key=lambda z: z["X0"])
+        k0 = next((k for k, z in enumerate(zz) if z["X0"] == u["X0"]), None)
+        if k0 is not None:
+            k1 = k0
+            while k1 + 1 < len(zz) and zz[k1 + 1]["kind"] == "扩展":
+                k1 += 1
+            if zz[k1]["live"]:
+                bad.append("合成框 %d–%d 所在扩展链的最后一个中枢还在走（D3-4 不该合成）" % (u["X0"], u["X1"]))
     if sum(s["n_centers_level"] for s in seg) != len(v["seg_centers"]):
         bad.append("各段 n_centers_level 之和 ≠ seg_centers 个数")
     if seg[0]["i0"] != 0 or seg[-1]["i1"] != len(r["bars"]) - 1 or any(
@@ -221,8 +245,9 @@ def main():
     in_box = [z for z in v["seg_centers"] if z["X0"] < 11314 < z["X1"]]
     cell("③ 367.77（bar 11314）不是分界、落在框里",
          [] if 11314 not in [b["bar"] for b in v["bounds"]] and in_box else ["11314 是分界或不在框里"])
-    cell("⑤ 段类型按线上读法 B（spec D3，server.TREND_READING）", [] if v["reading"] == "B" and [s["type"] for s in v["segments"]] == TYPES["zec15.json"]
-         else ["读法 %s 段类型 %s" % (v["reading"], [s["type"] for s in v["segments"]])])
+    tys = [s["type"] + ("·升" if s["upgraded"] else "") for s in v["segments"]]
+    cell("⑤ 段类型按线上读法 A（spec D3-3，server.TREND_READING）", [] if v["reading"] == "A" and tys == TYPES["zec15.json"]
+         else ["读法 %s 段类型 %s" % (v["reading"], tys)])
     cell("⑥ 每个分界是两邻分界之间的极值（直接从 K 线算，不经线段）", extreme_between())
     cell("⑦ D2-0 夹具 zec1m_d2std：04-29 那个 317.74 L 要确立（候选卡死就没有）", d2std_fixture())
     cell("⑧ 同一对 (b, b′) 被 D2-7 去掉最多一次（编者口径；含 zec1m_retract_loop 夹具）", retract_once())
@@ -278,8 +303,7 @@ def self_test():
     arms = [("P1 拿掉 D2-4（不重算中枢）", dict(regroup=False), lambda v: len(v["bounds"]) != len(base["bounds"])),
             ("P2 拿掉 D2-3（不交替）", dict(alternate=False), lambda v: len(v["retracted"]) != len(base["retracted"])),
             ("P5 拿掉 D2-7（空段照切）", dict(check_empty=False), lambda v: len(v["bounds"]) != len(base["bounds"])),
-            ("D3 换回读法 A（⑤ 那一格必须看得见）", dict(reading="A"),
-             lambda v: [s["type"] for s in v["segments"]] != [s["type"] for s in base["segments"]])]
+]
     miss = 0
     # P3（「H 之后价格不再过 H」，按段内 hi／lo）。card-753bd03a（L78 待定改判）以后 zec_1h 第 8 段拆开了，原来那颗牙
     # （zec_1h 不交替 1 刀 1 撤 ↔ 0 刀 3 撤）没了；现在默认规则下 zec15 就咬得到：留着 5 刀，拿掉 7 刀。
@@ -361,6 +385,26 @@ def self_test():
         _R.clear()
     print("%s L24:85 拿掉中枢方向限制 ⇒ 报出 %d 个框（例 %s）" % ("✓" if dirv else "✗", len(dirv), dirv[:1]))
     miss += not dirv
+    # D3-3 读法的反向验证：合成框按 3+3+3 重算以后，data/ 夹具上读法 A／B 段型都一样了（升级段两种读法都是盘整），
+    #   所以这颗牙放在线上 ZEC 30m 冻的夹具上（10-07，第 5 段：A＝升级·盘整、B＝上涨）。
+    from config import tick_of
+    fx = load(os.path.join(ROOT, "tools", "fixtures", "zecusdt_30m_d3read.json"))
+    ra = T.trend_v3(analyze(fx, tick=tick_of("zecusdt_30m_d3read.json")), reading="A")
+    rb = T.trend_v3(analyze(fx, tick=tick_of("zecusdt_30m_d3read.json")), reading="B")
+    seg_ab = lambda v: [(x["type"], x["upgraded"]) for x in v["segments"]]
+    ok = seg_ab(ra) != seg_ab(rb)
+    print("%s D3 换回读法 B ⇒ ZEC 30m 夹具段型变（A %s ／ B %s）" % ("✓" if ok else "✗",
+          [t for t, _ in seg_ab(ra)], [t for t, _ in seg_ab(rb)]))
+    miss += not ok
+    # D3-2／D3-4 的反向验证（card-0374e640-127）：各拧回旧写法，不变量必须报
+    for flag, fn, name in (("_D3_REGROUP", "zec15.json", "合成框退回拼 DD／GG"), ("_D3_LIVE_TAIL", "zec30_cut.json", "最后一个中枢还在走也合成")):
+        setattr(T, flag, False)
+        try:
+            hits = [x for x in invariants(fn) if "合成框" in x]
+        finally:
+            setattr(T, flag, True)
+        print("%s D3 %s ⇒ 报出 %d 处（例 %s）" % ("✓" if hits else "✗", name, len(hits), hits[:1]))
+        miss += not hits
     for name, kw, changed in arms:
         _, v = run("zec15.json", **kw)
         ok = changed(v)

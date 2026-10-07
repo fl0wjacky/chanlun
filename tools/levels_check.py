@@ -26,10 +26,10 @@ FILES = {"15m": "zec15.json", "30m": "zec30_cut.json", "1h": "zec_1h.json", "2h"
 
 # §二 2：15m 五个合成框 → (status, {对照图中枢序号: 占比})；占比容 ±1（spec 按开盘时刻量、这里含最后一根的时长）
 # 第 1 个：27% 在 1h #1、其余 73% 在 1h 第一个中枢之前 ⇒ partial（Nova 10-06 定的第四种状态，不算分歧）
-UNITS_15_VS_1H = [("partial", {1: 27}), ("mismatch", {1: 63, 2: 14}), ("match", {2: 100}),
-                  ("match", {2: 100}), ("match", {2: 100})]
-# 第 5 个：L24:84-85（card-40f4ce13，10-07）以后 15m 那一段上涨里只认下上下 ⇒ 这个合成框变成 07-29→08-15、
-#   451.54～531.91、2 个中枢，整个落在 1h #2 里 ⇒ match（原来 07-29→09-02、跨 #2／#3 ⇒ mismatch）。spec §二 2 由 Atlas 跟着改。
+UNITS_15_VS_1H = [("partial", {1: 26}), ("match", {2: 100}), ("match", {2: 100})]
+# 10-07 D3 改 A（card-0374e640-127）：合成框按高一级 3+3+3 重算、不足 9 段不合成 ⇒ ZEC 15m 夹具的合成框 5 → 3 个：
+#   03-08→04-06 191.35～289.31（26% 在 1h #1、其余在它之前 ⇒ partial）、06-05→07-07 250～544.28、07-29→08-15 451.54～531.91（都整个在 1h #2 ⇒ match）。
+#   原来 §二 2 第 2、3 个（04-19→05-20、05-20→06-03）不足 9 段，构不成高一级中枢。spec §二 2 由 Atlas 跟着改。
 # §四 第 4 项（L-7）：各图对 15m 的起点
 START = {"30m": "window", "1h": "differs", "2h": "same", "4h": "differs"}
 
@@ -39,7 +39,7 @@ def view(tf):
     raw = json.load(open(os.path.join(ROOT, "data", fn)))
     bars = raw["bars"] if isinstance(raw, dict) else raw
     bars = [dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"]) for b in bars]
-    v = trend_v3(analyze(bars, tick=tick_of(fn)), reading="B")
+    v = trend_v3(analyze(bars, tick=tick_of(fn)), reading="A")
     return dict(t=[b["t"] for b in bars], step=TFS[tf], bounds=v["bounds"], centers=v["seg_centers"], units=v["units"])
 
 
@@ -68,6 +68,12 @@ def run(V):
     e = LV.unit_links(h, r)[0]
     if e["status"] != "match" or e["share"] != [{"i": 1, "pct": 100}]:
         bad.append("正好铺满一个对照中枢的框没判成 100%% match：%s" % e)
+    # 跨两个相邻中枢、没有 gap：60%／40% ⇒ mismatch（L-9 要 100%）。门槛退回 50% 就会判成 match（夹具上那条 63% 的框 D3 以后没了，换成造的）
+    h = dict(t=[i * 15 * M for i in range(40)], step=15 * M, bounds=[], centers=[], units=[{"X0": 0, "X1": 39}])
+    r = dict(t=[i * 60 * M for i in range(10)], step=60 * M, bounds=[], centers=[{"X0": 0, "X1": 5}, {"X0": 6, "X1": 9}], units=[])
+    e = LV.unit_links(h, r)[0]
+    if e["status"] != "mismatch" or e["share"] != [{"i": 1, "pct": 60}, {"i": 2, "pct": 40}]:
+        bad.append("跨两个中枢 60／40 的框没判成 mismatch：%s" % e)
     # 没量到：对照图没有 ⇒ 全 unmeasured；最细图没有 ⇒ unmeasured；对照窗口没盖住 ⇒ unmeasured
     if any(u["status"] != "unmeasured" for u in LV.unit_links(V["15m"], None)):
         bad.append("没有对照图却没写 unmeasured")
