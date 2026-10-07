@@ -75,8 +75,8 @@ URL 参数（都可分享 / 可截图复现同一段）：
 ```bash
 python3 tools/web_theme_sync.py              # ① 色/线宽跟 style.py ＋ chanlun.pine 逐格比；不对就 rc=1
 python3 tools/web_theme_sync.py --selftest   #    探针：改错一格必须变红（证明这把尺真会红）
-python3 tools/web_footer_check.py            # ② 图脚「买卖点」那段在 390px 下放不放得下一行 ＋「数据源」那格不许空
-python3 tools/web_footer_check.py --selftest #    探针：十格都得变红
+python3 tools/web_footer_check.py            # ② 图脚「买卖点」那段在 390px 下放不放得下一行 ＋「数据源」「背驰看法」「中枢切法」三格印得出真实的值
+python3 tools/web_footer_check.py --selftest #    探针：十七格都得变红
 python3 web/check_parity.py                  # ③ 结构与 Python 逐根对账（9 份数据 / 2707 个结构；要 PIL）
 python3 tools/web_fmt_check.py               # ④ 价签数字 ≡ Python 的 `"%g" % round(v, 2)`（逐字相同）
 python3 tools/web_fmt_check.py --selftest    #    探针：六格都得变红（含「取整交给 toFixed」那版）

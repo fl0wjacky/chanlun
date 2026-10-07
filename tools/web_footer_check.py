@@ -53,7 +53,7 @@
      所以这格「切不到」**不是错**，跟「数据源」那格必须有个值不一样，两把切法分开写。
 
 跑法：
-  python3 tools/web_footer_check.py            # 主跑：拿实时规模的样本量 ＋ 数据源/背驰看法那两格
+  python3 tools/web_footer_check.py            # 主跑：拿实时规模的样本量 ＋ 数据源/背驰看法/中枢切法那三格
   python3 tools/web_footer_check.py --selftest # 探针：十七格都得变红（尺子自己先证明会红）
 """
 import json
@@ -275,10 +275,27 @@ def measure_check(quiet=False):
 
 # 「中枢切法」那格（card-e346ede6-996，2026-10-05 加）：跟「背驰看法」那格**同一套规矩** ——
 # 认的是 **d.cut（后台的回显）**，不是用户点的那颗、也不是 /api/meta 给的那份名单。
-# ★ 一处**故意不一样**，钉在探针 ⑰：**缺省那一档也要印**（缺省 2026-10-05 起是「按转折切」，
-#   见 `web/app.js` 的 `DEFAULT_CUT`）。这是一张图的记录 ——
-#   「延伸」「按转折切」两张对照图就靠这一格分开；要是"只在换了才印"，切换前那张图上
+# ★ 一处**故意不一样**，钉在探针 ⑰：**缺省那一档也要印**（缺省 **2026-10-06 起是「走势分段」**，
+#   见 `web/app.js` 的 `DEFAULT_CUT = 'trend'`）。这是一张图的记录 ——
+#   「延伸」「走势分段」两张对照图就靠这一格分开；要是"只在换了才印"，切换前那张图上
 #   没有任何一处说得出它是哪种切法（那就成了两张长得一样、含义不同的图）。
+#
+# ★★ 这一格**换过一次尺**（2026-10-07，card-22888623-1a7，Atlas 查的账）：缺省 10-06 从 turn
+#    改成 trend 时（`dac61cb`）**只改了后台和 app.js，忘了改这把尺** —— 于是这格一直拿
+#    「回显 turn ⇒『按转折切』」当期望，对着一个**后台已经不回的档位**报警。
+#    代码是好的，是尺旧了。现在按后台的实情重钉：
+#      · 回显 `trend` ⇒「走势分段」——**这才是今天的缺省那一档**；
+#      · 回显 `turn`  ⇒ 字面 `'turn'`。**这条不是"另一种档位"，是一条绊线** ——
+#        `web/server.py` 的 `CUT_ALIAS = {"turn": "trend"}` 把老链接当 trend 收、**回显 trend**，
+#        而 `CUT_NAME` 里**故意不给 turn 留名字**（`app.js`:2185-2188 写着为什么：留了反而会印出
+#        一个后台已经不用的档位）。所以 turn 今天走的是「名单外的新名字**原样印**」那条路
+#        —— 跟 zigzag 同一条规矩。哪天有人把 turn 的中文名加回 `CUT_NAME`，这条就红：
+#        那等于**把 `dac61cb` 撤销了**，该有人看一眼。
+#    ⚠️ 教训（写在这儿，别再踩）：**探针里引用的字面量，跟它一起过期**。⑭⑮⑰ 当时钉的都是
+#       「按转折切」——这个词前台已经印不出来了，于是 ⑭⑮ 变成**空过**（拿一个谁都印不出的词
+#       当"不相等"的另一边，永远成立），⑰ 也探错了档。⑰ 自己那句注释（"字面量得跟
+#       `DEFAULT_CUT` 一起翻"）写的就是这件事 —— 上一趟没照做。改尺时**先搜一遍这个文件里
+#       所有跟被改档位有关的字面量**，别只看判据那几行。
 CUT_RE = re.compile(r"｜\s*中枢切法\s*(\S+)")
 
 
@@ -290,23 +307,28 @@ def cut_cell(meta):
 
 
 def cut_check(quiet=False):
-    """判据：图脚那格＝**它自己给的那份回显**，四态（跟 measure_check 同形）。
+    """判据：图脚那格＝**它自己给的那份回显**，五态（跟 measure_check 同形）。
 
-    回显 turn ⇒「按转折切」／回显 extend ⇒「延伸」（**两档都印，缺省那档也不例外**）／后台新加的名字**原样印**（不吞）
+    回显 trend ⇒「走势分段」（**这是今天的缺省那一档，也印**）／回显 extend ⇒「延伸」（也印）
+    ／回显 turn ⇒ **原样的 'turn'**（后台当 trend 收、不回 turn，所以这条走"名单外原样印"那条路；
+    见上面那段：这是一条绊线，不是第二种档位）／后台新加的名字 ⇒ **原样印**（不吞）
     ／没有这个字段 ⇒ **整格不出现**（旧后台、离线样本：不知道的事不编）。
     另加一验：这一格插在「数据源」前面，不许把它挤坏。"""
-    got = (cut_cell(footer_text(dict(PAYLOAD, cut="turn"))),
+    got = (cut_cell(footer_text(dict(PAYLOAD, cut="trend"))),
            cut_cell(footer_text(dict(PAYLOAD, cut="extend"))),
+           cut_cell(footer_text(dict(PAYLOAD, cut="turn"))),
            cut_cell(footer_text(dict(PAYLOAD, cut="zigzag"))),
            cut_cell(footer_text(PAYLOAD)))
-    want = ("按转折切", "延伸", "zigzag", None)
-    src_got = source_of(footer_text(dict(PAYLOAD, cut="turn")))
+    want = ("走势分段", "延伸", "turn", "zigzag", None)
+    src_got = source_of(footer_text(dict(PAYLOAD, cut="trend")))
     src_ok = src_got == "币安实时"
     ok = got == want and src_ok
     if not quiet:
-        for name, g, w in zip(("回显 turn（现缺省）", "回显 extend（另一档，也印）", "名单外的新名字（原样印）", "没有这个字段（旧后台/样本）"), got, want):
-            print("  中枢切法那格：%-28s ⇒ %-10r（要 %r）" % (name, g, w))
-        print("  中枢切法那格：%-28s ⇒ %r（要 '币安实时'）" % ("它后面那格「数据源」", src_got))
+        for name, g, w in zip(("回显 trend（现缺省）", "回显 extend（另一档，也印）",
+                              "回显 turn（后台已不收 ⇒ 原样印，绊线）",
+                              "名单外的新名字（原样印）", "没有这个字段（旧后台/样本）"), got, want):
+            print("  中枢切法那格：%-38s ⇒ %-10r（要 %r）" % (name, g, w))
+        print("  中枢切法那格：%-38s ⇒ %r（要 '币安实时'）" % ("它后面那格「数据源」", src_got))
     return got, src_got, ok
 
 
@@ -511,6 +533,9 @@ process.stdout.write(JSON.stringify({t: sigTierText([
     # ⑭–⑰ 「中枢切法」那格的四格探针（2026-10-05 加这一格时配的）。
     #     判据是「名字＝**d.cut 那份回显**」⇒ 四件事都得钉住：接线在不在、认不认回显、缺字段编不编、
     #     **缺省那一态印不印**（这一条是本格特有的，见 CUT_RE 上面那段）。
+    # ★★ 2026-10-07 跟着缺省一起翻的字面量：⑭⑮⑰ 原来钉的是「按转折切」／`cut="turn"`，
+    #    缺省改 trend 之后那个词前台**印不出来**了 ⇒ ⑭⑮ 的「不相等」永远成立（空过），
+    #    ⑰ 探的也不是缺省那一档。**探针引用的字面量跟判据一起过期**，改尺时全文件搜一遍。
     def _crun(bjs, payload):
         try:
             return cut_cell(footer_text(payload, block_js=bjs))
@@ -520,14 +545,14 @@ process.stdout.write(JSON.stringify({t: sigTierText([
     # ⑭ 接线被摘掉（模板里不再调 cutText）⇒ 必须印不出名字
     b = _mut("+ cutText(d)", "+ ''")
     if b is not None:
-        got = _crun(b, dict(PAYLOAD, cut="turn"))
-        cases.append(("⑭ 模板不再调 cutText ⇒ 印成 %r，判据必须不认" % got, got != "按转折切"))
+        got = _crun(b, dict(PAYLOAD, cut="trend"))
+        cases.append(("⑭ 模板不再调 cutText ⇒ 印成 %r，判据必须不认" % got, got != "走势分段"))
 
-    # ⑮ ★ 写死成某一档（不认回显）：回显说是 turn，格子却印「延伸」⇒ 判据必须不认
+    # ⑮ ★ 写死成某一档（不认回显）：回显说是 trend，格子却印「延伸」⇒ 判据必须不认
     b = _mut("const c = d.cut;", "const c = 'extend';")
     if b is not None:
-        got = _crun(b, dict(PAYLOAD, cut="turn"))
-        cases.append(("⑮ 写死缺省、不认回显 ⇒ 印成 %r，判据必须不认" % got, got != "按转折切"))
+        got = _crun(b, dict(PAYLOAD, cut="trend"))
+        cases.append(("⑮ 写死缺省、不认回显 ⇒ 印成 %r，判据必须不认" % got, got != "走势分段"))
 
     # ⑯ 缺字段那态塌成一态：没有 cut 也硬印一个 ⇒ 判据必须不认
     b = _mut("if (typeof c !== 'string' || !c) return '';", "if (false) return '';")
@@ -537,14 +562,14 @@ process.stdout.write(JSON.stringify({t: sigTierText([
 
     # ⑰ ★ 本格特有的那一条：**只在不等于缺省时才印**（"少印一格是省事"的写法）⇒ 缺省那档必须印不出来。
     #   ★★ 探的既然是**缺省那一档**，这个字面量就得跟 `web/app.js` 的 `DEFAULT_CUT` 一起翻
-    #      （2026-10-05 起缺省＝turn）。拿 extend 当"缺省"来探的话，在 turn 当缺省的世界里它照样
-    #      红得挺像样，其实探的是**另一档** —— "缺省被吞掉"这件事就没人钉了。
-    b = _mut("const c = d.cut;", "const c = d.cut === 'turn' ? '' : d.cut;")
+    #      （**2026-10-06 起缺省＝trend／「走势分段」**）。拿 extend 当"缺省"来探的话，在 trend
+    #      当缺省的世界里它照样红得挺像样，其实探的是**另一档** —— "缺省被吞掉"这件事就没人钉了。
+    b = _mut("const c = d.cut;", "const c = d.cut === 'trend' ? '' : d.cut;")
     if b is not None:
-        got = _crun(b, dict(PAYLOAD, cut="turn"))
-        # 这一格的"红"是**那一格消失**（判据要的是「按转折切」四个字都在）—— 跟 ⑯ 正好相反：
+        got = _crun(b, dict(PAYLOAD, cut="trend"))
+        # 这一格的"红"是**那一格消失**（判据要的是「走势分段」四个字都在）—— 跟 ⑯ 正好相反：
         # ⑯ 是"不该有的却在"，这一格是"该在的却没了"。两个方向都得钉住。
-        cases.append(("⑰ 缺省那档不印（按转折切时整格消失）⇒ 印成 %r，判据必须不认" % got, got != "按转折切"))
+        cases.append(("⑰ 缺省那档不印（走势分段时整格消失）⇒ 印成 %r，判据必须不认" % got, got != "走势分段"))
 
     print("探针（每一格都必须红）：")
     for name, red in cases:
