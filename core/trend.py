@@ -312,30 +312,38 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
                                    n_centers_level=0)])
     zs = _centers_with_cuts(done, ks)
     edges = [0] + ks + [len(done)]
-    # ★ L24:84-85（card-40f4ce13，小栋 10-07 选 A）：「如果是向上的走势，里面的中枢一定是下-上-下的，向下的相反」。
-    #   走势方向靠中枢判，中枢又要看走势方向 ⇒ 两遍、不回头（Atlas 10-07 spec 写法）：
-    #   ① 分界（find_bounds）和每段的段型都用**不加限制**的中枢先算一遍，冻住；
-    #   ② 只在第一遍判成上涨／下跌的段里按方向重找中枢（上涨段的框从向下那条起，下跌段反过来）。
-    #      豁免（L45:122-124）：前一走势段（第一遍）是反向的 ⇒ 段内第一个框不限。图头那段不限（前面是什么不知道）；
-    #   ③ 段型用第二遍的中枢重分一次 —— 不再回头改分界、不再重新决定限不限。
-    #   ★ 所以 D4「同一套中枢既画框又判分界」在上涨／下跌段里不再成立：分界和 bounds[].ZD／ZG 用的是第一遍。
-    kinds0 = [classify([z for z in zs if a <= z["PI0"] < b], reading, done) for a, b in zip(edges, edges[1:])]
-    # ★ D6 只管**本级别**的上涨／下跌（Nova 10-07 08:00Z，card-0374e640-127）：含合成框的段（升级·上涨／下跌）
-    #   不是本级别走势（D3-3 一A），不限方向；首中枢豁免里「前一段是反向趋势」也只认本级别的，升级·趋势不算。
-    base = lambda k: kinds0[k][0] if (kinds0[k][0] in ("上涨", "下跌") and not (_D6_BASE_ONLY and kinds0[k][1])) else None
-    if _DIR_RULE:
-        grouped = []
-        for g, (a, b) in enumerate(zip(edges, edges[1:])):
-            last = g == len(edges) - 2
-            if g and base(g):
-                opp = "下跌" if base(g) == "上涨" else "上涨"
-                grouped += _group_centers(done, a, b, g, last, start_dir="down" if base(g) == "上涨" else "up",
-                                          free_first=base(g - 1) == opp)
-            else:
-                grouped += _group_centers(done, a, b, g, last)
-        zs = classify_relations(grouped)
-        for z in zs:
-            z.pop("seg", None)
+    bounds_ = res["bounds"]
+    # ★ L24:84-85（card-40f4ce13）：上涨走势里的中枢只认下上下、下跌里只认上下上（D6）。
+    #   ★ D4「同一套中枢既画框又判分界」在上涨／下跌段里不成立：分界和 bounds[].ZD／ZG 用不限方向的，画框用限方向的。
+    # ★ D6-4（2026-10-07 09:16Z Nova 改，card-66a0fd73-b30；spec bd5872b）：段型**先按方向判**。
+    #   图头以外每段：照这段的方向（从低点起 ⇒ 首段须向下；从高点起 ⇒ 首段须向上）限方向找中枢，豁免照 D6-2
+    #   （前一段的最终段型是本级别反向趋势 ⇒ 段内第一个框不限）。这组中枢按 D3 判得出**同方向的本级别趋势**
+    #   （上涨／下跌、不是升级段）⇒ 段型就是它、画框也用它；判不出 ⇒ 改用不限方向的中枢按 D3 判（盘整／升级·…）。
+    #   为什么：先不限方向定段型，从极值出发的那一笔（连接段 a）会被吞成第一个中枢的首段，趋势被遮成盘整，D6 就不再限了。
+    #   不打转：分界只用不限方向那一套（find_bounds），每段最多试两次、从左到右、不回头。
+    bks = {b["line_seg"] + 1: b["kind"] for b in bounds_}
+    grouped, final_kind = [], []
+    for g, (a, b) in enumerate(zip(edges, edges[1:])):
+        last = g == len(edges) - 2
+        free = [z for z in zs if a <= z["PI0"] < b]
+        pick = None
+        if _DIR_RULE and g and bks.get(a) in ("L", "H"):
+            want = "上涨" if bks[a] == "L" else "下跌"
+            opp = "下跌" if want == "上涨" else "上涨"
+            prev = final_kind[g - 1]
+            cz = _group_centers(done, a, b, g, last, start_dir="down" if want == "上涨" else "up",
+                                free_first=(prev[0] == opp and not prev[1]))
+            cz = classify_relations(cz)
+            k, up = classify(cz, reading, done)
+            if k == want and not (_D6_BASE_ONLY and up):
+                pick = cz
+        if pick is None:
+            pick = [dict(z, seg=g) for z in free]
+        grouped += pick
+        final_kind.append(classify(classify_relations([dict(z) for z in pick]), reading, done))
+    zs = classify_relations(grouped)
+    for z in zs:
+        z.pop("seg", None)
     segments, units_out, centers_out = [], [], []
     for g, (a, b) in enumerate(zip(edges, edges[1:])):
         zz = [z for z in zs if a <= z["PI0"] < b]

@@ -66,7 +66,8 @@ def kline_files():
 TYPES = {"zec15.json": ["盘整", "盘整", "盘整", "盘整", "盘整", "盘整", "下跌", "上涨"]}
 # ★ 10-07 D3 改 A（card-0374e640-127，一A二A）：读法 A、合成框按高一级 3+3+3 重算（D3-2 推广口径 (iii)）、
 #   最后一个中枢还在走不合成（D3-4）。zec15 八段（「·升」＝含合成出来的高一级中枢、整段升一级读）：
-TYPES = {"zec15.json": ["盘整", "盘整·升", "盘整", "盘整", "盘整", "盘整·升", "下跌", "盘整·升"]}
+TYPES = {"zec15.json": ["盘整", "盘整·升", "盘整", "上涨", "盘整", "盘整·升", "下跌", "盘整·升"]}
+# ★ D6-4（10-07 09:16Z，先限方向判段型）：第 3 段从「盘整」变「上涨」（限方向找出两个依次上移的中枢）。
 FIX_D2STD = os.path.join(ROOT, "tools", "fixtures", "zec1m_d2std.json")
 # card-eecdfd08：ZEC 永续 1m 一段（04-08 前后），旧程序在这里把同一对 (308.24 L, 394.0 H) 确立又撤回 13 次
 FIX_RETRACT = os.path.join(ROOT, "tools", "fixtures", "zec1m_retract_loop.json")   # Atlas 10-06：ZEC 永续 1m，04-29 317.74 真低点在向上线段段内
@@ -386,16 +387,14 @@ def self_test():
         _R.clear()
     print("%s L24:85 拿掉中枢方向限制 ⇒ 报出 %d 个框（例 %s）" % ("✓" if dirv else "✗", len(dirv), dirv[:1]))
     miss += not dirv
-    # D3-3 读法的反向验证：合成框按 3+3+3 重算以后，data/ 夹具上读法 A／B 段型都一样了（升级段两种读法都是盘整），
-    #   所以这颗牙放在线上 ZEC 30m 冻的夹具上（10-07，第 5 段：A＝升级·盘整、B＝上涨）。
-    from config import tick_of
-    fx = load(os.path.join(ROOT, "tools", "fixtures", "zecusdt_30m_d3read.json"))
-    ra = T.trend_v3(analyze(fx, tick=tick_of("zecusdt_30m_d3read.json")), reading="A")
-    rb = T.trend_v3(analyze(fx, tick=tick_of("zecusdt_30m_d3read.json")), reading="B")
-    seg_ab = lambda v: [(x["type"], x["upgraded"]) for x in v["segments"]]
-    ok = seg_ab(ra) != seg_ab(rb)
-    print("%s D3 换回读法 B ⇒ ZEC 30m 夹具段型变（A %s ／ B %s）" % ("✓" if ok else "✗",
-          [t for t, _ in seg_ab(ra)], [t for t, _ in seg_ab(rb)]))
+    # D3-3 读法的反向验证。★ D3-2（3+3+3 重算）＋ D6-4（先限方向）以后，data/、tools/fixtures、线上 15 张**没有一份**
+    #   读法 A／B 段型不同（10-07 实测），真数据咬不到了 ⇒ 造一段：一对扩展中枢（合成成一个单元）＋ 它上方一个不重叠的中枢。
+    #   读法 A 只数合成单元 ⇒ 升级·盘整；读法 B 合成单元跟本级别中枢一起数 ⇒ 上涨。classify 不给 done ⇒ 走拼 DD／GG 那条，只为够到读法分支。
+    zz = [dict(DD=10, GG=20, ZD=12, ZG=18, X0=0, X1=10, kind="—"), dict(DD=15, GG=25, ZD=16, ZG=22, X0=11, X1=20, kind="扩展"),
+          dict(DD=40, GG=50, ZD=42, ZG=48, X0=21, X1=30, kind="趋势")]
+    ka, kb = T.classify(zz, "A"), T.classify(zz, "B")
+    ok = ka == ("盘整", True) and kb == ("上涨", True)
+    print("%s D3 读法 A／B（造的一段）⇒ A %s ／ B %s" % ("✓" if ok else "✗", ka, kb))
     miss += not ok
     # D6 只管本级别（card-0374e640-127，Nova 08:00Z）—— 造出来的牙：把 zec15 第 6 段（本级别下跌、D6 会限它的方向）
     #   第一遍段型硬改成「升级·下跌」。规则对 ⇒ 这段的框跟不限方向时一样；拿掉这条（_D6_BASE_ONLY=False）⇒ 照样被限、框不一样。
