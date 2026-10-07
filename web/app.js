@@ -759,8 +759,13 @@ function placeTip(e) {
 function ghostHide() { ghostOn = null; ghostTip.classList.remove('on'); }
 
 // 分界那句（卡 card-22888623-1a7）：大横盘后补切的那一刀，凭什么在这儿（第 29 课）。
-// ★ 认人靠 `via`，**判据只有一处出处**：后端在 bound 上标的那个值。前端不自己重推一遍
+// ★ 认人靠 `rule`，**判据只有一处出处**：后端在 bound 上标的那个值。前端不自己重推一遍
 //   「这一刀算不算 D2-8」—— 重推就是把判据写成两份，迟早在某一格上错开（app.js:130 那条账）。
+// ★★ 字段名**换过一次**，记在这儿免得以后有人去找一个不存在的 `via`：Nova 10-06 拍的是
+//    `via: "D2-8"`，Bram 落引擎时用的是 **`rule`**，而且给**每一刀**都带名字
+//    （普通的 `"D2-2"`＝反方向三类点确立，补的那刀 `"D2-8"`）。引擎是**产的那一头**，
+//    所以前端跟着改成 `rule`；`trend_check` 那边还有一条不变量「每刀都得有认得的 rule」。
+//    ⚠️ 两边名字不同时**不会报错**，浮层只是**静默不出** —— 这类错最费时间，所以才写这一段。
 // ★ 别的分界**不出浮层**：浮层冒出来却什么都不说，比不出来更让人以为这儿有事。
 // ★ 那句话是 Nova 10-06 定的原话，一个字没改（「按第 29 课：大横盘后接一段上涨，在这里切开」）。
 const BOUND_TIP = '按第 29 课：大横盘后接一段上涨，在这里切开';
@@ -774,7 +779,7 @@ el('chart').addEventListener('mousemove', (e) => {
   const g = ghostHitAt(e.clientX, e.clientY);
   if (g) { ghostShow(e, g); return; }
   const b = boundHitAt(e.clientX, e.clientY);
-  if (b && b.via === 'D2-8') { boundShow(e, b); return; }
+  if (b && b.rule === 'D2-8') { boundShow(e, b); return; }
   ghostHide();
 });
 el('chart').addEventListener('mouseleave', ghostHide);
@@ -2242,7 +2247,7 @@ function renderMeta(d) {
     // 只剩 23.9px 余量，加一格最低消费 46px，Nova 10-06 拍了「进图脚、图例不动」。
     // ★ 措辞是 Nova 定稿的原话，一个字没改（第 29 课 L29:37-41）。
     // ★ 不写"什么时候不出现"：虚线分界这一层本来就在高低点上，这句说的是**个别那一刀**的来由 ——
-    //   判据在后端（bound 上的 `via`），前端不自己重推一遍。
+    //   判据在后端（bound 上的 `rule`），前端不自己重推一遍。
     + ' ｜ 虚线分界一般在高低点；个别是大横盘后接一段趋势时补切的（第 29 课）'
     + ` ｜ 数据源 ${sourceLabel(d.source, d.stale)}`;
   ghostText(d);          // 那一格是浮层（见上），不在这句话里 —— 两处各写一遍就会分家
