@@ -22,7 +22,7 @@ import server                                                 # noqa: E402
 from core.segment import check_segments                       # noqa: E402
 
 # 已知例外：(品种, 周期) → 卡号。修好就删。
-KNOWN = {}                                     # card-24dd71cb-003 修好以后清空（AAPL 1h／2h 图头段方向）
+KNOWN = {("ZECUSDT", "4h"): "card-2783fa1f-da8"}   # 10-07 图头段起点非段内极值（D6 前后一样，今天数据）；那张卡修好就删
 
 
 def main():
