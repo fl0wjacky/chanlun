@@ -1757,13 +1757,16 @@ async function setMeasure(id) {
     // ★ 锚点在**动数据之前**按**时间**抓（anchorOf）。后台契约是「切看法只换 signals，K线/笔/段/中枢
     //   逐字节不变」⇒ 这个锚点原样指回同一根，视口一动不动。真变了也不跳：这一手本来就是按时间放回去的，
     //   所以这里**不押**在「一定不变」上。
-    const anchor = own ? anchorOf(own.bars, chart.timeScale().getVisibleLogicalRange()) : null;
     const d = await load(el('symbol').value, el('tf').value, paging.span, id);
     if (id0 !== paging.reqId) return;
     // prevLen 传 undefined：换看法**不是补数据**，「要了却一根没多」这条判据在这儿不成立 ——
     // K 线根数本来就该一样，传了它，下一次往左拖就会被判成 nogain、印一句「取不到更早数据」的假话。
     Object.assign(paging, adopt(paging, d));
     setUrl();
+    // ★ 锚点在**即将动数据**那一刻现读屏上那一屏（card-0d389a48-4cc，Iris 定的写法）：不在 await 之前抓。
+    //   取数飞着的那几秒里用户可能拖过图；先抓的那份是「拖之前」，摆回去等于把用户那一下拖白拖了（⑭ 4740→4740）。
+    //   这时 state.data 还是 own、屏上还是旧图，「按时间对回同一根」的原意不变。viewSet 只管认回声，不充当屏上那一屏。
+    const anchor = own ? anchorOf(own.bars, chart.timeScale().getVisibleLogicalRange()) : null;
     if (anchor) draw(d, anchor); else draw(d);
     renderMeasures();
     renderCuts();                      // 切法这一趟也带着走（load 的缺省就是 paging.cut）⇒ chip 跟回显对齐
@@ -1835,11 +1838,14 @@ async function setCut(id) {
     // 锚点跟换看法一样按**时间**抓：切开之后后面整段都要重画（小栋 10-05 那条要求），框会大改；
     // 但 **K 线一根不多不少**，按时间对回去视口就不动 —— 用户看到的是"同一段行情换了个切法"，
     // 而不是图跳了一下。真变了也不跳：这一手本来就是按时间放回去的，不押在"一定不变"上。
-    const anchor = own ? anchorOf(own.bars, chart.timeScale().getVisibleLogicalRange()) : null;
     const d = await load(el('symbol').value, el('tf').value, paging.span, paging.measure, id);
     if (id0 !== paging.reqId) return;
     Object.assign(paging, adopt(paging, d));
     setUrl();
+    // ★ 锚点在**即将动数据**那一刻现读屏上那一屏（card-0d389a48-4cc，Iris 定的写法）：不在 await 之前抓。
+    //   取数飞着的那几秒里用户可能拖过图；先抓的那份是「拖之前」，摆回去等于把用户那一下拖白拖了（⑭ 4740→4740）。
+    //   这时 state.data 还是 own、屏上还是旧图，「按时间对回同一根」的原意不变。viewSet 只管认回声，不充当屏上那一屏。
+    const anchor = own ? anchorOf(own.bars, chart.timeScale().getVisibleLogicalRange()) : null;
     if (anchor) draw(d, anchor); else draw(d);
     renderCuts();
     el('state').textContent = d.closed ? '已收盘' : '未收盘（最后一根还在走）';
@@ -1949,7 +1955,6 @@ async function autoReload() {
   paging.loading = true;
   dataStale = true;                           // 数据在飞：读数压住（跟换品种那条同一笔账）
   try {
-    const anchor = own ? anchorOf(own.bars, chart.timeScale().getVisibleLogicalRange()) : null;
     const d = await load(el('symbol').value, el('tf').value, paging.span, paging.measure);
     if (id !== paging.reqId) return null;
     // ★ 取不到真后台时 load() 会**悄悄退回仓里的样本**（source 是「样本 x.json」，而且顺手把 span
@@ -1964,6 +1969,10 @@ async function autoReload() {
     // prevLen 传 undefined：这不是补数据，「要了却一根没多」那条判据在这儿不成立（同 setMeasure）。
     Object.assign(paging, adopt(paging, d));
     setUrl();
+    // ★ 锚点在**即将动数据**那一刻现读屏上那一屏（card-0d389a48-4cc，Iris 定的写法）：不在 await 之前抓。
+    //   取数飞着的那几秒里用户可能拖过图；先抓的那份是「拖之前」，摆回去等于把用户那一下拖白拖了（⑭ 4740→4740）。
+    //   这时 state.data 还是 own、屏上还是旧图，「按时间对回同一根」的原意不变。viewSet 只管认回声，不充当屏上那一屏。
+    const anchor = own ? anchorOf(own.bars, chart.timeScale().getVisibleLogicalRange()) : null;
     if (anchor) draw(d, anchor); else draw(d);
     el('state').textContent = d.closed ? '已收盘' : '未收盘（最后一根还在走）';
     el('state').className = 'badge ' + (d.closed ? '' : 'live');
