@@ -51,7 +51,7 @@
 //   ㉜–㊳ **走势分段那一层**（2026-10-05 补，card-c73ab37d-5a1，v3 §八）：这一层**默认开**
 //      （Nova 17:09Z：小栋要看的东西不能藏在 `?trend=1` 后面）。落在这套里是因为**它只有真后台
 //      给得出** —— `trend` 那个对象是 Bram 在 dbda139 里新加的，`more` 那套的假后台没有它。
-//      ①默认开（开关亮／地址栏不写／真画出带子）②**颜色跟分界点的类型走**（低⇒绿／高⇒红／图头⇒灰），
+//      ①默认开（开关亮／地址栏不写／真画出带子）②**颜色跟段型走**（上涨⇒绿／下跌⇒红／盘整与图头⇒灰；10-08 小栋选 B），
 //      不是跟段的 `type` 走 ③中阴那条斜线带铺在「极值 → 载荷的 `pullback_end_bar`」上（**不是段末**，
 //      这是 §八 3 的牙）④分界的价格字横心钉在极值那一根上 ⑤「待定」和「撤回」各写各的、条数对得上
 //      ⑥`?trend=0` 关得掉，且**那个色的像素真的清零**（数颜色，不数"前后两张图不等"—— 后者会拿
@@ -538,7 +538,7 @@ const shotChart = async (p, tag) => {
   // ★ 这一层自带一个只读出口 `window.__app.state.trendDrawn`（跟 `state.boxesDrawn` 同性质：
   //   **这一帧**交给这一层的清单，每帧开头重写）—— 画了一条带它上面就有一条。量它，比截图找颜色稳，
   //   红了也说得清错在哪一条。
-  console.log('32–38 走势分段那一层：默认开、颜色跟分界点走、斜线带铺到载荷说的那根、'
+  console.log('32–38 走势分段那一层：默认开、颜色跟段型走、斜线带铺到载荷说的那根、'
             + '「待定」那条线钉在载荷说的那一根上、关得掉、extend 不炸');
   const TQ = '?symbol=ZECUSDT&tf=15m';
   // 只读出口 ＝ 清单 ＋ **这一帧的视口口径**（每一根该落在哪个像素由工装自己算，不靠页面喂）。
@@ -598,19 +598,42 @@ const shotChart = async (p, tag) => {
        && A.bands.length >= 1,
      `开=${A.on}　chip=${JSON.stringify(A.chip)}　带子=${A.bands.length}　地址栏=${A.url || '(空)'}`);
 
-  // ㉝ 颜色跟**分界点的类型**走，不跟段的 `type` 走
-  //   ★ 这一格抓两种改法：把颜色挂到 `segments[].type` 上（一个"盘整"段就会被涂成第三种颜色），
-  //     或者把红绿画反。§八 1 的原话就是「低→高绿、高→低红」—— 讲的是方向，不是类型。
+  // ㉝ 颜色跟**段型**走（小栋 10-08 12:35 选 B，卡 card-fedf32aa-59d）：上涨绿、下跌红、盘整（含升级·盘整）灰
+  //   ★ 这一格抓两种改法：退回「跟分界点走」（一段从低点起的盘整又会被涂成绿 —— 小栋说「分不开」的那个），
+  //     或者把红绿画反。期望色、不透明度都从 /theme.js 现读，不焊死数。
+  //   ★★ 牙：默认那一屏不一定有「从低点起的盘整」（那一段在旧规则下是绿、新规则下是灰，是唯一能把两条规则
+  //     分开的段）。所以先在载荷里**找一段这样的**，把视口挪过去再量；载荷里一段都没有 ⇒ 这一格红（空转比红坏）。
+  //     实测（10-08）：把 layers.js 退回旧规则，这一格红在那一段上。
   const segByI0 = new Map(A.segs.map((s, g) => [s.i0, g]));
-  const wantCol = A.bands.map((b) => {
+  const wantOf = (b) => {
     const g = segByI0.get(b.i0), s = A.segs[g] || {};
-    if (g === 0 || s.head) return TREND.head;                          // 图头（第一把刀之前）＝ 灰
-    return ((A.T.bounds[g - 1] || {}).kind === 'L') ? TREND.up : TREND.dn;
-  });
-  ck('背景带的颜色跟**分界点的类型**走（低⇒绿／高⇒红／图头⇒灰），不是跟段的 `type` 走',
-     A.bands.length >= 2 && wantCol.every((c, i) => c === A.bands[i].col),
-     `画出来的 ${A.bands.map((b) => b.col).join(' ')}　该是 ${wantCol.join(' ')}　`
-     + `（载荷 ${A.segs.length} 段，屏上分界点的类型有 ${A.kinds || '一条都没有'}）`);
+    if (g === 0 || s.head) return [TREND.head, TREND.headA];
+    if (s.type === '上涨') return [TREND.up, s.live ? TREND.liveUp : TREND.bandUp];
+    if (s.type === '下跌') return [TREND.dn, s.live ? TREND.liveDn : TREND.bandDn];
+    return [TREND.head, s.live ? TREND.rangeLive : (s.upgraded ? TREND.rangeUpA : TREND.rangeA)];
+  };
+  const fromLow = (g) => { const s = A.segs[g] || {};
+    return g > 0 && !s.head && s.type !== '上涨' && s.type !== '下跌' && (A.T.bounds[g - 1] || {}).kind === 'L'; };
+  const gBite = A.segs.findIndex((s, g) => fromLow(g));
+  // ★ 另开一页去挪视口：后面几格（㊲ 等）认的是**默认那一屏**，在 dA 上挪了会把它们带红（10-08 实测）。
+  let B33 = A.bands;
+  if (gBite > 0) {
+    const sB = A.segs[gBite];
+    const d33 = await open(TQ); await waitBand(d33.p);
+    await d33.p.evaluate(([i0, i1]) => window.__app.chart.timeScale().setVisibleLogicalRange({ from: i0 - 50, to: Math.min(i1, i0 + 600) }),
+                         [sB.i0, sB.i1]);
+    await d33.p.waitForTimeout(1200);
+    B33 = (await trendState(d33.p)).bands;
+    await d33.c.close();
+  }
+  const wantBand = B33.map(wantOf);
+  const bit = B33.some((b) => fromLow(segByI0.get(b.i0)));
+  ck('背景带的颜色跟**段型**走（上涨⇒绿／下跌⇒红／盘整与图头⇒灰，升级·盘整深一档），不再跟分界点的高低走'
+     + '（挪到一段**从低点起的盘整**上量：它在旧规则下是绿，现在必须是灰）',
+     bit && B33.length >= 1 && wantBand.every((w, i) => w[0] === B33[i].col && Math.abs(w[1] - B33[i].a) < 1e-3),
+     `画出来的 ${B33.map((b) => `${b.col}@${b.a}`).join(' ')}　该是 ${wantBand.map((w) => `${w[0]}@${w[1]}`).join(' ')}　`
+     + `（屏上段型 ${B33.map((b) => (A.segs[segByI0.get(b.i0)] || {}).type).join('／')}）`
+     + (gBite > 0 ? '' : '　★ 载荷里一段「从低点起的盘整」都没有 ⇒ 这一格量不到东西'));
 
   // ㉞ §八 3 的牙：那条斜线带铺到**载荷说的那一根**（`pullback_end_bar`）为止，不是铺到段末
   //   ★ 有人把 `pullback_end_bar` 换成 `s.i1`（"铺满这一段"读起来更顺）⇒ 当场红。
@@ -728,15 +751,18 @@ const shotChart = async (p, tag) => {
     }
     return n;
   }, [want, 6]);
-  const upGreen = blend(TREND.up, TREND.bandUp);
+  // ★ 10-08 起底色跟段型走：默认窗口里不一定有上涨段（最新那段常是盘整，灰）。所以数的是**屏上最宽那条带**
+  //   自己的色（色号、不透明度都从 trendDrawn 读，trendDrawn 又是从 /theme.js 来的），不焊死绿。
+  const widest = A.bands.slice().sort((x, y) => (y.i1 - y.i0) - (x.i1 - x.i0))[0] || { col: TREND.up, a: TREND.bandUp };
+  const upGreen = blend(widest.col, widest.a);
   const dOff = await open(TQ + '&trend=0');
   const OFF = await trendState(dOff.p);
   const nOn = await bandPixels(dA.p, upGreen), nOff = await bandPixels(dOff.p, upGreen);
   ck('`?trend=0` 关得掉：开关灭、地址栏留着 `trend=0`（可分享）、一条带不画、**那个色的像素清零**',
      OFF.on === false && !!OFF.chip && OFF.chip.pressed === 'false' && /trend=0/.test(OFF.url)
        && OFF.bands.length === 0 && nOn >= 5000 && nOff <= 50,
-     `开=${OFF.on}　带子=${OFF.bands.length}　地址栏=${OFF.url}　绿带像素：开 ${nOn} ／ 关 ${nOff}`
-     + `（数的是 ${JSON.stringify(upGreen)} ±6）`);
+     `开=${OFF.on}　带子=${OFF.bands.length}　地址栏=${OFF.url}　带子像素：开 ${nOn} ／ 关 ${nOff}`
+     + `（数的是屏上最宽那条带的色 ${widest.col}@${widest.a} ⇒ ${JSON.stringify(upGreen)} ±6）`);
   await dOff.c.close();
 
   // ㊳ `cut=extend` 那档：载荷**连 `trend` 这个键都没有** ⇒ 开着也画不出东西
