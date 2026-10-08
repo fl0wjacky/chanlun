@@ -11,7 +11,7 @@
      这一格拿整份逐笔加长去对 —— 两条不同的路算出同一个数，才说明「当下能知道」没算偏；
   ③ 随机 4000 组（同一个生成器）：check_segments 违规 0（修前 2 组）；
   ④ 独立复核 verify_by_definition 的 case 4 那一支：合段 0 处；终点前后挪 2 笔必须报；
-  ⑤ 反弹收成一笔（L77 第一支的形状）却标了合段，复核必须报。
+  ⑤ 复核的结构条件有牙：反弹收成一笔（L77 第一支的形状）、A 收成一笔、R 头三笔没有公共重叠，三样标了合段都必须报。
 """
 import json
 import os
@@ -103,7 +103,22 @@ def main(quiet=False):
         fake = [dict(s) for s in segs0 if s["PI1"] < m0["PI0"]] + [dict(m0, PI1=8, p1=P1[8]["p1"])]
         v5 = [x for x in S.verify_by_definition(fake, P1) if x[0] == "L77 合段不成立"]
         bad += not v5
-        say("%s ⑤ 反弹收成一笔（第一支的形状）却标了合段 ⇒ 复核报 %d 处" % ("✓" if v5 else "✗", len(v5)))
+        say("%s ⑤a 反弹收成一笔（第一支的形状）却标了合段 ⇒ 复核报 %d 处" % ("✓" if v5 else "✗", len(v5)))
+        # ⑤b A 只有一笔：把 1600 的 A（5-7）收成一笔，合段终点跟着前移 2 笔
+        P2 = [dict(p) for p in P0]
+        P2[5] = dict(P2[5], p1=P2[7]["p1"], hi=max(P2[5]["hi"], P2[7]["hi"]), lo=min(P2[5]["lo"], P2[7]["lo"]))
+        del P2[6:8]
+        fake2 = [dict(s) for s in segs0 if s["PI1"] < m0["PI0"]] + [dict(m0, PI1=m0["PI1"] - 2, p1=P2[m0["PI1"] - 2]["p1"])]
+        v5b = [x for x in S.verify_by_definition(fake2, P2) if x[0] == "L77 合段不成立"]
+        bad += not v5b
+        say("%s ⑤b A 收成一笔却标了合段 ⇒ 复核报 %d 处" % ("✓" if v5b else "✗", len(v5b)))
+        # ⑤c R 三笔没有公共重叠（L65「有重叠部分的连续三笔」那一条）：把 R 第三笔整个挪到前两笔够不着的地方
+        P3 = [dict(p) for p in P0]
+        lo3 = max(P3[8]["hi"], P3[9]["hi"]) + 0.5
+        P3[10] = dict(P3[10], p0=lo3, p1=lo3 + 1.0, lo=lo3, hi=lo3 + 1.0)
+        v5c = [x for x in S.verify_by_definition([dict(s) for s in segs0 if s["PI1"] <= m0["PI1"]], P3) if x[0] == "L77 合段不成立"]
+        bad += not v5c
+        say("%s ⑤c R 头三笔没有公共重叠却标了合段 ⇒ 复核报 %d 处" % ("✓" if v5c else "✗", len(v5c)))
     hit = [sd for sd in range(4000) if check_segments(build_segments(gen(sd)), gen(sd), [])]
     bad += bool(hit)
     say("%s ③ 随机 4000 组违规 %d 组 %s" % ("✓" if not hit else "✗", len(hit), hit[:8]))

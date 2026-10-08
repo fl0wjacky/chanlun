@@ -853,16 +853,19 @@ def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
                 first = next((r for r in range(k + 1, N) if past_v(pens[r]) or past_e(pens[r])), None)
                 ok = first is not None and past_v(pens[first]) and not past_e(pens[first])
             if ok:
-                # (e) 中间真是「A＋R」两个线段（Atlas 23:02；第一支 ⟪如果这个反弹只是一笔……走势A依然延续⟫ 也满足 (a)(b)(d)，
-                #     不加这条复核分不出一支、二支）：找得到切点 m，A＝[i+1..m]、R＝[m+1..k] 各 ≥3 笔、单数；A 跟旧段同向、R 反向；
-                #     A 的终点是段内往旧段方向的极值（A 走到头才被 R 接过去）。
-                #     ★「R 把 A 线段破坏」这里**不独立判**：笔级的两种近似都会误杀原文那种合段 ——「R 越过 A 的起点」误杀 1300
-                #       （A 起于 96.2、R 收在 96.6），「R 越过 A 最后一笔的起点」误杀 1600（R 95.6→96.2、A 最后一笔起于 97.1；
-                #       A 是靠特征序列分型（含追平）被确认破坏的，不是靠哪一笔越过了谁）。真要独立判，得把特征序列那套再写一遍，
-                #       这条留给引擎（_first_seg 的 confirm），复核只守结构：A、R 都是够格的段、方向对、切点在 A 的极值上。
-                def is_seg(a, b, d):              # [a..b] 笔数单数 ≥3，第一笔方向 d
-                    return b - a + 1 >= 3 and (b - a + 1) % 2 == 1 and ((pens[a]["p1"] > pens[a]["p0"]) == d)
-                # 往旧段方向的极值笔；追平取**最晚**那个（A 走到最后一次碰到极值才算走到头 —— 1600 的 95.6 出现两次，第 5、7 笔，A 是 5-7）
+                # (e) 中间真是「A＋R」两个线段（Atlas 23:02／23:04；第一支 ⟪如果这个反弹只是一笔……走势A依然延续⟫ 也满足 (a)(b)(d)，
+                #     不加这条复核分不出一支、二支）：A＝[i+1..m]、R＝[m+1..k] 各单数 ≥3 笔，A 跟旧段同向、R 反向，
+                #     **两段的头三笔各有公共重叠**（L65 分解定理 ⟪有重叠部分的连续三笔⟫ 那一半；判法跟 `_opening_overlaps` 同一条，这里另写一遍）。
+                #     切点 m ＝ 段内往旧段方向的极值那一笔：A ⟪没有创新低⟫，R 从 A 的终点反过来，A 的终点就是 X 之后往旧段方向最远的那一点；
+                #     追平取**最晚**那个（前一个之后还有一样远的一笔，A 还没走完；1600 的 95.6 在第 5、7 两笔，取早 A 只剩一笔，取晚 A 是 5-7）。
+                #     ★ 这是**必要条件、不是充分条件**。「R 把 A 线段破坏」本身照 L67 精确化以后的定义（特征序列分型）判，
+                #       复核不重写，交给引擎（`_first_seg` 的 confirm）和 seg_prefix_check。笔级的两种近似都试过、都会误杀原文那种合段：
+                #       「R 越过 A 的起点」误杀 1300，「R 越过 A 最后一笔的起点」误杀 1600；L65 的「被笔破坏」（gj ≥ di）又太弱，一笔反弹也算。
+                def is_seg(a, b, d):              # [a..b] 笔数单数 ≥3、第一笔方向 d、头三笔有公共重叠
+                    if b - a + 1 < 3 or (b - a + 1) % 2 == 0 or (pens[a]["p1"] > pens[a]["p0"]) != d:
+                        return False
+                    t = pens[a:a + 3]
+                    return max(p["lo"] for p in t) <= min(p["hi"] for p in t)
                 m = (min if up else max)(range(k, i, -1), key=lambda r: pens[r]["p1"])
                 ok = is_seg(i + 1, m, not up) and is_seg(m + 1, k, up)
             if not ok:
