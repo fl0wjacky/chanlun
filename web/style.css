@@ -285,6 +285,12 @@ body.fs-fake main { position: fixed; inset: 0; z-index: 50; height: 100dvh; back
   padding-bottom: 8px; border-bottom: 1px solid var(--line);
 }
 .mcap { flex: 1 0 100%; font-size: 11px; color: var(--dim); }
+/* T13 入门防守那颗旁边的周期下拉：跟 chip 同高、同边框，开着才露出来（`hidden`）。不另起色：只用 :root 那几个变量。 */
+.wolftf {
+  font: inherit; font-size: 12px; color: var(--mu); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 999px; padding: 4px 8px; cursor: pointer;
+}
+.wolftf[hidden] { display: none; }
 /* 实心用 --tx（墨色）当底、--bg 当字：**不借信号色**（--am 是「未收盘/旧数据」、--rd 是「出错」，
    借来当选中色，那两个色就不只一个意思了）。 */
 .mchip[aria-checked="true"] { background: var(--tx); border-color: var(--tx); color: var(--bg); }
@@ -298,6 +304,10 @@ body.fs-fake main { position: fixed; inset: 0; z-index: 50; height: 100dvh; back
   border: 1px solid var(--line); border-radius: 3px; padding: 0 3px; white-space: nowrap;
 }
 .mchip[aria-checked="true"] .nonorig { color: var(--bg); border-color: currentColor; }
+/* T16：选中「峰值」时那行说明（触屏没有 hover，title 看不到）。跟 .mcap 同一号字，颜色用 --mu 不用 --dim：
+   这是要读的话，不是脚注。宽屏：看法那一组的最后一项（右栏 190 宽，自己折行，不碰图）。
+   窄屏：app.js 把它挪进 #chart，浮在图上（见下面 @media 那一档）。 */
+.mgroup .mnote { flex: 1 0 100%; font-size: 11px; line-height: 1.5; color: var(--mu); }
 
 .chip i { width: 9px; height: 9px; border-radius: 2px; opacity: .45; }
 .chip[aria-pressed="true"] { color: var(--tx); border-color: var(--mu); background: var(--panel-hi); }
@@ -386,7 +396,19 @@ body.fs-fake main { position: fixed; inset: 0; z-index: 50; height: 100dvh; back
   body.m-fold .panel { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
   /* 收起时开关跟 `.panel` 同一条账（两处一起加、一起不加 —— 差一截就是「开关飘起来压住图」） */
   body.m-fold .fold { bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
-  .chip { flex: 0 0 auto; }
+  .chip, .wolftf { flex: 0 0 auto; }
+  /* T16 窄屏：浮在图上、贴底（时间轴上面一点），照 .more 的写法 —— 不占流、不压图、碰不到 #fold（Iris 09:36）。
+     z-index 3 的理由同 .more：画布是 1/2，低于它就被盖住。最多三行（让开价格轴以后宽约 306，全文正好三行；Iris 09:51）。 */
+  #chart > .mnote {
+    /* right 让开价格轴（Iris 09:44）：--ps-right 是 app.js 每次布局量出来的右轴宽，全屏按钮那套同一个变量 */
+    position: absolute; left: 10px; right: calc(var(--ps-right, 56px) + 6px); bottom: 34px; z-index: 3; pointer-events: none;
+    padding: 4px 10px; border-radius: 6px; font-size: 11px; line-height: 1.4;
+    color: var(--mu); background: var(--panel); border: 1px solid var(--line);
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+  }
+  /* 防狼术也开着：图底那条 6px 窄带 ＋ 左下角最多两行字（每行 15、离带 3）≈ 时间轴上方 39px 都被它占了。
+     时间轴 28 ⇒ 浮条底边抬到 28＋39＋5 ＝ 72，让开（数是 layers.js wolfView 的 WOLF_STRIP／行高算的，改那边要跟着改）。 */
+  #chart.wolf-on > .mnote { bottom: 72px; }
   /* 全屏那颗按钮在手机上大一点（26px 的触控目标太小；这颗在手机上比桌面上更值钱）——
      仍是右上角、仍让开右轴那一条（--ps-right 那条账不分宽窄）。 */
   .fs { width: 30px; height: 30px; top: 6px; }
@@ -473,3 +495,6 @@ body.fs-fake main { position: fixed; inset: 0; z-index: 50; height: 100dvh; back
 }
 
 @media (prefers-reduced-motion: reduce) { .chip { transition: none; } }
+
+/* T16：收起就是收起 —— 放在最后，压过窄屏那一档的 display（同为 id＋类的权重，后写的赢）。 */
+#mnote[hidden] { display: none; }

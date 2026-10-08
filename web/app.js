@@ -4,8 +4,8 @@
 //   {symbol, tf, name, updated, closed, bars[], pens[], segs[], centers[], seg_centers[], signals{seg,pen}, meta{tick,pen_rule}}
 // 取不到后台就退回 `fixtures/`（离线也能看、也能截图对账）；两边都没有就老实说取不到，不画半张图。
 import { CHART, PAGE, CANDLE, WIDTH, SUB, TREND } from './theme.js';
-import { makeBoxPrimitive, makeAnnotPrimitive, makeTrendPrimitive, shownOf, ghostHitAt, boundHitAt,
-         refTfName } from './layers.js';
+import { makeBoxPrimitive, makeAnnotPrimitive, makeTrendPrimitive, makeWolfPrimitive, shownOf, ghostHitAt,
+         boundHitAt, refTfName } from './layers.js';
 
 const LWC = window.LightweightCharts;
 
@@ -68,6 +68,9 @@ const el = (id) => document.getElementById(id);
 const opts = { ...DEFAULTS, sigKinds: { ...DEFAULTS.sigKinds } };
 opts.vol = subParam('vol');
 opts.macd = subParam('macd');
+// 入门防守（T13，均线.md 六.7）：**默认关**（Nova 09:02 定）。关着就一个请求都不发（跟 MACD 那颗同一条账）。
+// 地址栏 `?wolf=1` 开；`?wolftf=1h` 指名周期（不写 ＝ 跟着这张图的周期）。周期**由用户选**，原文没给默认。
+opts.wolf = SUB_Q.get('wolf') === '1';
 // 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）：**默认开**（Nova 2026-10-05 17:09Z 定）——
 // 这一层就是小栋要看的那个东西，藏在 `?trend=1` 后面他打开页面根本看不见；开关留着，可以手动关掉。
 // 所以地址栏这一头是**反着写**的：`?trend=0` 才关（可分享、可截图复现）。
@@ -135,7 +138,7 @@ const paging = { span: 1, spanMax: null, earliest: false, nogain: false, stop: n
 // list 空 ⇒ 这一组不画（离线样本、旧后台：不知道的事不编，页面上一个字都不多）。
 // ★ orig：**哪些看法不是 108 课原文**由 /api/meta 说（card-6381042d-03f），前端不写死名字。
 //   `orig[id] === false` ⇒ 那颗芯片挂「非原文」那枚小标；**读不到就一个标都不挂**（不知道的事不编）。
-const measures = { list: [], orig: {} };
+const measures = { list: [], orig: {}, note: {} };
 // ---- 中枢切法（卡 card-e346ede6-996；v3 见 card-51571a5f-dc2）----
 // 口径：`/api/chart?…&cut=extend|trend`（Bram 10-05 定的契约，v3 换的这一档）。trend＝走势分段、**是缺省**
 //   ⇒ 缺省那份不带就不发；extend＝原文那套（可切的一档）。白名单外 400，回显顶层 `cut`，缓存键
@@ -206,6 +209,7 @@ state.candleSeries = candle;
 //   两个 paneView 里，挂哪条系列不影响 zOrder（`bottom` 就在 K 线底下），所以挂在**永远可见**的
 //   `overlay` 上最稳（挂线段那条的话，一关线段开关整层跟着消失 —— 跟上面那段是同一条理由）。
 for (const [c, p] of [[candle, makeBoxPrimitive(state)], [overlay, makeAnnotPrimitive(state)],
+                      [overlay, makeWolfPrimitive(state)],   // T13：插在走势那层**前面**，trendPrim 仍是最后一个
                       [overlay, makeTrendPrimitive(state)]]) {
   c.attachPrimitive(p);
   primitives.push(p);
@@ -862,6 +866,7 @@ function paint(d) {
   overlay.setData(bars.length ? [{ time: bars.at(-1).time, value: bars.at(-1).close }] : []);
   paintVol(d);
   syncSub();                 // 副图跟着主图一起换（同一份 K 线、同一个档位）；关着就一个请求都不发
+  syncWolf();                // 入门防守同理（T13）：关着不请求；开着就跟着品种／档位换（周期另选）
   applyToggles();
   renderMeta(d);
   renderLast();
@@ -1387,6 +1392,62 @@ function syncSub() {
 // 这里只多补一件：地址栏跟着改（图层那几颗不进地址栏，这两颗进）。
 function syncSubView() { syncSub(); setUrl(); }
 
+// ---------------------------------------------------------------- 入门防守（T13，均线.md 六.7；后台 /api/wolf）
+// 作者给入门者的傻瓜化规则（第 103 课）：黄白线在 0 轴下面的不参与。**不是判据** —— 图上只铺一条格底窄带
+// （画法见 layers.js makeWolfPrimitive），任何一层都不读它。
+// 周期由用户选（下拉），默认「跟图」＝ 这张图的周期；后台按时间回区间，前端按时间落到这张图上。
+// 跟 MACD 副图同一套取数口径：懒取、按「品种|周期|档位」认格、换格作废在飞的那一份、取不到就说取不到。
+const wolf = { on: false, below: null, label: '', note: '', err: '', slot: null, reqId: 0, fromT: null,
+  // 「只算到 X 之后」里那个 X 按**图上的坐标**念（UTC，跟时间轴、光标读数同一句话，见 timeLabel）
+  fmt: (ms) => timeLabel(ms / 1000) };
+state.wolf = wolf;
+let wolfTf = SUB_Q.get('wolftf') || '';          // '' ＝ 跟图
+const WOLF_NAME = '防狼术';
+async function loadWolf(symbol, tf, span) {
+  const r = await fetch(`/api/wolf?${new URLSearchParams({ symbol, tf, span: String(span) })}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return await r.json();
+}
+function wolfLabel(tf) { return `${WOLF_NAME}（入门过滤，不是判据）· 周期 ${tf}`; }
+function syncWolf() {
+  wolf.on = !!opts.wolf;
+  // T13＋T16 合起来时手机上的让位（Iris 09:44）：防狼术开着 ⇒ 格底窄带＋左下角那一两行字占住图底；
+  //   峰值那行浮条（窄屏的 #mnote）靠这个类往上挪，让开它们。宽屏 #mnote 在右栏，不受影响。
+  el('chart').classList.toggle('wolf-on', wolf.on);
+  const sel = el('wolftf');
+  if (sel) sel.hidden = !opts.wolf;
+  if (!opts.wolf) {                                 // 关着不付：清掉、不请求
+    wolf.below = null; wolf.slot = null; wolf.err = ''; wolf.fromT = null; wolf.reqId++;
+    repaint();
+    return;
+  }
+  if (!state.data) return;
+  const symbol = el('symbol').value, tf = wolfTf || el('tf').value;
+  const want = `${symbol}|${tf}|${paging.span}`;
+  if (wolf.slot === want) return;
+  wolf.slot = want; wolf.below = null; wolf.err = ''; wolf.fromT = null; wolf.label = wolfLabel(tf);
+  repaint();
+  const id = ++wolf.reqId;
+  loadWolf(symbol, tf, paging.span).then((m) => {
+    if (id !== wolf.reqId || !opts.wolf) return;
+    wolf.below = Array.isArray(m.below) ? m.below : [];
+    // 后台算到的第一根（Bram eb89f5b）：周期比图细时 span 会被钳，更早那截是**没算**，不是「不在下面」。
+    // 画法那边拿它把没算那截单独画出来，并在那句字后面补「只算到 X 之后」（随图往左补数据自动变，不在这儿算死）。
+    wolf.fromT = typeof m.from_t === 'number' ? m.from_t : null;
+    wolf.note = typeof m.note === 'string' ? m.note : '';
+    const chip = document.querySelector('.chip[data-key="wolf"]');
+    if (chip) chip.title = wolf.note ? `${wolfLabel(tf)} ｜ ${wolf.note}` : wolfLabel(tf);
+    repaint();
+  }).catch((e) => {
+    if (id !== wolf.reqId || !opts.wolf) return;
+    wolf.err = String((e && e.message) || e);
+    wolf.below = []; wolf.label = `${WOLF_NAME}：取不到（${wolf.err}）`;
+    const chip = document.querySelector('.chip[data-key="wolf"]');
+    if (chip) chip.title = wolf.label;
+    repaint();
+  });
+}
+
 // ---------------------------------------------------------------- 开关
 function applyToggles() {
   penSolid.applyOptions({ visible: opts.pen });
@@ -1461,6 +1522,7 @@ function buildChips() {
       if (key === 'macd' && opts.macd) { sub.slot = null; sub.err = ''; }
       applyToggles();
       if (key === 'vol' || key === 'macd') syncSubView();
+      if (key === 'wolf') { wolf.slot = null; syncWolf(); setUrl(); }
     };
     box.appendChild(b);
   };
@@ -1491,6 +1553,23 @@ function buildChips() {
   // 点取 theme.js 的 SUB：成交量用 K 线那一对涨跌色（取阳色），MACD 取黄白线里的黄（原文的叫法）。
   add('成交量', 'vol', CANDLE.up);
   add('MACD', 'macd', SUB.dea);
+  // 入门防守（T13）：**排在 MACD 后面**（它就是拿 MACD 的黄白线判的），点色取 MACD 负柱那个色（跟图上那条带同色）。
+  add(WOLF_NAME, 'wolf', SUB.dn);
+  {
+    const b = box.querySelector('.chip[data-key="wolf"]');
+    b.title = `${WOLF_NAME}：黄白线两条都在 0 轴下的区间，图底铺一条窄带（第 103 课的入门过滤，不是判据）`;
+    // 周期下拉：开着才露出来。「跟图」＝ 这张图的周期。
+    const sel = document.createElement('select');
+    sel.id = 'wolftf'; sel.className = 'wolftf'; sel.hidden = !opts.wolf;
+    sel.setAttribute('aria-label', `${WOLF_NAME}看哪个周期的 MACD`);
+    for (const [v, t] of [['', '跟图'], ...TFS.map((x) => [x, x])]) {
+      const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o);
+    }
+    sel.value = TFS.includes(wolfTf) ? wolfTf : '';
+    wolfTf = sel.value;
+    sel.onchange = () => { wolfTf = sel.value; wolf.slot = null; syncWolf(); setUrl(); };
+    b.after(sel);
+  }
   watchOverflow(box);
 }
 
@@ -1649,7 +1728,12 @@ function readMeasures(m) {
     if (side && typeof side[id] === 'boolean') orig[id] = side[id];   // ①：旁边那张表
     else if (it && typeof it.orig === 'boolean') orig[id] = it.orig;  // ②：项自己带着
   }
-  return { list, orig };
+  // ★ T16（背驰.md 六.3）：`measure_note = {看法: 一句话}` —— 量是原文、单用超出原文的那几种另挂一句说明，
+  //   **不是**「非原文」那枚标（那是 orig:false 的事）。读不到或不是字符串就不挂，同上一条规矩。
+  const ns = (m && typeof m.measure_note === 'object' && m.measure_note) || {};
+  const note = {};
+  for (const id of list) if (typeof ns[id] === 'string' && ns[id]) note[id] = ns[id];
+  return { list, orig, note };
 }
 
 // 一次 `/api/meta` 拿两张名单（看法、切法）—— 不是图省一次请求，是**只有一份「名单到没到」**：
@@ -1661,10 +1745,11 @@ async function loadMeasures() {
     const r = await fetch('/api/meta');
     if (!r.ok) return;
     const m = await r.json();
-    const { list, orig } = readMeasures(m);
+    const { list, orig, note } = readMeasures(m);
     if (list.length >= 2) {              // 只有一种看法＝没什么可切的；不画一个只有一个选项的开关
       measures.list = list;
       measures.orig = orig;
+      measures.note = note;
       // 地址栏点名的那个后台认不认：名单外的一律退回缺省（缺省不在名单里才拿第一个）
       const want = new URLSearchParams(location.search).get('measure');
       if (want && !list.includes(want)) paging.measure = list.includes(DEFAULT_MEASURE) ? DEFAULT_MEASURE : list[0];
@@ -1721,11 +1806,26 @@ function buildMeasures() {
       b.appendChild(mark);
       b.title = `${long} ｜ ${NON_ORIG_LONG}`;
     }
+    if (measures.note[id]) {                                              // T16：悬停多一句「单用超出原文」
+      b.title = `${b.title} ｜ ${measures.note[id]}`;
+      b.setAttribute('aria-description', measures.note[id]);              // 读屏器不一定念 title（Iris 09:18）
+    }
     b.setAttribute('role', 'radio');
     b.onclick = () => setMeasure(id);
     g.appendChild(b);
   }
   box.prepend(g);
+  // T16（Nova 09:18 定）：触屏没有 hover ⇒ **选中**带说明的那种看法时，出一行小字。
+  //   ★ 位置（Iris 09:36 真机量过）：放成 main 的流内子元素会在 grid 里多出一行 ⇒ 图被压矮 41～68px、手机上还盖住 #fold。
+  //   ⇒ **同一个元素、两处落脚**（placeMnote）：宽屏放进看法那一组当最后一项（右栏里自己折行，不碰图）；
+  //     窄屏那一组是横滑单行、放不下 ⇒ 挪进 #chart 浮在图上（.more 那套写法），不占流、不压图。
+  if (!el('mnote')) {
+    const n = document.createElement('div');
+    n.id = 'mnote'; n.className = 'mnote'; n.hidden = true;
+    n.setAttribute('aria-live', 'polite');
+    g.appendChild(n);
+  }
+  placeMnote();
   watchOverflow(box);                  // 手机上多了一排，右边还有没有东西要重算一遍
   renderMeasures();
 }
@@ -1734,6 +1834,15 @@ function buildMeasures() {
 // ★ 买卖点那层关着 ⇒ 这一组**置灰不可点**：这四颗只换买卖点的画法，层关着的时候换看法，
 //   屏幕上**什么都不会变** —— 点了没反应会被当成坏了（判据只有 opts.sig 一处，跟别的开关同一条账）。
 //   ★ 手机上没有 hover，所以「为什么是灰的」不能只写在 title 里，标题那行也得说。
+// T16：#mnote 宽屏在看法那一组里、窄屏浮在 #chart 上。断点跟 style.css 的 @media (max-width: 760px) 同一个。
+const MNOTE_MQ = window.matchMedia('(max-width: 760px)');
+function placeMnote() {
+  const n = el('mnote'); if (!n) return;
+  const host = MNOTE_MQ.matches ? el('chart') : el('mgroup');
+  if (host && n.parentNode !== host) host.appendChild(n);
+}
+MNOTE_MQ.addEventListener('change', placeMnote);
+
 function renderMeasures() {
   const g = el('mgroup'); if (!g) return;
   const on = !!opts.sig;
@@ -1743,6 +1852,12 @@ function renderMeasures() {
   }
   const cap = g.querySelector('.mcap');
   if (cap) cap.textContent = on ? '背驰看法' : '背驰看法 · 买卖点那层关着';
+  const mn = el('mnote');                // T16：选中的看法有说明（现在只有峰值）就印出来，没有就收起
+  if (mn) {
+    const t = measures.note[paging.measure] || '';
+    mn.textContent = t;                  // 不加「峰值：」前缀：说明本身就以「单用超出原文」开头（Nova 09:24）
+    mn.hidden = !t;
+  }
   if (on) g.removeAttribute('title');
   else g.title = '买卖点那一层关着 —— 这四颗只换买卖点的画法，先把它打开';
 }
@@ -2390,6 +2505,9 @@ function setUrl() {
   if (opts.lv) q.delete('lv'); else q.set('lv', '0');
   // 框编号：**默认关**（跟「走势分段」那颗反着来）⇒ 开着才写上去。
   if (opts.trendNum) q.set('trendnum', '1'); else q.delete('trendnum');
+  // 入门防守：默认关 ⇒ 开着才写；周期「跟图」不写，另选了才写。
+  if (opts.wolf) q.set('wolf', '1'); else q.delete('wolf');
+  if (opts.wolf && wolfTf) q.set('wolftf', wolfTf); else q.delete('wolftf');
   history.replaceState(null, '', `?${q}`);            // 可分享、可截图复现
 }
 

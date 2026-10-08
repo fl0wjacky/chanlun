@@ -6,7 +6,7 @@
 // 画法不是重新设计的，是 `render/full_common.py` 一行行搬过来的：box_split 的三档（规则 B）、
 // draw_signals 的尺寸与偏移、draw_labels 的「先到先得往上挪最多 12 行」。搬的时候保持同构，
 // 是为了以后改 Python 那版时能一眼看出这边该改哪一段。
-import { CHART, CANDLE, DASH, PAGE, SIG, TREND, WIDTH } from './theme.js';
+import { CHART, CANDLE, DASH, PAGE, SIG, SUB, TREND, WIDTH } from './theme.js';
 
 // ---- 小工具 ----
 const hex2rgb = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
@@ -1347,4 +1347,90 @@ function drawSignalText(ctx, placed, x, y0, s, tier, H) {
   ctx.fillText(txt, x, ty);
   ctx.textAlign = 'left';
   placed.push(box);                                                      // ★ 与 fillRect 同一个 box
+}
+
+// ---------------------------------------------------------------------------
+// 入门防守（T13，均线.md 六.7；后台 /api/wolf，卡 card-441d2f86-db3）：MACD 两条线都在 0 轴下的区间。
+// ★ 画成**贴格底的一条窄带**，不铺满全高：全高那一层已经归「走势分段」（绿／红背景带），两层都铺满
+//   就叠成一片浑色，谁也读不出来；格顶那条窄带归「中阴／等确认」。格底这条是空着的，正好给它。
+// ★ 色取 SUB.dn（MACD 负柱那个色）：这条带讲的就是「黄白线在 0 轴下」，跟副图负柱同一件事、同一个色。
+// ★ 区间按**时间**给（[t0 毫秒, t1 毫秒 或 null]）：周期由用户另选，可能跟这张图不是一个周期，
+//   所以不能按根数对。落到这张图上取「t ≥ t0 的第一根」到「t ≤ t1 的最后一根」；t1 为 null ＝ 到现在还在下面。
+// ★ 这一层**不进任何判据**，图上只是一条提示；左端那句字把这件事说出来。
+export const WOLF_STRIP = 6;          // 带高（px）；量图的工装认这个数
+export function makeWolfPrimitive(state) {
+  return {
+    attached(p) { this._chart = p.chart; this._series = p.series; this._request = p.requestUpdate; },
+    detached() {},
+    updateAllViews() {},
+    paneViews() {
+      // ★ 挂 `top`：格底那一截是成交量柱的地盘（主图下沿），挂 bottom 会整条压在量柱底下看不见（1440 实截过）。
+      return [{ zOrder: () => 'top', renderer: () => ({ draw: (t) => wolfView(t, state, this) }) }];
+    },
+  };
+}
+function wolfView(target, state, prim) {
+  const w = state.wolf, data = state.data;
+  state.wolfDrawn = [];                              // 只读出口：这一帧画了哪几段（量，不靠眼睛）
+  if (!w || !w.on || !Array.isArray(w.below) || !data || !data.bars || !data.bars.length) return;
+  target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
+    const W = mediaSize.width, H = mediaSize.height;
+    const vp = viewport(prim._chart, state.candleSeries || prim._series, data);
+    const ts = data.bars.map((b) => b.t), n = ts.length;
+    const firstGE = (t) => { let lo = 0, hi = n; while (lo < hi) { const m = (lo + hi) >> 1; if (ts[m] < t) lo = m + 1; else hi = m; } return lo; };
+    const lastLE = (t) => firstGE(t + 1) - 1;
+    const y0 = H - WOLF_STRIP;
+    // ★ 后台没算到的那一截（from_t 之前；用户选的周期比图细、span 被钳时会有）：同一条道上画**斜线灰**，
+    //   跟「站上 0 轴」（空着）分得开 —— 空着说的是「算了，不在下面」，斜线说的是「没算」。
+    let uncomputed = false;
+    if (typeof w.fromT === 'number' && ts[0] < w.fromT) {
+      const iEnd = firstGE(w.fromT) - 1;
+      const xa = vp.xOfBar(0), xb = vp.xOfBar(Math.min(iEnd, n - 1));
+      if (xa !== null && xb !== null && xb >= 0) {
+        const x0 = Math.max(0, xa - vp.spacing / 2), x1 = Math.min(W, xb + vp.spacing / 2);
+        ctx.save();
+        ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, WOLF_STRIP); ctx.clip();
+        ctx.fillStyle = rgba(PAGE.bg, 255); ctx.fillRect(x0, y0, x1 - x0, WOLF_STRIP);
+        ctx.strokeStyle = rgba(PAGE.mu, 150); ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let x = x0 - WOLF_STRIP; x < x1; x += 4) { ctx.moveTo(x, y0 + WOLF_STRIP); ctx.lineTo(x + WOLF_STRIP, y0); }
+        ctx.stroke(); ctx.restore();
+      }
+      uncomputed = true;
+    }
+    let labelX = 44;                                 // 让开左下角 TradingView 那枚标（MACD 副图关着时它就落在主图这一格左下角）
+    for (const [t0, t1] of w.below) {
+      const i0 = firstGE(t0), i1 = t1 == null ? n - 1 : lastLE(t1);
+      if (i0 >= n || i1 < 0 || i1 < i0) continue;   // 整段落在这份数据外面
+      const half = vp.spacing / 2;
+      const xa = vp.xOfBar(i0), xb = vp.xOfBar(i1);
+      if (xa === null || xb === null) continue;
+      const x0 = xa - half, x1 = xb + half;
+      if (x1 < 0 || x0 > W) continue;
+      // 先垫一层底色再铺色：这一截下面是量柱，不垫的话红量柱和这条带混成一片（1440 实截过，读不出哪段是带）。
+      //   代价：带所在的那几段，量柱最底下 6px 被盖住 —— 量柱读的是高度，底下 6px 不改读数。
+      ctx.fillStyle = rgba(PAGE.bg, 255);
+      ctx.fillRect(x0, y0, x1 - x0, WOLF_STRIP);
+      ctx.fillStyle = rgba(SUB.dn, 190);
+      ctx.fillRect(x0, y0, x1 - x0, WOLF_STRIP);
+      state.wolfDrawn.push({ i0, i1, open: t1 == null });
+    }
+    const extra = uncomputed && w.fmt ? `只算到 ${w.fmt(w.fromT)} 之后` : '';
+    if (w.label) {
+      // 左下角固定一处（开着就写，滚动时不跟着跳）。字底下垫一块底色（量柱就在这一截，不垫读不清）。
+      // ★ 一行放不下（手机 390 上「只算到 …」那半句接上去会出画布）就折成两行，后半句在上面那一行。
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.textBaseline = 'bottom'; ctx.textAlign = 'left';
+      const one = extra ? `${w.label} · ${extra}` : w.label;
+      const lines = ctx.measureText(one).width <= W - labelX - 8 ? [one] : [extra, w.label].filter(Boolean);
+      lines.forEach((line, k) => {
+        const yb = y0 - 3 - (lines.length - 1 - k) * 15;
+        const tw = ctx.measureText(line).width;
+        ctx.fillStyle = rgba(PAGE.bg, 220);
+        ctx.fillRect(labelX - 3, yb - 14, tw + 6, 15);
+        ctx.fillStyle = rgba(PAGE.mu, 255);
+        ctx.fillText(line, labelX, yb);
+      });
+    }
+  });
 }
