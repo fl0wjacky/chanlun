@@ -388,7 +388,7 @@ body.fs-fake main { position: fixed; inset: 0; z-index: 50; height: 100dvh; back
          量开关自己写进 `--fold-w`（加载完、改字号、转屏各重量一次）。它比开关实宽大 ⇒ 兜个偏保守的数，
          宁可我这边空一格，也不许 chip 在 JS 到位前那一瞬间停在开关底下。
          Atlas 复核时记过一条：把 reserveFold() 摘掉全尺还是绿的 —— 就是这个兜底在顶（等价变异，不挡）。 */
-    padding-right: calc(10px + var(--fold-w, 150px));
+    padding-right: calc(26px + var(--fold-w, 150px));   /* 26 ＝ 开关左边那道渐变的宽（main::after）：滑到头时最后一颗整颗落在渐变外面（Bram 10-08 18:44） */
   }
   /* **收起**（body 上有 m-fold）的时候这一行就是屏幕最下面那一行 ⇒ 底下那条安全区（iPhone 的横条）
      由它让出来（原先这条账挂在收起开关上 —— 它就是当时最下面那一格）。展开的时候下面还长着图例跟
