@@ -1,0 +1,25 @@
+diff --git a/core/center.py b/core/center.py
+index f3ccf96..7ec48cf 100644
+--- a/core/center.py
++++ b/core/center.py
+@@ -111,6 +111,10 @@ def upgrades(units, PI0, PI1):
+     return out
+ 
+ 
++import os as _os
++_Z14B = _os.environ.get('Z14B') == '1'
++
++
+ def find_centers(pens, start_dir=None, free_first=False):
+     """pens: build_pens() 输出的笔列表。
+ 
+@@ -148,6 +152,9 @@ def find_centers(pens, start_dir=None, free_first=False):
+                         nxt = j                       # 下一个中枢从离开的 Z 段找起
+                         break
+                     end = j                           # 仍重叠 → 延续到这个 Z 段
++                    if _Z14B and end - i + 1 >= 9:     # 临时：Z14 档② 满 9 段收口
++                        reason, nxt = "满9段收口", j + 1
++                        break
+                 if j + 1 < N and ZD <= u["p0"] <= ZG:  # ① 第三类买卖点：从区间里出发离开、回试不回来
+                     w = pens[j + 1]
+                     if (u["p1"] > u["p0"] and w["lo"] > ZG) or (u["p1"] < u["p0"] and w["hi"] < ZD):
