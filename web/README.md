@@ -89,7 +89,7 @@ python3 tools/web_more_check.py --selftest   #    探针：三十四格都得变
 浏览器工装（**不是第七把尺**：要真浏览器，慢且脆，谁改接线谁跑）：
 
 ```bash
-python3 -m http.server 8791 --bind 127.0.0.1 --directory web   # 只绑回环（部署纪律）
+python3 -m http.server <端口> --bind <回环地址> --directory web   # 只绑回环（部署纪律）
 npm i playwright && npx playwright install chromium            # 各机器一次
 NODE_PATH=<装 playwright 的那个 node_modules> node tools/web_more_e2e.js [输出目录] [页面地址]
 ```
