@@ -7,10 +7,13 @@
 // 牙：把 app.js 的 toggleFs／keepView 改回「viewSet 优先」，桌面跳回 938 根、手机 292 根 ⇒ 红（2026-10-08 实测）。
 //
 // 跑法（跟 web_measure_e2e.js 一样，要 playwright ＋ 真后台，只绑回环）：
-//   python3 web/server.py --port 8792
-//   NODE_PATH=<装了 playwright 的 node_modules> node tools/web_fs_drag_e2e.js [页面地址]
+//   先起一个只绑回环的后台（python3 web/server.py --port <端口>），然后
+//   E2E_URL=<那个后台的页面地址> NODE_PATH=<装了 playwright 的 node_modules> node tools/web_fs_drag_e2e.js
+//   ★ 不写默认地址（部署细节不进仓）：没给 E2E_URL、也没给第一个参数，就直接报错退出。predeploy 会给 E2E_URL。
 const { chromium } = require('playwright');
-const PAGE = (process.env.E2E_URL || process.argv[2] || 'http://127.0.0.1:8792/').replace(/\/?$/, '/');
+const RAW = process.env.E2E_URL || process.argv[2];
+if (!RAW) { console.error('缺页面地址：请设 E2E_URL（或把地址当第一个参数）。本工装不带默认地址。'); process.exit(2); }
+const PAGE = RAW.replace(/\/?$/, '/');
 (async () => {
   const b = await chromium.launch(); let bad = 0;
   for (const [dev, o] of [['桌面 1440', { viewport: { width: 1440, height: 900 } }],
