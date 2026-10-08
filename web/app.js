@@ -4,8 +4,8 @@
 //   {symbol, tf, name, updated, closed, bars[], pens[], segs[], centers[], seg_centers[], signals{seg,pen}, meta{tick,pen_rule}}
 // 取不到后台就退回 `fixtures/`（离线也能看、也能截图对账）；两边都没有就老实说取不到，不画半张图。
 import { CHART, PAGE, CANDLE, WIDTH, SUB, TREND } from './theme.js';
-import { makeBoxPrimitive, makeAnnotPrimitive, makeTrendPrimitive, shownOf, ghostHitAt, boundHitAt,
-         refTfName } from './layers.js';
+import { makeBoxPrimitive, makeAnnotPrimitive, makeTrendPrimitive, makeWolfPrimitive, shownOf, ghostHitAt,
+         boundHitAt, refTfName } from './layers.js';
 
 const LWC = window.LightweightCharts;
 
@@ -68,6 +68,9 @@ const el = (id) => document.getElementById(id);
 const opts = { ...DEFAULTS, sigKinds: { ...DEFAULTS.sigKinds } };
 opts.vol = subParam('vol');
 opts.macd = subParam('macd');
+// 入门防守（T13，均线.md 六.7）：**默认关**（Nova 09:02 定）。关着就一个请求都不发（跟 MACD 那颗同一条账）。
+// 地址栏 `?wolf=1` 开；`?wolftf=1h` 指名周期（不写 ＝ 跟着这张图的周期）。周期**由用户选**，原文没给默认。
+opts.wolf = SUB_Q.get('wolf') === '1';
 // 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）：**默认开**（Nova 2026-10-05 17:09Z 定）——
 // 这一层就是小栋要看的那个东西，藏在 `?trend=1` 后面他打开页面根本看不见；开关留着，可以手动关掉。
 // 所以地址栏这一头是**反着写**的：`?trend=0` 才关（可分享、可截图复现）。
@@ -206,6 +209,7 @@ state.candleSeries = candle;
 //   两个 paneView 里，挂哪条系列不影响 zOrder（`bottom` 就在 K 线底下），所以挂在**永远可见**的
 //   `overlay` 上最稳（挂线段那条的话，一关线段开关整层跟着消失 —— 跟上面那段是同一条理由）。
 for (const [c, p] of [[candle, makeBoxPrimitive(state)], [overlay, makeAnnotPrimitive(state)],
+                      [overlay, makeWolfPrimitive(state)],   // T13：插在走势那层**前面**，trendPrim 仍是最后一个
                       [overlay, makeTrendPrimitive(state)]]) {
   c.attachPrimitive(p);
   primitives.push(p);
@@ -862,6 +866,7 @@ function paint(d) {
   overlay.setData(bars.length ? [{ time: bars.at(-1).time, value: bars.at(-1).close }] : []);
   paintVol(d);
   syncSub();                 // 副图跟着主图一起换（同一份 K 线、同一个档位）；关着就一个请求都不发
+  syncWolf();                // 入门防守同理（T13）：关着不请求；开着就跟着品种／档位换（周期另选）
   applyToggles();
   renderMeta(d);
   renderLast();
@@ -1387,6 +1392,54 @@ function syncSub() {
 // 这里只多补一件：地址栏跟着改（图层那几颗不进地址栏，这两颗进）。
 function syncSubView() { syncSub(); setUrl(); }
 
+// ---------------------------------------------------------------- 入门防守（T13，均线.md 六.7；后台 /api/wolf）
+// 作者给入门者的傻瓜化规则（第 103 课）：黄白线在 0 轴下面的不参与。**不是判据** —— 图上只铺一条格底窄带
+// （画法见 layers.js makeWolfPrimitive），任何一层都不读它。
+// 周期由用户选（下拉），默认「跟图」＝ 这张图的周期；后台按时间回区间，前端按时间落到这张图上。
+// 跟 MACD 副图同一套取数口径：懒取、按「品种|周期|档位」认格、换格作废在飞的那一份、取不到就说取不到。
+const wolf = { on: false, below: null, label: '', note: '', err: '', slot: null, reqId: 0 };
+state.wolf = wolf;
+let wolfTf = SUB_Q.get('wolftf') || '';          // '' ＝ 跟图
+const WOLF_NAME = '防狼术';
+async function loadWolf(symbol, tf, span) {
+  const r = await fetch(`/api/wolf?${new URLSearchParams({ symbol, tf, span: String(span) })}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return await r.json();
+}
+function wolfLabel(tf) { return `${WOLF_NAME}（入门过滤，不是判据）· 周期 ${tf}`; }
+function syncWolf() {
+  wolf.on = !!opts.wolf;
+  const sel = el('wolftf');
+  if (sel) sel.hidden = !opts.wolf;
+  if (!opts.wolf) {                                 // 关着不付：清掉、不请求
+    wolf.below = null; wolf.slot = null; wolf.err = ''; wolf.reqId++;
+    repaint();
+    return;
+  }
+  if (!state.data) return;
+  const symbol = el('symbol').value, tf = wolfTf || el('tf').value;
+  const want = `${symbol}|${tf}|${paging.span}`;
+  if (wolf.slot === want) return;
+  wolf.slot = want; wolf.below = null; wolf.err = ''; wolf.label = wolfLabel(tf);
+  repaint();
+  const id = ++wolf.reqId;
+  loadWolf(symbol, tf, paging.span).then((m) => {
+    if (id !== wolf.reqId || !opts.wolf) return;
+    wolf.below = Array.isArray(m.below) ? m.below : [];
+    wolf.note = typeof m.note === 'string' ? m.note : '';
+    const chip = document.querySelector('.chip[data-key="wolf"]');
+    if (chip) chip.title = wolf.note ? `${wolfLabel(tf)} ｜ ${wolf.note}` : wolfLabel(tf);
+    repaint();
+  }).catch((e) => {
+    if (id !== wolf.reqId || !opts.wolf) return;
+    wolf.err = String((e && e.message) || e);
+    wolf.below = []; wolf.label = `${WOLF_NAME}：取不到（${wolf.err}）`;
+    const chip = document.querySelector('.chip[data-key="wolf"]');
+    if (chip) chip.title = wolf.label;
+    repaint();
+  });
+}
+
 // ---------------------------------------------------------------- 开关
 function applyToggles() {
   penSolid.applyOptions({ visible: opts.pen });
@@ -1461,6 +1514,7 @@ function buildChips() {
       if (key === 'macd' && opts.macd) { sub.slot = null; sub.err = ''; }
       applyToggles();
       if (key === 'vol' || key === 'macd') syncSubView();
+      if (key === 'wolf') { wolf.slot = null; syncWolf(); setUrl(); }
     };
     box.appendChild(b);
   };
@@ -1491,6 +1545,23 @@ function buildChips() {
   // 点取 theme.js 的 SUB：成交量用 K 线那一对涨跌色（取阳色），MACD 取黄白线里的黄（原文的叫法）。
   add('成交量', 'vol', CANDLE.up);
   add('MACD', 'macd', SUB.dea);
+  // 入门防守（T13）：**排在 MACD 后面**（它就是拿 MACD 的黄白线判的），点色取 MACD 负柱那个色（跟图上那条带同色）。
+  add(WOLF_NAME, 'wolf', SUB.dn);
+  {
+    const b = box.querySelector('.chip[data-key="wolf"]');
+    b.title = `${WOLF_NAME}：黄白线两条都在 0 轴下的区间，图底铺一条窄带（第 103 课的入门过滤，不是判据）`;
+    // 周期下拉：开着才露出来。「跟图」＝ 这张图的周期。
+    const sel = document.createElement('select');
+    sel.id = 'wolftf'; sel.className = 'wolftf'; sel.hidden = !opts.wolf;
+    sel.setAttribute('aria-label', `${WOLF_NAME}看哪个周期的 MACD`);
+    for (const [v, t] of [['', '跟图'], ...TFS.map((x) => [x, x])]) {
+      const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o);
+    }
+    sel.value = TFS.includes(wolfTf) ? wolfTf : '';
+    wolfTf = sel.value;
+    sel.onchange = () => { wolfTf = sel.value; wolf.slot = null; syncWolf(); setUrl(); };
+    b.after(sel);
+  }
   watchOverflow(box);
 }
 
@@ -2390,6 +2461,9 @@ function setUrl() {
   if (opts.lv) q.delete('lv'); else q.set('lv', '0');
   // 框编号：**默认关**（跟「走势分段」那颗反着来）⇒ 开着才写上去。
   if (opts.trendNum) q.set('trendnum', '1'); else q.delete('trendnum');
+  // 入门防守：默认关 ⇒ 开着才写；周期「跟图」不写，另选了才写。
+  if (opts.wolf) q.set('wolf', '1'); else q.delete('wolf');
+  if (opts.wolf && wolfTf) q.set('wolftf', wolfTf); else q.delete('wolftf');
   history.replaceState(null, '', `?${q}`);            // 可分享、可截图复现
 }
 

@@ -285,6 +285,12 @@ body.fs-fake main { position: fixed; inset: 0; z-index: 50; height: 100dvh; back
   padding-bottom: 8px; border-bottom: 1px solid var(--line);
 }
 .mcap { flex: 1 0 100%; font-size: 11px; color: var(--dim); }
+/* T13 入门防守那颗旁边的周期下拉：跟 chip 同高、同边框，开着才露出来（`hidden`）。不另起色：只用 :root 那几个变量。 */
+.wolftf {
+  font: inherit; font-size: 12px; color: var(--mu); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 999px; padding: 4px 8px; cursor: pointer;
+}
+.wolftf[hidden] { display: none; }
 /* 实心用 --tx（墨色）当底、--bg 当字：**不借信号色**（--am 是「未收盘/旧数据」、--rd 是「出错」，
    借来当选中色，那两个色就不只一个意思了）。 */
 .mchip[aria-checked="true"] { background: var(--tx); border-color: var(--tx); color: var(--bg); }
@@ -386,7 +392,7 @@ body.fs-fake main { position: fixed; inset: 0; z-index: 50; height: 100dvh; back
   body.m-fold .panel { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
   /* 收起时开关跟 `.panel` 同一条账（两处一起加、一起不加 —— 差一截就是「开关飘起来压住图」） */
   body.m-fold .fold { bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
-  .chip { flex: 0 0 auto; }
+  .chip, .wolftf { flex: 0 0 auto; }
   /* 全屏那颗按钮在手机上大一点（26px 的触控目标太小；这颗在手机上比桌面上更值钱）——
      仍是右上角、仍让开右轴那一条（--ps-right 那条账不分宽窄）。 */
   .fs { width: 30px; height: 30px; top: 6px; }
