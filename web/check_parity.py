@@ -420,6 +420,12 @@ def run_meta(quiet=False):
         diffs.append("measure_orig 跟 measures 对不上或不是布尔：%r" % (mo,))
     elif [k for k in ms if not mo[k]] != ["slope"]:
         diffs.append("非原文的应当只有 slope，给的是 %r" % [k for k in ms if not mo[k]])
+    # T16（背驰.md 六.3）：measure_note 只挂「量是原文、单用超出原文」的；现在只有 peak，且 peak 照旧算原文（不改类型）
+    mn = m.get("measure_note")
+    if not isinstance(mn, dict) or any(k not in (ms or []) or not isinstance(v, str) or not v for k, v in mn.items()):
+        diffs.append("measure_note 不是 {看法: 非空字符串} 或带了名单外的看法：%r" % (mn,))
+    elif sorted(mn) != ["peak"] or not (isinstance(mo, dict) and mo.get("peak") is True):
+        diffs.append("measure_note 应当只有 peak、且 peak 仍是原文：note=%r orig.peak=%r" % (sorted(mn), (mo or {}).get("peak")))
     if not quiet:
         print("%s /api/meta measures=%s measure_orig=%s%s" % ("✗" if diffs else "✓", ms, mo,
                                                              "  ← " + " ｜ ".join(diffs) if diffs else ""))
@@ -557,6 +563,14 @@ def self_test():
         finally:
             server.wolf_below = real
     arms.append(("防狼术只看一条线", arm_wolf_one_line))
+    def arm_meta_no_note():
+        real = dict(server.MEASURE_NOTE)
+        server.MEASURE_NOTE.clear()
+        try:
+            return run_meta(quiet=True)
+        finally:
+            server.MEASURE_NOTE.update(real)
+    arms.append(("峰值那句「单用超出原文」丢了", arm_meta_no_note))
 
     def arm_engine_stale():
         """副图那份头部的引擎版本不跟着进程（比如缓存里留着旧值）⇒ 前端分不出换没换引擎，必须红。"""

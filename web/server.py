@@ -34,7 +34,8 @@
         回显 trend。白名单外 400。/api/meta 回 cut_default。
   GET /api/meta            → 白名单（前端拿来做下拉）
         engine = 引擎版本（core/*.py＋config.py 的 sha256 前 10 位，启动时算），/api/chart、/api/macd 头部也带同一个；
-        measures 仍是字符串列表（契约不变）；measure_orig = {看法: 是否 108 课原文的判法}，slope 为 false（小栋 10-04 ①A）。
+        measures 仍是字符串列表（契约不变）；measure_orig = {看法: 是否 108 课原文的判法}，slope 为 false（小栋 10-04 ①A）；
+        measure_note = {看法: 一句说明}，只给「量是原文、单用超出原文」的那几种（现在只有 peak，背驰.md 六.3，T16）。
   GET /api/wolf?symbol=&tf=[&span=]   → 防狼术（T13，均线.md 六.7，默认关、不是判据）：这一格 MACD(12,26,9) 黄白线在 0 轴下
         的区间 below=[[t0, t1|null]]（两条都 <0 进、两条都 >0 出、其余维持），头部同 /api/macd。前端开了开关、按用户选的周期才取。
   GET /  /<静态文件>       → web/ 下的前端文件（只送 STATIC_EXT 里的类型，.py / .md / 点文件一律 404）
@@ -66,7 +67,7 @@ from make_web_fixture import iso, shape                 # noqa: E402
 from core.analyze import analyze                        # noqa: E402
 from core.trend import trend_v3                         # noqa: E402
 import levels as LV                                     # noqa: E402  （web/levels.py：级别联动，不进引擎版本）
-from core.signals import MEASURES, MEASURE_ORIG, macd_lines, wolf_below, signals as engine_signals   # noqa: E402
+from core.signals import MEASURES, MEASURE_ORIG, MEASURE_NOTE, macd_lines, wolf_below, signals as engine_signals   # noqa: E402
 import core.signals as _engine_signals_mod              # noqa: E402,F401  （见下行：模块对象从 sys.modules 取）
 _ENGINE = sys.modules["core.signals"]                    # core/__init__ 把 signals 导成了函数，模块要从这里拿
 
@@ -736,7 +737,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps(dict(symbols=list(SYMBOLS), tfs=list(TFS), days=DAYS,
                                                    refresh_s=REFRESH_S, span_max=SPAN_MAX,
                                                    engine=ENGINE, measures=list(MEASURES), cut_modes=list(CUT_MODES), cut_default=DEFAULT_CUT,
-                                                   measure_orig={m: MEASURE_ORIG.get(m, False) for m in MEASURES})).encode())
+                                                   measure_orig={m: MEASURE_ORIG.get(m, False) for m in MEASURES},
+                                                   measure_note={m: MEASURE_NOTE[m] for m in MEASURES if m in MEASURE_NOTE})).encode())
         return self._static(u.path, u.query)
 
     def _static(self, path, query=""):
