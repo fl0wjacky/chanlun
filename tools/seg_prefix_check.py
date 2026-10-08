@@ -71,7 +71,8 @@ def self_test():
     print("%s 故意撤销的划段函数（%s）⇒ 报出 %d 处" % ("✓" if rv else "✗", fn, len(rv)))
     # 图头那一条拿掉 cutoff（判 ① 型等到反向段确认）⇒ Atlas 的两组随机反例必须报撤回（card-2783fa1f-da8）
     import core.segment as SG
-    fz = json.load(open(os.path.join(HERE, "fixtures", "headfuzz_pens.json")))["seeds"]
+    fz_all = json.load(open(os.path.join(HERE, "fixtures", "headfuzz_pens.json")))["seeds"]
+    fz = {sd: p for sd, p in fz_all.items() if sd in ("1525", "4772")}
     SG.HEAD_EXT_CUTOFF = False
     try:
         rv2 = {sd: len(revocations(p)) for sd, p in fz.items()}
@@ -79,7 +80,15 @@ def self_test():
         SG.HEAD_EXT_CUTOFF = True
     ok2 = all(rv2.values())
     print("%s 图头那一条不设 cutoff ⇒ 随机反例撤回 %s" % ("✓" if ok2 else "✗", rv2))
-    return 0 if rv and ok2 else 3
+    # 图头挪位踩暂定刀（card-6dd83a22-a76）：关掉 HEAD_DIR_NO_TENT ⇒ 1754／2068 必须报撤回
+    SG.HEAD_DIR_NO_TENT = False
+    try:
+        rv3 = {sd: len(revocations(fz_all[sd])) for sd in ("1754", "2068")}
+    finally:
+        SG.HEAD_DIR_NO_TENT = True
+    ok3 = all(rv3.values())
+    print("%s 图头挪位不避暂定刀 ⇒ 随机反例撤回 %s" % ("✓" if ok3 else "✗", rv3))
+    return 0 if rv and ok2 and ok3 else 3
 
 
 if __name__ == "__main__":
