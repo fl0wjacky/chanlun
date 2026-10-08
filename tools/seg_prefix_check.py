@@ -3,6 +3,7 @@
 """线段「已确认段只增不撤」检查：每份 K 线样本，笔序列逐笔加长，build_segments 的已确认段必须只往后长、不撤销。
 
     python3 tools/seg_prefix_check.py             # data/ 下全部样本，撤销数必须为 0（rc=0）
+    python3 tools/seg_prefix_check.py --fuzz 4000 # 随机 4000 组逐笔加长（先不进 predeploy，见 fuzz()）
     python3 tools/seg_prefix_check.py --self-test # 反向验证：喂一个故意会撤销的划段函数，必须报出来（rc=0 ＝ 报出来了）
 
 为什么要它（card-753bd03a，Nova 10-06 定为合并条件）：
@@ -137,5 +138,39 @@ def self_test():
     return 0 if rv and ok2 and ok3 else 3
 
 
+def fuzz_pens(sd):
+    """随机笔（Atlas／Bram 10-08 那个生成器，card-c784a101-791）：起价 100、涨跌交替，每笔幅度取自 {0.3,0.6,1,1.5,2.5,4}，
+    长度取自 {30,50,80}。跟 tools/fixtures/l77_pens.json、headfuzz 不是一个分布，所以三处各留各的。"""
+    import random
+    rng = random.Random(sd)
+    n = rng.choice([30, 50, 80])
+    P, p, up = [], 100.0, rng.random() < .5
+    for k in range(n):
+        d = rng.choice([0.3, 0.6, 1, 1.5, 2.5, 4]) * (1 if up else -1)
+        q = round(p + d, 2)
+        P.append(dict(p0=p, p1=q, hi=max(p, q), lo=min(p, q), i0=k * 5, i1=k * 5 + 5, dir="up" if up else "down"))
+        p, up = q, not up
+    return P
+
+
+def fuzz(n_seeds):
+    """--fuzz N（Nova 10-08 21:49）：随机 N 组笔逐笔加长查撤销。10-08 land-b4c 上 4000 组有 20 组撤销（card-6dd83a22-a76 在查根），
+    所以**先不进 predeploy**：根查清、修好以后，把它接进去，让尺子自己报，不再靠人手跑。"""
+    import concurrent.futures as cf
+    with cf.ProcessPoolExecutor(max_workers=JOBS) as ex:
+        res = list(ex.map(_fuzz_one, range(n_seeds), chunksize=50))
+    bad = [(sd, rv[0]) for sd, rv in enumerate(res) if rv]
+    for sd, first in bad[:20]:
+        print("✗ seed %d：第 %d 笔加进来时撤了 %s" % (sd, first[0], first[1]))
+    print("随机 %d 组：%d 组撤销%s" % (n_seeds, len(bad), "" if len(bad) <= 20 else "（只列前 20 组）"))
+    return 1 if bad else 0
+
+
+def _fuzz_one(sd):
+    return revocations(fuzz_pens(sd))
+
+
 if __name__ == "__main__":
+    if "--fuzz" in sys.argv:
+        sys.exit(fuzz(int(sys.argv[sys.argv.index("--fuzz") + 1])))
     sys.exit(self_test() if "--self-test" in sys.argv else main())
