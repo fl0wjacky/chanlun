@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """J17／W61：走势完成后必有大一级的中枢震荡，且至少落在原走势最后一个中枢里（走势分段.md 六之三 乙4、级别.md J17、背驰.md W61；
-L89、L99）。口径 Bram 10-08 12:4x 提、Nova 12:41 定。**只报警，不改图。**
+L89、L99）。口径 Bram 10-08 12:4x 提、Nova 12:41 定。**只统计，不报警、不改图**（C3 6 根以后 A 也过不了 5%，见下）。
 
-    python3 tools/j17_check.py              # data/ 下每份 K 线：印违反数；rc 恒为 0（只报警）
+    python3 tools/j17_check.py              # data/ 下每份 K 线：印违反数；rc 恒为 0（只统计）
     python3 tools/j17_check.py --self-test  # 两个拧坏臂各自必须报得出；报不出 ⇒ rc=1
 
 对象：`trend_v3` 的走势段（相邻两个分界之间）。第 k 段 M_k 完成（分界 b_k 确立）以后：
@@ -22,7 +22,10 @@ L89、L99）。口径 Bram 10-08 12:4x 提、Nova 12:41 定。**只报警，不�
   臂 ②：把 M_k 的「最后一个中枢」换成倒数第二个（只在有 ≥2 个中枢的段上）⇒ B 的违反数或「不健康」数必须变。
 判法（Nova 12:41 定死）：A、B 真数据违反 ≤5%，且各自的臂都报得出 ⇒ 断言只报警；否则只统计，spec 写明实测不成立。
 ★ 10-08 实测（data/ 10 份 ＋ 线上 15 张快照 10-07，图头段除外）：
-  A 违反 1／24（4.2%），臂 ① 23／23 ⇒ **A 当断言，只报警**；
+  笔 7 根时：A 违反 1／24（4.2%），臂 ① 23／23 ⇒ 当时 A 当断言、只报警；
+  **C3 改成 6 根以后（main 3718ca8）**：A 违反 data 1／17 ＋ 线上 3／30 ＝ 4／47（8.5%），过不了 5% ⇒ **A 也只统计**，
+  spec 写明实测不成立。臂 ① 照样全报（17／17、30／30），所以这是判据真不成立，不是检查没牙。
+  同一份线上快照按 7 根算 A 还是 1／15：涨的是 C3 带出来的（判了的刀数翻倍，违反 1 → 3）。
   B 违反约 25%（data 2／8、线上 4／15 上下）⇒ **B 不当断言，只统计**（spec 写明实测不成立）；「不健康」本来就只统计。
   图头段（第 0 段、起点被窗口截掉）单独记「图头」，不判：它的区间不完整，J18 同理。含图头时 A 是 5／23，其中 4 刀是图头。
 """
@@ -92,14 +95,14 @@ def main(quiet=False):
         (av, an), (bv, bn) = count(res, "A"), count(res, "B")
         unh = sum(1 for r in res if r["unhealthy"])
         tot["A"][0] += av; tot["A"][1] += an; tot["B"][0] += bv; tot["B"][1] += bn; tot["unh"] += unh
-        viol += av                                        # 只有 A 是断言；B、不健康只统计
+        viol += av                                        # 返回 A 违反数供 selfcheck 印；A、B、不健康都只统计
         if not quiet and (an or bn):
-            print("%s %-18s 段 %2d ｜ A（断言）违反 %d／%d ｜ B（统计）不在最后中枢 %d／%d ｜ 不健康 %d" % ("⚠" if av else "✓", fn, len(S), av, an, bv, bn, unh))
+            print("%s %-18s 段 %2d ｜ A 无公共重叠 %d／%d ｜ B 不在最后中枢 %d／%d ｜ 不健康 %d" % ("·", fn, len(S), av, an, bv, bn, unh))
             for r in res:
                 if r["A"] == "违反":
                     print("    违反 A：第 %d 段完成后，它和后两段没有公共重叠" % r["k"])
     if not quiet:
-        print("合计：A（断言）违反 %d／%d ｜ B（统计）%d／%d ｜ 不健康 %d" % (tot["A"][0], tot["A"][1], tot["B"][0], tot["B"][1], tot["unh"]))
+        print("合计（只统计）：A %d／%d ｜ B %d／%d ｜ 不健康 %d" % (tot["A"][0], tot["A"][1], tot["B"][0], tot["B"][1], tot["unh"]))
     return viol
 
 
@@ -141,7 +144,7 @@ def self_test():
     ok2 = True                                            # B 只统计（实测 ~25% 不成立），臂 ② 只印、不判
     print("%s 臂 ① 后两段推到 M_k 外面 ⇒ A 违反 %d／%d（要全报）" % ("✓" if ok1 else "✗", arm1_v, arm1_n))
     print("· 臂 ② 最后一个中枢换成倒数第二个（≥2 个中枢的段）⇒ B %d → %d（B 只统计，不判；线上快照上是 4 → 6）" % (b_real, b_arm2))
-    print("· 真数据（图头除外）：A 违反 %d／%d、B %d／%d（A ≤5%% 当断言；B 超了只统计，见文件头）" % (real_a, n_a, real_b, n_b))
+    print("· 真数据（图头除外）：A 违反 %d／%d、B %d／%d（6 根下 A、B 都过不了 5%%，只统计，见文件头）" % (real_a, n_a, real_b, n_b))
     miss += (not ok1) + (not ok2)
     return 1 if miss else 0
 
