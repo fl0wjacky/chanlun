@@ -41,6 +41,12 @@ KNOWN={
  'S-待定-1':('core/segment.py:374-392（Bram 10-08 摸底）','已实现'),
  'W53':('—','不进代码（Nova 10-08 11:34）'),'W26':('—','未实现，这批不做（W26 后半）'),
  'C3':('core/pen.py min_gap（第三批 ①参数 ②默认 6）','进行中'),
+ '笔P2':('core/kline.py `fractals()`：第三根标准化 K 线出现即认分型','已实现（第三批 B10 核过）'),
+ '笔P3':('core/kline.py `_standardize_span` 开头那段（整段互相包含时取头一根）','程序自定（原文未给，第三批 B10）'),
+ '笔P4':('—','不进代码（只是 spec 位置调整，第三批 B10）'),
+ '笔P5':('core/kline.py 标准化后取极值（端点比合并后的 K 线）','已实现（第三批 B10：4.7% 影线越过端点，前端约定行加说明）'),
+ '笔P7':('core/kline.py 合并时记 ih／il（出极值的那根原始 K 线）','已实现（第三批 B10）'),
+ '笔P9':('core/kline.py `quantize()` 按最小价位取整后逐位比','已实现（第三批 B10）'),
  '笔P8':('core/kline.py 合并时 `bh > p["h"]` 才换 ih（并列取前一根）','不改（Nova 10-08 12:56：L81 数据不够、上下文讲的是包含）'),
 }
 # 第 N 章补翻文件里的条目标题（W、M、J、T、Z、C、S、P 这些编号的出处），有就拿它当摘要
@@ -53,7 +59,7 @@ title={}
 for ref,f in chap:
     t=subprocess.run(['git','show',ref+':'+f],capture_output=True,text=True).stdout
     for line in t.split('\n'):
-        m=re.match(r'\*\*('+idre+r')(?:[（(][^）)]*[）)])?\s*·\s*(.+?)\*\*',line)
+        m=re.match(r'(?:-\s*)?\*\*('+idre+r')(?:[（(][^）)]*[）)])?\s*·\s*(.+?)\*\*',line)
         if m and m.group(1) not in title: title[m.group(1)]=(f.split('/')[-1],m.group(2))
         m=re.match(r'\|\s*('+idre+r')\s*\|\s*(.+?)\s*\|',line)
         if m and m.group(1) not in title: title[m.group(1)]=(f.split('/')[-1],re.sub(r'[*`]','',m.group(2)))
