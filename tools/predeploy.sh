@@ -3,7 +3,7 @@
 #
 #   tools/predeploy.sh          # 五套 Python 检查 + trend_check --self-test + seg_prefix_check（含 --self-test）+ live_seg_check
 #                               #   ＋ **六把 web 尺（主跑 + 各自自检各一条，10-07 接进来，card-b6609942-1ad）**
-#                               #   ＋ 4 套前端回归（ghost / more / readout / measure）
+#                               #   ＋ 前端回归（ghost / more / more --selftest / readout / measure / fs_drag）
 #   tools/predeploy.sh --all    # 再加 4 套单卡证据工装（macd_axis / mobile_share / readout_swap_probe / subhead_slot_probe）
 #   tools/predeploy.sh --expect <sha> [--all]   # 只在 HEAD 就是这笔、且没有未提交改动时才跑；对不上 ⇒ exit=2（没比成），一格都不跑
 #                                               # （也认环境变量 EXPECT_SHA）。card-a1ea0209-015：10-06 worktree 没建成，
@@ -141,7 +141,9 @@ for chk in "${CHECKS[@]}"; do
 done
 
 # ---- 渲染那半：前端 e2e ----
-SUITES=(tools/web_ghost_e2e.js tools/web_more_e2e.js tools/web_readout_e2e.js tools/web_measure_e2e.js tools/web_fs_drag_e2e.js)
+# 一格可以带开关：「文件 开关…」用空格隔开（下面跑的时候按空格拆）。`web_more_e2e.js --selftest` 是 ㉑ 那条竞态的牙：
+#   故意把最后几档扣住，旧写法（死等 3 秒）必须红、现写法必须绿，两条都对才 rc=0（card-c5a625b8-a14，Nova 10-08 23:52 定接进来）。
+SUITES=(tools/web_ghost_e2e.js tools/web_more_e2e.js "tools/web_more_e2e.js --selftest" tools/web_readout_e2e.js tools/web_measure_e2e.js tools/web_fs_drag_e2e.js)
 # ★ web_fs_drag_e2e（card-c90f0f08-3ac）：拖过再进/出全屏，视口不许跳回最初那一屏。web_measure_e2e 的全屏格是**没拖过**就进，量不到这个。
 # ★ subhead_slot_probe 挂在 --all 档、**不进默认档**（Nova 2026-10-05 16:04）：它要真后台连点十二次开关、
 #   跑将近一分钟，只有上线前那一趟值这个时间。它钉的是「副图页头拿格高 0 摆位置」（card-9b0fe913-758）。
@@ -178,10 +180,12 @@ else
     for s in "${SUITES[@]}"; do
       out=$(mktemp -d)
       log=$(mktemp)
-      "$NODE" "$s" "$out" >"$log" 2>&1
+      read -r -a argv <<<"$s"                     # 「文件 开关…」拆开：文件在前，输出目录照旧放在开关后面
+      "$NODE" "${argv[@]}" "$out" >"$log" 2>&1
       rc=$?
       case $rc in
-        0) record "$s" 绿 "$(pick "$log" '[0-9]+/[0-9]+ *(过|绿)' tail | sed 's/　*截图.*//')" ;;
+        0) g=$(pick "$log" '[0-9]+/[0-9]+ *(过|绿)|都对' tail | sed 's/　*截图.*//')
+           record "$s" 绿 "$g" ;;
         1) record "$s" 红 "$(pick "$log" '✗' head)" ;;
         2|3) m=$(pick "$log" '✗|炸了' head); case $m in rc=*) ;; *) m="rc=$rc $m" ;; esac
              record "$s" 没比成 "$m" ;;
