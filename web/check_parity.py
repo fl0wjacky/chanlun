@@ -408,7 +408,7 @@ def run_default(quiet=False):
     cases = [(fn, dataset(fn)) for fn in files if dataset(fn)]
     bars_by_key = {key: json.load(open(data(fn), encoding="utf-8")) for fn, key in cases}
     bad = 0
-    keys = ("bounds", "retracted", "pending", "segments", "units")
+    keys = ("bounds", "retracted", "pending", "segments", "units", "xzd_seconds")   # 跟 web/server.py _cut_cc 交出去的那几个键同一份（M29 加了 xzd_seconds）
     with running(bars_by_key) as port:
         m = get_path(port, "/api/meta")
         if m.get("cut_default") != "trend" or sorted(m.get("cut_modes") or []) != ["extend", "trend"]:
