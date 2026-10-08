@@ -1,5 +1,5 @@
 import re,subprocess,collections,sys
-M=subprocess.run(['git','rev-parse','--short','HEAD'],capture_output=True,text=True).stdout.strip()
+M=subprocess.run(['git','rev-parse','--short','origin/main'],capture_output=True,text=True).stdout.strip()   # 表头写的『基于 main』取 origin/main，不取本支 HEAD
 files=subprocess.run(['git','-c','core.quotepath=off','ls-tree','--name-only','HEAD','docs/spec/'],capture_output=True,text=True).stdout.split()
 topic=[f for f in files if f.endswith('.md') and not f.split('/')[-1].startswith('第')]
 idre=r'(?:S-待定-\d|(?:W|M|J|T|Z|R|C|S|P|D)\d{1,2}(?:-\d+)?)'
@@ -53,6 +53,13 @@ for ref,f in chap:
         if m and m.group(1) not in title: title[m.group(1)]=(f.split('/')[-1],m.group(2))
         m=re.match(r'\|\s*('+idre+r')\s*\|\s*(.+?)\s*\|',line)
         if m and m.group(1) not in title: title[m.group(1)]=(f.split('/')[-1],re.sub(r'[*`]','',m.group(2)))
+NOW={
+ 'M13':'现状：已定（Nova 10-08 06:47，命名做开关，不报小栋）',
+ 'T13':'现状：已定（Nova 10-08 09:02，独立开关、默认关；口径见 均线.md 六.7）',
+ 'T16':'现状：已定（Nova 10-08 08:19，不改类型、另挂 MEASURE_NOTE；见 背驰.md 六.3）',
+ 'W33':'现状：已定（Nova 10-08 05:3x，不报小栋）',
+ 'W60':'现状：已定（Nova 10-08 06:25，以 L52 自己的例子为准，不否定小转大）',
+}
 rows=[]
 key=lambda x:(re.match(r'S-待定|[A-Z]+',x).group(0),[int(v) for v in re.findall(r'\d+',x)])
 for k in sorted(occ,key=key):
@@ -61,11 +68,13 @@ for k in sorted(occ,key=key):
     if k in title and re.match(r'[WMJTZ]\d',k):
         cf,tt=title[k];tt=re.sub(r'[|]','／',tt);tt=(tt[:70]+'…') if len(tt)>70 else tt
         summ=f"{tt}（出处：{cf}）"
+        if k in NOW: summ+=' ★'+NOW[k]
     else:
         summ=label(k,best[2])
     rows.append(f"| {k} | `{best[0]}:{best[1]}` | {summ} | {code} | {st} |")
 hdr=f"""# 规则对代码总表（底账）
 
+> **本表不是规范，规范以 `docs/spec` 为准。**
 > 基于 main `{M}`。**用途**：spec 里每一条编了号的规则，写清楚代码在哪、还没实现、还是只是说明不进代码。以后拿它防『spec 定了、代码没跟上』。第三批 B13 的 S7、S10、S12 就是这样漏的。
 > **怎么生成的**：`notes/gen_rcm.py`。扫 `docs/spec/` 下 17 份主题文件（不含『第 N 章』补翻记录），按编号抓出现处：W、M、J、T、Z、R、C、S、P、D 加数字，以及 S-待定-N。**一个编号常出现在好几处，这里只取最像定义的那一处**（『规则 X』开头、标题、加粗）。W、M、J、T、Z 的摘要取『第 N 章』补翻文件里这个编号的条目标题（标明出处，第四到七章的文件在各章自己的支上）；D、R、S、C、P 和没找到标题的，取 spec 那一行的标题或加粗字，**可能取错**，以定义处原文为准。
 > **分工**：Atlas 列规则，并填上已经核过的几条；Bram 填『代码位置』和『状态』。状态五选一：已实现／**未实现**／不进代码（只是说明或操作建议）／进行中／请核。
