@@ -100,9 +100,11 @@ fi
 #  ★ ①③ 要 PIL（① 经 `render/style.py`，③ 经 `from render.style import CHART`）⇒ 缺 PIL 时它们
 #    打顶格的 `ModuleNotFoundError`，按下面「崩了」那条归 **rc=99 记「没比成」**（不是红）。标题那行
 #    印的 `PIL 无` 就是给这个看的：门要用带 PIL 的解释器跑（`PYTHON=`）。
+# ★ check_abuse --self-test（card-79464e38-458，10-08 接进来）：15 种改坏后台，主跑必须各自红；一臂一个子进程、5 个并行，约 2 分 20 秒。
+#   接进来之前没人跑它，第 12 臂（替身不收 cut/pen_min）崩了不知多久。一臂崩了算没牙（rc=3 ⇒ 记红）。
 # ★ check_closedue（card-7d3e8748-3d3）：收盘前 1 秒请求过、收盘后打开，照页面真的补数节奏（常量从 app.js 读）敲，
 #   10 秒内必须拿到新那根，每格每根最多多拉币安 1 次。假钟假币安，约 12 秒；自检把 _close_due 摘掉必须红。
-for chk in tools/selfcheck.py web/check_parity.py "web/check_parity.py --self-test" web/check_abuse.py web/check_closedue.py "web/check_closedue.py --self-test" web/check_assets.py "tools/pine_lockstep.py --head HEAD" "notes/pine-incremental-seg.py --self-test" "notes/pine-incremental-seg.py --tail 60" "tools/trend_check.py --self-test" tools/seg_prefix_check.py "tools/seg_prefix_check.py --self-test" tools/live_seg_check.py tools/levels_check.py "tools/levels_check.py --self-test" "tools/j18_check.py --self-test" "tools/j19_check.py --self-test" "tools/j17_check.py --self-test" tools/web_theme_sync.py "tools/web_theme_sync.py --selftest" tools/web_footer_check.py "tools/web_footer_check.py --selftest" tools/web_fmt_check.py "tools/web_fmt_check.py --selftest" tools/web_fitbox_check.py "tools/web_fitbox_check.py --selftest" tools/web_more_check.py "tools/web_more_check.py --selftest"; do
+for chk in tools/selfcheck.py web/check_parity.py "web/check_parity.py --self-test" web/check_abuse.py "web/check_abuse.py --self-test" web/check_closedue.py "web/check_closedue.py --self-test" web/check_assets.py "tools/pine_lockstep.py --head HEAD" "notes/pine-incremental-seg.py --self-test" "notes/pine-incremental-seg.py --tail 60" "tools/trend_check.py --self-test" tools/seg_prefix_check.py "tools/seg_prefix_check.py --self-test" tools/live_seg_check.py tools/levels_check.py "tools/levels_check.py --self-test" "tools/j18_check.py --self-test" "tools/j19_check.py --self-test" "tools/j17_check.py --self-test" tools/web_theme_sync.py "tools/web_theme_sync.py --selftest" tools/web_footer_check.py "tools/web_footer_check.py --selftest" tools/web_fmt_check.py "tools/web_fmt_check.py --selftest" tools/web_fitbox_check.py "tools/web_fitbox_check.py --selftest" tools/web_more_check.py "tools/web_more_check.py --selftest"; do
   log=$(mktemp)
   "$PY" $chk >"$log" 2>&1
   rc=$?

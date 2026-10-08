@@ -475,16 +475,23 @@ def main():
 
 
 class _NoLock:
+    """「没有锁」：with、acquire、release 全放行。★ acquire/release 是 10-08 补的 —— start_prefetch 用
+    lock.acquire(blocking=False)，原先没这两个方法，这一臂红是红了，可红在 AttributeError（处理器崩），不是红在单飞没了。"""
     def __enter__(self):
         return self
 
     def __exit__(self, *a):
         return False
 
+    def acquire(self, blocking=True, timeout=-1):
+        return True
 
-def self_test():
+    def release(self):
+        pass
+
+
+def self_test(arm=None):
     """把服务改坏六种，main() 必须各自 rc≠0：没有单飞锁 ／ 没有刷新节流 ／ 报错把堆栈回给前端 ／ 静态放行源码 ／ 预热并发 ／ 刷新挂在请求上。"""
-    import importlib
     import io
     import contextlib as cl
 
@@ -540,8 +547,8 @@ def self_test():
     def ignore_measure():
         real = server.get_chart
 
-        def g(symbol, tf, span=1, prefetch=True, touch=True, measure="macd"):
-            out = real(symbol, tf, span, prefetch, touch, "macd")    # 全按 macd 算
+        def g(symbol, tf, span=1, prefetch=True, touch=True, measure="macd", **kw):   # **kw：cut / pen_min 照转（10-08 前漏了，路由一调就 TypeError）
+            out = real(symbol, tf, span, prefetch, touch, "macd", **kw)    # 全按 macd 算
             if out is None:
                 return None
             body = out[0].replace(b'"measure":"macd"', ('"measure":"%s"' % measure).encode(), 1)   # 只改回显
@@ -551,8 +558,8 @@ def self_test():
     def macd_ignores_span():
         real = server.get_chart
 
-        def g(symbol, tf, span=1, prefetch=True, touch=True, measure="macd"):
-            return real(symbol, tf, 1 if measure == server.MACD_KEY else span, prefetch, touch, measure)
+        def g(symbol, tf, span=1, prefetch=True, touch=True, measure="macd", **kw):
+            return real(symbol, tf, 1 if measure == server.MACD_KEY else span, prefetch, touch, measure, **kw)
         server.get_chart = g
 
     def macd_own_fetch():
@@ -566,25 +573,54 @@ def self_test():
     def serve_source():
         server.STATIC_EXT[".py"] = "text/plain; charset=utf-8"
 
-    miss = 0
-    for name, f in [("拿掉单飞锁", no_lock), ("拿掉刷新节流", no_throttle), ("错误回堆栈", leaky),
+    ARMS = [("拿掉单飞锁", no_lock), ("拿掉刷新节流", no_throttle), ("错误回堆栈", leaky),
                     ("静态放行 .py", serve_source), ("预热改成并发", parallel_prewarm),
                     ("刷新挂在请求上", sync_refresh), ("span 不设白名单", any_span), ("超封顶不钳", no_clamp), ("不预拉", no_prefetch),
                     ("不拿上一档当底（整窗重拉）", no_seed), ("earliest 恒为假", never_earliest),
                     ("忽略 measure（全按 macd 算、只改回显）", ignore_measure),
                     ("副图不认 span（总给 1 档）", macd_ignores_span), ("副图自己另去拉币安", macd_own_fetch),
-                    ("跳价不缓存（每趟都打币安）", tick_no_cache)]:
-        importlib.reload(server)
+                    ("跳价不缓存（每趟都打币安）", tick_no_cache)]
+    if arm is not None:
+        # 子进程里只跑这一臂：改坏 → main() → 印「rc 红格」给父进程
+        name, f = ARMS[arm]
         f()
         buf = io.StringIO()
         with cl.redirect_stdout(buf):
             rc = main()
         reds = [l.split()[1] for l in buf.getvalue().splitlines() if l.startswith("✗")]
-        print("%s 变异 %-10s ⇒ rc=%d 红格 %s" % ("✓" if rc else "✗", name, rc, " ".join(reds)))
-        miss += 0 if rc else 1
-    importlib.reload(server)
+        print("ARM %d %s" % (rc, " ".join(reds)))
+        return 0
+    # ★ 每一臂一个子进程、5 个并行（10-08）：原先 15 臂串着跑、同一进程里 reload，一共 7 分多钟；一臂崩了（Traceback）
+    #   整个自检就死在那儿，后面的臂都没跑 —— 第 12 臂（替身不收 cut/pen_min）就这么崩了不知多久，没人发现。
+    #   现在一臂崩了记「崩了」并且**算没牙**（崩不是红：它证明不了这一格能抓到这种改坏），其余臂照跑。
+    import subprocess
+    import concurrent.futures as _cf
+
+    def run(i):
+        p = subprocess.run([sys.executable, os.path.abspath(__file__), "--arm", str(i)],
+                           capture_output=True, text=True, timeout=600)
+        line = next((l for l in p.stdout.splitlines() if l.startswith("ARM ")), None)
+        if p.returncode != 0 or line is None:
+            last = (p.stderr.strip().splitlines() or ["？"])[-1]
+            return None, last[:120]
+        rc, _, reds = line[4:].partition(" ")
+        return int(rc), reds
+
+    miss = 0
+    with _cf.ThreadPoolExecutor(max_workers=5) as ex:
+        results = list(ex.map(run, range(len(ARMS))))
+    for (name, _), (rc, reds) in zip(ARMS, results):
+        if rc is None:
+            print("✗ 变异 %-10s ⇒ 崩了（不算红）：%s" % (name, reds))
+            miss += 1
+        else:
+            print("%s 变异 %-10s ⇒ rc=%d 红格 %s" % ("✓" if rc else "✗", name, rc, reds))
+            miss += 0 if rc else 1
+    print("自检通过（%d 臂全红）" % len(ARMS) if not miss else "%d 臂没牙或崩了" % miss)
     return 3 if miss else 0
 
 
 if __name__ == "__main__":
+    if "--arm" in sys.argv:
+        sys.exit(self_test(int(sys.argv[sys.argv.index("--arm") + 1])))
     sys.exit(self_test() if "--self-test" in sys.argv else main())
