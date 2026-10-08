@@ -15,7 +15,7 @@
   D3    同一段走势里连续扩展的中枢合成一个高一级中枢（DD 取小、GG 取大）。读法 A：有合成中枢就整段升一级、
         只数合成出来的；读法 B：合成中枢留在本级别跟别的一起数（L17:255 后半句）。等小栋定，默认 A（spec 现写法）。
 
-D2-5 死点类型（趋势背驰／盘整背驰／小转大）：确立的分界上标 death，只标注、不决定刀（_death_types，第四批 ①）。
+D2-5 死点类型（趋势背驰／盘整背驰／小转大／比不了）：确立的分界上标 death＋death_why，只标注、不决定刀（_death_types，第四批 ①）。
 """
 from .center import find_centers, classify_relations
 
@@ -396,34 +396,44 @@ _DEATH = True                                     # 只给 trend_check --self-te
 
 
 def _death_types(r, done, bounds):
-    """D2-5（第四批 ①，Nova 10-08 14:09）：每个确立的分界标 death，按顺序取第一个成立的 —— 只标注、不动刀。
-      ① 趋势背驰：引擎现有的一卖（H）／一买（L）正好落在这一根（signals 线段级、默认看法 MACD 面积）。
-      ② 盘整背驰（编者口径，L88:8-9）：H 是向上线段 C＝done[line_seg] 的终点；C 之前、参照中枢 Z 成立（前三段）以后
-         最近一条离开 Z 向上的线段 A（起点不高于 ZG、终点高于 ZG）；C 比 A 创了更高的高点、C 的力度 < A 的力度（面积）。
-      ③ 小转大：前两种都不成立（L53:41／L53:45；二类点就是确立它的那一次反抽，不另标）。L 全部反过来。
-    原地写进 bounds[i]["death"]，返回 bounds。"""
+    """D2-5（第四批 ①，Nova 10-08 14:09；② 的 A 照 agent/atlas/d25-a 改，Nova 14:24 定）：每个确立的分界标 death，
+    只标注、不动刀。按顺序取第一个成立的：
+      ① 趋势背驰：引擎现有的一卖（H）／一买（L）正好落在这一刀（signals 线段级、默认看法 MACD 面积）；
+      ② 盘整背驰：C＝刀所在线段；A＝**进入参照中枢 Z 的那条线段**（Z 第一段之前紧挨着的那一条，L24 的 A、B、C），
+         C 比 A 创了更高（低）的点、而且 C 的面积 < A 的面积；
+      ③ 小转大：① 不成立、② **真比过**也不成立；
+      比不了：② 比不了（找不到 Z／找不到 A／进入段跟 C 反向）—— 单独一类，不算小转大（Nova 14:18）。
+         没有一买一卖只说明 ① 不成立，照样接着比 ②（Atlas 14:24）。
+    death_why 写依据：① 成立写「一买」／「一卖」；② 比过写比的结果；比不了写原因。原地写进 bounds，返回 bounds。"""
     from .signals import signals, macd_hist, strength
     first = {(s["bar"], s["kind"]) for s in signals(r) if s["kind"] in ("一买", "一卖")}
     hist = macd_hist(r["bars"])
     for b in bounds:
         up = b["kind"] == "H"
-        if (b["bar"], "一卖" if up else "一买") in first:
-            b["death"] = "趋势背驰"
+        kind1 = "一卖" if up else "一买"
+        if (b["bar"], kind1) in first:
+            b["death"], b["death_why"] = "趋势背驰", kind1
             continue
         j = b["line_seg"]
         C = done[j]
-        A = None
-        k0 = next((k for k, x in enumerate(done) if x["i0"] >= b["ref_X0"]), j)   # Z 的首段
-        for k in range(j - 1, k0 + 2, -1):            # 离开 ⇒ Z 成立（前三段）以后的线段
-            x = done[k]
-            if _is_up(x) == up and ((x["p0"] <= b["ZG"] < x["p1"]) if up else (x["p0"] >= b["ZD"] > x["p1"])):
-                A = x
-                break
-        if A is not None and ((C["p1"] > A["p1"]) if up else (C["p1"] < A["p1"])) \
-                and strength(C, hist) < strength(A, hist):
-            b["death"] = "盘整背驰"
+        k0 = next((k for k, x in enumerate(done) if x["i0"] >= b["ref_X0"]), None) if b.get("ref_X0") is not None else None
+        if k0 is None or k0 >= j:
+            b["death"], b["death_why"] = "比不了", "找不到 Z"
+            continue
+        if k0 == 0:
+            b["death"], b["death_why"] = "比不了", "找不到 A"
+            continue
+        A = done[k0 - 1]
+        if _is_up(A) != up:
+            b["death"], b["death_why"] = "比不了", "进入段反向"
+            continue
+        newx = (C["p1"] > A["p1"]) if up else (C["p1"] < A["p1"])
+        weak = strength(C, hist) < strength(A, hist)
+        if newx and weak:
+            b["death"], b["death_why"] = "盘整背驰", "C 创新%s、面积小于 A" % ("高" if up else "低")
         else:
             b["death"] = "小转大"
+            b["death_why"] = "C 没创新%s" % ("高" if up else "低") if not newx else "C 面积不小于 A"
     return bounds
 
 

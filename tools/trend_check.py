@@ -89,9 +89,10 @@ TYPES = {"zec15.json": ["盘整", "盘整·升", "盘整", "上涨", "盘整", "
 TYPES = {"zec15.json": ["盘整", "盘整·升", "盘整", "盘整", "盘整", "盘整", "盘整·升", "盘整·升", "盘整·升", "盘整·升", "下跌", "盘整·升", "上涨"]}
 # ★ D2-8（10-07，card-22888623-1a7，Nova 定 ④）：第 7 段在 787.96 补一刀，切成「升级·盘整」＋「上涨」（9 段）。
 # ★ D6-4（10-07 09:16Z，先限方向判段型）：第 3 段从「盘整」变「上涨」（限方向找出两个依次上移的中枢）。
-# ★ D2-5（第四批 ①，Nova 10-08 14:09）：分界标死点类型，不动刀。zec15 12 刀里只有 L 486.0 @05-16 10:00 是盘整背驰
-#   （C 比前一条离开同一个参照中枢的线段创了新低、MACD 面积更小）；夹具里没有落在刀上的一买一卖 ⇒ 没有趋势背驰。
-DEATH = {"zec15.json": ["小转大"] * 4 + ["盘整背驰"] + ["小转大"] * 7}
+# ★ D2-5（第四批 ①，Nova 10-08 14:09；② 的 A＝进入参照中枢的那条线段，agent/atlas/d25-a，Nova 14:24）：分界标死点类型，不动刀。
+#   zec15 12 刀：盘整背驰 2（L 299.56 @04-19、H 588.8 @07-15）、小转大 1（D2-8 那刀 L 787.96，C 没创新低）、比不了 9；
+#   夹具里没有落在刀上的一买一卖 ⇒ 没有趋势背驰。
+DEATH = {"zec15.json": ["比不了"] * 2 + ["盘整背驰"] + ["比不了"] * 6 + ["盘整背驰", "比不了", "小转大"]}
 FIX_D2STD = os.path.join(ROOT, "tools", "fixtures", "zec1m_d2std.json")
 # card-eecdfd08：ZEC 永续 1m 一段（04-08 前后），旧程序在这里把同一对 (308.24 L, 394.0 H) 确立又撤回 13 次
 # ★ R6＝B（10-08）：原 8000 根（整份 1m 的 [42000:50000]）在读法 B 下不再打转，拿掉编者口径也只撤 1 次 ⇒ 探针没牙。
@@ -175,7 +176,7 @@ def invariants(fn):
         if g is None or not (0 <= g < len(seg)) or not (seg[g]["i0"] <= z["X0"] and z["X1"] <= seg[g]["i1"]):
             bad.append("框 %d–%d 的 seg=%r 不对" % (z["X0"], z["X1"], g))
     for b in bs:                                  # D2-5（第四批 ①）：每一刀都标死点类型，三选一
-        if b.get("death") not in ("趋势背驰", "盘整背驰", "小转大"):
+        if b.get("death") not in ("趋势背驰", "盘整背驰", "小转大", "比不了") or not b.get("death_why"):
             bad.append("刀 %d 没标死点类型（D2-5）：%r" % (b["bar"], b.get("death")))
     for b in bs:                                  # 每一刀都要说清按哪条规则落的（前端只读 rule，card-22888623-1a7）
         if b.get("rule") not in ("D2-2", "D2-8"):
@@ -296,7 +297,7 @@ def main():
     cell("⑤ 段类型按线上读法 A（spec D3-3，server.TREND_READING）", [] if v["reading"] == "A" and tys == TYPES["zec15.json"]
          else ["读法 %s 段类型 %s" % (v["reading"], tys)])
     dts = [b.get("death") for b in v["bounds"]]
-    cell("⑤′ D2-5 死点类型（zec15）：只有 486.0 那刀是盘整背驰，其余小转大", [] if dts == DEATH["zec15.json"]
+    cell("⑤′ D2-5 死点类型（zec15）：盘整背驰 2、小转大 1、比不了 9", [] if dts == DEATH["zec15.json"]
          else ["死点类型 %s" % dts])
     cell("⑥ 每个分界是两邻分界之间的极值（直接从 K 线算，不经线段）", extreme_between())
     cell("⑦ D2-0 夹具 zec1m_d2std：04-29 那个 317.74 L 要确立（候选卡死就没有）", d2std_fixture())
