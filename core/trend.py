@@ -15,7 +15,7 @@
   D3    同一段走势里连续扩展的中枢合成一个高一级中枢（DD 取小、GG 取大）。读法 A：有合成中枢就整段升一级、
         只数合成出来的；读法 B：合成中枢留在本级别跟别的一起数（L17:255 后半句）。等小栋定，默认 A（spec 现写法）。
 
-D2-5 死点类型（趋势背驰／盘整背驰／小转大）只标注、不决定刀，另一步做。
+D2-5 死点类型（趋势背驰／盘整背驰／小转大）：确立的分界上标 death，只标注、不决定刀（_death_types，第四批 ①）。
 """
 from .center import find_centers, classify_relations
 
@@ -190,7 +190,7 @@ def find_bounds(r, regroup=True, alternate=True, check_empty=True, no_exceed=Tru
                     break
             ks.append(j + 1)
             bounds.append(dict(rule="D2-2", line_seg=j, bar=done[j]["i1"], kind=typ, price=done[j]["p1"], pullback_line_seg=t,
-                               pullback_end_bar=done[t]["i1"], ZD=z["ZD"], ZG=z["ZG"]))
+                               pullback_end_bar=done[t]["i1"], ZD=z["ZD"], ZG=z["ZG"], ref_X0=z["X0"]))
             want = None if not alternate else ("L" if typ == "H" else "H")
             break
     return dict(bounds=bounds, retracted=retracted, ks=ks, done=done, want=want)
@@ -392,6 +392,41 @@ def _d28_cuts(done, ks, segments, units, centers):
     return out
 
 
+_DEATH = True                                     # 只给 trend_check --self-test 的探针关：分界不标死点类型（D2-5）
+
+
+def _death_types(r, done, bounds):
+    """D2-5（第四批 ①，Nova 10-08 14:09）：每个确立的分界标 death，按顺序取第一个成立的 —— 只标注、不动刀。
+      ① 趋势背驰：引擎现有的一卖（H）／一买（L）正好落在这一根（signals 线段级、默认看法 MACD 面积）。
+      ② 盘整背驰（编者口径，L88:8-9）：H 是向上线段 C＝done[line_seg] 的终点；C 之前、参照中枢 Z 成立（前三段）以后
+         最近一条离开 Z 向上的线段 A（起点不高于 ZG、终点高于 ZG）；C 比 A 创了更高的高点、C 的力度 < A 的力度（面积）。
+      ③ 小转大：前两种都不成立（L53:41／L53:45；二类点就是确立它的那一次反抽，不另标）。L 全部反过来。
+    原地写进 bounds[i]["death"]，返回 bounds。"""
+    from .signals import signals, macd_hist, strength
+    first = {(s["bar"], s["kind"]) for s in signals(r) if s["kind"] in ("一买", "一卖")}
+    hist = macd_hist(r["bars"])
+    for b in bounds:
+        up = b["kind"] == "H"
+        if (b["bar"], "一卖" if up else "一买") in first:
+            b["death"] = "趋势背驰"
+            continue
+        j = b["line_seg"]
+        C = done[j]
+        A = None
+        k0 = next((k for k, x in enumerate(done) if x["i0"] >= b["ref_X0"]), j)   # Z 的首段
+        for k in range(j - 1, k0 + 2, -1):            # 离开 ⇒ Z 成立（前三段）以后的线段
+            x = done[k]
+            if _is_up(x) == up and ((x["p0"] <= b["ZG"] < x["p1"]) if up else (x["p0"] >= b["ZD"] > x["p1"])):
+                A = x
+                break
+        if A is not None and ((C["p1"] > A["p1"]) if up else (C["p1"] < A["p1"])) \
+                and strength(C, hist) < strength(A, hist):
+            b["death"] = "盘整背驰"
+        else:
+            b["death"] = "小转大"
+    return bounds
+
+
 def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_exceed=True, standardize=True):
     """→ dict(seg_centers, bounds, retracted, pending, segments, units, reading)。
     seg_centers：按确立的分界切开重算的线段中枢（D4，前端画框就用它），每个带 seg（属于第几段走势，跟 segments 下标对齐）；
@@ -420,7 +455,7 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
                 ks2.append(j + 1)
                 b2.append(dict(line_seg=j, bar=done[j]["i1"], kind=c["kind"], price=done[j]["p1"],
                                pullback_line_seg=c["confirm"], pullback_end_bar=done[min(c["confirm"], len(done) - 1)]["i1"],
-                               ZD=c["U"].get("ZD", c["U"]["DD"]), ZG=c["U"].get("ZG", c["U"]["GG"]), rule="D2-8"))
+                               ZD=c["U"].get("ZD", c["U"]["DD"]), ZG=c["U"].get("ZG", c["U"]["GG"]), ref_X0=c["U"]["X0"], rule="D2-8"))
             ks2.sort()
             b2.sort(key=lambda x: x["bar"])
             s2, u2, c2 = _layer(done, ks2, b2, reading, n)
@@ -430,5 +465,7 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
                     next(sg for sg in s2 if sg["i0"] == done[c["j"]]["i1"])) for c in cuts)
             if ok:
                 ks, bounds, segments, units_out, centers_out = ks2, b2, s2, u2, c2
+    if _DEATH:
+        _death_types(r, done, bounds)
     return dict(seg_centers=centers_out, bounds=bounds, retracted=res["retracted"],
                 pending=pending(done, ks, res["want"]), segments=segments, units=units_out, reading=reading)

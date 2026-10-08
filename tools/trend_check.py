@@ -89,6 +89,9 @@ TYPES = {"zec15.json": ["盘整", "盘整·升", "盘整", "上涨", "盘整", "
 TYPES = {"zec15.json": ["盘整", "盘整·升", "盘整", "盘整", "盘整", "盘整", "盘整·升", "盘整·升", "盘整·升", "盘整·升", "下跌", "盘整·升", "上涨"]}
 # ★ D2-8（10-07，card-22888623-1a7，Nova 定 ④）：第 7 段在 787.96 补一刀，切成「升级·盘整」＋「上涨」（9 段）。
 # ★ D6-4（10-07 09:16Z，先限方向判段型）：第 3 段从「盘整」变「上涨」（限方向找出两个依次上移的中枢）。
+# ★ D2-5（第四批 ①，Nova 10-08 14:09）：分界标死点类型，不动刀。zec15 12 刀里只有 L 486.0 @05-16 10:00 是盘整背驰
+#   （C 比前一条离开同一个参照中枢的线段创了新低、MACD 面积更小）；夹具里没有落在刀上的一买一卖 ⇒ 没有趋势背驰。
+DEATH = {"zec15.json": ["小转大"] * 4 + ["盘整背驰"] + ["小转大"] * 7}
 FIX_D2STD = os.path.join(ROOT, "tools", "fixtures", "zec1m_d2std.json")
 # card-eecdfd08：ZEC 永续 1m 一段（04-08 前后），旧程序在这里把同一对 (308.24 L, 394.0 H) 确立又撤回 13 次
 # ★ R6＝B（10-08）：原 8000 根（整份 1m 的 [42000:50000]）在读法 B 下不再打转，拿掉编者口径也只撤 1 次 ⇒ 探针没牙。
@@ -171,6 +174,9 @@ def invariants(fn):
         g = z.get("seg")
         if g is None or not (0 <= g < len(seg)) or not (seg[g]["i0"] <= z["X0"] and z["X1"] <= seg[g]["i1"]):
             bad.append("框 %d–%d 的 seg=%r 不对" % (z["X0"], z["X1"], g))
+    for b in bs:                                  # D2-5（第四批 ①）：每一刀都标死点类型，三选一
+        if b.get("death") not in ("趋势背驰", "盘整背驰", "小转大"):
+            bad.append("刀 %d 没标死点类型（D2-5）：%r" % (b["bar"], b.get("death")))
     for b in bs:                                  # 每一刀都要说清按哪条规则落的（前端只读 rule，card-22888623-1a7）
         if b.get("rule") not in ("D2-2", "D2-8"):
             bad.append("刀 %d 没有 rule 或 rule 不认识：%r" % (b["bar"], b.get("rule")))
@@ -289,6 +295,9 @@ def main():
     tys = [s["type"] + ("·升" if s["upgraded"] else "") for s in v["segments"]]
     cell("⑤ 段类型按线上读法 A（spec D3-3，server.TREND_READING）", [] if v["reading"] == "A" and tys == TYPES["zec15.json"]
          else ["读法 %s 段类型 %s" % (v["reading"], tys)])
+    dts = [b.get("death") for b in v["bounds"]]
+    cell("⑤′ D2-5 死点类型（zec15）：只有 486.0 那刀是盘整背驰，其余小转大", [] if dts == DEATH["zec15.json"]
+         else ["死点类型 %s" % dts])
     cell("⑥ 每个分界是两邻分界之间的极值（直接从 K 线算，不经线段）", extreme_between())
     cell("⑦ D2-0 夹具 zec1m_d2std：04-29 那个 317.74 L 要确立（候选卡死就没有）", d2std_fixture())
     cell("⑧ 同一对 (b, b′) 被 D2-7 去掉最多一次（编者口径；含 zec1m_retract_loop 夹具）", retract_once())
@@ -468,6 +477,26 @@ def self_test():
     ok = on and not off and not nodir
     print("%s D2-8：照常 %s 787.96 ／ 关掉 D2-8 %s ／ 关掉方向限制（兜底该撤刀）%s" % ("✓" if ok else "✗",
           "有" if on else "没有", "有" if off else "没有", "有" if nodir else "没有"))
+    miss += not ok
+    # D2-5 的反向验证：关掉标注 ⇒ ② 报「没标死点类型」；只标不判（全写小转大）⇒ ⑤′ 的 486.0 盘整背驰没了
+    T._DEATH = False
+    _R.clear()
+    try:
+        nod = [x for x in invariants("zec15.json") if "没标死点类型" in x]
+    finally:
+        T._DEATH = True
+        _R.clear()
+    real_dt = T._death_types
+    T._death_types = lambda r, done, bounds: [b.update(death="小转大") for b in bounds] and bounds
+    _R.clear()
+    try:
+        _, vv = run("zec15.json")
+        flat = [b["death"] for b in vv["bounds"]] != DEATH["zec15.json"]
+    finally:
+        T._death_types = real_dt
+        _R.clear()
+    ok = bool(nod) and flat
+    print("%s D2-5 关掉标注 ⇒ 报出 %d 刀没标；全写小转大 ⇒ 基线%s" % ("✓" if ok else "✗", len(nod), "变了" if flat else "没变（牙没咬到）"))
     miss += not ok
     # D3-3 读法的反向验证。★ D3-2（3+3+3 重算）＋ D6-4（先限方向）以后，data/、tools/fixtures、线上 15 张**没有一份**
     #   读法 A／B 段型不同（10-07 实测），真数据咬不到了 ⇒ 造一段：一对扩展中枢（合成成一个单元）＋ 它上方一个不重叠的中枢。
