@@ -405,7 +405,7 @@ def _cut_cc(slot, symbol, pen_min=DEFAULT_PEN_MIN):
         r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"), min_gap=gap_of(pen_min))
         v = trend_v3(r, reading=TREND_READING)
         cc = slot.mbodies[(CUT_KEY, pen_min)] = (v["seg_centers"], {k: v[k] for k in
-                                      ("bounds", "retracted", "pending", "segments", "units")}, v["reading"])
+                                      ("bounds", "retracted", "pending", "segments", "units", "xzd_seconds")}, v["reading"])
     return cc
 
 

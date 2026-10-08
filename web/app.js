@@ -579,7 +579,7 @@ function structKey(d, t0, t1, shown, levels) {
   // 买卖点：一个点 —— 三角和它的字都画在这个 x 上。画不画由 shownOf 说了算
   //   （大开关 ＋ 六个 kind 的 chip ＋ 待确认；带了 shown 就必须带 sigAt，缺了当场炸，不静默放过）
   const sigs = (a) => (a || []).filter((s) => at(ts(s.bar)) && (!sh || sh.sigAt(s)))
-    .map((s) => `${ts(s.bar)}@${s.price},${s.kind}${s.confirmed === false ? ',未确认' : ''}`).join('|');
+    .map((s) => `${ts(s.bar)}@${s.price},${s.kind}${s.why ? ',' + s.why : ''}${s.confirmed === false ? ',未确认' : ''}`).join('|');
   const done = (d.segs || []).filter((s) => !s.live);   // 线段中枢的 host（跟 layers.js doneSegs 同一条）
   // 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）。★ 跟别的层同一条账：**层关着就不算「看得见」**
   //   —— 开着它却不算它的账，换档之后走势段整个换了一批、屏幕上明明白白变了，那句话却不出声。
@@ -612,7 +612,8 @@ function structKey(d, t0, t1, shown, levels) {
   return [on('pen') ? part(d.pens) : '', on('seg') ? part(d.segs) : '',
           on('pc') ? boxes(d.centers, d.pens || [], on('up')) : '',
           on('sc') ? boxes(d.seg_centers, done, on('up')) : '',
-          sigs((d.signals || {}).seg), sigs((d.signals || {}).pen),
+          // 小转大的二类（走势层 xzd_seconds，M29）画在段级买卖点那一路里 ⇒ 算进段级那一份；字（why）也算，二买 ↔ 二买·盘背 是看得见的变化
+          sigs([...((d.signals || {}).seg || []), ...((d.trend || {}).xzd_seconds || [])]), sigs((d.signals || {}).pen),
           (on('trend') || on('up')) ? trend() : ''].join('#');
 }
 // 可视窗口 → 时间区间。★ 换档前取一次、换档后用**同一段时间**再取一次：
@@ -2462,7 +2463,7 @@ function renderMeta(d) {
     `${d.name || d.symbol} · ${d.tf} ｜ ${d.nbars} 根 ｜ 笔 ${d.pens.length} ｜ 类中枢 ${d.centers.length}`
     + ` ｜ 完成线段 ${done}（+${d.segs.length - done} 未完成）｜ 线段中枢 ${d.seg_centers.length}`
     + ` ｜ 精度 ${d.meta?.tick} ｜ ${d.meta?.pen_rule === 'new' ? '新笔' : '老笔'}${Number.isFinite(d.pen_min) ? `（最少 ${d.pen_min} 根）` : ''}`
-    + ` ｜ 买卖点 线段中枢层 ${sigTierText(d.signals?.seg || [])} · 类中枢层 ${sigTierText(d.signals?.pen || [])}`
+    + ` ｜ 买卖点 线段中枢层 ${sigTierText([...(d.signals?.seg || []), ...(d.trend?.xzd_seconds || [])])} · 类中枢层 ${sigTierText(d.signals?.pen || [])}`
     + measureText(d)
     + cutText(d)
     // 分界那一刀的说明（卡 card-22888623-1a7）。★ 它**只在这儿写一次**：这句是"整句说明"，

@@ -427,7 +427,11 @@ export function makeAnnotPrimitive(state) {
               //    判据一处就够：每颗点过一遍 `sigAt`。
               const sigs = [];
               for (const tier of ['seg', 'pen']) {
-                for (const s of data.signals?.[tier] || []) {
+                // ★ M29（买卖点.md:106，L53）：小转大那一刀的二类放在走势层 `trend.xzd_seconds`，不在 signals 里（J12：signals 不读分界）。
+                //   画法、开关、避让都跟段级买卖点同一条路：过同一个 sigAt（大开关＋「二买／二卖」芯片），三角同一个样子，
+                //   只是字不一样（见 sigLabel）。
+                const extra = tier === 'seg' ? (data.trend?.xzd_seconds || []) : [];
+                for (const s of [...(data.signals?.[tier] || []), ...extra]) {
                   if (!sh.sigAt(s)) continue;   // 大开关 ＋ kind chip ＋ 待确认，全在 shownOf 里
                   const x = vp.xOfBar(s.bar), y = vp.yOfPrice(s.price);
                   if (!onScreen(x, W, 40) || y === null) continue;
@@ -1357,7 +1361,7 @@ function drawSignalGhost(ctx, x, y, s, tier) {
 function drawSignalText(ctx, placed, x, y0, s, tier, H) {
   const buy = s.kind.endsWith('买');
   const base = buy ? CHART.buy : CHART.sell;
-  const txt = s.kind + (s.weak ? SIG.weakText : '') + (tier === 'pen' ? '·笔' : '') + (s.confirmed ? '' : SIG.pendingMark);
+  const txt = sigLabel(s, tier);
   ctx.font = FONT_SM;
   const tw = ctx.measureText(txt).width;
   const anchor = y0 + (buy ? 13 : -6);                                   // 原来的字位，不许漂
@@ -1370,6 +1374,23 @@ function drawSignalText(ctx, placed, x, y0, s, tier, H) {
   ctx.fillText(txt, x, ty);
   ctx.textAlign = 'left';
   placed.push(box);                                                      // ★ 与 fillRect 同一个 box
+
+}
+
+/** 买卖点的字。★ M29 以后二类带 `why`（core/signals.py，Atlas m29-code）：
+ *    不创新低／不创新高 ⇒ 就是「二买／二卖」；创新低（高）＋盘整背驰 ⇒ 「二买·盘背」；
+ *    小转大（走势层 xzd_seconds）⇒ 「二买·小转大（事后才确认）」，创新了又有盘整背驰的在「小转大」后面加「·盘背」。
+ *  没有 `why` 的（一类、三类，或旧后台）照旧：`weak` 加「(弱)」。`weak` 字段这一版先不删（Nova 10-08 16:44）。 */
+export function sigLabel(s, tier) {
+  const w = typeof s.why === 'string' ? s.why : '';
+  let tag;
+  // 小转大：固定带「（事后才确认）」、不写日期（Nova 10-08 16:46 定）—— 点画在第二段终点，可当时并不知道那一刀是小转大；
+  //   具体哪天才出现只放在给小栋的图上（Bram m29-figs），后台也不带这个字段（Atlas c84a098 去掉了 known_bar）。
+  if (w.startsWith('小转大')) tag = '·小转大' + (w.includes('盘整背驰') ? '·盘背' : '') + '（事后才确认）';
+  else if (w.includes('盘整背驰')) tag = '·盘背';
+  else if (w) tag = '';
+  else tag = s.weak ? SIG.weakText : '';
+  return s.kind + tag + (tier === 'pen' ? '·笔' : '') + (s.confirmed ? '' : SIG.pendingMark);
 }
 
 // ---------------------------------------------------------------------------
