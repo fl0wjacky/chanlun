@@ -301,16 +301,20 @@ async function race21(page, mode) {
   }
   const release = SCEN.holdFrom != null ? setTimeout(lateFree, 4000) : null;
   await page.waitForTimeout(3000);
+  let why = '';                                     // 等超时就记原因（Bram 10-08 17:48：别把 15 秒超时静默吞掉）
   if (mode === 'wait') {
     const lastMain = requests.slice(reqBefore).at(-1);
     if (lastMain != null) {
-      await page.waitForFunction((s) => window.__app && window.__app.state.data && window.__app.state.data.span === s,
-        lastMain, { timeout: 15000 }).catch(() => {});
-      for (let w = 0; w < 30 && macdCalls.slice(macdBefore).at(-1) !== lastMain; w++) await page.waitForTimeout(500);
+      const painted = await page.waitForFunction((s) => window.__app && window.__app.state.data && window.__app.state.data.span === s,
+        lastMain, { timeout: 15000 }).then(() => true, () => false);
+      if (!painted) why = `主图 15 秒内没把 span=${lastMain} 画上去`;
+      let w = 0;
+      for (; w < 30 && macdCalls.slice(macdBefore).at(-1) !== lastMain; w++) await page.waitForTimeout(500);
+      if (macdCalls.slice(macdBefore).at(-1) !== lastMain) why += (why ? '；' : '') + `副图 15 秒内没去要 span=${lastMain}`;
       await page.waitForTimeout(800);                  // 副图那一份画上去
     }
   }
-  const out = { spans: requests.slice(reqBefore), mspans: macdCalls.slice(macdBefore) };
+  const out = { spans: requests.slice(reqBefore), mspans: macdCalls.slice(macdBefore), why };
   if (release) { clearTimeout(release); lateFree(); }   // 旧写法那一边比完以后才放行，别把页面卡死在半路
   return out;
 }
@@ -371,7 +375,7 @@ async function race21(page, mode) {
     t('自检：旧写法（拖完死等 3 秒就比）在「最后一档晚到」时**必须红**', fixedRed,
       `主图要了 ${JSON.stringify(res.fixed.spans)}、副图要了 ${JSON.stringify(res.fixed.mspans)}`);
     t('自检：现行写法（等主图画完、副图跟上再比）同一场景**必须绿**', waitGreen,
-      `主图要了 ${JSON.stringify(res.wait.spans)}、副图要了 ${JSON.stringify(res.wait.mspans)}`);
+      `主图要了 ${JSON.stringify(res.wait.spans)}、副图要了 ${JSON.stringify(res.wait.mspans)}${res.wait.why ? '；★ ' + res.wait.why : ''}`);
     console.log(bad.length ? `\n自检 ${bad.length} 处不对` : '\n自检两条都对：㉑ 有牙');
     process.exit(bad.length ? 1 : 0);
   }
@@ -1156,12 +1160,12 @@ async function race21(page, mode) {
       + `再打开 ${SC.n} 格、请求累计 ${macdCalls.length - macd0} 次`);
 
     // ㉑ 往左拖换档：副图必须**跟主图同一个 span** 一起换、换完还是逐根对齐
-    const { spans: spans17, mspans: mspans17 } = await race21(p17, 'wait');
+    const { spans: spans17, mspans: mspans17, why: why17 } = await race21(p17, 'wait');
     const SD = await subProbe(p17, spans17.at(-1) || 1);
     t('㉑ 换档：往左拖出 span=2 ⇒ 副图跟着要**同一个 span**，换完之后仍然逐根对齐（点数＝主图根数）',
       spans17.length > 0 && mspans17.length > 0 && mspans17.at(-1) === spans17.at(-1)
       && SD.bad === 0 && SD.pts.every((x) => x === SD.bars),
-      `主图要了 ${JSON.stringify(spans17)}、副图要了 ${JSON.stringify(mspans17)}；`
+      `主图要了 ${JSON.stringify(spans17)}、副图要了 ${JSON.stringify(mspans17)}；${why17 ? '★ ' + why17 + '；' : ''}`
       + `换完 ${SD.bars} 根、副图 ${SD.pts.join('/')} 点、逐根差 ${SD.bad} 处`);
     await p17.close();
 
