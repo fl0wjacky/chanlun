@@ -91,6 +91,10 @@ def burst(port, n, method, path):
 def main():
     calls.update(n=0, down=False, inflight=0, peak=0, delay=0.3)   # 每一跑从同一个起点开始（自测会连跑多臂）
     server.fetch = fake_fetch
+    # 「收盘后还没拉过就算 due」那条（_close_due）在这里关掉：这把尺用真钟、假 K 线跟着真钟对齐，跑这 40 秒里要是
+    #   碰上一个真的 15 分钟收盘，那一格会合法地多拉一次，⑤「刷新期内拉 0 次」这类格子就成了看运气的尺。
+    #   收盘那条由 web/check_closedue.py 在假钟上专门量（含「每格每根最多多拉 1 次」）。
+    server._close_due = lambda *a: False
     server.tick_fetch = lambda symbol, tf: fake_fetch(symbol, tf, 0, 1 << 62)[-2:]   # 跳价：一次调用＝一个请求
     real_prefetch = server.start_prefetch
     server.start_prefetch = lambda *a: None              # 老格子（⓪–⑨）量的是单档的拉取次数：先把预拉关掉，⑪ 再专门测它
