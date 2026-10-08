@@ -26,6 +26,8 @@
   GET /api/tick?symbol=&tf=  → 最后一根（未收盘）K 线 {t,o,h,l,c,v} ＋ fetched_at / stale / engine。同一格 2.5 秒内只碰
         一次币安（单飞，多人同看不放大）；失败回上次成功的值、stale=true；从没成功过 503。**不碰结构**（小栋 10-05 A：
         最后一根实时跳价，笔段中枢买卖点仍收盘才由 /api/chart 整份重算）。
+  GET /api/chart …&pen_min=6|7  → 笔最少几根 K 线（C3，小栋 10-08 定：默认 6、可切 7）。白名单外 400；回显 pen_min；
+        /api/meta 回 pen_min_options、pen_min_default。只换笔这一层（往上线段、中枢、走势、买卖点跟着整段重算），不碰币安。
   GET /api/chart …&cut=extend|trend  → 线段中枢的切法。**默认 trend**（docs/spec/走势分段.md v3，card-51571a5f-dc2）：
         在本级别确立的走势分界处切开，seg_centers 回切开重算的那套（D4），顶层多 trend:{bounds, retracted, pending,
         segments, units}、trend_reading（D3 读法 A／B），seg_centers 每个带 seg（第几段走势）；形状见 core/trend.py::trend_v3。
@@ -123,9 +125,19 @@ def _clean(v):
     return v
 
 
-def build_payload(bars, symbol, tf):
+# 笔最少几根 K 线（C3，小栋 10-08 12:42 拍 ①B：默认 6、可切回 7；第一个提交先保持 7，翻默认单独一笔）。
+#   6 根 ＝ 顶分型和底分型之间可以没有独立 K 线（L106:4）＝ 标准化序列上 k 相差 ≥ 3；7 根 ＝ 之间至少一根独立 K 线（L62:17、L77:37）＝ ≥ 4。
+PEN_MIN_OPTIONS = (6, 7)
+DEFAULT_PEN_MIN = 7
+
+
+def gap_of(pen_min):
+    return pen_min - 3
+
+
+def build_payload(bars, symbol, tf, pen_min=DEFAULT_PEN_MIN):
     """bars（fetch_klines 的格式）→ 前端那一份。形状 = make_web_fixture.shape，这里只补精度。"""
-    return _clean(shape(bars, tick_of(SYMBOLS[symbol] + "_.json"), symbol, tf))
+    return _clean(shape(bars, tick_of(SYMBOLS[symbol] + "_.json"), symbol, tf, min_gap=gap_of(pen_min)))
 
 
 # ───────────────────────── 缓存：每个（品种, 周期）一格 ─────────────────────────
@@ -268,7 +280,7 @@ def _refresh(slot, symbol, tf):
     # fetched_at / stale / refreshing 放最前：两个旗只在响应时替换这一处，不重算结构
     body = json.dumps(dict(fetched_at=iso(now_ms), stale=False, refreshing=False,
                            span=slot.span, earliest=earliest, span_max=SPAN_MAX[tf], measure="macd", cut="extend", engine=ENGINE,
-                           **build_payload(bars, symbol, tf)),
+                           pen_min=DEFAULT_PEN_MIN, **build_payload(bars, symbol, tf)),
                       ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
     return bars, body, earliest
 
@@ -370,13 +382,29 @@ TREND_READING = "A"                      # D3 读法（A＝整段升一级／B�
 CUT_KEY = "__cut__"                      # mbodies 里切法结果那一份的键（一格只算一次，各看法共用：v3 不读背驰）
 
 
-def _cut_cc(slot, symbol):
-    """在 slot.lock 里调用 → (seg_centers, trend, reading)：v3 只用线段 ⇒ 跟看法无关，一格算一次（数据一刷新随 mbodies 清掉）。"""
-    cc = slot.mbodies.get(CUT_KEY)
+def _base_body(slot, symbol, tf, pen_min):
+    """在 slot.lock 里调用 → 这一格在某个「笔最少根数」下的底稿（不切、默认看法）。默认那档就是 slot.body；
+    另一档懒算一次（同一份 K 线、不碰币安），头部字段照抄 slot.body，数据一刷新随 mbodies 清掉。"""
+    if pen_min == DEFAULT_PEN_MIN:
+        return slot.body
+    key = ("__body__", pen_min)
+    b = slot.mbodies.get(key)
+    if b is None:
+        head = json.loads(slot.body)
+        d = {k: head[k] for k in ("fetched_at", "stale", "refreshing", "span", "earliest", "span_max", "measure", "cut", "engine")}
+        d["pen_min"] = pen_min
+        d.update(build_payload(slot.bars, symbol, tf, pen_min))
+        b = slot.mbodies[key] = json.dumps(d, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return b
+
+
+def _cut_cc(slot, symbol, pen_min=DEFAULT_PEN_MIN):
+    """在 slot.lock 里调用 → (seg_centers, trend, reading)：v3 只用线段 ⇒ 跟看法无关，一格（每档笔根数）算一次（数据一刷新随 mbodies 清掉）。"""
+    cc = slot.mbodies.get((CUT_KEY, pen_min))
     if cc is None:
-        r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"))
+        r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"), min_gap=gap_of(pen_min))
         v = trend_v3(r, reading=TREND_READING)
-        cc = slot.mbodies[CUT_KEY] = (v["seg_centers"], {k: v[k] for k in
+        cc = slot.mbodies[(CUT_KEY, pen_min)] = (v["seg_centers"], {k: v[k] for k in
                                       ("bounds", "retracted", "pending", "segments", "units")}, v["reading"])
     return cc
 
@@ -415,7 +443,7 @@ def get_levels(symbol, tf, span=1):
     ), ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
 
-def _measure_body(slot, symbol, tf, measure, cut=DEFAULT_CUT):
+def _measure_body(slot, symbol, tf, measure, cut=DEFAULT_CUT, pen_min=DEFAULT_PEN_MIN):
     """在 slot.lock 里调用 → 这一格在某种背驰看法下的 JSON。买卖点之外的一切跟默认那份是同一份：
     K 线、笔、段、中枢跟看法无关，只有 signals 两层重算（懒算、按 measure 各存一份，数据刷新就作废）。
     切看法不碰币安。"""
@@ -424,36 +452,36 @@ def _measure_body(slot, symbol, tf, measure, cut=DEFAULT_CUT):
     if measure == WOLF_KEY:
         return _wolf_body(slot, symbol, tf)              # 防狼术同上：跟切法、看法都无关
     if cut != "extend":
-        b = slot.mbodies.get((measure, cut))
+        b = slot.mbodies.get((measure, cut, pen_min))
         if b is None:
-            d = json.loads(_measure_body(slot, symbol, tf, measure, "extend"))   # 从不切的那份派生
-            cc = _cut_cc(slot, symbol)
+            d = json.loads(_measure_body(slot, symbol, tf, measure, "extend", pen_min))   # 从不切的那份派生
+            cc = _cut_cc(slot, symbol, pen_min)
             d["seg_centers"], d["trend"], d["cut"] = _clean(cc[0]), _clean(cc[1]), cut
             d["trend_reading"] = cc[2]                    # D3 读法回显：前端据此决定字母挂哪一级（Nova 10-05 16:4x）
-            b = slot.mbodies[(measure, cut)] = json.dumps(d, ensure_ascii=False, separators=(",", ":"),
+            b = slot.mbodies[(measure, cut, pen_min)] = json.dumps(d, ensure_ascii=False, separators=(",", ":"),
                                                           allow_nan=False).encode("utf-8")
         return b
     if measure == "macd":
-        return slot.body
+        return _base_body(slot, symbol, tf, pen_min)
     if measure == MACD_KEY:
         return _macd_body(slot, symbol, tf)
-    b = slot.mbodies.get(measure)
+    b = slot.mbodies.get((measure, pen_min))
     if b is None:
-        d = json.loads(slot.body)
-        r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"))
+        d = json.loads(_base_body(slot, symbol, tf, pen_min))
+        r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"), min_gap=gap_of(pen_min))
         d["signals"] = _clean({"seg": engine_signals(r, "seg", measure), "pen": engine_signals(r, "pen", measure)})
         d["measure"] = measure
-        b = slot.mbodies[measure] = json.dumps(d, ensure_ascii=False, separators=(",", ":"),
+        b = slot.mbodies[(measure, pen_min)] = json.dumps(d, ensure_ascii=False, separators=(",", ":"),
                                                allow_nan=False).encode("utf-8")
     return b
 
 
-def _variant(slot, symbol=None, tf=None, measure="macd", cut=DEFAULT_CUT):
+def _variant(slot, symbol=None, tf=None, measure="macd", cut=DEFAULT_CUT, pen_min=DEFAULT_PEN_MIN):
     """在 slot.lock 里调用 → (json, gzip)，头上两个旗按当下状态如实标。"""
-    key = (slot.failed, slot.refreshing, measure, cut)
+    key = (slot.failed, slot.refreshing, measure, cut, pen_min)
     v = slot.variants.get(key)
     if v is None:
-        body = _measure_body(slot, symbol, tf, measure, cut)
+        body = _measure_body(slot, symbol, tf, measure, cut, pen_min)
         if slot.failed:
             body = body.replace(b'"stale":false', b'"stale":true', 1)
         if slot.refreshing:
@@ -500,7 +528,7 @@ def start_prefetch(symbol, tf, span):
     threading.Thread(target=_prefetch, args=(symbol, tf, nxt), daemon=True).start()
 
 
-def get_chart(symbol, tf, span=1, prefetch=True, touch=True, measure="macd", cut=DEFAULT_CUT):
+def get_chart(symbol, tf, span=1, prefetch=True, touch=True, measure="macd", cut=DEFAULT_CUT, pen_min=DEFAULT_PEN_MIN):
     """→ (json bytes, gzip bytes) 或 None（一次都没拉成功过）。
 
     · 冷（还没有缓存）：同步拉，持锁 ⇒ 并发进来的都等这一次，不回空；
@@ -526,7 +554,7 @@ def get_chart(symbol, tf, span=1, prefetch=True, touch=True, measure="macd", cut
             slot.refreshing = True
             slot.variants = {}
             start_refresh(slot, symbol, tf)
-        out = _variant(slot, symbol, tf, measure, cut)
+        out = _variant(slot, symbol, tf, measure, cut, pen_min)
     if prefetch:
         start_prefetch(symbol, tf, span)
     return out
@@ -643,10 +671,10 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlsplit(self.path)
         if u.path == "/api/chart":
             try:
-                q = urllib.parse.parse_qs(u.query, keep_blank_values=True, strict_parsing=True, max_num_fields=5)
+                q = urllib.parse.parse_qs(u.query, keep_blank_values=True, strict_parsing=True, max_num_fields=6)
             except ValueError:
                 return self._err(400)
-            if not {"symbol", "tf"} <= set(q) <= {"symbol", "tf", "span", "measure", "cut"} or any(len(v) != 1 for v in q.values()):
+            if not {"symbol", "tf"} <= set(q) <= {"symbol", "tf", "span", "measure", "cut", "pen_min"} or any(len(v) != 1 for v in q.values()):
                 return self._err(400)                     # 多参数、少参数、重复参数一律不认
             symbol, tf = q["symbol"][0].upper(), q["tf"][0]
             if symbol not in SYMBOLS or tf not in TFS:
@@ -662,7 +690,10 @@ class Handler(BaseHTTPRequestHandler):
             cut = CUT_ALIAS.get(cut, cut)
             if cut not in CUT_MODES:
                 return self._err(400)                     # 切法只认 extend / trend（turn 当 trend 收）
-            got = get_chart(symbol, tf, span, measure=measure, cut=cut)
+            pm_raw = q.get("pen_min", [str(DEFAULT_PEN_MIN)])[0]
+            if pm_raw not in {str(v) for v in PEN_MIN_OPTIONS}:
+                return self._err(400)                     # 笔最少根数只认 "6" "7"（C3）
+            got = get_chart(symbol, tf, span, measure=measure, cut=cut, pen_min=int(pm_raw))
             if got is None:
                 return self._err(503)
             return self._send(200, got[0], gz=got[1])
@@ -738,7 +769,8 @@ class Handler(BaseHTTPRequestHandler):
                                                    refresh_s=REFRESH_S, span_max=SPAN_MAX,
                                                    engine=ENGINE, measures=list(MEASURES), cut_modes=list(CUT_MODES), cut_default=DEFAULT_CUT,
                                                    measure_orig={m: MEASURE_ORIG.get(m, False) for m in MEASURES},
-                                                   measure_note={m: MEASURE_NOTE[m] for m in MEASURES if m in MEASURE_NOTE})).encode())
+                                                   measure_note={m: MEASURE_NOTE[m] for m in MEASURES if m in MEASURE_NOTE},
+                                                   pen_min_options=list(PEN_MIN_OPTIONS), pen_min_default=DEFAULT_PEN_MIN)).encode())
         return self._static(u.path, u.query)
 
     def _static(self, path, query=""):
