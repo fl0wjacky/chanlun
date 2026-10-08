@@ -16,7 +16,7 @@ from config import data
 from cards import zec_data as zec
 
 # ---- 写死在图上的标称（改图时同步改这里） ----
-NESTED = dict(A=6, unmerged=1, B=5, hit=4, A_1h=3)   # v2 引擎（回头修正划笔、三买三卖终结、区间只看前三段）回算
+NESTED = dict(A=16, unmerged=11, B=10, hit=7, A_1h=9)   # ★ C3 笔默认 6 根（10-08）回算；7 根时是 (6, 1, 5, 4) 和 3
 # chart_nested：30m 合并后 / 其中没合的 / 1h 类中枢 / 对得上；1h 合并后（图上是现算的，这里是标称快照）
 C07_MIN_MATCH = 50       # c07「结构层级大致对应」：个数最接近那档，两边互相对上的比例都应 ≥ 此值（%）
 
@@ -98,8 +98,10 @@ Z, P = R4["centers"], R4["pens"]
 mine = []
 for n, z in enumerate(Z, 1):                     # 另写：按中枢逐笔扫，离开 = 向上笔越过 ZG；起点须在 [ZD, ZG] 内才可能是三买
     last = Z[n]["PI0"] if n < len(Z) else len(P)
+    # 只看中枢所在线段里的笔（类中枢段内算，card-def0b363）：回试笔 j+1 不能越过所在线段的最后一笔
+    send = R4["segs"][z["seg"]]["PI1"] if z.get("seg") is not None and z["seg"] < len(R4["segs"]) else len(P) - 1
     j = z["PI0"]
-    while j + 1 < len(P) and j <= last:
+    while j + 1 < len(P) and j <= last and j + 1 <= send:
         a, b2 = P[j], P[j + 1]
         if a["p1"] > a["p0"] and a["p1"] > z["ZG"] and b2["p1"] < b2["p0"]:
             if b2["lo"] > z["ZG"]:                # 回试整笔在 ZG 之上：离开笔从区间里出发才是三买，否则是贯穿

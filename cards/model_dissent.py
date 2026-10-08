@@ -101,11 +101,15 @@ def gap_rows_and_z():
     而 Z 里的 term 由 core/center.py 独立算出（见 cross_check 的说明）。
     """
     r = analyze_file("aaplusdt_4h.json")
-    P, B, Z = r["pens"], r["bars"], r["centers"]
+    P, B, Z, S = r["pens"], r["bars"], r["centers"], r["segs"]
     rows = []
     for n, z in enumerate(Z):
         nxt = Z[n + 1]["PI0"] if n + 1 < len(Z) else len(P)
-        for j in range(z["PI0"], min(nxt + 1, len(P) - 1)):
+        # 只扫中枢**所在线段**里的笔（离开笔、回试笔都要在段内）：类中枢是段内算的（card-def0b363），引擎看不到段外的回试，
+        #   段外那次回试在引擎里就是「所在线段结束」。★ C3 默认 6 根以后，中枢 2 的两次三买回试都落在下一段，
+        #   卡片原来按「到下一个中枢为止」扫，跨了段，就跟引擎分家了（不是引擎错，是卡片的扫描范围过时）。
+        seg_end = S[z["seg"]]["PI1"] if z.get("seg") is not None and z["seg"] < len(S) else len(P) - 1
+        for j in range(z["PI0"], min(nxt + 1, len(P) - 1, seg_end)):
             up, dn = P[j], P[j + 1]
             if up["p1"] > up["p0"] and up["p1"] > z["ZG"] and dn["p1"] < dn["p0"]:
                 if dn["p1"] > z["ZG"]:                # 回试整段在 ZG 之上：离开段须从区间里出发才算三买（第 20 / 38 课）

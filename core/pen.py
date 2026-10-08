@@ -116,8 +116,8 @@ def check_range_ext(cls=None, seeds=range(40)):
 
 
 def build_pens(fx, std, rule="old", min_gap=None):
-    min_gap = MIN_GAP_DEFAULT if min_gap is None else min_gap
     """fx: fractals() 的输出；std: standardize() 的输出。返回 (笔列表, 笔端点序列)。"""
+    min_gap = MIN_GAP_DEFAULT if min_gap is None else min_gap
     if rule not in ("old", "new"):
         raise ValueError("rule 只能是 'old'（老笔）或 'new'（新笔）")
 
@@ -215,12 +215,13 @@ def _pens_of(seq):
     ) for a, b in zip(seq, seq[1:])]
 
 
-def build_pens_v1(fx, min_gap=4):
+def build_pens_v1(fx, min_gap=None):
     """【v1 口径，已停用】一遍扫过去、从不回头：同类取更极端，反类隔够就收。
 
     问题：隔得不够而被跳过的更极端分型，会被夹在后面那一笔的中间 —— 约 20–30% 的笔端点不是
     这一笔的极值（违反第 66 / 70 / 71 课答疑）。只留作对照。
     """
+    min_gap = MIN_GAP_DEFAULT if min_gap is None else min_gap
     seq = []
     for f in fx:
         if not seq:
@@ -251,8 +252,8 @@ def nonextreme_pens(pens, std):
 
 
 def check_pens(pens, seq, std, rule="old", min_gap=None):
-    min_gap = MIN_GAP_DEFAULT if min_gap is None else min_gap
     """自检笔的不变量（不看极值，极值见 nonextreme_pens）。返回违规列表（应为空）。"""
+    min_gap = MIN_GAP_DEFAULT if min_gap is None else min_gap
     bad = []
     for n in range(len(seq) - 1):
         a, b = seq[n], seq[n + 1]
@@ -271,7 +272,6 @@ def check_pens(pens, seq, std, rule="old", min_gap=None):
 
 
 def unsplit_violations(pens, fx, std, rule="old", min_gap=None):
-    min_gap = MIN_GAP_DEFAULT if min_gap is None else min_gap
     """独立复核（不调用 build_pens 的任何内部函数）：笔内不能再切出合法的三笔。
 
     第 77 课唯一性证明：两个候选端点之间不能再夹一个顶 —— 原文「在这两个底之间不可能还存在一个顶，↵否则这里就不是一笔了」。
@@ -279,6 +279,7 @@ def unsplit_violations(pens, fx, std, rule="old", min_gap=None):
     都隔得够、两头都是各自的极值（价格相等时终点须是第一次到达 —— 第 77 课「连续的底中最先一个」），
     说明这一笔被合并过头。返回 [(笔序号, C.k, D.k), ...]。
     """
+    min_gap = MIN_GAP_DEFAULT if min_gap is None else min_gap
     def ok(a, b):
         if a["type"] == b["type"]:
             return False
