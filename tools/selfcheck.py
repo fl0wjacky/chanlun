@@ -478,6 +478,14 @@ with _ctx.redirect_stdout(_io.StringIO()) as _jbuf:
 print("  J18 级别先后（只报警）           : %d 处违反%s" % (_j18_v, "" if not _j18_v else "　← tools/j18_check.py：" +
       " ｜ ".join(l.strip() for l in _jbuf.getvalue().splitlines() if l.strip().startswith("违反"))[:200]))
 
+# ---- J19：相邻周期的笔状态联动（级别联动.md 七 J19，Nova 10-08）—— **只报警，不进违规数** ----
+# 只跑 1h 对 4h 那一对（几秒）；15m 那两对 --full 才跑。判法和翻转臂见 tools/j19_check.py 文件头。
+from j19_check import main as _j19_main                  # noqa: E402
+with _ctx.redirect_stdout(_io.StringIO()) as _j19buf:
+    _j19_v = _j19_main()
+print("  J19 笔状态联动（只报警）         : %d 处违反%s" % (_j19_v, "" if not _j19_v else "　← tools/j19_check.py：" +
+      " ｜ ".join(l.strip() for l in _j19buf.getvalue().splitlines() if l.strip().startswith("违反"))[:200]))
+
 # ---- 判据前提：下面那扇「字体覆盖」门自己的基准对不对 ----
 # 那扇门判「缺不缺字」靠 `config._notdef_mask` 投出的 .notdef 基准。基准错了它就是**假绿**：
 # 拿一个没有墨的空白遮罩当 .notdef，所有真字形都"不等于它" ⇒ 报「一个都不缺」。
