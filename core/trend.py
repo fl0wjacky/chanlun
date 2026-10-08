@@ -481,8 +481,10 @@ def _xzd_seconds(done, bounds, r=None):
         else:
             continue
         out.append(dict(kind="二买" if down else "二卖", bar=s2["i1"], price=s2["p1"], confirmed=True,
-                        weak=bool(newx), level="seg", why=why, from_bar=b["bar"],
-                        known_bar=b["pullback_end_bar"]))   # 事后才知道：点画在 s2，可要到刀确立（回抽段终点）才知道它是小转大
+                        weak=bool(newx), level="seg", why=why, from_bar=b["bar"]))
+    # ★ 不带 known_bar（Nova 10-08 16:41 指出 pullback_end_bar 也是事后才认出来的，实时还要晚一截）：
+    #   这颗点「哪一根才知道」只能逐根截断重放才量得准（trend_check ④′），每次请求都重放太贵；回放／回测本来就是逐根截断，
+    #   点会在刀实时确立的那一根自然出现，不需要这个字段。
     return out
 
 
