@@ -1727,12 +1727,23 @@ function buildMeasures() {
       b.appendChild(mark);
       b.title = `${long} ｜ ${NON_ORIG_LONG}`;
     }
-    if (measures.note[id]) b.title = `${b.title} ｜ ${measures.note[id]}`;   // T16：悬停多一句「单用超出原文」
+    if (measures.note[id]) {                                              // T16：悬停多一句「单用超出原文」
+      b.title = `${b.title} ｜ ${measures.note[id]}`;
+      b.setAttribute('aria-description', measures.note[id]);              // 读屏器不一定念 title（Iris 09:18）
+    }
     b.setAttribute('role', 'radio');
     b.onclick = () => setMeasure(id);
     g.appendChild(b);
   }
   box.prepend(g);
+  // T16（Nova 09:18 定）：触屏没有 hover ⇒ **选中**带说明的那种看法时，面板底下出一行小字。放在面板**外面**
+  //   （紧跟其后）而不是看法那一组里：手机上那一组是一条横滑的单行，塞进去要么被挤成一个字宽、要么被滑出屏。
+  if (!el('mnote')) {
+    const n = document.createElement('div');
+    n.id = 'mnote'; n.className = 'mnote'; n.hidden = true;
+    n.setAttribute('aria-live', 'polite');
+    box.insertAdjacentElement('afterend', n);
+  }
   watchOverflow(box);                  // 手机上多了一排，右边还有没有东西要重算一遍
   renderMeasures();
 }
@@ -1750,6 +1761,12 @@ function renderMeasures() {
   }
   const cap = g.querySelector('.mcap');
   if (cap) cap.textContent = on ? '背驰看法' : '背驰看法 · 买卖点那层关着';
+  const mn = el('mnote');                // T16：选中的看法有说明（现在只有峰值）就印出来，没有就收起
+  if (mn) {
+    const t = measures.note[paging.measure] || '';
+    mn.textContent = t ? `${(MEASURE_NAME[paging.measure] || [paging.measure])[0]}：${t}` : '';
+    mn.hidden = !t;
+  }
   if (on) g.removeAttribute('title');
   else g.title = '买卖点那一层关着 —— 这四颗只换买卖点的画法，先把它打开';
 }

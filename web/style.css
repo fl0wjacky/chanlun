@@ -298,6 +298,10 @@ body.fs-fake main { position: fixed; inset: 0; z-index: 50; height: 100dvh; back
   border: 1px solid var(--line); border-radius: 3px; padding: 0 3px; white-space: nowrap;
 }
 .mchip[aria-checked="true"] .nonorig { color: var(--bg); border-color: currentColor; }
+/* T16：选中「峰值」时面板底下那行说明（触屏没有 hover，title 看不到）。跟 .mcap 同一号字，颜色用 --mu 不用 --dim：
+   这是要读的话，不是脚注。 */
+.mnote { font-size: 11px; line-height: 1.5; color: var(--mu); padding: 2px 8px 4px; }
+.mnote[hidden] { display: none; }
 
 .chip i { width: 9px; height: 9px; border-radius: 2px; opacity: .45; }
 .chip[aria-pressed="true"] { color: var(--tx); border-color: var(--mu); background: var(--panel-hi); }
