@@ -525,7 +525,7 @@ export function makeAnnotPrimitive(state) {
               // ④ 买卖点**文字**：最后画，跟价签共用 `placed` ⇒ 文字之间互相避让、价签也避开它；
               //    压在三角上面 ⇒ 数字/字完整可读（与 Python 出图的结论一致）。
               //    `y0` 是②里画三角时算出来的底边 —— 传过来，免得「文字挂在哪条边」这个式子写两份。
-              for (const g of sigs) drawSignalText(ctx, placed, g.x, g.y0, g.s, g.tier, H, data.bars);
+              for (const g of sigs) drawSignalText(ctx, placed, g.x, g.y0, g.s, g.tier, H);
 
               // ⑤ 未收盘的最后一根：虚线框 + 「未收盘」（Python dashed_rect + 琥珀字）
               //    ★ 这一句**不登记 placed** —— 跟 Python 一致：那边它也是直接画的、不在 draw_labels 里
@@ -1340,7 +1340,7 @@ function drawSignalGhost(ctx, x, y, s, tier) {
  *  `ty = 框底 − 4` 是 alphabetic 基线 —— 没被夹/没被挪时它就等于原来的锚点（**字位不许漂**）；
  *  被夹顶边时字**跟着框一起下来**（否则框进了画布、字还是被切，第 1 项就白做了）。
  *  避让/夹边都走 `fitBox()`，跟价签同一个守卫（原先这里另写了一份，两处各一套就是老毛病）。 */
-function drawSignalText(ctx, placed, x, y0, s, tier, H, bars) {
+function drawSignalText(ctx, placed, x, y0, s, tier, H) {
   const buy = s.kind.endsWith('买');
   const base = buy ? CHART.buy : CHART.sell;
   const txt = sigLabel(s, tier);
@@ -1356,32 +1356,19 @@ function drawSignalText(ctx, placed, x, y0, s, tier, H, bars) {
   ctx.fillText(txt, x, ty);
   ctx.textAlign = 'left';
   placed.push(box);                                                      // ★ 与 fillRect 同一个 box
-  // 小转大的二类：第二行淡字「几号才知道」（known_bar）—— 点画在 s2 的终点，可要到那一根才知道这一刀是小转大。
-  //   不写这一行，读图的人会以为当时就能看见这颗点（回测里提前知道，正是 known_bar 要防的那件事）。
-  const kt = s.known_bar != null && bars && bars[s.known_bar] ? bars[s.known_bar].t : null;
-  if (kt != null) {
-    const k = new Date(kt).toISOString().slice(5, 16).replace('T', ' ') + ' UTC 才知道';
-    const kw = ctx.measureText(k).width;
-    const ka = buy ? box[3] + 13 : box[1] - 4;                           // 买点往下接一行，卖点往上接一行
-    const kb = fitBox([x - kw / 2 - 5, ka - SIG_UP, x + kw / 2 + 5, ka + SIG_DN], placed, H);
-    ctx.fillStyle = rgba(PAGE.bg, 215);
-    ctx.fillRect(kb[0], kb[1], kb[2] - kb[0], kb[3] - kb[1]);
-    ctx.fillStyle = PAGE.mu;
-    ctx.textAlign = 'center';
-    ctx.fillText(k, x, kb[3] - SIG_DN);
-    ctx.textAlign = 'left';
-    placed.push(kb);
-  }
+
 }
 
 /** 买卖点的字。★ M29 以后二类带 `why`（core/signals.py，Atlas m29-code）：
  *    不创新低／不创新高 ⇒ 就是「二买／二卖」；创新低（高）＋盘整背驰 ⇒ 「二买·盘背」；
- *    小转大（走势层 xzd_seconds）⇒ 「二买·小转大」，创新了又有盘整背驰的再加「·盘背」。
+ *    小转大（走势层 xzd_seconds）⇒ 「二买·小转大（事后才确认）」，创新了又有盘整背驰的在「小转大」后面加「·盘背」。
  *  没有 `why` 的（一类、三类，或旧后台）照旧：`weak` 加「(弱)」。`weak` 字段这一版先不删（Nova 10-08 16:44）。 */
 export function sigLabel(s, tier) {
   const w = typeof s.why === 'string' ? s.why : '';
   let tag;
-  if (w.startsWith('小转大')) tag = '·小转大' + (w.includes('盘整背驰') ? '·盘背' : '');
+  // 小转大：固定带「（事后才确认）」、不写日期（Nova 10-08 16:46 定）—— 点画在第二段终点，可当时并不知道那一刀是小转大；
+  //   具体哪天才出现只放在给小栋的图上（Bram m29-figs），后台也不带这个字段（Atlas c84a098 去掉了 known_bar）。
+  if (w.startsWith('小转大')) tag = '·小转大' + (w.includes('盘整背驰') ? '·盘背' : '') + '（事后才确认）';
   else if (w.includes('盘整背驰')) tag = '·盘背';
   else if (w) tag = '';
   else tag = s.weak ? SIG.weakText : '';
