@@ -15,7 +15,7 @@
   D3    同一段走势里连续扩展的中枢合成一个高一级中枢（DD 取小、GG 取大）。读法 A：有合成中枢就整段升一级、
         只数合成出来的；读法 B：合成中枢留在本级别跟别的一起数（L17:255 后半句）。等小栋定，默认 A（spec 现写法）。
 
-D2-5 死点类型（趋势背驰／盘整背驰／小转大／比不了）：确立的分界上标 death＋death_why，只标注、不决定刀（_death_types，第四批 ①）。
+D2-5 死点类型（趋势背驰／盘整背驰／小转大／盘整·未见背驰／比不了；D2-8 补刀单列）：确立的分界上标 death＋death_why，只标注、不决定刀（_death_types，第四批 ①）。
 """
 from .center import find_centers, classify_relations
 
@@ -395,20 +395,24 @@ def _d28_cuts(done, ks, segments, units, centers):
 _DEATH = True                                     # 只给 trend_check --self-test 的探针关：分界不标死点类型（D2-5）
 
 
-def _death_types(r, done, bounds):
-    """D2-5（第四批 ①，Nova 10-08 14:09；② 的 A 照 agent/atlas/d25-a 改，Nova 14:24 定）：每个确立的分界标 death，
-    只标注、不动刀。按顺序取第一个成立的：
+def _death_types(r, done, bounds, segments, centers):
+    """D2-5（第四批 ①，Nova 10-08 14:09；口径照 agent/atlas/d25-a 169d63b，Nova 14:32 审过）：每个确立的分界标 death＋death_why，
+    只标注、不动刀。D2-8 补的刀不进分类，标「D2-8 补刀」（靠中枢排布切的，不是背驰、也不是反方向三类点确立的）。
+    其余按顺序取第一个成立的：
       ① 趋势背驰：引擎现有的一卖（H）／一买（L）正好落在这一刀（signals 线段级、默认看法 MACD 面积）；
-      ② 盘整背驰：C＝刀所在线段；A＝**进入参照中枢 Z 的那条线段**（Z 第一段之前紧挨着的那一条，L24 的 A、B、C），
-         C 比 A 创了更高（低）的点、而且 C 的面积 < A 的面积；
-      ③ 小转大：① 不成立、② **真比过**也不成立；
-      比不了：② 比不了（找不到 Z／找不到 A／进入段跟 C 反向）—— 单独一类，不算小转大（Nova 14:18）。
-         没有一买一卖只说明 ① 不成立，照样接着比 ②（Atlas 14:24）。
-    death_why 写依据：① 成立写「一买」／「一卖」；② 比过写比的结果；比不了写原因。原地写进 bounds，返回 bounds。"""
+      ② 盘整背驰：C＝刀所在线段；Z＝**C 离开的那个中枢**（C 之前最后一个走完的本级别中枢，C 不在它的成段里）；
+         A＝进入 Z 的那条线段（Z 第一段之前紧挨着的那一条，L24 的 A、B、C）；C 比 A 创了更高（低）的点、C 的面积 < A 的面积；
+      ①② 都比不了（找不到 Z／找不到 A／进入段跟 C 反向）⇒「比不了」，单独一类；没有一买一卖只说明 ① 不成立，照样接着比 ②；
+      ①② 真比过、都不成立 ⇒ 前一段是本级别趋势（上涨／下跌、不是升级段）标「小转大」（L43：a+A+b+B+c），否则标「盘整·未见背驰」。
+    centers：分界确立以后按刀切开重算的线段中枢（seg_centers）。原地写进 bounds，返回 bounds。"""
     from .signals import signals, macd_hist, strength
     first = {(s["bar"], s["kind"]) for s in signals(r) if s["kind"] in ("一买", "一卖")}
     hist = macd_hist(r["bars"])
+    pre = {sg["i1"]: sg for sg in segments}                # 刀 ⇒ 刀前那一段走势
     for b in bounds:
+        if b.get("rule") == "D2-8":
+            b["death"], b["death_why"] = "D2-8 补刀", "不分类（中枢排布切出来的）"
+            continue
         up = b["kind"] == "H"
         kind1 = "一卖" if up else "一买"
         if (b["bar"], kind1) in first:
@@ -416,10 +420,11 @@ def _death_types(r, done, bounds):
             continue
         j = b["line_seg"]
         C = done[j]
-        k0 = next((k for k, x in enumerate(done) if x["i0"] >= b["ref_X0"]), None) if b.get("ref_X0") is not None else None
-        if k0 is None or k0 >= j:
+        zs = [z for z in centers if z["PI1"] < j]
+        if not zs:
             b["death"], b["death_why"] = "比不了", "找不到 Z"
             continue
+        k0 = zs[-1]["PI0"]
         if k0 == 0:
             b["death"], b["death_why"] = "比不了", "找不到 A"
             continue
@@ -431,9 +436,12 @@ def _death_types(r, done, bounds):
         weak = strength(C, hist) < strength(A, hist)
         if newx and weak:
             b["death"], b["death_why"] = "盘整背驰", "C 创新%s、面积小于 A" % ("高" if up else "低")
-        else:
-            b["death"] = "小转大"
-            b["death_why"] = "C 没创新%s" % ("高" if up else "低") if not newx else "C 面积不小于 A"
+            continue
+        why = "C 没创新%s" % ("高" if up else "低") if not newx else "C 面积不小于 A"
+        sg = pre.get(b["bar"])
+        trend = sg is not None and sg["type"] in ("上涨", "下跌") and not sg["upgraded"]
+        b["death"], b["death_why"] = ("小转大" if trend else "盘整·未见背驰"), why + ("" if trend else "；前一段是%s" % (
+            (sg["type"] + ("·升" if sg["upgraded"] else "")) if sg else "？"))
     return bounds
 
 
@@ -476,6 +484,6 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
             if ok:
                 ks, bounds, segments, units_out, centers_out = ks2, b2, s2, u2, c2
     if _DEATH:
-        _death_types(r, done, bounds)
+        _death_types(r, done, bounds, segments, centers_out)
     return dict(seg_centers=centers_out, bounds=bounds, retracted=res["retracted"],
                 pending=pending(done, ks, res["want"]), segments=segments, units=units_out, reading=reading)
