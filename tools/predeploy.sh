@@ -83,7 +83,7 @@ fi
 # live_seg_check：线上 15 张图现拉现算跑 check_segments，报错就拦（已知例外列在脚本里、写明卡号；拉不到 ⇒ 没比成）。约 50 秒，要联网。
 # seg_prefix_check：线段已确认段逐笔加长只增不撤（card-753bd03a 合并条件；Pine 逐根续扫押的就是它，约 50 秒）。
 #   它退 3 ＝ 某条探针没响 ＝ 那条检查没牙 ⇒ 记红，不记「没比成」。条目里带参数，所以下面 $chk 不加引号（路径无空格）。
-for chk in tools/selfcheck.py web/check_parity.py web/check_abuse.py web/check_assets.py tools/pine_lockstep.py "tools/trend_check.py --self-test" tools/seg_prefix_check.py "tools/seg_prefix_check.py --self-test" tools/live_seg_check.py tools/levels_check.py "tools/levels_check.py --self-test" "tools/j18_check.py --self-test"; do
+for chk in tools/selfcheck.py web/check_parity.py web/check_abuse.py web/check_assets.py tools/pine_lockstep.py "tools/trend_check.py --self-test" tools/seg_prefix_check.py "tools/seg_prefix_check.py --self-test" tools/live_seg_check.py tools/levels_check.py "tools/levels_check.py --self-test" "tools/j18_check.py --self-test" "tools/j19_check.py --self-test"; do
   log=$(mktemp)
   "$PY" $chk >"$log" 2>&1
   rc=$?
