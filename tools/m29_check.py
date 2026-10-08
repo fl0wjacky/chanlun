@@ -20,7 +20,8 @@ T = importlib.import_module("core.trend")
 
 DATA = ["aaplusdt_1h.json", "aaplusdt_2h.json", "aaplusdt_30m.json", "aaplusdt_4h.json", "btc_4h.json",
         "zec15.json", "zec30_cut.json", "zec_1h.json", "zec_2h.json", "zec_4h.json"]
-WHY = ("不创新低", "创新低＋盘整背驰")
+WHY_BUY = ("不创新低", "创新低＋盘整背驰")
+WHY_SELL = ("不创新高", "创新高＋盘整背驰")   # 二卖按方向写（Iris 10-08 17:07 逮到原来二卖也写「低」）
 XZD_BASE = {"zec15.json": [452.0], "zec30_cut.json": [452.0]}   # 线上 ZEC 15m／30m 快照也都是 452.0（不在 data/）
 
 
@@ -33,9 +34,9 @@ def main():
                 if s["kind"] not in ("二买", "二卖"):
                     continue
                 tot[lv] += 1
-                if s.get("why") not in WHY:
+                if s.get("why") not in (WHY_BUY if s["kind"] == "二买" else WHY_SELL):
                     bad.append("%s %s %s bar %d 没有 why 或 why 不认识：%r" % (f, lv, s["kind"], s["bar"], s.get("why")))
-                if bool(s.get("weak")) != (s.get("why") == "创新低＋盘整背驰"):
+                if bool(s.get("weak")) != (s.get("why") in ("创新低＋盘整背驰", "创新高＋盘整背驰")):
                     bad.append("%s %s %s bar %d 的 weak 跟 why 对不上" % (f, lv, s["kind"], s["bar"]))
         v = T.trend_v3(r)
         bs = {b["bar"]: b for b in v["bounds"]}

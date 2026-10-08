@@ -364,9 +364,9 @@ def signals(r, level="seg", measure="macd", ratio=1.0, fast=12, slow=26, sig=9,
                 if not _M29:
                     add(k2, c + 2, k, weak)
                 elif not weak:
-                    add(k2, c + 2, k, weak); out[-1]["why"] = "不创新低"
+                    add(k2, c + 2, k, weak); out[-1]["why"] = "不创新低" if want_down else "不创新高"
                 elif _panzheng(C, s2, want_down, hist, measure, ratio):
-                    add(k2, c + 2, k, weak); out[-1]["why"] = "创新低＋盘整背驰"
+                    add(k2, c + 2, k, weak); out[-1]["why"] = "创新低＋盘整背驰" if want_down else "创新高＋盘整背驰"
     out.sort(key=lambda s: (s["bar"], s["kind"]))
     return out
 
