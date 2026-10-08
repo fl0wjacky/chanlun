@@ -135,7 +135,7 @@ const paging = { span: 1, spanMax: null, earliest: false, nogain: false, stop: n
 // list 空 ⇒ 这一组不画（离线样本、旧后台：不知道的事不编，页面上一个字都不多）。
 // ★ orig：**哪些看法不是 108 课原文**由 /api/meta 说（card-6381042d-03f），前端不写死名字。
 //   `orig[id] === false` ⇒ 那颗芯片挂「非原文」那枚小标；**读不到就一个标都不挂**（不知道的事不编）。
-const measures = { list: [], orig: {} };
+const measures = { list: [], orig: {}, note: {} };
 // ---- 中枢切法（卡 card-e346ede6-996；v3 见 card-51571a5f-dc2）----
 // 口径：`/api/chart?…&cut=extend|trend`（Bram 10-05 定的契约，v3 换的这一档）。trend＝走势分段、**是缺省**
 //   ⇒ 缺省那份不带就不发；extend＝原文那套（可切的一档）。白名单外 400，回显顶层 `cut`，缓存键
@@ -1649,7 +1649,12 @@ function readMeasures(m) {
     if (side && typeof side[id] === 'boolean') orig[id] = side[id];   // ①：旁边那张表
     else if (it && typeof it.orig === 'boolean') orig[id] = it.orig;  // ②：项自己带着
   }
-  return { list, orig };
+  // ★ T16（背驰.md 六.3）：`measure_note = {看法: 一句话}` —— 量是原文、单用超出原文的那几种另挂一句说明，
+  //   **不是**「非原文」那枚标（那是 orig:false 的事）。读不到或不是字符串就不挂，同上一条规矩。
+  const ns = (m && typeof m.measure_note === 'object' && m.measure_note) || {};
+  const note = {};
+  for (const id of list) if (typeof ns[id] === 'string' && ns[id]) note[id] = ns[id];
+  return { list, orig, note };
 }
 
 // 一次 `/api/meta` 拿两张名单（看法、切法）—— 不是图省一次请求，是**只有一份「名单到没到」**：
@@ -1661,10 +1666,11 @@ async function loadMeasures() {
     const r = await fetch('/api/meta');
     if (!r.ok) return;
     const m = await r.json();
-    const { list, orig } = readMeasures(m);
+    const { list, orig, note } = readMeasures(m);
     if (list.length >= 2) {              // 只有一种看法＝没什么可切的；不画一个只有一个选项的开关
       measures.list = list;
       measures.orig = orig;
+      measures.note = note;
       // 地址栏点名的那个后台认不认：名单外的一律退回缺省（缺省不在名单里才拿第一个）
       const want = new URLSearchParams(location.search).get('measure');
       if (want && !list.includes(want)) paging.measure = list.includes(DEFAULT_MEASURE) ? DEFAULT_MEASURE : list[0];
@@ -1721,6 +1727,7 @@ function buildMeasures() {
       b.appendChild(mark);
       b.title = `${long} ｜ ${NON_ORIG_LONG}`;
     }
+    if (measures.note[id]) b.title = `${b.title} ｜ ${measures.note[id]}`;   // T16：悬停多一句「单用超出原文」
     b.setAttribute('role', 'radio');
     b.onclick = () => setMeasure(id);
     g.appendChild(b);

@@ -125,6 +125,9 @@ MEASURES = ("macd", "slope", "lines", "peak", "macd_or_lines")
 OR_PARTS = ("macd", "lines")                 # macd_or_lines 由哪两半组成；两半各自原样走单选的判法
 # 哪几种是 108 课原文给的判法（小栋 10-04 ①A）：斜率（价差÷根数）是早期自己加的，原文没有，留着但要标明。
 MEASURE_ORIG = {"macd": True, "slope": False, "lines": True, "peak": True, "macd_or_lines": True}
+# 量是原文的、但单独拿来用超出了原文的那几种（背驰.md 六.3 末段，第七章 T16，Nova 10-08 定「不改类型、另挂说明」）。
+#   跟斜率的「非原文」分开：斜率是**量本身**不是原文的（MEASURE_ORIG False）；峰值的量是原文的（L15:177-178），只是单用超出原文。
+MEASURE_NOTE = {"peak": "单用超出原文：峰值这个量是原文的（第 15 课），但原文只在 1 分钟急促上升时允许单看柱子，其他情况要配合黄白线"}
 
 
 def series_for(bars, measure, fast=12, slow=26, sig=9):
