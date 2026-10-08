@@ -418,10 +418,12 @@ import json as _json                                         # noqa: E402
 _fx = [dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"])
        for b in _json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "aaplusdt_1h_headdir.json")))]
 from config import tick_of as _tick_of                       # noqa: E402
-_rh = analyze(_fx, tick=_tick_of("aaplusdt_1h.json"))
+# ★ C3（10-08）默认 6 根以后，这份夹具（当时是 7 根下冻的）在 6 根下不再出这个毛病，data/ 10 份、线上 15 张在 6 根下也**无样本**
+#   ⇒ 这一格钉在 7 根档（min_gap=4）上跑：7 根是还在的开关档，修法两档都管。6 根档出了样本再补一份。
+_rh = analyze(_fx, tick=_tick_of("aaplusdt_1h.json"), min_gap=4)
 count("AAPL 1h 夹具线段不变量违规（图头段方向）", len(check_segments(_rh["segs"], _rh["pens"])))
 SG.HEAD_DIR_FIX = False                                       # 反向验证：拿掉这条修法，同一份夹具必须报出来
-_rh0 = analyze(_fx, tick=_tick_of("aaplusdt_1h.json"))
+_rh0 = analyze(_fx, tick=_tick_of("aaplusdt_1h.json"), min_gap=4)
 SG.HEAD_DIR_FIX = True
 count("拿掉图头段方向修法后 AAPL 1h 夹具没报出来", 0 if check_segments(_rh0["segs"], _rh0["pens"]) else 1)
 
@@ -435,6 +437,29 @@ SG.HEAD_EXT_FIX = False                                       # 反向验证：�
 _r40 = analyze(_fx4, tick=_tick_of("zecusdt_4h_headext.json"))
 SG.HEAD_EXT_FIX = True
 count("拿掉图头段起点修法后 ZEC 4h 夹具没报出来", 0 if check_segments(_r40["segs"], _r40["pens"]) else 1)
+
+# ---- 自检 A 的第三种合法情形：起点由 S11 定死、段内后来出更低／更高点（C3 第 ② 步，Atlas／Nova 10-08 13:05，card-ce73bc99-58c）----
+# 线上 AAPL 15m（10-07 快照前 5800 根）冻成夹具：6 根下第 31 段，第 313 笔 310.58 破了第一笔终点 310.39（S11），之后 309.33 < 起点 309.58。
+# 两个反向臂：① 关掉这一支 ⇒ 这一格回到「量不了」；② 把第 313 笔的高点压到第一笔终点以下（S11 不成立）⇒ 不许判 ok。
+_fs = _json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "aaplusdt_15m_s11.json")))
+_rs = analyze(_fs, tick=_tick_of("aaplusdt_15m.json"))
+_ums = []
+count("AAPL 15m S11 夹具：线段不变量违规＋量不了", len(check_segments(_rs["segs"], _rs["pens"], _ums)) + len(_ums))
+SG.S11_START_OK = False
+_ums0 = []
+_rs0 = analyze(_fs, tick=_tick_of("aaplusdt_15m.json"))
+check_segments(_rs0["segs"], _rs0["pens"], _ums0)
+SG.S11_START_OK = True
+count("关掉 S11 那一支后 AAPL 15m 夹具没回到「量不了」", 0 if _ums0 else 1)
+_s31 = next((x for x in _rs["segs"] if x["i0"] == 5343), None)
+if _s31 is None:
+    count("AAPL 15m S11 夹具里找不到 i0=5343 那一段", 1)
+else:
+    _P = [dict(p) for p in _rs["pens"]]
+    _j = _s31["PI0"] + 2
+    _P[_j]["hi"] = _P[_j]["p1"] = _P[_s31["PI0"]]["p1"] - 0.09
+    _P[_j + 1]["p0"] = _P[_j]["p1"]
+    count("第 313 笔压到第一笔终点以下后仍判合法（S11 那一支没看第三笔）", 1 if SG._start_check(_s31, _P) == "ok" else 0)
 
 # ---- 走势分界 v3（docs/spec/走势分段.md v3 §三，card-51571a5f-dc2）----
 # 基线（zec15／zec30 五个分界＋一次撤回）、不变量（交替、刀在同向线段终点、两刀间有中枢、框不跨分界、首尾相接）、

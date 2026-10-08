@@ -38,7 +38,14 @@ def main():
                 skipped += 1
                 continue
             um = []
-            v = check_segments(segs, pens, um) + um          # 「量不了」在上线门里也拦（同 ⑧ 口径：不当绿）
+            v = check_segments(segs, pens, um)
+            # 「量不了」在上线门里也拦（同 ⑧ 口径：不当绿）——**图头段（第 0 段）除外**：只印、不拦（Nova 10-08 13:21 定）。
+            #   图头那一段是被窗口截出来的，图头规则本来就判「量不了不挪」（core/segment.py）；窗口每天滚，今天有明天没有。
+            #   J17、J18 也都把图头单独记。非图头段的「量不了」照旧拦。
+            head_um = [x for x in um if x[1] == 0]
+            v += [x for x in um if x[1] != 0]
+            if head_um:
+                print("· %s %s 图头段量不了（只记不拦）：%s" % (sym, tf, head_um[0]))
             known = KNOWN.get((sym, tf))
             if v and known:
                 print("~ %s %s 已知例外（%s）：%d 处，例 %s" % (sym, tf, known, len(v), v[:1]))

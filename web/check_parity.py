@@ -58,7 +58,7 @@ def norm(v):
     return v
 
 
-def reference(bars, fn, min_gap=4):
+def reference(bars, fn, min_gap=None):
     r = analyze(bars, tick=tick_of(fn), min_gap=min_gap)
     big = []
     for b in r["big"]:
@@ -170,6 +170,10 @@ def run(quiet=False):
 
 
 VIEW = 160                                               # 默认可视窗口（Nova 10-04：最近 160 根里结构必须逐项相同）
+# 已知例外（Nova 10-08 13:04 定：不放宽 VIEW，单列）：(品种, 周期) → 在哪一档笔根数下、最右差异离右端至少多少根、卡号。
+#   ZEC 4h 在 6 根下往左加载（span 1→2）会动到视口里的结构：实测最右一处离右端 117 根（段端点 2、类中枢 2、线段中枢 3）。
+#   这是 6 根带来的真实变化，写进了给小栋的那一页。**只放这一个数**：比 117 更靠右就照样红；默认不是 6 根时不生效。
+KNOWN_SPAN = {("ZECUSDT", "4h"): dict(pen_min=6, floor=117, card="card-2e6bb3bd-4ae C3 第②步")}
 
 
 def run_span(quiet=False):
@@ -213,8 +217,14 @@ def run_span(quiet=False):
                              % (len(d2["bars"]), len(d1["bars"])))
             p = diff_pair(d1, d2)
             r = p["rightmost_from_end"]
+            kn = KNOWN_SPAN.get((sym, tf))
             if r is not None and r < VIEW:
-                diffs.append("最近 %d 根里结构变了：最右一处离右端 %d 根 %s" % (VIEW, r, p["per_cat"]))
+                if kn and server.DEFAULT_PEN_MIN == kn["pen_min"] and r >= kn["floor"]:
+                    if not quiet:
+                        print("~ %s %s 已知例外（%s）：最近 %d 根里结构变了，最右离右端 %d 根（例外下限 %d）"
+                              % (sym, tf, kn["card"], VIEW, r, kn["floor"]))
+                else:
+                    diffs.append("最近 %d 根里结构变了：最右一处离右端 %d 根 %s" % (VIEW, r, p["per_cat"]))
             near.append(r)
             bad += bool(diffs)
             if not quiet:

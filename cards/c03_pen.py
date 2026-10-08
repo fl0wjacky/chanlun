@@ -5,26 +5,27 @@ import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from cards.base import *
 from core import analyze_file
-from core.pen import nonextreme_pens, build_pens_v1
+from core.pen import nonextreme_pens, build_pens_v1, MIN_GAP_DEFAULT
 
 W, H = 1400, 2600
 OUTNAME = "c03_笔.png"
 
 
 def draw_anatomy(d):
-    """A 一笔的解剖：分型各占 3 根、中间至少 1 根独立K线"""
+    """A 一笔的解剖：分型各占 3 根；默认 6 根，两个分型可以紧挨着（C3，小栋 10-08 定）"""
     section(d, 200, 736, "一笔的解剖")
-    d.text((300, 224), "分型各占 3 根K线；两段之间至少要空出 1 根 —— 这 1 根才叫独立K线", font=f_n, fill=MU)
+    d.text((300, 224), "分型各占 3 根K线；默认 6 根，两个分型可以紧挨着，不要求中间空出独立K线", font=f_n, fill=MU)
 
+    # 默认 6 根：底分型（1～3）和顶分型（4～6）紧挨着，中间没有独立K线 ⇒ 分型中心索引差 3（＝MIN_GAP_DEFAULT）
     A = [(100.5,101.0,99.5,99.8), (99.8,100.0,98.6,99.0), (99.0,99.2,97.8,98.4),
-         (98.4,100.2,98.4,99.6),  (99.6,101.4,99.6,100.8), (100.8,102.2,100.4,101.6),
+         (98.4,100.2,98.4,99.6),  (100.8,102.2,100.4,101.6),
          (101.6,103.0,101.2,101.8), (101.8,102.4,100.6,101.0), (101.0,101.6,99.8,100.2)]
     ma = Mini(d, 180, 392, 1220, 648, 97.6, 103.2)
     n = len(A); Xa = lambda i: ma.X(i, n)
     cs(ma, Xa, ma.Y, A, w=52)
-    d.line([Xa(2), ma.Y(97.8), Xa(6), ma.Y(103.0)], fill=BL, width=8)
+    d.line([Xa(2), ma.Y(97.8), Xa(5), ma.Y(103.0)], fill=BL, width=8)
     d.ellipse([Xa(2) - 9, ma.Y(97.8) - 9, Xa(2) + 9, ma.Y(97.8) + 9], fill=GR)
-    d.ellipse([Xa(6) - 9, ma.Y(103.0) - 9, Xa(6) + 9, ma.Y(103.0) + 9], fill=RD)
+    d.ellipse([Xa(5) - 9, ma.Y(103.0) - 9, Xa(5) + 9, ma.Y(103.0) + 9], fill=RD)
 
     def bracket(i, j, y, col, label):
         x0, x1 = Xa(i) - 34, Xa(j) + 34
@@ -33,13 +34,14 @@ def draw_anatomy(d):
         d.line([x1, y, x1, y + 16], fill=col, width=3)
         d.text(((x0 + x1) / 2 - d.textlength(label, font=f_n) / 2, y - 32), label, font=f_n, fill=col)
     bracket(1, 3, 368, GR, "底分型（占 3 根）")
-    bracket(4, 4, 368, CY, "独立K线")
-    bracket(5, 7, 368, RD, "顶分型（占 3 根）")
-    d.line([Xa(2), 300, Xa(6), 300], fill=AM, width=3)
-    d.line([Xa(2), 300, Xa(2), 318], fill=AM, width=3)
-    d.line([Xa(6), 300, Xa(6), 318], fill=AM, width=3)
-    d.text((Xa(2) + 10, 266), "两个分型中心之间 = 5 根K线（第 77 课老笔；第 81 课新笔可选，默认老笔）", font=f_n, fill=AM)
-    d.text((180, 656), "第 77 课：顶底之间至少一根K线不属于两分型 → 索引差 ≥ 4", font=f_n, fill=MU)
+    bracket(4, 6, 368, RD, "顶分型（占 3 根）")
+    xa0, xa1 = Xa(1) - 34, Xa(6) + 34                # 两个分型合起来那 6 根（底分型第 1 根 → 顶分型第 3 根）
+    d.line([xa0, 300, xa1, 300], fill=AM, width=3)
+    d.line([xa0, 300, xa0, 318], fill=AM, width=3)
+    d.line([xa1, 300, xa1, 318], fill=AM, width=3)
+    d.text((xa0 + 10, 266), "两个分型合起来 6 根K线（默认老笔；第 81 课新笔可选）", font=f_n, fill=AM)
+    d.text((180, 656), "第 106 课：至少延伸6个基本K线单位 → 索引差 ≥ 3", font=f_n, fill=MU)
+    d.text((180, 688), "默认 6 根；切到 7 根时，中间还要再隔一根独立K线", font=f_n, fill=MU)
     d.text((820, 658), "底 = 底分型的最低点　顶 = 顶分型的最高点", font=f_n, fill=BL)
     d.text((820, 690), "笔 = 两个相邻的「顶」与「底」之间", font=f_n, fill=BL)
 
@@ -96,20 +98,20 @@ def cellc(d, x0, y0, w, h, no, title, verdict, vcol, bars, note,
 def draw_four_cases(d):
     """B 三种处理：分型 → 笔只有成笔 / 跳过 / 取更极端（本项目引擎口径）"""
     cw = section(d, 756, 1660, "分型 → 笔：三种处理（本项目引擎口径）")
-    d.text((80 + cw + 20, 782), "看三件事：同类/异类　间隔够不够 4　两头是不是极值", font=f_n, fill=MU)
+    d.text((80 + cw + 20, 782), "看三件事：同类/异类　间隔够不够 3　两头是不是极值", font=f_n, fill=MU)
 
     # ①② 成笔的两个方向
     P1 = [(100.0,100.2,98.8,99.2), (99.2,99.4,97.8,98.6), (98.6,100.0,98.4,99.6),
           (99.6,101.2,99.4,100.8), (100.8,102.2,100.4,101.8), (101.8,103.0,101.4,102.0),
           (102.0,102.4,100.8,101.4)]
     cellc(d, 76, 826, 614, 366, "①", "间隔够 + 异类分型", "向上笔 ✓", GR, P1,
-          "底分型(索引1) → 顶分型(索引5)，差 4，刚好够 → 成笔",
+          "底分型(索引1) → 顶分型(索引5)，差 4 ≥ 3 → 成笔",
           marks=[(1, "bot", GR), (5, "top", RD)], pen_pts=[(1, "bot"), (5, "top")])
     P2 = [(100.5,102.5,100.0,102.0), (102.0,103.0,101.0,101.5), (101.5,102.0,100.0,100.5),
           (100.5,101.0,99.0,99.5), (99.5,100.0,98.0,98.5), (98.5,98.8,97.0,97.5),
           (97.5,99.2,97.2,98.6)]
     cellc(d, 710, 826, 614, 366, "②", "间隔够 + 异类分型", "向下笔 ✓", GR, P2,
-          "顶分型(索引1) → 底分型(索引5)，差 4 → 成笔（和左格对称）",
+          "顶分型(索引1) → 底分型(索引5)，差 4 ≥ 3 → 成笔（和左格对称）",
           marks=[(1, "top", RD), (5, "bot", GR)], pen_pts=[(1, "top"), (5, "bot")])
 
     # ★ ③④ 共用同一段行情
@@ -120,7 +122,7 @@ def draw_four_cases(d):
           (103.4,103.8,102.0,102.6)]
     cellc(d, 76, 1236, 614, 406, "③", "与末尾端点异类，但间隔不够", "跳过 ×", RD, P4,
           ["此刻序列里只挂着顶分型(索引1)，它就是当前末尾端点",
-           "底分型(索引2) 与它只隔 1 格 < 4 → 被跳过",
+           "底分型(索引2) 与它只隔 1 格 < 3 → 被跳过",
            "「跳过」是引擎的实现口径，第 77 课三步骤未单列"],
           marks=[(1, "top", RD), (2, "bot", GR)],
           labels=[(1, "末尾端点", RD, "up")], gap=(1, 2, "间隔 1"))
@@ -135,9 +137,9 @@ def draw_rules(d):
     """E 原文：两个条件、三步骤、唯一性（第 77 课）+ 端点必须是极值（第 66/70/71 课答疑）"""
     section(d, 2166, 2438, "原文怎么划笔（第 77 课）")
     d.text((520, 2192), "缠师在这一课里把笔的定义和算法一次讲完了", font=f_n, fill=MU)
-    d.text((86, 2230), "两个条件：① 顶和底之间至少有一根K线不属于顶分型与底分型（= 索引差 ≥ 4）",
+    d.text((86, 2230), "两个条件：① 顶和底之间至少有一个K线不属于顶分型与底分型（7 根档 = 索引差 ≥ 4；默认 6 根放宽到 ≥ 3，第 106 课）",
            font=f_t, fill=TX)
-    d.text((86, 2260), "　　　　　② 顶分型中最高那根K线的区间，至少有一部分高于底分型中最低那根K线的区间",
+    d.text((86, 2260), "　　　　　② 顶分型中最高那K线的区间至少要有一部分高于底分型中最低那K线的区间",
            font=f_t, fill=TX)
     d.text((86, 2290), "三步骤：一、标出所有符合标准的分型　二、前后同性质时——顶取更高者、底取更低者（相等都先留）",
            font=f_t, fill=TX)
@@ -159,15 +161,14 @@ def draw_real_data(d):
     rows = []
     for fn, tag in (("aaplusdt_4h.json", "4 小时"), ("aaplusdt_30m.json", "30 分钟")):
         r = analyze_file(fn)
-        v1, _ = build_pens_v1(r["fx"])
+        v1, _ = build_pens_v1(r["fx"], MIN_GAP_DEFAULT)
         rows.append((tag, len(r["fx"]), len(r["pens"]), len(nonextreme_pens(r["pens"], r["std"])),
                      len(v1), len(nonextreme_pens(v1, r["std"]))))
     for k, (tag, nfx, npen, bad, nv1, badv1) in enumerate(rows):
         d.text((86, 1774 + 32 * k), "%s：%d 个分型 → %d 条笔　（端点不是极值的 %d 条；v1 一遍扫过去是 %d 条，其中 %d 条不合格）"
                % (tag, nfx, npen, bad, nv1, badv1), font=f_n, fill=TX)
-    if sum(r[3] for r in rows):
-        d.text((86, 1838), "注：剩下的是剧烈的扩张震荡 —— 顶一个比一个高、底一个比一个低又挨得太近，两道回头修正都救不回。",
-               font=f_t, fill=MU)
+    # ★ C3 默认 6 根以后，这两份数据上端点不是极值的笔是 0 条（7 根时有几条剧烈扩张震荡救不回，原先这里有一句注）。
+    #   数据是冻结的 ⇒ 那句注永远画不到，删掉；要是以后换数据又冒出来，「端点不是极值的 N 条」那一行会照实印数。
     d.text((86, 1870), "换算下来：约 %d 个分型才筛出 1 条笔。" % round(rows[1][1] / rows[1][2]), font=f_p, fill=AM)
 
 
