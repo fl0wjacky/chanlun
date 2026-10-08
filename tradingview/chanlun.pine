@@ -410,6 +410,7 @@ var array<Unit>  zSegs    = array.new<Unit>()          // 已确认段（只增�
 var array<int>   zSegI    = array.from(0)              // 段扫描位置（= 上一段 endPen + 1）
 var array<int>   zSegBorn = array.from(0)              // 方向确立的破位笔（case-1 的 at；case-2 归 0）
 var array<int>   zSegSig  = array.from(-1, -1, -1)     // 笔序列尾签名 [last, 2nd-last, 3rd-last]（zFx 下标，-1 = 无）
+var array<int>   zSegTent = array.from(-1)             // S7 暂定那一段的终点笔（-1 = 没有）；暂定段不进 zSegs
 
 // 一根一步。守卫三条 —— 正确性**不押在** ① 的"只增"不变量上，对不上就走第 3 条整段重算：
 //   1) 分型表没变（长度相同且尾分型签名相同）⇒ 无事可做
@@ -575,7 +576,7 @@ reverseConfirmPen(array<Unit> P, int endPen, bool segUp, int e3) =>
         j += 1
     res
 
-// 第 71 课：假设 pens[k] 的终点是分界点。返回 [情况(0 不成立 / 1 / 2), at(-1 = 无)]，含义同 Python _case_at
+// 第 71 课：假设 pens[k] 的终点是分界点。返回 [情况(0 不成立 / 1 / 2 / 3＝S7 暂定), at(-1 = 无)]，含义同 Python _case_at
 //   mEnd / mConf / mDir：「从第 s 笔起的第一个已完成线段」的 memo（终点笔 / 确认那一笔 / 1 上 -1 下；mEnd = -1 ⇒ 没有），由 firstSegFill 填
 caseAt(array<Unit> P, int i, int k, bool up, array<int> mEnd, array<int> mConf, array<int> mDir) =>
     n = P.size()
@@ -595,7 +596,7 @@ caseAt(array<Unit> P, int i, int k, bool up, array<int> mEnd, array<int> mConf, 
         V = P.get(k).p1
         e2h = P.get(k + 1).hi
         e2l = P.get(k + 1).lo
-        if not (up ? V <= e1h : V >= e1l)
+        if not (up ? V < e1h : V > e1l)                   // S10②：V 跟 E1 一端相同算分界（同 Python S10_TIE）
             bool gap = up ? e1h < e2l : e1l > e2h
             // 线段 #1（L81:140-145，card-fff28d01-f13，同 Python GAP_COVER）：同一份特征序列里、E1 之前有元素整个盖住
             //   E1 和 E2 之间那段空档 ⇒ 不算缺口（只会二→一）。E1、E2、分型判定不动。
@@ -619,13 +620,29 @@ caseAt(array<Unit> P, int i, int k, bool up, array<int> mEnd, array<int> mConf, 
                 bool fin = false
                 while r <= stop and not fin
                     p = P.get(r)
-                    if up ? p.hi > V : p.lo < V
+                    if up ? p.hi >= V : p.lo <= V                 // S10①：追平 X 的起点也算破
                         at := r, fin := true
-                    else if up ? p.lo < L : p.hi > L
+                    // ★ 追平 X 的终点只从 r > k+2 起算：pens[k+2] 就是从 X 终点出发的，它追平 L 恒成立（同 Python，自检有反向臂）
+                    else if up ? (p.lo < L or (r > k + 2 and p.lo == L)) : (p.hi > L or (r > k + 2 and p.hi == L))
                         cse := 1, at := r, fin := true
                     r += 1
                 if not fin and okRev
                     cse := 1, at := mConf.get(s0)
+                if not fin and not okRev                      // ★ S7 当场判（同 Python _s7_fractal）：V 之后单独做包含、开头按原线段方向，构成分型 ⇒ 暂定
+                    float s2h = P.get(k + 1).hi
+                    float s2l = P.get(k + 1).lo
+                    int j7 = k + 3
+                    bool done7 = false
+                    while j7 < n and not done7
+                        e7 = P.get(j7)
+                        if contains(s2h, s2l, e7.hi, e7.lo)
+                            s2h := up ? math.max(s2h, e7.hi) : math.min(s2h, e7.hi)
+                            s2l := up ? math.max(s2l, e7.lo) : math.min(s2l, e7.lo)
+                            j7 += 2
+                        else
+                            done7 := true
+                            if up ? (s2h == V and s2h > e7.hi and s2l > e7.lo) : (s2l == V and s2l < e7.lo and s2h < e7.hi)
+                                cse := 3, at := j7
             else                                          // 第二种情况
                 float e3h = na
                 float e3l = na
@@ -693,9 +710,12 @@ firstSegFill(array<Unit> P, int from, array<int> mEnd, array<int> mConf, array<i
         if i + 2 < n
             up = isUp(P.get(i))
             k = i + 2
-            while k < n - 1 and e < 0
+            bool tent = false
+            while k < n - 1 and e < 0 and not tent
                 [cse, at] = caseAt(P, i, k, up, mEnd, mConf, mDir)
-                if cse > 0
+                if cse == 3
+                    tent := true                          // S7 暂定不是已完成线段（同 Python _first_seg 返回 None）
+                else if cse > 0
                     e := k
                     c := math.max(k + 1, at)
                 else
@@ -736,7 +756,7 @@ headStartBad(array<Unit> P, int i, int endPen, bool up, array<int> mEnd, array<i
                 if last >= x + 1
                     float xs = P.get(x).p0
                     for j = x + 1 to last
-                        if up ? P.get(j).hi > xs : P.get(j).lo < xs
+                        if up ? P.get(j).hi >= xs : P.get(j).lo <= xs   // S10①：追平也算破（同 Python _start_check）
                             broke := true
                 bad := not broke
     bad
@@ -766,11 +786,13 @@ buildSegments(array<Unit> P) =>
         int endPen = -1
         int res = -1
         int conf = -1
+        int found = 0
         while k < n - 1 and endPen < 0
             [cse, at] = caseAt(P, i, k, up, mEnd, mConf, mDir)
             if cse > 0
                 endPen := k
-                res := cse == 1 ? at : 0
+                found := cse
+                res := cse == 1 or cse == 3 ? at : 0
                 conf := math.max(k + 1, at)
             else
                 k += 2
@@ -789,8 +811,10 @@ buildSegments(array<Unit> P) =>
             born := 0
         else
             born := res
-            segs.push(mkSeg(P, i, endPen, false))
+            segs.push(mkSeg(P, i, endPen, found == 3))    // S7 暂定照未完成段画
             i := endPen + 1
+            if found == 3
+                stop := true                              // 暂定以后不再往下切（同 Python：不然逐笔加长会撤段）
     if n - i >= 3
         segs.push(mkSeg(P, i, n - 1, true))
     segs
@@ -815,7 +839,7 @@ mkPen(array<Fx> fx, array<int> seq, int t) =>
     b = fx.get(seq.get(t + 1))
     Unit.new(a.i, b.i, a.p, b.p, math.max(a.p, b.p), math.min(a.p, b.p))
 
-zSegStep(array<Fx> fx, array<int> seq, array<Unit> pens, array<Unit> segs, array<int> segI, array<int> segBorn, array<int> sig) =>
+zSegStep(array<Fx> fx, array<int> seq, array<Unit> pens, array<Unit> segs, array<int> segI, array<int> segBorn, array<int> sig, array<int> tent) =>
     M = seq.size()
     e1 = M >= 1 ? seq.get(M - 1) : -1
     e2 = M >= 2 ? seq.get(M - 2) : -1
@@ -849,6 +873,7 @@ zSegStep(array<Fx> fx, array<int> seq, array<Unit> pens, array<Unit> segs, array
         mDir = array.new<int>(n, 0)
         firstSegFill(pens, i, mEnd, mConf, mDir)
         born = segBorn.get(0)
+        tent.set(0, -1)
         bool stop = false
         while i + 2 < n and not stop
             if not openingOverlaps(pens, i)
@@ -861,11 +886,13 @@ zSegStep(array<Fx> fx, array<int> seq, array<Unit> pens, array<Unit> segs, array
             int endPen = -1
             int res = -1
             int conf = -1
+            int found = 0
             while k < n - 1 and endPen < 0
                 [cse, at] = caseAt(pens, i, k, up, mEnd, mConf, mDir)
                 if cse > 0
                     endPen := k
-                    res := cse == 1 ? at : 0
+                    found := cse
+                    res := cse == 1 or cse == 3 ? at : 0
                     conf := math.max(k + 1, at)
                 else
                     k += 2
@@ -882,6 +909,9 @@ zSegStep(array<Fx> fx, array<int> seq, array<Unit> pens, array<Unit> segs, array
                 // ★ 图头那一段起点非段内极值、且不是 L78 ① 型 ⇒ 同样往后挪一笔（同 Python HEAD_EXT_FIX，card-2783fa1f-da8）
                 i += 1
                 born := 0
+            else if found == 3
+                tent.set(0, endPen)                       // S7 暂定：不进只增的缓存，扫描位置不动；画的时候补上（见 islast）
+                stop := true
             else
                 born := res
                 segs.push(mkSeg(pens, i, endPen, false))
@@ -890,7 +920,7 @@ zSegStep(array<Fx> fx, array<int> seq, array<Unit> pens, array<Unit> segs, array
         segBorn.set(0, born)
     true
 
-zSegStep(zFx, zSeq, zPens, zSegs, zSegI, zSegBorn, zSegSig)
+zSegStep(zFx, zSeq, zPens, zSegs, zSegI, zSegBorn, zSegSig, zSegTent)
 
 // ③ 自检用的整段对照：增量 (zPens, zSegs) 必须跟整段重算逐格/逐段相同。
 // i0/i1 已唯一确定一根笔（p0/p1/hi/lo 都由同一对端点推出），所以只比 i0/i1；段比 PI0/PI1 + live。
@@ -1302,8 +1332,12 @@ if barstate.islast
     // ★ segs 必须在 if 外面声明：Pine 里 if 块内声明的变量出了块就不存在（小栋真机编译报「segs 未定义」）。
     //   B：全程按线段方向合并 ⇒ 前缀不稳定，整段重算；A：已确认段增量维护，这里补 live 尾巴（不落 var）。
     segs = featModeB ? buildSegments(pens) : array.copy(zSegs)
-    if not featModeB and pens.size() - zSegI.get(0) >= 3
-        segs.push(mkSeg(pens, zSegI.get(0), pens.size() - 1, true))
+    int tailFrom = zSegI.get(0)
+    if not featModeB and zSegTent.get(0) >= 0             // S7 暂定段：照未完成段画，后面的尾巴从它之后起
+        segs.push(mkSeg(pens, zSegI.get(0), zSegTent.get(0), true))
+        tailFrom := zSegTent.get(0) + 1
+    if not featModeB and pens.size() - tailFrom >= 3
+        segs.push(mkSeg(pens, tailFrom, pens.size() - 1, true))
     done = array.new<Unit>()
     for s in segs
         if not s.live

@@ -276,7 +276,7 @@ def _start_check(s, pens, mode=FEAT_STD_DEFAULT, memo=None, cutoff=None):
     #   实例：线上 AAPL 15m（10-07 快照）第 31 段，第 313 笔 310.58 破了第一笔终点 310.39，之后第 314 笔跌到 309.33 < 起点 309.58。
     if S11_START_OK and s["PI1"] >= s["PI0"] + 2:
         x1, x3 = pens[s["PI0"]], pens[s["PI0"] + 2]
-        if (x3["hi"] > x1["p1"]) if up else (x3["lo"] < x1["p1"]):
+        if _beyond(x3, x1["p1"], up, S10_TIE):           # S10①：第三笔追平第一笔的终点也算破
             return "ok"
     xs = [j for j in range(s["PI0"], s["PI1"] + 1)
           if (pens[j]["lo"] == ext if up else pens[j]["hi"] == ext) and _dir(pens[j]) != s["dir"]]
@@ -285,7 +285,7 @@ def _start_check(s, pens, mode=FEAT_STD_DEFAULT, memo=None, cutoff=None):
     if x is not None and (rev is None or rev["dir"] != s["dir"] or (cutoff is not None and rev["confirm"] > cutoff)):
         return "unmeasured"
     last = min(s["PI1"], rev["confirm"] - 1) if rev is not None else s["PI1"]
-    broke = x is not None and any((pens[j]["hi"] > pens[x]["p0"]) if up else (pens[j]["lo"] < pens[x]["p0"])
+    broke = x is not None and any(_beyond(pens[j], pens[x]["p0"], up, S10_TIE)
                                   for j in range(x + 1, last + 1))
     return "ok" if broke else "bad"
 
@@ -330,6 +330,29 @@ def check_segments(segs, pens, unmeasured=None):
     return bad
 
 
+def _beyond(p, level, up, tie):
+    """这一笔破没破 level：向上看 hi、向下看 lo；tie ⇒ 追平也算破（S10①，小栋 10-08 00:33 定 B）。"""
+    return (p["hi"] >= level if tie else p["hi"] > level) if up else (p["lo"] <= level if tie else p["lo"] < level)
+
+
+def _s7_fractal(pens, k, up):
+    """S7 当场判（线段.md 附第 1、2 条；分界后合并方向照 agent/atlas/s7-incl-dir）：分界点 V 之后的元素**单独起一段**做包含，
+    开头按原线段方向合（顶取高高、底取低低），分界前那根不参与、也不拿来定方向；合完的 E2 跟下一根 E3 构成顶（底）分型、
+    E2 的极值仍是 V ⇒ 返回 E3 那一笔的序号（当场判出来的那一刻），否则 None。"""
+    V = pens[k]["p1"]
+    E2 = dict(h=pens[k + 1]["hi"], l=pens[k + 1]["lo"])
+    for j in range(k + 3, len(pens), 2):
+        e = pens[j]
+        if (E2["h"] >= e["hi"] and E2["l"] <= e["lo"]) or (e["hi"] >= E2["h"] and e["lo"] <= E2["l"]):
+            pick = max if up else min
+            E2 = dict(h=pick(E2["h"], e["hi"]), l=pick(E2["l"], e["lo"]))
+            continue
+        ok = (E2["h"] == V and E2["h"] > e["hi"] and E2["l"] > e["lo"]) if up else \
+             (E2["l"] == V and E2["l"] < e["lo"] and E2["h"] < e["hi"])
+        return j if ok else None
+    return None
+
+
 def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT, memo=None):
     """第 71 课：假设 pens[k] 的终点 V 是分界点，按原文程序考察。
 
@@ -369,8 +392,8 @@ def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT, memo=None):
     E1 = _feature_std([f[1] for f in feats], up, mode)[-1]
     V = pens[k]["p1"]
     E2 = dict(h=pens[k + 1]["hi"], l=pens[k + 1]["lo"])
-    if (up and V <= E1["h"]) or (not up and V >= E1["l"]):
-        return None, None                         # V 不高于（低于）前一特征元素，谈不上顶（底）
+    if (up and V < E1["h"]) or (not up and V > E1["l"]) or (not S10_TIE and V == (E1["h"] if up else E1["l"])):
+        return None, None                         # V 不高于（低于）前一特征元素，谈不上顶（底）；一端相同照 S10② 算分界
     gap = (E1["h"] < E2["l"]) if up else (E1["l"] > E2["h"])
     # ★ 线段 #1（L81:140-145，小栋 10-07 A，card-fff28d01-f13；spec 线段.md #10）：缺口要不被**之前同一特征序列**里的元素盖住
     #   才算真缺口。同一份包含处理后的序列里、E1 之前有元素整个盖住 E1 和 E2 之间那段空档 ⇒ 不算缺口（只会二→一）。
@@ -394,13 +417,19 @@ def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT, memo=None):
         stop = rev["confirm"] - 1 if ok_rev else len(pens) - 1
         for r in range(k + 2, stop + 1):
             p = pens[r]
-            if (up and p["hi"] > V) or (not up and p["lo"] < V):
-                return None, r                    # 破了 X 的起点：① 旧线段延续，从 r 起再找
-            if (up and p["lo"] < L) or (not up and p["hi"] > L):
-                return 1, r                       # 先破 X 的结束位置：V 是终点，新段在 r 才确立
+            if _beyond(p, V, up, S10_TIE):
+                return None, r                    # 破了 X 的起点：① 旧线段延续，从 r 起再找（S10① 追平也算破）
+            # ★ 追平 X 的终点只从 r > k+2 起算：pens[k+2] 就是从 X 的终点出发的，它「追平 L」恒成立 ——
+            #   S7／S10／S12 那份卷子出题人和两个答卷人各自在这里踩了一次（Iris 10-08 14:25），自检有反向臂专抓这个。
+            if _beyond(p, L, not up, S10_TIE and r > k + 2):
+                return 1, r                       # 先破 X 的结束位置：V 是终点，新段在 r 才确立（第三笔就破 ＝ S11）
         if ok_rev:
             return 1, rev["confirm"]              # ② 反向线段走完、没破 V：V 是终点，新段到反向线段确认时才确立
-        return None, len(pens)                    # 反向线段还没走完：待定，其后候选一律不判
+        if S7_NOW:                                # ★ S7（小栋 10-07 23:51 定 A）：等不到结局 ⇒ 分界点之后的元素单独做包含，有分型就当场判，标「暂定」
+            e3 = _s7_fractal(pens, k, up)
+            if e3 is not None:
+                return 3, e3                      # 暂定：结局（S12／S-待定-1～3）要是后来定成 ①，这一刀作废 —— 所以只当未完成段对待
+        return None, len(pens)                    # 反向线段还没走完、也没有分型：待定，其后候选一律不判
 
     E3 = None                                     # ④ 第二种情况
     for j in range(k + 3, len(pens), 2):          # V 之后的同类元素，按分型方向做包含
@@ -428,6 +457,8 @@ HEAD_DIR_FIX = True                       # 探针开关：图头那一段终点
 HEAD_EXT_FIX = True                       # 探针开关：图头那一段起点非段内极值、且不是 L78 ① 型（检查器会报的那种）就往后挪一笔（card-2783fa1f-da8）
 HEAD_EXT_CUTOFF = True                    # 探针开关：图头那一条判 ① 型只看到确认图头段的那一笔（关掉 ⇒ 随机 seed 2435／4750 撤回已确认段）
 GAP_COVER = True                          # 探针开关：缺口被之前同一特征序列元素盖住不算缺口（线段 #1，card-fff28d01-f13）
+S10_TIE = True                            # 探针开关：两处「相等」（S10，线段.md 附第 5 条）：① 追平 X 的起点／终点算破；② V 跟分界前那个元素一端相同算分界
+S7_NOW = True                             # 探针开关：第一种情况等不到结局时当场判（S7，附第 2 条）—— 有分型就先切、标「暂定」（case 3）
 
 
 def _first_seg(pens, start, mode=FEAT_STD_DEFAULT, memo=None):
@@ -513,12 +544,13 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=
             i += 1
             born = 0
             continue
-        born = (at or 0) if case == 1 else 0      # 方向确立只对第一种情况有意义；第二种情况的 at 只给 _first_seg 当「确认那一笔」
+        born = (at or 0) if case in (1, 3) else 0  # 方向确立只对第一种情况（含 S7 暂定）有意义；第二种情况的 at 只给 _first_seg 当「确认那一笔」
         segs.append(dict(
             PI0=i, PI1=end_pen,
             i0=pens[i]["i0"], i1=pens[end_pen]["i1"],
             p0=pens[i]["p0"], p1=pens[end_pen]["p1"],
             dir=seg_dir, npens=end_pen - i + 1, case=case,
+            **(dict(tentative=True, live=True) if case == 3 else {}),   # 暂定：上层（中枢、走势）照未完成段对待，结局定了才算数
             hi=max(pens[k]["hi"] for k in range(i, end_pen + 1)),
             lo=min(pens[k]["lo"] for k in range(i, end_pen + 1)),
         ))
@@ -526,6 +558,8 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=
             segs[-1]["_born"] = at                # 只给 _first_seg 用：确认这一段的那一笔
             return segs
         i = end_pen + 1
+        if case == 3:                             # ★ S7 暂定：结局没定之前，后面不再往下切 —— 不然逐笔加长时，暂定那一刀一旦作废（定成 ①），
+            break                                 #   它后面已经切出来的段就跟着被撤（seg_prefix_check 实测 10 处）。后面整截算未完成段。
 
     if n - i >= 3:
         seg_dir = _dir(pens[i])
@@ -609,6 +643,8 @@ def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
                     if verdict == "yes":
                         out = dict(dir="up" if up_ else "down", PI0=i, PI1=k2, confirm=max(k2 + 1, r or 0))
                         break
+                    if verdict == "tentative":    # S7 暂定：不是已完成的线段，跟引擎的 _first_seg 一样当「没有」
+                        break
                     if verdict == "wait":
                         skip_ = r
                 k2 += 2
@@ -626,8 +662,10 @@ def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
         sf = std_feats(pre, up)
         e1 = sf[-1]
         v, first = pens[k]["p1"], pens[k + 1]
-        beyond_v = (lambda p: p["hi"] > v) if up else (lambda p: p["lo"] < v)
-        if (up and not v > e1["h"]) or (not up and not v < e1["l"]):
+        tie = S10_TIE                             # S10①：追平算破；S10②：V 跟 e1 一端相同算分界（独立按定义写，不调 _beyond）
+        beyond_v = (lambda p: p["hi"] > v) if up else (lambda p: p["lo"] < v)          # 第二种情况「重新越过 V」（L78:39-41 新高新低）：照旧严格
+        breaks_v = ((lambda p: p["hi"] >= v) if up else (lambda p: p["lo"] <= v)) if tie else beyond_v   # 第一种情况破 X 的起点（S10①）
+        if (up and not (v >= e1["h"] if tie else v > e1["h"])) or (not up and not (v <= e1["l"] if tie else v < e1["l"])):
             return "no", None
         no_gap = first["lo"] <= e1["h"] if up else first["hi"] >= e1["l"]
         # 线段 #1（L81:140-145，card-fff28d01-f13）：空档被 E1 之前的同序列元素整个盖住 ⇒ 不算缺口（独立按定义写，不调 _case_at）
@@ -639,12 +677,26 @@ def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
             rev = first_seg_def(k + 2)
             ok_rev = rev is not None and rev["dir"] == ("up" if up else "down")
             for r in range(k + 2, rev["confirm"] if ok_rev else N):   # 反向线段被确认那一笔之前的破位都算提前定
-                if beyond_v(pens[r]):
+                if breaks_v(pens[r]):
                     return "wait", r              # 反向线段破了 X 的起点：① 旧段延续
-                if (pens[r]["lo"] < end) if up else (pens[r]["hi"] > end):
+                eq = tie and r > k + 2                # 追平 X 的终点：pens[k+2] 从 X 终点出发，它追平是恒成立的，不算
+                if ((pens[r]["lo"] < end or (eq and pens[r]["lo"] == end)) if up else
+                        (pens[r]["hi"] > end or (eq and pens[r]["hi"] == end))):
                     return "yes", r               # 反向线段走完前先破 X 的结束位置：提前定（L71:27）
             if ok_rev:
                 return "yes", rev["confirm"]      # ② 反向线段走完没破 X 的起点
+            if S7_NOW:                            # S7 当场判（独立再写一遍）：V 之后单独做包含、开头按原线段方向，构成分型 ⇒ 暂定
+                mid, j7 = [first["hi"], first["lo"]], k + 3
+                while j7 < N:
+                    h, l = pens[j7]["hi"], pens[j7]["lo"]
+                    if (mid[0] >= h and mid[1] <= l) or (h >= mid[0] and l <= mid[1]):
+                        pick = max if up else min
+                        mid = [pick(mid[0], h), pick(mid[1], l)]
+                        j7 += 2
+                        continue
+                    if (mid[0] == v and mid[0] > h and mid[1] > l) if up else (mid[1] == v and mid[1] < l and mid[0] < h):
+                        return "tentative", j7
+                    break
             return "wait", N
         # 第二种情况：V 之后的同类元素可以包含，找 E3
         mid, right, j = [first["hi"], first["lo"]], None, k + 3
@@ -696,7 +748,7 @@ def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
             if k2 < skip:
                 continue
             verdict, r = judge(i, k2, up)
-            if verdict == "yes":
+            if verdict in ("yes", "tentative"):  # 更早的候选能当场判（S7 暂定），引擎就会在那里切、而且不再往下切
                 bad.append(("更早的分界点已满足", n, k2)); break
             if verdict == "wait":
                 if r > k:
