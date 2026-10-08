@@ -58,8 +58,8 @@ def norm(v):
     return v
 
 
-def reference(bars, fn):
-    r = analyze(bars, tick=tick_of(fn))
+def reference(bars, fn, min_gap=4):
+    r = analyze(bars, tick=tick_of(fn), min_gap=min_gap)
     big = []
     for b in r["big"]:
         b = dict(b)
@@ -344,6 +344,48 @@ def run_wolf(quiet=False):
     return bad
 
 
+def run_pen_min(quiet=False):
+    """C3 笔最少根数（小栋 10-08）：① 每份数据 pen_min=6／7 两档，服务吐的结构 ≡ 引擎 analyze(min_gap=根数−3) 原样那份；
+    ② 不带 pen_min ＝ 默认档、回显 pen_min；③ 名单外的值 400；④ /api/meta 的 pen_min_options／pen_min_default 跟进程一致。"""
+    files = sorted(os.path.basename(p) for p in glob.glob(data("*.json")))
+    cases = [(fn, k) for fn, k in ((fn, dataset(fn)) for fn in files) if k]
+    bars_by_key = {k: json.load(open(data(fn), encoding="utf-8")) for fn, k in cases}
+    bad = 0
+    with running(bars_by_key) as port:
+        for fn, (sym, tf) in cases:
+            diffs = []
+            for pm in server.PEN_MIN_OPTIONS:
+                got = get_path(port, "/api/chart?symbol=%s&tf=%s&cut=extend&pen_min=%d" % (sym, tf, pm))
+                d = compare(reference(bars_by_key[(sym, tf)], fn, min_gap=pm - 3), flat(got))
+                if d:
+                    diffs.append("pen_min=%d：%s" % (pm, " ｜ ".join(d[:2])))
+                if got.get("pen_min") != pm:
+                    diffs.append("pen_min=%d 回显成 %r" % (pm, got.get("pen_min")))
+            dflt = get(port, sym, tf)
+            if dflt.get("pen_min") != server.DEFAULT_PEN_MIN:
+                diffs.append("不带 pen_min 回显 %r ≠ 默认 %r" % (dflt.get("pen_min"), server.DEFAULT_PEN_MIN))
+            bad += bool(diffs)
+            if not quiet:
+                print("%s %-18s %s %-3s 笔根数两档%s" % ("✗" if diffs else "✓", fn, sym, tf, "  ← " + " ｜ ".join(diffs) if diffs else ""))
+        sym, tf = cases[0][1]
+        for v in ("5", "8", "06", "6.0", ""):
+            try:
+                get_path(port, "/api/chart?symbol=%s&tf=%s&pen_min=%s" % (sym, tf, v))
+                bad += 1
+                if not quiet:
+                    print("✗ pen_min=%r 没回 400" % v)
+            except Exception:
+                pass
+        m = get_path(port, "/api/meta")
+        if m.get("pen_min_options") != list(server.PEN_MIN_OPTIONS) or m.get("pen_min_default") != server.DEFAULT_PEN_MIN:
+            bad += 1
+            if not quiet:
+                print("✗ /api/meta pen_min_options／pen_min_default 不对：%r %r" % (m.get("pen_min_options"), m.get("pen_min_default")))
+    if not quiet:
+        print("笔根数 %d 份 × 两档：不一致 %d" % (len(cases), bad))
+    return bad
+
+
 def run_default(quiet=False):
     """默认切法 v3（docs/spec/走势分段.md，card-51571a5f-dc2）：
     ① /api/meta 的 cut_default 是 trend、cut_modes 是 extend／trend；② 不带 cut 回显 trend、带 trend 对象、不带旧 cuts；
@@ -572,6 +614,16 @@ def self_test():
             server.MEASURE_NOTE.update(real)
     arms.append(("峰值那句「单用超出原文」丢了", arm_meta_no_note))
 
+    def arm_pen_min_ignored():
+        """后台收了 pen_min 却不换笔（永远按 7 根算）⇒ 6 根那档必须对不上。"""
+        real = server.gap_of
+        server.gap_of = lambda pm: 4
+        try:
+            return run_pen_min(quiet=True)
+        finally:
+            server.gap_of = real
+    arms.append(("笔根数参数收了不用", arm_pen_min_ignored))
+
     def arm_engine_stale():
         """副图那份头部的引擎版本不跟着进程（比如缓存里留着旧值）⇒ 前端分不出换没换引擎，必须红。"""
         orig = server._macd_body
@@ -625,6 +677,7 @@ if __name__ == "__main__":
     rc = rc or (1 if run_span() else 0)
     rc = rc or (1 if run_macd() else 0)
     rc = rc or (1 if run_wolf() else 0)
+    rc = rc or (1 if run_pen_min() else 0)
     rc = rc or (1 if run_meta() else 0)
     rc = rc or (1 if run_default() else 0)
     sys.exit(rc)
