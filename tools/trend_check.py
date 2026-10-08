@@ -179,6 +179,9 @@ def invariants(fn):
     for b in bs:                                  # D2-5（第四批 ①）：每一刀都标死点类型，三选一
         if b.get("death") not in ("趋势背驰", "盘整背驰", "小转大", "盘整·未见背驰", "比不了", "D2-8 补刀") or not b.get("death_why"):
             bad.append("刀 %d 没标死点类型（D2-5）：%r" % (b["bar"], b.get("death")))
+    for b in bs:                                  # D2-5：一买／一卖落在刀所在线段里却跟刀 bar 对不上 ⇒ 报（不许悄悄降到 ②）
+        if b.get("death_warn"):
+            bad.append("刀 %d 死点类型可能判错：%s" % (b["bar"], b["death_warn"]))
     for b in bs:                                  # 每一刀都要说清按哪条规则落的（前端只读 rule，card-22888623-1a7）
         if b.get("rule") not in ("D2-2", "D2-8"):
             bad.append("刀 %d 没有 rule 或 rule 不认识：%r" % (b["bar"], b.get("rule")))
@@ -499,6 +502,33 @@ def self_test():
         _R.clear()
     ok = bool(nod) and flat
     print("%s D2-5 关掉标注 ⇒ 报出 %d 刀没标；全写小转大 ⇒ 基线%s" % ("✓" if ok else "✗", len(nod), "变了" if flat else "没变（牙没咬到）"))
+    miss += not ok
+    # D2-5 一买对不上分界就报（第四批，Atlas）：真数据里眼下没有对不上的，造一颗。
+    #   在 signals 的输出里塞一颗一买／一卖，落在 zec15 某刀所在的那条线段里：
+    #   ⑴ bar 比刀早一根 ⇒ 必须报「死点类型可能判错」；⑵ bar 正对刀 ⇒ 判成趋势背驰、不报；⑶ 关掉这条检查再塞⑴ ⇒ 不报（报出来的确实是这条检查）。
+    import importlib; _SG = importlib.import_module("core.signals")   # core 包把 signals 函数导出成同名，别用 import core.signals
+    real_sig = _SG.signals
+    _, b0 = run("zec15.json")
+    tgt = next(b for b in b0["bounds"] if b.get("rule") == "D2-2" and b["death"] != "趋势背驰")
+    k1 = "一卖" if tgt["kind"] == "H" else "一买"
+    def _inject(off):
+        def f(r, *a, **kw):
+            return real_sig(r, *a, **kw) + [dict(kind=k1, bar=tgt["bar"] + off, price=tgt["price"], confirmed=True)]
+        return f
+    def _probe(off, check=True):
+        _SG.signals = _inject(off); T._DEATH_MATCH_CHECK = check; _R.clear()
+        try:
+            _, vv = run("zec15.json")
+            bb = next(b for b in vv["bounds"] if b["bar"] == tgt["bar"])
+            return bb.get("death"), bool(bb.get("death_warn")), [x for x in invariants("zec15.json") if "死点类型可能判错" in x]
+        finally:
+            _SG.signals = real_sig; T._DEATH_MATCH_CHECK = True; _R.clear()
+    d1, w1, rep1 = _probe(-1)
+    d2, w2, rep2 = _probe(0)
+    d3, w3, rep3 = _probe(-1, check=False)
+    ok = w1 and bool(rep1) and d2 == "趋势背驰" and not w2 and not rep2 and not w3 and not rep3
+    print("%s D2-5 一买对不上分界：错一根 ⇒ %s；正对 ⇒ %s、%s；关掉检查 ⇒ %s" % ("✓" if ok else "✗",
+          "报了" if rep1 else "没报（牙没咬到）", d2, "不报" if not rep2 else "误报", "不报" if not rep3 else "还在报"))
     miss += not ok
     # D3-3 读法的反向验证。★ D3-2（3+3+3 重算）＋ D6-4（先限方向）以后，data/、tools/fixtures、线上 15 张**没有一份**
     #   读法 A／B 段型不同（10-07 实测），真数据咬不到了 ⇒ 造一段：一对扩展中枢（合成成一个单元）＋ 它上方一个不重叠的中枢。

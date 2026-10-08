@@ -393,6 +393,7 @@ def _d28_cuts(done, ks, segments, units, centers):
 
 
 _DEATH = True                                     # 只给 trend_check --self-test 的探针关：分界不标死点类型（D2-5）
+_DEATH_MATCH_CHECK = True                         # 只给 trend_check --self-test 的探针关：一买一卖跟刀 bar 对不上时不报
 
 
 def _death_types(r, done, bounds, segments, centers):
@@ -406,7 +407,8 @@ def _death_types(r, done, bounds, segments, centers):
       ①② 真比过、都不成立 ⇒ 前一段是本级别趋势（上涨／下跌、不是升级段）标「小转大」（L43：a+A+b+B+c），否则标「盘整·未见背驰」。
     centers：分界确立以后按刀切开重算的线段中枢（seg_centers）。原地写进 bounds，返回 bounds。"""
     from .signals import signals, macd_hist, strength
-    first = {(s["bar"], s["kind"]) for s in signals(r) if s["kind"] in ("一买", "一卖")}
+    sig1 = [s for s in signals(r) if s["kind"] in ("一买", "一卖")]
+    first = {(s["bar"], s["kind"]) for s in sig1}
     hist = macd_hist(r["bars"])
     pre = {sg["i1"]: sg for sg in segments}                # 刀 ⇒ 刀前那一段走势
     for b in bounds:
@@ -420,6 +422,12 @@ def _death_types(r, done, bounds, segments, centers):
             continue
         j = b["line_seg"]
         C = done[j]
+        # ★ 一买／一卖落在刀所在的那条线段里、bar 却跟刀对不上（signals 用原始线段、分界用 D2-0 标准化后的线段，端点可能挪过）：
+        #   不许悄悄降到 ②，挂 death_warn，trend_check 当违规报（Atlas 10-08 15:18 提，Nova 15:42 派）。分类照常往下走。
+        if _DEATH_MATCH_CHECK:
+            near = [x for x in sig1 if x["kind"] == kind1 and C["i0"] <= x["bar"] <= C["i1"]]
+            if near:
+                b["death_warn"] = "%s 在 bar %d，落在刀所在线段里，跟刀 bar %d 对不上" % (kind1, near[0]["bar"], b["bar"])
         zs = [z for z in centers if z["PI1"] < j]
         if not zs:
             b["death"], b["death_why"] = "比不了", "找不到 Z"
