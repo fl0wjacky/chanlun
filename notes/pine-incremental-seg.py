@@ -39,6 +39,7 @@ sys.path.insert(0, ROOT)
 from core import analyze                                             # noqa: E402
 from core.segment import build_segments, _dir, _opening_overlaps, _case_at  # noqa: E402
 from core.segment import FEAT_STD_A, FEAT_STD_B                     # noqa: E402
+import core.segment as SG                                           # noqa: E402
 
 SKIP = ("annot", "mag", "sub")
 MODES = (FEAT_STD_A, FEAT_STD_B)
@@ -67,78 +68,122 @@ def _mk_live(pens, i, n, seg_dir):
     )
 
 
-# ── 增量状态机：只存 (i, born)，已确认段**只增** ──────────────────────────────────
-# 对应 pine 的 buildSegments 改法：把 while 外层循环里的 i / born 提出来当 var 状态，
-# 每根新笔进来时从 i 续扫；已确认的段 push 进一个只增的数组，不再回头碰。
+# ── Pine 的镜像：buildSegments（整段）和 zSegStep（逐根续扫）共用这一份扫描 ──────────────────
+# ★ 10-08 重写（card-7a451eef-1e2）：旧版有三处跟 Pine／引擎对不上，42 处分歧全是它自己的口径 ——
+#   ① born 不管第几种情况都取 at（引擎 `born = at if case == 1`，Pine `res := cse == 1 ? at : 0`）—— 39 处；
+#   ② 没有图头两条修法（HEAD_DIR_FIX／HEAD_EXT_FIX；Pine 是 segs.size() == 0 时那两个 else if）；
+#   ③ 拿增量去比 B 模式 —— B 的已确认段前缀本来就不稳（aaplusdt_30m 第 28 笔撤 (11,15)），Pine 在 B 下走整段
+#      （chanlun.pine `segs = featModeB ? buildSegments(pens) : array.copy(zSegs)`）—— 3 处。
+#   另认 S7 的 case 3（暂定）：不进只增的缓存、扫描位置不动、之后不再往下切（Pine zSegTent）。
+BORN_CASE1_ONLY = True        # 只给 --self-test 的臂关：born 退回旧写法（第二种情况的 at 也当 born）
+KNOW_TENTATIVE = True         # 只给 --self-test 的臂关：不认 case 3（暂定当成已确认段缓存起来）
+
+
+def _scan(pens, i, born, have_segs, mode, memo):
+    """从 (i, born) 起往后扫，照 Pine 的内层循环。→ (新确认的段, i, born, 暂定 (PI0, PI1) 或 None)。"""
+    n, out, tent = len(pens), [], None
+    while i + 2 < n:
+        if not _opening_overlaps(pens, i):
+            i += 1
+            continue
+        d = _dir(pens[i])
+        k = i + 2
+        while k < born:
+            k += 2
+        found = None
+        while k < n - 1:
+            case, res = _case_at(pens, i, k, d, mode, memo)
+            if case:
+                found = (k, case, res)
+                break
+            k += 2
+            if res is not None:
+                while k < res:
+                    k += 2
+        if found is None:
+            break
+        e, case, at = found
+        first = not have_segs and not out
+        if first and SG.HEAD_DIR_FIX and ((d == "down" and pens[e]["p1"] >= pens[i]["p0"]) or
+                                          (d == "up" and pens[e]["p1"] <= pens[i]["p0"])):
+            i, born = i + 1, 0
+            continue
+        if first and SG.HEAD_EXT_FIX and SG._start_check(dict(
+                dir=d, PI0=i, PI1=e, p0=pens[i]["p0"],
+                hi=max(pens[q]["hi"] for q in range(i, e + 1)),
+                lo=min(pens[q]["lo"] for q in range(i, e + 1))), pens, mode, memo,
+                cutoff=max(e + 1, at or 0) if SG.HEAD_EXT_CUTOFF else None) == "bad":
+            i, born = i + 1, 0
+            continue
+        if case == 3 and KNOW_TENTATIVE:
+            tent = (i, e)
+            break
+        born = (at or 0) if (case in (1, 3) or not BORN_CASE1_ONLY) else 0
+        out.append(_mk_seg(pens, i, e, case, d))
+        i = e + 1
+    return out, i, born, tent
+
+
+def _assemble(pens, segs, i, tent):
+    out = list(segs)
+    n = len(pens)
+    if tent is not None:
+        s = _mk_seg(pens, tent[0], tent[1], 3, _dir(pens[tent[0]]))
+        s.update(tentative=True, live=True)
+        out.append(s)
+        i = tent[1] + 1
+    if n - i >= 3:
+        out.append(_mk_live(pens, i, n, _dir(pens[i])))
+    return out
+
+
+def whole(pens, mode):
+    """Pine buildSegments 的镜像（B 模式在 Pine 里只走这条）。"""
+    segs, i, _, tent = _scan(pens, 0, 0, False, mode, {})
+    return _assemble(pens, segs, i, tent)
+
+
 class IncSegments:
+    """Pine zSegStep 的镜像（A 模式）：只存 (i, born) 和只增的已确认段；暂定每次续扫重算、不进缓存。"""
     def __init__(self, mode=FEAT_STD_A):
-        self.mode = mode
-        self.pens = []
-        self.segs = []          # 已确认段（只增）
-        self.i = 0              # 扫描位置 = 上一段 end_pen + 1
-        self.born = 0           # 本段方向确立的破位笔（case-2 归 0）
+        self.mode, self.pens, self.segs, self.i, self.born, self.tent = mode, [], [], 0, 0, None
 
     def feed(self, pen):
-        """喂一根新笔，从 (i, born) 续扫。不做整段重算。"""
         self.pens.append(pen)
-        pens = self.pens
-        n = len(pens)
-        i = self.i
-        born = self.born
-        while i + 2 < n:
-            if not _opening_overlaps(pens, i):
-                i += 1
-                continue
-            seg_dir = _dir(pens[i])
-            found = None
-            k = i + 2
-            while k < born:                     # 方向确立之前，本段不能结束
-                k += 2
-            while k < n - 1:
-                case, resume = _case_at(pens, i, k, seg_dir, self.mode)
-                if case:
-                    found = (k, case, resume); break
-                k += 2
-                if resume is not None:          # 待定区间内的候选不判：跳到破位处之后的同向笔
-                    while k < resume:
-                        k += 2
-            if found is None:
-                break
-            end_pen, case, born = found
-            born = born or 0
-            self.segs.append(_mk_seg(pens, i, end_pen, case, seg_dir))
-            i = end_pen + 1
-        self.i = i
-        self.born = born
+        new, self.i, self.born, self.tent = _scan(self.pens, self.i, self.born, bool(self.segs), self.mode, {})
+        self.segs += new
         return self
 
     def result(self):
-        """当前输出 = 已确认段 + live 尾巴（若有）。与 build_segments 同形。"""
-        pens = self.pens
-        n = len(pens)
-        i = self.i
-        out = list(self.segs)
-        if n - i >= 3:
-            out.append(_mk_live(pens, i, n, _dir(pens[i])))
-        return out
+        return _assemble(self.pens, self.segs, self.i, self.tent)
 
 
-def check_series(pens, mode=FEAT_STD_A):
-    """在每个前缀 k（3..n）上对账：增量 vs 整段。返回分歧列表。"""
-    inc = IncSegments(mode)
-    fails = []
-    checked = 0
-    for k in range(1, len(pens) + 1):
-        inc.feed(pens[k - 1])
-        if k < 3:
-            continue                      # 不足三笔，两边都不会有线段
-        checked += 1
-        want = build_segments(pens[:k], mode=mode)
-        got = inc.result()
-        if want != got:
-            fails.append((k, want, got))
-            if len(fails) >= 3:
-                break
+def check_series(pens, mode=FEAT_STD_A, stop_at=3):
+    """A：每个前缀上 增量 vs 整段引擎。B：整段镜像 vs 整段引擎（全长 ＋ 每 10 笔一个前缀）。→ (查了几个, 分歧)。"""
+    fails, checked = [], 0
+    if mode == FEAT_STD_A:
+        inc = IncSegments(mode)
+        for k in range(1, len(pens) + 1):
+            inc.feed(pens[k - 1])
+            if k < 3:
+                continue
+            checked += 1
+            want = build_segments(pens[:k], mode=mode)
+            got = inc.result()
+            if want != got:
+                fails.append((k, want, got))
+                if len(fails) >= stop_at:
+                    break
+    else:
+        for k in sorted(set(range(10, len(pens) + 1, 10)) | {len(pens)}):
+            if k < 3:
+                continue
+            checked += 1
+            want, got = build_segments(pens[:k], mode=mode), whole(pens[:k], mode)
+            if want != got:
+                fails.append((k, want, got))
+                if len(fails) >= stop_at:
+                    break
     return checked, fails
 
 
@@ -182,37 +227,30 @@ def rand_pens(rng, n, tick):
 
 
 def self_test():
-    """正臂：故意破坏前缀稳定（在已确认段之后插一根改方向的笔），增量与整段**必须**分歧。
-
-    做法：拿真实序列跑通后，在**已确认段的边界之后**塞一根笔、让 i 处重新变待定，
-    此时整段重算会改写已确认前缀、而增量版本（只增）不会 ⇒ 必然分歧。
-    若这条不红，说明尺子根本没在比较"已确认前缀是否只增"。
-    """
-    data = load_real()
-    for fn, bars in data:
-        pens = analyze(bars)["pens"]
-        if len(pens) < 8:
-            continue
-        inc = IncSegments(FEAT_STD_A)
-        for p in pens:
-            inc.feed(p)
-        # 已确认段的数量 —— 若为 0，这份数据没货，换一份
-        if not inc.segs:
-            continue
-        # 破坏：把已确认段的第一段 PI1 处的笔反转方向，强制重算时 i 会提前停 / 改判
-        tampered = list(pens)
-        k = inc.segs[0]["PI1"]
-        tampered[k] = dict(tampered[k])
-        tampered[k]["p1"] = tampered[k]["p0"] + abs(tampered[k]["p1"] - tampered[k]["p0"]) + 1.0
-        tampered[k]["hi"] = tampered[k]["p1"]
-        want = build_segments(tampered, mode=FEAT_STD_A)
-        # 增量版本还停在旧状态（只增、不知道被改）⇒ 应该对不上
-        got = inc.result()
-        if want != got:
-            print("  正臂（%s，改第一段 PI1=%d 的方向）⇒ 红 ✓" % (fn, k))
-            return True
-    print("★ 正臂没红：所有样本破坏后增量与整段仍相同 ⇒ 尺子没接上（exit=3）")
-    return False
+    """正臂（Nova 10-08 16:06 定的牙）：
+      ① born 退回旧写法（第二种情况的 at 也当 born）⇒ A 模式必须红；
+      ② 不认 case 3（暂定当成已确认段缓存）⇒ 有暂定的那张（data/aaplusdt_2h.json）必须红。"""
+    global BORN_CASE1_ONLY, KNOW_TENTATIVE
+    data = dict(load_real())
+    ok = True
+    BORN_CASE1_ONLY = False
+    try:
+        red = [fn for fn, bars in data.items() if check_series(analyze(bars)["pens"], FEAT_STD_A, 1)[1]]
+    finally:
+        BORN_CASE1_ONLY = True
+    print("  %s 臂 ① born 退回旧写法 ⇒ 红 %d 份 %s" % ("✓" if red else "✗", len(red), red[:3]))
+    ok &= bool(red)
+    KNOW_TENTATIVE = False
+    try:
+        fn = "aaplusdt_2h.json"
+        red2 = bool(check_series(analyze(data[fn])["pens"], FEAT_STD_A, 1)[1]) if fn in data else False
+    finally:
+        KNOW_TENTATIVE = True
+    print("  %s 臂 ② 不认暂定（case 3）⇒ %s %s" % ("✓" if red2 else "✗", fn, "红" if red2 else "没红"))
+    ok &= red2
+    if not ok:
+        print("★ 正臂没红 ⇒ 这把尺不算数（exit=3）")
+    return ok
 
 
 def main():
@@ -220,6 +258,7 @@ def main():
     ap.add_argument("--impl", default="Incremental", choices=["Incremental", "Whole"])
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--random", type=int, default=0)
+    ap.add_argument("--snap", default=None, help="另加一份本地快照（json.gz：{'<品种> <周期>': {'bars': [...]}}），不进仓")
     a = ap.parse_args()
 
     if a.self_test:
@@ -229,6 +268,10 @@ def main():
     if not data:
         print("★ data/ 里一份 K 线都没有 ⇒ 跑不动")
         return 2
+    if a.snap:
+        import gzip
+        snap = json.loads(gzip.open(a.snap).read())
+        data += [("快照 " + k, snap[k]["bars"]) for k in sorted(snap)]
 
     total_checked, total_fails = 0, []
     t0 = time.time()
@@ -248,7 +291,8 @@ def main():
             for k, want, got in fails:
                 total_fails.append((fn, mode, k, want, got))
             tag = "✓" if not fails else "✗ 分歧 %d 处" % len(fails)
-            print("  %-18s mode=%s 笔 %4d  前缀 %4d  %s" % (fn, mode, len(pens), checked, tag))
+            print("  %-18s %s 笔 %4d  %s %4d  %s" % (fn, "A" if mode == FEAT_STD_A else "B", len(pens),
+                                                   "前缀" if mode == FEAT_STD_A else "B 整段核", checked, tag))
 
     if a.random:
         rng = random.Random(20261002)
@@ -272,7 +316,7 @@ def main():
         print("  整段(前3段): %s" % want[:3])
         print("  增量(前3段): %s" % got[:3])
         return 1
-    print("✓ 每个前缀上，增量 == 整段（两种 mode 都查了）。")
+    print("✓ A：每个前缀上 增量 == 整段；B：整段镜像 == 引擎。")
     return 0
 
 
