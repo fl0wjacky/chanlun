@@ -37,24 +37,72 @@ def revocations(pens, build=build_segments):
     return out
 
 
+def _confirmed(build, pens):
+    return [(s["PI0"], s["PI1"]) for s in build(pens) if not s.get("live")]
+
+
+def revocations_range(pens, lo, hi, build=build_segments):
+    """revocations 的一段：只看第 lo..hi−1 笔加进来时。起点那一份「上一个前缀」现算（lo>3 时是 pens[:lo−1]），
+    所以把 [3, len+1) 切成几段各跑一遍再按序拼起来，跟 revocations 整串跑**逐条相同**（自检 ③ 钉这一条）。"""
+    out = []
+    prev = _confirmed(build, pens[:lo - 1]) if lo > 3 else []
+    for n in range(lo, hi):
+        cur = _confirmed(build, pens[:n])
+        if cur[:len(prev)] != prev:
+            k = next((t for t, (a, b) in enumerate(zip(prev, cur)) if a != b), len(cur))
+            out.append((n, prev[k]))
+        prev = cur
+    return out
+
+
+def cuts(n_pens, parts):
+    """把前缀 [3, n_pens] 切成 parts 段，**按工作量切**（第 n 个前缀要划 n 笔 ⇒ 工作量 ∝ n，累计 ∝ n²）。"""
+    lo, hi = 3, n_pens + 1
+    if parts <= 1 or hi - lo < 2 * parts:
+        return [(lo, hi)]
+    edges = [lo] + [int(round((lo * lo + (hi * hi - lo * lo) * k / parts) ** 0.5)) for k in range(1, parts)] + [hi]
+    edges = sorted(set(edges))
+    return list(zip(edges, edges[1:]))
+
+
+def _job(args):
+    pens, lo, hi = args
+    return revocations_range(pens, lo, hi)
+
+
+JOBS = int(os.environ.get("SEG_PREFIX_JOBS", "4"))   # 子进程数；1 ＝ 跟原来一样整串跑（对拍用）
+
+
 def main():
-    bad = 0
-    for fn in kline_files():
-        pens = analyze(load(os.path.join(ROOT, "data", fn)), tick=tick_of(fn))["pens"]
-        rv = revocations(pens)
-        bad += len(rv)
-        print("%s %s %d 笔 撤销 %d %s" % ("✓" if not rv else "✗", fn, len(pens), len(rv), rv[:2] if rv else ""))
+    """★ 10-08 起按前缀区间切片、多进程跑（card-b71b1600-253）：zec15 1581 笔一张整串要 258 秒（平方级），整门 306 秒里的大头。
+    切片跟整串**逐条相同**（revocations_range 的文档；SEG_PREFIX_JOBS=1 就是原来的整串跑，两种跑法的输出逐字节对拍过）。"""
+    items = [(fn, analyze(load(os.path.join(ROOT, "data", fn)), tick=tick_of(fn))["pens"]) for fn in kline_files()]
     for fn in ("aaplusdt_1h_headdir.json", "zecusdt_4h_headext.json"):   # 图头那两条修法的线上夹具（card-24dd71cb／card-2783fa1f）
         bars = json.load(open(os.path.join(HERE, "fixtures", fn)))
-        pens = analyze([dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"]) for b in bars], tick=tick_of(fn))["pens"]
-        rv = revocations(pens)
-        bad += len(rv)
-        print("%s fixtures/%s %d 笔 撤销 %d %s" % ("✓" if not rv else "✗", fn, len(pens), len(rv), rv[:2] if rv else ""))
+        items.append(("fixtures/" + fn, analyze([dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"]) for b in bars], tick=tick_of(fn))["pens"]))
     fz = json.load(open(os.path.join(HERE, "fixtures", "headfuzz_pens.json")))["seeds"]   # 直接是笔（Atlas 的随机反例）
-    for sd, pens in fz.items():
-        rv = revocations(pens)
+    items += [("fixtures/headfuzz_pens.json seed %s" % sd, pens) for sd, pens in fz.items()]
+    # 每张按工作量切成若干片（大图多切，小图一片），所有片进同一个进程池 ⇒ 长的那张不会拖住别的
+    total = sum(len(p) ** 2 for _, p in items) or 1
+    tasks = []
+    for k, (name, pens) in enumerate(items):
+        parts = max(1, round(JOBS * 2 * len(pens) ** 2 / total)) if JOBS > 1 else 1
+        tasks += [(k, lo, hi) for lo, hi in cuts(len(pens), parts)]
+    tasks.sort(key=lambda t: -(t[2] ** 2 - t[1] ** 2))        # 大片先发
+    if JOBS > 1:
+        import concurrent.futures as cf
+        with cf.ProcessPoolExecutor(max_workers=JOBS) as ex:
+            res = list(ex.map(_job, [(items[k][1], lo, hi) for k, lo, hi in tasks]))
+    else:
+        res = [_job((items[k][1], lo, hi)) for k, lo, hi in tasks]
+    got = {}
+    for (k, lo, _), rv in zip(tasks, res):
+        got.setdefault(k, []).append((lo, rv))
+    bad = 0
+    for k, (name, pens) in enumerate(items):
+        rv = [x for _, part in sorted(got.get(k, [])) for x in part]
         bad += len(rv)
-        print("%s fixtures/headfuzz_pens.json seed %s %d 笔 撤销 %d %s" % ("✓" if not rv else "✗", sd, len(pens), len(rv), rv[:2] if rv else ""))
+        print("%s %s %d 笔 撤销 %d %s" % ("✓" if not rv else "✗", name, len(pens), len(rv), rv[:2] if rv else ""))
     print("全部通过（已确认段只增不撤）" if not bad else "%d 处撤销" % bad)
     return 1 if bad else 0
 
@@ -79,7 +127,13 @@ def self_test():
         SG.HEAD_EXT_CUTOFF = True
     ok2 = all(rv2.values())
     print("%s 图头那一条不设 cutoff ⇒ 随机反例撤回 %s" % ("✓" if ok2 else "✗", rv2))
-    return 0 if rv and ok2 else 3
+    # ③ 切片拼起来 ≡ 整串（10-08 起主跑是切片并行的）：拿会撤销的 flaky 比，撤销点得一条不差 —— 切错一格（起点那份
+    #    「上一个前缀」取成 pens[:lo] 之类）就会多报或漏报衔接处那一条
+    whole = revocations(pens, flaky)
+    ok3 = all([x for lo, hi in cuts(len(pens), parts) for x in revocations_range(pens, lo, hi, flaky)] == whole
+              for parts in (2, 3, 5, 9))
+    print("%s 切片拼起来 ≡ 整串（%s，切 2/3/5/9 片，整串报 %d 处）" % ("✓" if ok3 else "✗", fn, len(whole)))
+    return 0 if rv and ok2 and ok3 else 3
 
 
 if __name__ == "__main__":

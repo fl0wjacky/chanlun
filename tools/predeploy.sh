@@ -83,7 +83,7 @@ fi
 # ---- 数据那半：Python 检查（每一套自己就是 0 过 / 非 0 不过）----
 # trend_check --self-test：反向验证（拿掉规则 ⇒ 必须变／必须报）每趟都跑，不靠手动记得（Nova 10-06，card-3edd7fb3）。
 # live_seg_check：线上 15 张图现拉现算跑 check_segments，报错就拦（已知例外列在脚本里、写明卡号；拉不到 ⇒ 没比成）。约 50 秒，要联网。
-# seg_prefix_check：线段已确认段逐笔加长只增不撤（card-753bd03a 合并条件；Pine 逐根续扫押的就是它，约 50 秒）。
+# seg_prefix_check：线段已确认段逐笔加长只增不撤（card-753bd03a 合并条件；Pine 逐根续扫押的就是它）。整串 306 秒（zec15 一张 258 秒，平方级），10-08 起按前缀区间切片多进程跑（SEG_PREFIX_JOBS，默认 4）。
 #   它退 3 ＝ 某条探针没响 ＝ 那条检查没牙 ⇒ 记红，不记「没比成」。条目里带参数，所以下面 $chk 不加引号（路径无空格）。
 #
 # ★★ 六把 web 尺接进来（card-b6609942-1ad，Iris 10-07）：在 10-07 之前，这一串里**只有**
@@ -108,21 +108,32 @@ fi
 #   接进来之前没人跑它，第 12 臂（替身不收 cut/pen_min）崩了不知多久。一臂崩了算没牙（rc=3 ⇒ 记红）。
 # ★ check_closedue（card-7d3e8748-3d3）：收盘前 1 秒请求过、收盘后打开，照页面真的补数节奏（常量从 app.js 读）敲，
 #   10 秒内必须拿到新那根，每格每根最多多拉币安 1 次。假钟假币安，约 12 秒；自检把 _close_due 摘掉必须红。
-for chk in tools/selfcheck.py web/check_parity.py "web/check_parity.py --self-test" web/check_abuse.py "web/check_abuse.py --self-test" web/check_closedue.py "web/check_closedue.py --self-test" web/check_assets.py "tools/pine_lockstep.py --head HEAD" "notes/pine-incremental-seg.py --self-test" "notes/pine-incremental-seg.py --tail 60" "tools/trend_check.py --self-test" tools/speed_gate.py "tools/speed_gate.py --self-test" tools/seg_prefix_check.py "tools/seg_prefix_check.py --self-test" tools/live_seg_check.py tools/levels_check.py "tools/levels_check.py --self-test" "tools/j18_check.py --self-test" "tools/j19_check.py --self-test" "tools/j17_check.py --self-test" tools/web_theme_sync.py "tools/web_theme_sync.py --selftest" tools/web_footer_check.py "tools/web_footer_check.py --selftest" tools/web_fmt_check.py "tools/web_fmt_check.py --selftest" tools/web_fitbox_check.py "tools/web_fitbox_check.py --selftest" tools/web_more_check.py "tools/web_more_check.py --selftest"; do
-  log=$(mktemp)
-  "$PY" $chk >"$log" 2>&1
-  rc=$?
+# ★ 并行池（card-b71b1600-253，Nova 10-08 20:39 点头）：先把下面这些条目交给 tools/predeploy_pool.py 跑（默认 4 路，长的先发、
+#   check_abuse 排池子末尾、速度门不进池子最后单独串跑），每条的输出 / 退出码 / 用时落到临时目录；再**按原顺序**一条条读回来，
+#   分类、记表跟原来一字不差。PREDEPLOY_JOBS=1 ＝ 跟原来一样一条一条串着跑（对拍：两种跑法逐条的绿／红／没比成必须一样）。
+#   为什么不按「改了哪些文件才跑」挑：10-08 web_more_check 那一格，恰好是「谁也没想到会碰到它」的红。
+CHECKS=(tools/selfcheck.py web/check_parity.py "web/check_parity.py --self-test" web/check_abuse.py "web/check_abuse.py --self-test" web/check_closedue.py "web/check_closedue.py --self-test" web/check_assets.py "tools/pine_lockstep.py --head HEAD" "notes/pine-incremental-seg.py --self-test" "notes/pine-incremental-seg.py --tail 60" "tools/trend_check.py --self-test" tools/speed_gate.py "tools/speed_gate.py --self-test" tools/seg_prefix_check.py "tools/seg_prefix_check.py --self-test" tools/live_seg_check.py tools/levels_check.py "tools/levels_check.py --self-test" "tools/j18_check.py --self-test" "tools/j19_check.py --self-test" "tools/j17_check.py --self-test" tools/web_theme_sync.py "tools/web_theme_sync.py --selftest" tools/web_footer_check.py "tools/web_footer_check.py --selftest" tools/web_fmt_check.py "tools/web_fmt_check.py --selftest" tools/web_fitbox_check.py "tools/web_fitbox_check.py --selftest" tools/web_more_check.py "tools/web_more_check.py --selftest")
+POOLDIR=$(mktemp -d)
+POOL_T0=$(date +%s)
+"$PY" tools/predeploy_pool.py --dir "$POOLDIR" --jobs "${PREDEPLOY_JOBS:-4}" --python "$PY" -- "${CHECKS[@]}"
+POOL_SEC=$(( $(date +%s) - POOL_T0 ))
+ci=0
+for chk in "${CHECKS[@]}"; do
+  log="$POOLDIR/$ci.log"
+  rc=$(cat "$POOLDIR/$ci.rc" 2>/dev/null || echo 97)       # 97：池子没给这一条落退出码（不该发生）⇒ 记「没比成」
+  sec=$(cat "$POOLDIR/$ci.sec" 2>/dev/null || echo "?")
+  ci=$((ci + 1))
   case $chk in *--self-test) [ $rc = 3 ] && rc=1 ;; esac
   # Python 崩了（缺包、Traceback）退的也是 1，跟「比了、红了」同码 ⇒ 先看日志分开（Iris 核 167a32a 时逮到）
   if [ $rc = 1 ] && grep -qE '^(Traceback|ModuleNotFoundError|ImportError)' "$log"; then rc=99; fi
   # selfcheck 自己有一栏「查不了 / 跑不了」（缺字体、缺版式工具）而引擎违规是 0 ⇒ 那是环境没备齐，不是红
   if [ $rc = 1 ] && grep -E '^退出原因' "$log" | grep -q '总违规=0' && grep -E '^退出原因' "$log" | grep -qE '查不了|跑不了'; then rc=98; fi
   case $rc in
-    0) record "$chk" 绿 "" ;;
-    1) record "$chk" 红 "$(pick "$log" '✗|不过|退出原因' tail)" ;;
-    99) record "$chk" 没比成 "崩了：$(pick "$log" '^[A-Za-z]*Error' tail)" ;;
-    98) record "$chk" 没比成 "环境没备齐：$(grep -E '^退出原因' "$log" | grep -oE '[^ ]+=(查不了|跑不了)' | tr '\n' ' ')" ;;
-    *) record "$chk" 没比成 "rc=$rc $(grep -v '^[[:space:]]*$' "$log" | tail -1 | cut -c1-70)" ;;
+    0) record "$chk" 绿 "${sec}s" ;;
+    1) record "$chk" 红 "${sec}s $(pick "$log" '✗|不过|退出原因' tail)" ;;
+    99) record "$chk" 没比成 "${sec}s 崩了：$(pick "$log" '^[A-Za-z]*Error' tail)" ;;
+    98) record "$chk" 没比成 "${sec}s 环境没备齐：$(grep -E '^退出原因' "$log" | grep -oE '[^ ]+=(查不了|跑不了)' | tr '\n' ' ')" ;;
+    *) record "$chk" 没比成 "${sec}s rc=$rc $(grep -v '^[[:space:]]*$' "$log" | tail -1 | cut -c1-70)" ;;
   esac
   if [ $rc = 0 ]; then rm -f "$log"; else keep "$chk" "日志 $(tmpname "$log")"; fi
 done
@@ -182,6 +193,7 @@ fi
 
 echo "================ 上线前检查 ================"
 echo "HEAD $HEAD_SHA · python $PYV（PIL $PIL）· node $NODEV · playwright $PWV · 临时端口 ${PORT:-没起}"
+echo "Python 那半墙钟 ${POOL_SEC}s（并行 ${PREDEPLOY_JOBS:-4} 路；速度门在池子之后单独串跑；每格「说明」栏开头是这一条自己的用时）"
 for line in "${RESULTS[@]}"; do echo "$line"; done
 if [ ${#KEPT[@]} -gt 0 ]; then
   echo "---- 没过的那几步，日志和截图留着 ----"
