@@ -254,6 +254,9 @@ def _opening_overlaps(pens, i):
     return max(p["lo"] for p in p3) < min(p["hi"] for p in p3)
 
 
+S11_START_OK = True          # 只给自检反向臂关：起点由 S11 定死、段内后来出更低／更高点 ⇒ 合法（C3 第 ② 步）
+
+
 def _start_check(s, pens, mode=FEAT_STD_DEFAULT, memo=None, cutoff=None):
     """自检 A 的判定（L78:34-35，card-753bd03a），检查器和图头那一条（card-2783fa1f）共用这一份：
     起点不是段内极值 ⇒ 必须是 ① 型 —— 段内造出极值的那一笔 X（反向笔），其后段内价格又破了 X 的起点
@@ -267,6 +270,14 @@ def _start_check(s, pens, mode=FEAT_STD_DEFAULT, memo=None, cutoff=None):
     ext = s["lo"] if up else s["hi"]
     if s["p0"] == ext:
         return "ok"
+    # 第三种合法情形（C3 第 ② 步，Atlas 13:05、Nova 13:05 定；线段.md 附第 4 条 S11 ＋ L78:50）：起点之后的第三笔就破了第一笔的终点
+    #   ⇒ 新线段一定形成、前线段一定结束（L71:22，S11 定死、不回头改）；段内后来再出更低（更高）的点，是线段内部极值不在端点
+    #   （L78:50 允许，可标准化），不是待定区间收出来的起点 ⇒ 不归「L78 ① 型」那一套管，合法。
+    #   实例：线上 AAPL 15m（10-07 快照）第 31 段，第 313 笔 310.58 破了第一笔终点 310.39，之后第 314 笔跌到 309.33 < 起点 309.58。
+    if S11_START_OK and s["PI1"] >= s["PI0"] + 2:
+        x1, x3 = pens[s["PI0"]], pens[s["PI0"] + 2]
+        if (x3["hi"] > x1["p1"]) if up else (x3["lo"] < x1["p1"]):
+            return "ok"
     xs = [j for j in range(s["PI0"], s["PI1"] + 1)
           if (pens[j]["lo"] == ext if up else pens[j]["hi"] == ext) and _dir(pens[j]) != s["dir"]]
     x = xs[0] if xs else None
