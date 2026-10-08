@@ -398,6 +398,16 @@ const shotChart = async (p, tag) => {
   // ★ 先按「在不在这一屏里」筛，**再**取前 3 个样本 —— 原来 `slice(0,3)` 在筛之前，样本会随行情飘：
   //   屏幕上明明有 3 颗，取到的却是「全段前 3 颗」里两颗在屏幕外的（实测 x=-214），
   //   这一格就白红了（读数其实一模一样）。红得对，但红错了地方。
+  // ★ 默认视口里不够 2 颗就挪视口去找 2 颗（C3 默认翻成 6 根以后实测：ZEC 15m 默认视口只剩 1 颗已确认点，
+  //   13/14 两格白红 —— 不是三角没画，是样本不够）。挪到「最后两颗」上，量完把视口还回去，后面的格不受影响。
+  let viewBack = null;
+  if ((await boxOf(sigsNow)).length < 2 && sigsNow.length >= 2) {
+    viewBack = await p.evaluate(() => window.__app.chart.timeScale().getVisibleLogicalRange());
+    const last2 = [...sigsNow].sort((a, b) => a.bar - b.bar).slice(-2).map((s) => s.bar);
+    const mid = (last2[0] + last2[1]) / 2, half = Math.max(150, (last2[1] - last2[0]) / 2 + 60);
+    await p.evaluate(([f, t]) => window.__app.chart.timeScale().setVisibleLogicalRange({ from: f, to: t }), [mid - half, mid + half]);
+    await sleep(1200);
+  }
   const triBoxes = (await boxOf(sigsNow)).slice(0, 3);
   const on = await countMarks(triBoxes);                       // 这一页的买卖点**已经点开**（见上面那一行）
   await p.locator('.chip[data-key="sig"]').click(); await sleep(800);
@@ -411,7 +421,8 @@ const shotChart = async (p, tag) => {
      `${triBoxes.length} 颗样本：开着 ${desc(on)}｜关掉 ${desc(off)}｜多出来 ${JSON.stringify(dlt)}`);
   ck('同一状态重拍，读数一模一样（这一格量的是那个开关，不是抖动）',
      triBoxes.length >= 2 && again.every((o, i) => o.n === on[i].n),
-     `两次都开着：${desc(on)} ／ ${desc(again)}`);
+     `两次都开着：${desc(on)} ／ ${desc(again)}${viewBack ? '（默认视口不够 2 颗，挪到最后两颗上量的）' : ''}`);
+  if (viewBack) { await p.evaluate((r) => window.__app.chart.timeScale().setVisibleLogicalRange(r), viewBack); await sleep(1200); }
   // ★★ ⑰ 切看法**真的落到那几个点上**（替掉原来那句「整屏像素前后不等」—— 那句是替身，见文件头上 ⑰ 的说明）。
   //    只在「两种看法差出来的那个点」盘踞的小块里、只认买卖点那两个颜色，切之前读一次、切之后读一次，**看差**：
   //    多出来的点必须**多出够一颗三角的墨**，少掉的点必须**少掉**那么多。（差分是必须的：那一小块落在
