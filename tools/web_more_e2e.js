@@ -1099,6 +1099,17 @@ const snap = (p) => p.evaluate(() => {
       await p17.waitForTimeout(250);
     }
     await p17.waitForTimeout(3000);
+    // ★ 不能只等死的 3 秒就去比两份请求账（10-08 实测红过一次：主图要了 [2,4,8]、副图 [2,4]，
+    //   可屏上 11088 根、副图 11088/11088 是对齐的）。副图是在主图**画完**那一份以后才去要的
+    //   （app.js paint → syncSub），最后一趟 span=8 还在路上时就比，两份账当然差一格 —— 工装的毛病，不是页面的。
+    //   ⇒ 先等主图真把最后要的那一档画上去，再等副图跟上那一档（各最多 15 秒）；真跟不上照样红，牙不丢。
+    const lastMain = requests.slice(reqBefore).at(-1);
+    if (lastMain != null) {
+      await p17.waitForFunction((s) => window.__app && window.__app.state.data && window.__app.state.data.span === s,
+        lastMain, { timeout: 15000 }).catch(() => {});
+      for (let w = 0; w < 30 && macdCalls.slice(macdBefore).at(-1) !== lastMain; w++) await p17.waitForTimeout(500);
+      await p17.waitForTimeout(800);                  // 副图那一份画上去
+    }
     const spans17 = requests.slice(reqBefore), mspans17 = macdCalls.slice(macdBefore);
     const SD = await subProbe(p17, spans17.at(-1) || 1);
     t('㉑ 换档：往左拖出 span=2 ⇒ 副图跟着要**同一个 span**，换完之后仍然逐根对齐（点数＝主图根数）',
