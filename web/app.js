@@ -1764,7 +1764,7 @@ function renderMeasures() {
   const mn = el('mnote');                // T16：选中的看法有说明（现在只有峰值）就印出来，没有就收起
   if (mn) {
     const t = measures.note[paging.measure] || '';
-    mn.textContent = t ? `${(MEASURE_NAME[paging.measure] || [paging.measure])[0]}：${t}` : '';
+    mn.textContent = t;                  // 不加「峰值：」前缀：说明本身就以「单用超出原文」开头（Nova 09:24）
     mn.hidden = !t;
   }
   if (on) g.removeAttribute('title');
