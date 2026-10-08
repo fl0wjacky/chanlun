@@ -740,7 +740,9 @@ def selftest():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--selftest", action="store_true")
+    # ★ card-b6609942-1ad：两种自测拼法都认（理由同 web_theme_sync.py：六把里 check_parity 用的是
+    #   带连字符的 `--self-test`，抄错就被静默吞掉、跑成主跑）。argparse 本来就拒未知参数（rc=2）。
+    ap.add_argument("--selftest", "--self-test", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         raise SystemExit(selftest())

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # 上线前一道门（card-9b0fe913-758）：数据那半（Python 检查）＋ 渲染那半（前端 e2e）按顺序跑，一张表收账。
 #
-#   tools/predeploy.sh          # 五套 Python 检查 + trend_check --self-test + seg_prefix_check（含 --self-test）+ live_seg_check + 4 套前端回归（ghost / more / readout / measure）
+#   tools/predeploy.sh          # 五套 Python 检查 + trend_check --self-test + seg_prefix_check（含 --self-test）+ live_seg_check
+#                               #   ＋ **六把 web 尺（主跑 + 各自自检各一条，10-07 接进来，card-b6609942-1ad）**
+#                               #   ＋ 4 套前端回归（ghost / more / readout / measure）
 #   tools/predeploy.sh --all    # 再加 4 套单卡证据工装（macd_axis / mobile_share / readout_swap_probe / subhead_slot_probe）
 #   tools/predeploy.sh --expect <sha> [--all]   # 只在 HEAD 就是这笔、且没有未提交改动时才跑；对不上 ⇒ exit=2（没比成），一格都不跑
 #                                               # （也认环境变量 EXPECT_SHA）。card-a1ea0209-015：10-06 worktree 没建成，
@@ -83,7 +85,22 @@ fi
 # live_seg_check：线上 15 张图现拉现算跑 check_segments，报错就拦（已知例外列在脚本里、写明卡号；拉不到 ⇒ 没比成）。约 50 秒，要联网。
 # seg_prefix_check：线段已确认段逐笔加长只增不撤（card-753bd03a 合并条件；Pine 逐根续扫押的就是它，约 50 秒）。
 #   它退 3 ＝ 某条探针没响 ＝ 那条检查没牙 ⇒ 记红，不记「没比成」。条目里带参数，所以下面 $chk 不加引号（路径无空格）。
-for chk in tools/selfcheck.py web/check_parity.py web/check_abuse.py web/check_assets.py tools/pine_lockstep.py "tools/trend_check.py --self-test" tools/seg_prefix_check.py "tools/seg_prefix_check.py --self-test" tools/live_seg_check.py tools/levels_check.py "tools/levels_check.py --self-test" "tools/j18_check.py --self-test" "tools/j19_check.py --self-test" "tools/j17_check.py --self-test"; do
+#
+# ★★ 六把 web 尺接进来（card-b6609942-1ad，Iris 10-07）：在 10-07 之前，这一串里**只有**
+#    `web/check_parity.py` 一把尺，①②④⑤⑥ 全靠人记得手跑 —— 于是 `web_more_check`
+#    （05bce7a 起）和 `web_footer_check`（dac61cb 起）**同时在 main 上红了一整天**（约 41 小时），
+#    这道门一路是绿的。现在六把**主跑 + 各自自检**都在这儿，每条自己 0 过 / 非 0 不过。
+#  ★ 自检条目为什么必须单列：自检证明的是「每格探针都有牙」（改坏了它会响），**不证明
+#    「期望值跟代码对得上」**。10-07 实测：② 的自检 17/17 全绿，而它的主跑是红的 ——
+#    两条是不同的轴，只跑一条正好会放过上面那种「尺子旧了」的红。
+#  ★ 拼法不统一（照各自 usage 头里写的那个写）：③ `check_parity` 是 `--self-test`（带连字符），
+#    其余五把是 `--selftest`；本门里 trend/seg_prefix/levels 三条也用的是 `--self-test`。
+#    六把现在**两种拼法都认**（Iris f7e7f2f），所以哪种都不会被静默吞掉；门里保持混写只是为了
+#    跟每个脚本自己的文档一致。
+#  ★ ①③ 要 PIL（① 经 `render/style.py`，③ 经 `from render.style import CHART`）⇒ 缺 PIL 时它们
+#    打顶格的 `ModuleNotFoundError`，按下面「崩了」那条归 **rc=99 记「没比成」**（不是红）。标题那行
+#    印的 `PIL 无` 就是给这个看的：门要用带 PIL 的解释器跑（`PYTHON=`）。
+for chk in tools/selfcheck.py web/check_parity.py "web/check_parity.py --self-test" web/check_abuse.py web/check_assets.py "tools/pine_lockstep.py --head HEAD" "tools/trend_check.py --self-test" tools/seg_prefix_check.py "tools/seg_prefix_check.py --self-test" tools/live_seg_check.py tools/levels_check.py "tools/levels_check.py --self-test" "tools/j18_check.py --self-test" "tools/j19_check.py --self-test" "tools/j17_check.py --self-test" tools/web_theme_sync.py "tools/web_theme_sync.py --selftest" tools/web_footer_check.py "tools/web_footer_check.py --selftest" tools/web_fmt_check.py "tools/web_fmt_check.py --selftest" tools/web_fitbox_check.py "tools/web_fitbox_check.py --selftest" tools/web_more_check.py "tools/web_more_check.py --selftest"; do
   log=$(mktemp)
   "$PY" $chk >"$log" 2>&1
   rc=$?
