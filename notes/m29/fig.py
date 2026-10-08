@@ -45,8 +45,10 @@ def panel(k, v, tag, extra):
             if not b0 <= s["bar"] <= b1: continue
             x, y = X(s["bar"]), Y(s["price"])
             d.ellipse([x - 16, y - 16, x + 16, y + 16], outline=(230, 120, 0), width=3)
-            label(x - 70, y + 20, "★ 新加：%s %.2f @%s（%s）" % (s["kind"], s["price"], ts(s["bar"]), s["why"]), (230, 120, 0))
+            kb = s.get("known_bar")
+            label(x - 40, y + 30, "★ 新加：%s %.2f @%s（%s%s）" % (s["kind"], s["price"], ts(s["bar"]), s["why"],
+                  "，%s 才知道" % ts(kb) if kb is not None else ""), (230, 120, 0))      # 往下错开，别压三买的标签
 panel(0, A, "改前（main：小转大没有二类点）", False)
-panel(1, Bv, "改后（M29：小转大那一刀的确立回抽出二买，放走势层 xzd_seconds）", True)
+panel(1, Bv, "改后（M29：小转大那一刀之后紧接的第二段终点出二买，L53；放走势层 xzd_seconds）", True)
 d.text((ML, PH * 2 + 24), "蓝三角＝信号层买卖点（这一批段级没有变化）；紫虚线＝走势分界；橙圈＝新加的小转大二买", fill=(60, 60, 60), font=fsm)
 img.save(out); print("ok", name, [(s["price"], ts(s["bar"])) for s in Bv["xzd_seconds"]])
