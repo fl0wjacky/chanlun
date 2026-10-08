@@ -1172,18 +1172,28 @@ function trendMarkView(target, state, prim) {
       }
     }
     // 盘整组的段界刻度（卡 card-9f7a80b6-e8a）：落点是标注层这一帧算好的（`state.pzDrawn`），见 `drawPzGroups`。
-    drawPzTicks(ctx, state, mine, W);
+    drawPzTop(ctx, state, mine, W);
   });
 }
 
 /** 盘整组段界上的刻度 ＋ `k/N`。刻度线照画（它是结构）；**字**先放刻度右边，跟已经画上去的字
  *  （这一层的 `mine`：分界价格／待定／撤回／编号…；标注层的 `placed`：价签／买卖点文字／组的 chip）
- *  **像素有交叠**就翻到左边，两边都撞就只画刻度不写字（Bram 22:02 定：交叠才修，贴着不算）。
+ *  **像素有交叠**就换一格（上右 → 上左 → 下右 → 下左），四格都撞就只画刻度不写字（Bram 22:02 定：交叠才修，贴着不算）。
  *  ★ 字不登记任何一张表：它是最后画的，后面没有谁要躲它。 */
-function drawPzTicks(ctx, state, mine, W) {
+function drawPzTop(ctx, state, mine, W) {
   const P = state.pzDrawn;
   if (!P || P.railY === null) return;
-  const y = P.railY, others = [...mine, ...(state.labelBoxes || [])];
+  // chip ＋ 「还有 n 段」：位置是标注层定的（chip 已登记 `placed`），这里只是**最后落笔**，压在分界虚线上面。
+  for (const g of P.groups) {
+    for (const c of g.chips) pzChipPaint(ctx, c.box, c.text, c.main);
+    ctx.font = FONT_SM; ctx.fillStyle = TREND.mut; ctx.textBaseline = 'alphabetic';
+    if (g.before) { ctx.textAlign = 'left'; ctx.fillText(`◀ 左边还有 ${g.before} 段`, 8, P.railY - 20); }
+    if (g.after) { ctx.textAlign = 'right'; ctx.fillText(`右边还有 ${g.after} 段 ▶`, W - 8, P.railY - 20); }
+    ctx.textAlign = 'left';
+  }
+  // ★ 左下角那块留给 LWC 的 TradingView 标（最底下那一格窗格才有，手机上价格窗格就是最底下那格）：
+  //   它不在任何占位表里，刻度字翻到细轨下面时会撞上它 —— 当成一块占位，桌面上只是少用 60px，代价很小。
+  const y = P.railY, others = [...mine, ...(state.labelBoxes || []), [0, P.H - 32, 60, P.H]];
   ctx.font = FONT;
   for (const g of P.groups) {
     g.tickLabels = [];
@@ -1191,12 +1201,20 @@ function drawPzTicks(ctx, state, mine, W) {
       ctx.strokeStyle = TREND.edge; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.moveTo(x, y - 8); ctx.lineTo(x, y + 4); ctx.stroke();
       const t = `${k}/${g.n}`, tw = ctx.measureText(t).width;
-      const boxR = [x + 5, y - 15, x + 5 + tw, y - 1], boxL = [x - 5 - tw, y - 15, x - 5, y - 1];
-      const ok = (b) => b[0] >= 2 && b[2] <= W - 2 && !hits(b, others);
-      const side = ok(boxR) ? 'r' : ok(boxL) ? 'l' : null;
-      if (side) haloText(ctx, side === 'r' ? x + 5 : x - 5, y - 4, t, TREND.edge, side === 'r' ? 'left' : 'right');
-      // `blockedR`：右边那一格被别的字占了（只为工装：它得证明"撞了"那条路真走到过，不然 ㊾ 是空转）
-      g.tickLabels.push({ k, side, box: side === 'r' ? boxR : side === 'l' ? boxL : null, blockedR: hits(boxR, others) });
+      // 四个候选格，按顺序取第一个不撞的：细轨上方 右 → 左 → 细轨下方 右 → 左。
+      //   下方那两格是手机上量出来要的（390 宽 35 个刻度里 17 个四周都被**它自己那条分界的价格字**占了：
+      //   窗格矮，低点贴着底，价格字正好落在细轨上方那一行，而且居中压着刻度两边）。
+      const cand = [
+        ['r', [x + 5, y - 15, x + 5 + tw, y - 1], x + 5, y - 4, 'left'],
+        ['l', [x - 5 - tw, y - 15, x - 5, y - 1], x - 5, y - 4, 'right'],
+        ['rb', [x + 5, y + 4, x + 5 + tw, y + 18], x + 5, y + 15, 'left'],
+        ['lb', [x - 5 - tw, y + 4, x - 5, y + 18], x - 5, y + 15, 'right'],
+      ];
+      const ok = (b) => b[0] >= 2 && b[2] <= W - 2 && b[3] <= P.H - 1 && !hits(b, others);
+      const pick = cand.find((c) => ok(c[1])) || null;
+      if (pick) haloText(ctx, pick[2], pick[3], t, TREND.edge, pick[4]);
+      // `blockedR`：右上那一格被别的字占了（只为工装：它得证明"撞了"那条路真走到过，不然 ㊾b 是空转）
+      g.tickLabels.push({ k, side: pick ? pick[0] : null, box: pick ? pick[1] : null, blockedR: hits(cand[0][1], others) });
     }
   }
 }
@@ -1278,13 +1296,14 @@ export function fmtG(v) {
 }
 // <<< FMT_G
 
-/** ④.5 盘整组：相邻的盘整段在图上标成一组 ——「这几段是同一个更大的盘整」（`L33:162`；
- *  我们是非同级别分解，原文不许盘整接盘整，`L45:60`）。**分界一条不动**，只加记号。
+/** ④.5 盘整组：相邻的盘整段在图上标成一组 ——「这几段是同一个更大的盘整」。出处：主引 L38 原博正文
+ *  （非同级别分解下不允许盘整+盘整）和 `L45:60`（盘整+盘整就是中枢延伸、扩展出来的）；附 `L33:162`
+ *  （镜像答疑：「盘整+盘整还是盘整，但加多了就是级别大的盘整」）。**分界一条不动**，只加记号。
  *  形态是 07:51Z 定的 C（卡上【实现要点】那一条），量出来的，不是挑的：
  *    · **细轨贴价格窗格底边**，不套框 —— 一屏装不下任何一组（ZEC 1h 一组跨十几屏），套框画不出来；
  *      `H` 是**这个窗格**的高（primitive 挂在 K 线那一格上），不是 `#chart` 的高（底下还有成交量／MACD）。
  *    · 组内每条**段界**一根刻度 ＋ `k/N` —— 一屏往往只落得下一两条界，刻度回答的是「我在组的哪儿」
- *      （落点在这儿算，**画在走势那一层的最后**，见 `drawPzTicks`：要躲的分界价格字住在那一层）；
+ *      （落点在这儿算，**画在走势那一层的最后**，见 `drawPzTop`：要躲的分界价格字住在那一层）；
  *    · 主标签：组头在屏内就贴组头，组头滚出左边就**吸视口左边**（吸着组头等于没标签）；
  *    · 有段落在屏外时，右边再排一块「屏内 第 a–b 段」，两头写明「◀ 左边还有 n 段」「右边还有 n 段 ▶」。
  *  ★ 避让：两块 chip **最后登记** `placed`（买卖点文字 → 价签 → 我）⇒ `fitBox` 挪的是我，老标签一个像素不动。
@@ -1323,7 +1342,7 @@ function drawPzGroups(ctx, state, sh, vp, placed, chart, W, H) {
       if (out || x === null) continue;
       ctx.beginPath(); ctx.moveTo(x, railY - 10); ctx.lineTo(x, railY + 6); ctx.stroke();
     }
-    // 段界刻度 k/N：**这里只算落点，画在走势那一层**（`drawPzTicks`）。理由：刻度字要躲的是分界那几个价格字，
+    // 段界刻度 k/N：**这里只算落点，画在走势那一层**（`drawPzTop`）。理由：刻度字要躲的是分界那几个价格字，
     //   而那些字住在走势那一层自己的占位表（`mine`）里、而且**在这一层之后才画** —— 在这儿画，同一帧里根本看不见它们。
     //   走势那层排在最后，画到它那儿时 `placed`（价签／买卖点文字／我的 chip）和它自己的 `mine` 都已经是这一帧的了。
     const ticks = [];
@@ -1345,27 +1364,31 @@ function drawPzGroups(ctx, state, sh, vp, placed, chart, W, H) {
       const box = pzChip(ctx, placed, cx, top, text, main, W, H);
       if (!box) continue;
       pzHits.boxes.push([...box, g]);
-      chips.push({ text, box });
+      chips.push({ text, box, main });
       cx = box[2] + 6;
     }
-    // 两头在外几段（chip 跟细轨之间那一行，`FONT_SM` 静音灰；刻度字在它下面一行，竖向不重叠）
-    ctx.font = FONT_SM; ctx.fillStyle = TREND.mut; ctx.textBaseline = 'alphabetic';
-    if (w.before) { ctx.textAlign = 'left'; ctx.fillText(`◀ 左边还有 ${w.before} 段`, 8, railY - 20); }
-    if (w.after) { ctx.textAlign = 'right'; ctx.fillText(`右边还有 ${w.after} 段 ▶`, W - 8, railY - 20); }
-    ctx.textAlign = 'left';
+    // ★ chip、「还有 n 段」、刻度**这里都不画**：位置在这一层定（chip 要登记 `placed`），**笔画放到走势那一层最后**
+    //   （`drawPzTop`）。走势那层排在这一层之后，它的分界竖虚线会从这儿画的字上横穿过去（手机实截：
+    //   「屏内 第 6–7 段」中间被一根虚线劈开）。字要压在线上面，就得最后画。
     state.pzDrawn.groups.push({ n: g.n, from: g.from, to: g.to, i0: g.i0, i1: g.i1, leftOut, rightOut, ...w,
       ticks: ticks.map((t) => t.k), tickAt: ticks, tickLabels: [], chips });
   }
 }
 
-/** 一块 chip：页面底色实底 ＋ 静音灰细边 ＋ 亮字。★ 不用 `tag()`：`tag()` 是**价签**（彩色实底黑字），
- *  价钱是这张图最响的一档，一句说明不能长得跟它一样。避让走同一个 `fitBox`，画的框＝登记的框。 */
+/** 一块 chip 的**落位**：量宽 → `fitBox` → 登记 `placed`，返回框（画在 `pzChipPaint`，见上）。
+ *  ★ 不用 `tag()`：`tag()` 是**价签**（彩色实底黑字），价钱是这张图最响的一档，一句说明不能长得跟它一样。 */
 function pzChip(ctx, placed, x, y, text, main, W, H) {
   ctx.font = main ? FONT_PZ : FONT;
   const tw = ctx.measureText(text).width;
   let box = [x, y, x + tw + 14, y + 20];
   if (box[2] > W - 2) return null;                       // 一行放不下就不画（不截字、不缩字）
   box = fitBox(box, placed, H);
+  placed.push(box);
+  return box;
+}
+/** chip 的笔画：页面底色实底 ＋ 静音灰细边 ＋ 亮字。画的框＝`pzChip` 登记的那个框。 */
+function pzChipPaint(ctx, box, text, main) {
+  ctx.font = main ? FONT_PZ : FONT;
   ctx.fillStyle = PAGE.bg;
   ctx.strokeStyle = rgba(TREND.mut, (main ? 0.9 : 0.6) * 255); ctx.lineWidth = 1;
   ctx.beginPath();
@@ -1376,8 +1399,6 @@ function pzChip(ctx, placed, x, y, text, main, W, H) {
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
   ctx.fillText(text, box[0] + 7, (box[1] + box[3]) / 2 + 0.5);
   ctx.textBaseline = 'alphabetic';
-  placed.push(box);
-  return box;
 }
 
 /** 线段的终点：未完成的画到**迄今的极值**（向上段最高、向下段最低），full_common 同一条 */

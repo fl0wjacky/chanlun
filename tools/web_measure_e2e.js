@@ -1730,7 +1730,7 @@ const shotChart = async (p, tag) => {
     const hit = (bx) => others.some((q) => bx[0] < q[2] && q[0] < bx[2] && bx[1] < q[3] && q[1] < bx[3]);
     return { k, kind: b.kind, side: t.side, blockedR: t.blockedR, overlap: !!(t.box && hit(t.box)) };
   });
-  ck('㊾b （牙）分界价格字挪到刻度字右边那一格上 ⇒ 刻度字翻到左边或只画刻度，仍然不交叠',
+  ck('㊾b （牙）分界价格字挪到刻度字右边那一格上 ⇒ 刻度字换一格或只画刻度，仍然不交叠',
      !pzBump.err && pzBump.blockedR === true && pzBump.side !== 'r' && !pzBump.overlap,
      JSON.stringify(pzBump));
 
