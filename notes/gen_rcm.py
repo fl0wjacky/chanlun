@@ -41,7 +41,7 @@ KNOWN={
  'S-待定-1':('core/segment.py:374-392（Bram 10-08 摸底）','已实现'),
  'W53':('—','不进代码（Nova 10-08 11:34）'),'W26':('—','未实现，这批不做（W26 后半）'),
  'C3':('core/pen.py min_gap（第三批 ①参数 ②默认 6）','进行中'),
- '笔P8':('core/kline.py 合并时 `bh > p["h"]` 才换 ih','跟作者 L81 并列取法不同（0.8%），待 Nova 定'),
+ '笔P8':('core/kline.py 合并时 `bh > p["h"]` 才换 ih（并列取前一根）','不改（Nova 10-08 12:56：L81 数据不够、上下文讲的是包含）'),
 }
 # 第 N 章补翻文件里的条目标题（W、M、J、T、Z、C、S、P 这些编号的出处），有就拿它当摘要
 chap=[('HEAD',f) for f in files if f.endswith('.md') and f.split('/')[-1].startswith('第')]
