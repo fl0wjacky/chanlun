@@ -103,7 +103,8 @@ for chk in tools/selfcheck.py web/check_parity.py web/check_abuse.py web/check_a
 done
 
 # ---- 渲染那半：前端 e2e ----
-SUITES=(tools/web_ghost_e2e.js tools/web_more_e2e.js tools/web_readout_e2e.js tools/web_measure_e2e.js)
+SUITES=(tools/web_ghost_e2e.js tools/web_more_e2e.js tools/web_readout_e2e.js tools/web_measure_e2e.js tools/web_fs_drag_e2e.js)
+# ★ web_fs_drag_e2e（card-c90f0f08-3ac）：拖过再进/出全屏，视口不许跳回最初那一屏。web_measure_e2e 的全屏格是**没拖过**就进，量不到这个。
 # ★ subhead_slot_probe 挂在 --all 档、**不进默认档**（Nova 2026-10-05 16:04）：它要真后台连点十二次开关、
 #   跑将近一分钟，只有上线前那一趟值这个时间。它钉的是「副图页头拿格高 0 摆位置」（card-9b0fe913-758）。
 # ★★ 它跟 68decdd 是**一对**：改前那一棵树（`e494d90`）上它 5/12 红。所以这支**必须在 68decdd 之后并**

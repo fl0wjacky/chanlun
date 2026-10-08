@@ -1643,8 +1643,12 @@ function placeFs() {
 }
 // 进/出全屏：把「刚才那一屏」记下来，等 LWC 按新尺寸排完，摆回去。两次 rAF 是**让 LWC 先重排**——
 // 它的重排挂在 ResizeObserver 上，同一拍里读回来的还是旧尺寸。
+// ★ 「刚才那一屏」＝**屏上正在显示的范围**，不是 viewSet（card-c90f0f08-3ac）。viewSet 只记**我们自己摆的**
+//   那一下（拿来认回声，见 setView／sameRange），用户用手势拖过之后它不跟着更新 ⇒ 拿它当基准，拖完一进全屏
+//   就跳回最初那一屏。viewSet 本身**不动**：手势也去写它，会把下一次真的拖动当成回声吞掉（Atlas 10-07）。
+//   屏上读不到（图还没建好）才退回 viewSet。
 function keepView(r) {
-  const want = r || viewSet || chart.timeScale().getVisibleLogicalRange();
+  const want = r || chart.timeScale().getVisibleLogicalRange() || viewSet;
   requestAnimationFrame(() => requestAnimationFrame(() => {
     if (want) setView(want);
     placeFs();
@@ -1662,7 +1666,7 @@ function syncFs() {
   fsBtn.title = on ? '退出全屏（Esc）' : '全屏看图（Esc 退出）';
 }
 async function toggleFs() {
-  const r = viewSet || chart.timeScale().getVisibleLogicalRange();   // 进/出都摆回这一屏
+  const r = chart.timeScale().getVisibleLogicalRange() || viewSet;   // 进/出都摆回屏上这一屏（见 keepView 上面那段）
   if (fsOn()) {
     if (fsNative()) {
       try { await document.exitFullscreen(); } catch (e) { /* 已经退了：下面 syncFs 会认掉 */ }
