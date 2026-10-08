@@ -31,7 +31,7 @@
     2  跑不动（取不到树 / 数据缺 / 引擎抛异常）—— **查不了 ≠ 通过**
     3  --self-test 的**正臂没红** ⇒ 这个检查程序本身不算数；或者两边共同的键是 0 / 少于只有一边有的 ⇒ 没比成
 """
-import argparse, hashlib, io, importlib, json, os, shutil, subprocess, sys, tempfile
+import argparse, hashlib, io, importlib, json, os, re, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE) if os.path.basename(HERE) == "tools" else HERE
@@ -58,6 +58,13 @@ def materialize(sha):
 
 
 SIGNAL_LEVELS = ("seg", "pen")        # 与 pine 的 sigLevel 两个选项对应（线段中枢 / 类中枢）
+# ★ 信号层只哈希 **Pine 移植了的那几个字段**（Nova 10-08 17:10）：跟 chanlun.pine 的 `type Sig` 一一对应（kind/bar/price/confirmed/weak）。
+#   引擎的 signals() 还带 why、level、center、unit、std 这类 Pine 根本不输出的字段 —— 改它们 Pine 不用动，尺子不该红
+#   （M29 把二卖的 why 从「不创新低」改成「不创新高」，整片信号键红了，Pine 一行不用改）。
+#   名单不许悄悄变宽：--self-test 会拿它跟检出树里 `type Sig` 的字段逐个对，多一个、少一个都报（exit=3）。
+#   这不是「忽略标注字段」的开关：名单是正面列出来的「Pine 有什么」，引擎新加任何字段默认都不参与，
+#   要参与就得 Pine 先有 —— 跟 signalsOf 对齐，而不是跟引擎对齐。
+PINE_SIG_FIELDS = ("kind", "bar", "price", "confirmed", "weak")
 
 
 def outputs(tree, perturb=False):
@@ -67,10 +74,12 @@ def outputs(tree, perturb=False):
 
     perturb=True 时把背驰比例压到 0（**只动信号层，不动结构层**）—— 给 --self-test 的信号层
     正臂用：同一棵树上改了信号，信号键**必须**变，否则说明这个探针根本没接上。
+    perturb="why" 时只把每颗点的 why 改掉（Pine 没有的字段）—— 信号键**必须不变**。
     """
     code = r'''
 import hashlib, io, json, os, sys
-tree, outp, perturb = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
+tree, outp, mode, fields = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4].split(",")
+perturb = mode == "1"
 sys.path.insert(0, tree)
 import core
 
@@ -96,13 +105,17 @@ for f in sorted(os.listdir(os.path.join(tree, "data"))):
     for lv in ("seg", "pen"):                      # 信号层：买卖点
         k = "%s|%s" % (f, lv)
         try:
-            out[k] = H(core.signals(r, lv, "macd", ratio=(0.0 if perturb else 1.0)))
+            sg = core.signals(r, lv, "macd", ratio=(0.0 if perturb else 1.0))
+            if mode == "why":
+                sg = [dict(x, why="拧坏的说明文字") for x in sg]
+            out[k] = H([{f: x.get(f) for f in fields} for x in sg])   # 只哈希 Pine 移植了的字段（PINE_SIG_FIELDS）
         except Exception as e:
             out[k] = "signals 跑不动:%s" % type(e).__name__
 json.dump(out, open(outp, "w"))
 '''
     fd, tmp = tempfile.mkstemp(suffix=".json"); os.close(fd)
-    p = subprocess.run([sys.executable, "-c", code, tree, tmp, "1" if perturb else "0"],
+    mode = perturb if perturb == "why" else ("1" if perturb else "0")
+    p = subprocess.run([sys.executable, "-c", code, tree, tmp, mode, ",".join(PINE_SIG_FIELDS)],
                        capture_output=True, text=True)
     if p.returncode:
         print("★ 引擎在 %s 上跑不动 ⇒ 查不了（**不是「通过」**）：" % tree)
@@ -190,6 +203,30 @@ def main():
         print("⇒ 正臂②（信号层）红了：把背驰比例压到 0 ⇒ %d/%d 个信号键变了 ✓"
               % (len(moved), len(sig_keys)))
         print("    （探针连上了。它**不**证明引擎算得对，只证明「信号一变，它就看得见」。）")
+
+        # ── 臂③：只改 why（Pine 没有的字段）⇒ 信号键必须**一个都不变**
+        C = ref_tree(tree, perturb="why")
+        drift = [k for k in sig_keys if A[k] != C.get(k)]
+        if drift:
+            print("★ 臂③ 只改 why 却有 %d 个信号键变了（例 %s）⇒ 名单外的字段混进了哈希（exit=3）。" % (len(drift), drift[:2]))
+            return 3
+        print("⇒ 臂③ 只改 why（Pine 不输出的字段）⇒ %d 个信号键一个没变 ✓" % len(sig_keys))
+
+        # ── 臂④：名单跟检出树里 chanlun.pine 的 `type Sig` 逐个对，多一个、少一个都报
+        d = materialize(tree)
+        try:
+            src = io.open(os.path.join(d, PINE), encoding="utf-8").read()
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+        m = re.search(r"^type Sig\n((?:[ \t]+\S+[ \t]+\w+.*\n)+)", src, re.M)
+        pine = [re.split(r"\s+", ln.strip())[1] for ln in m.group(1).splitlines()] if m else []
+        extra = [f for f in PINE_SIG_FIELDS if f not in pine]
+        missing = [f for f in pine if f not in PINE_SIG_FIELDS]
+        if not pine or extra or missing:
+            print("★ 臂④ PINE_SIG_FIELDS 跟 %s 的 type Sig 对不上：名单多了 %s、少了 %s（Pine 里是 %s）（exit=3）。"
+                  % (PINE, extra, missing, pine))
+            return 3
+        print("⇒ 臂④ PINE_SIG_FIELDS 跟 type Sig 逐个对上：%s ✓" % ", ".join(pine))
         return 0
 
     rc, base, _e = sh("git log -1 --format=%%H -- %s" % PINE)
