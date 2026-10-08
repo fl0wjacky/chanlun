@@ -424,6 +424,9 @@ def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT, memo=None):
             if _beyond(p, L, not up, S10_TIE and r > k + 2):
                 return 1, r                       # 先破 X 的结束位置：V 是终点，新段在 r 才确立（第三笔就破 ＝ S11）
         if ok_rev:
+            if L77_MERGE:                         # 试验（card-c784a101-791，L77 第二支）：A 被一个反弹线段 R 破坏 ⇒ 新段＝X＋A＋R，硬收在 R 的终点
+                R = _first_seg(pens, rev["PI1"] + 1, mode, memo)
+                return 4, (R["PI1"] if R is not None else None)   # case 4：旧段在 V 结束；at ＝ 新段的终点笔（硬定）；R 没走完 ⇒ None，新段等着
             return 1, rev["confirm"]              # ② 反向线段走完、没破 V：V 是终点，新段到反向线段确认时才确立
         if S7_NOW:                                # ★ S7（小栋 10-07 23:51 定 A）：等不到结局 ⇒ 分界点之后的元素单独做包含，有分型就当场判，标「暂定」
             e3 = _s7_fractal(pens, k, up)
@@ -458,6 +461,7 @@ HEAD_EXT_FIX = True                       # 探针开关：图头那一段起点
 HEAD_EXT_CUTOFF = True                    # 探针开关：图头那一条判 ① 型只看到确认图头段的那一笔（关掉 ⇒ 随机 seed 2435／4750 撤回已确认段）
 GAP_COVER = True                          # 探针开关：缺口被之前同一特征序列元素盖住不算缺口（线段 #1，card-fff28d01-f13）
 S10_TIE = True                            # 探针开关：两处「相等」（S10，线段.md 附第 5 条）：① 追平 X 的起点／终点算破；② V 跟分界前那个元素一端相同算分界
+L77_MERGE = True                          # 试验开关（只量不推）：L77 第二支硬合
 S7_NOW = True                             # 探针开关：第一种情况等不到结局时当场判（S7，附第 2 条）—— 有分型就先切、标「暂定」（case 3）
 
 
@@ -488,6 +492,7 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=
     """
     segs, i, n = [], start, len(pens)
     memo = {} if _memo is None else _memo
+    forced = None                             # L77 第二支：下一段硬定的终点笔
     born = 0                                  # 本段方向确立的那一笔（上一段第一种情况确认时的破位笔）
     while i + min_pens - 1 < n:
         # ★ L65:50-51／L77:69-70：线段开始的那三笔必须有重合。没有公共重叠 ⇒ i 处**构不成线段**
@@ -508,6 +513,17 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=
             i += 1
             continue
         seg_dir = _dir(pens[i])
+        if forced is not None and forced >= i + 2 and forced < n - 1:
+            e = forced; forced = None
+            segs.append(dict(PI0=i, PI1=e, i0=pens[i]["i0"], i1=pens[e]["i1"], p0=pens[i]["p0"], p1=pens[e]["p1"],
+                             dir=seg_dir, npens=e - i + 1, case=4,
+                             hi=max(pens[q]["hi"] for q in range(i, e + 1)), lo=min(pens[q]["lo"] for q in range(i, e + 1))))
+            if first_only:
+                segs[-1]["_born"] = e + 1
+                return segs
+            i, born = e + 1, 0
+            continue
+        forced = None
         found = None
         k = i + min_pens - 1                  # 候选终点笔（至少 3 笔，步长 2 保笔数为单数）
         while k < born:                       # 方向确立之前，本段不能结束
@@ -544,6 +560,17 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=
             i += 1
             born = 0
             continue
+        if case == 4:
+            if at is None:                    # R 还没走完：旧段照收，新段先不切（后面整截未完成），免得 R 走完时撤段
+                segs.append(dict(PI0=i, PI1=end_pen, i0=pens[i]["i0"], i1=pens[end_pen]["i1"], p0=pens[i]["p0"], p1=pens[end_pen]["p1"],
+                                 dir=seg_dir, npens=end_pen - i + 1, case=1,
+                                 hi=max(pens[q]["hi"] for q in range(i, end_pen + 1)), lo=min(pens[q]["lo"] for q in range(i, end_pen + 1))))
+                if first_only:
+                    segs[-1]["_born"] = end_pen + 1
+                    return segs
+                i = end_pen + 1
+                break
+            forced, at, case = at, at, 1
         born = (at or 0) if case in (1, 3) else 0  # 方向确立只对第一种情况（含 S7 暂定）有意义；第二种情况的 at 只给 _first_seg 当「确认那一笔」
         segs.append(dict(
             PI0=i, PI1=end_pen,
