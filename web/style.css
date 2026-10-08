@@ -298,10 +298,10 @@ body.fs-fake main { position: fixed; inset: 0; z-index: 50; height: 100dvh; back
   border: 1px solid var(--line); border-radius: 3px; padding: 0 3px; white-space: nowrap;
 }
 .mchip[aria-checked="true"] .nonorig { color: var(--bg); border-color: currentColor; }
-/* T16：选中「峰值」时面板底下那行说明（触屏没有 hover，title 看不到）。跟 .mcap 同一号字，颜色用 --mu 不用 --dim：
-   这是要读的话，不是脚注。 */
-.mnote { font-size: 11px; line-height: 1.5; color: var(--mu); padding: 2px 8px 4px; }
-.mnote[hidden] { display: none; }
+/* T16：选中「峰值」时那行说明（触屏没有 hover，title 看不到）。跟 .mcap 同一号字，颜色用 --mu 不用 --dim：
+   这是要读的话，不是脚注。宽屏：看法那一组的最后一项（右栏 190 宽，自己折行，不碰图）。
+   窄屏：app.js 把它挪进 #chart，浮在图上（见下面 @media 那一档）。 */
+.mgroup .mnote { flex: 1 0 100%; font-size: 11px; line-height: 1.5; color: var(--mu); }
 
 .chip i { width: 9px; height: 9px; border-radius: 2px; opacity: .45; }
 .chip[aria-pressed="true"] { color: var(--tx); border-color: var(--mu); background: var(--panel-hi); }
@@ -391,6 +391,14 @@ body.fs-fake main { position: fixed; inset: 0; z-index: 50; height: 100dvh; back
   /* 收起时开关跟 `.panel` 同一条账（两处一起加、一起不加 —— 差一截就是「开关飘起来压住图」） */
   body.m-fold .fold { bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
   .chip { flex: 0 0 auto; }
+  /* T16 窄屏：浮在图上、贴底（时间轴上面一点），照 .more 的写法 —— 不占流、不压图、碰不到 #fold（Iris 09:36）。
+     z-index 3 的理由同 .more：画布是 1/2，低于它就被盖住。最多两行。 */
+  #chart > .mnote {
+    position: absolute; left: 10px; right: 10px; bottom: 34px; z-index: 3; pointer-events: none;
+    padding: 4px 10px; border-radius: 6px; font-size: 11px; line-height: 1.4;
+    color: var(--mu); background: var(--panel); border: 1px solid var(--line);
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  }
   /* 全屏那颗按钮在手机上大一点（26px 的触控目标太小；这颗在手机上比桌面上更值钱）——
      仍是右上角、仍让开右轴那一条（--ps-right 那条账不分宽窄）。 */
   .fs { width: 30px; height: 30px; top: 6px; }
@@ -477,3 +485,6 @@ body.fs-fake main { position: fixed; inset: 0; z-index: 50; height: 100dvh; back
 }
 
 @media (prefers-reduced-motion: reduce) { .chip { transition: none; } }
+
+/* T16：收起就是收起 —— 放在最后，压过窄屏那一档的 display（同为 id＋类的权重，后写的赢）。 */
+#mnote[hidden] { display: none; }

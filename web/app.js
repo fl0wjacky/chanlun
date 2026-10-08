@@ -1736,14 +1736,17 @@ function buildMeasures() {
     g.appendChild(b);
   }
   box.prepend(g);
-  // T16（Nova 09:18 定）：触屏没有 hover ⇒ **选中**带说明的那种看法时，面板底下出一行小字。放在面板**外面**
-  //   （紧跟其后）而不是看法那一组里：手机上那一组是一条横滑的单行，塞进去要么被挤成一个字宽、要么被滑出屏。
+  // T16（Nova 09:18 定）：触屏没有 hover ⇒ **选中**带说明的那种看法时，出一行小字。
+  //   ★ 位置（Iris 09:36 真机量过）：放成 main 的流内子元素会在 grid 里多出一行 ⇒ 图被压矮 41～68px、手机上还盖住 #fold。
+  //   ⇒ **同一个元素、两处落脚**（placeMnote）：宽屏放进看法那一组当最后一项（右栏里自己折行，不碰图）；
+  //     窄屏那一组是横滑单行、放不下 ⇒ 挪进 #chart 浮在图上（.more 那套写法），不占流、不压图。
   if (!el('mnote')) {
     const n = document.createElement('div');
     n.id = 'mnote'; n.className = 'mnote'; n.hidden = true;
     n.setAttribute('aria-live', 'polite');
-    box.insertAdjacentElement('afterend', n);
+    g.appendChild(n);
   }
+  placeMnote();
   watchOverflow(box);                  // 手机上多了一排，右边还有没有东西要重算一遍
   renderMeasures();
 }
@@ -1752,6 +1755,15 @@ function buildMeasures() {
 // ★ 买卖点那层关着 ⇒ 这一组**置灰不可点**：这四颗只换买卖点的画法，层关着的时候换看法，
 //   屏幕上**什么都不会变** —— 点了没反应会被当成坏了（判据只有 opts.sig 一处，跟别的开关同一条账）。
 //   ★ 手机上没有 hover，所以「为什么是灰的」不能只写在 title 里，标题那行也得说。
+// T16：#mnote 宽屏在看法那一组里、窄屏浮在 #chart 上。断点跟 style.css 的 @media (max-width: 760px) 同一个。
+const MNOTE_MQ = window.matchMedia('(max-width: 760px)');
+function placeMnote() {
+  const n = el('mnote'); if (!n) return;
+  const host = MNOTE_MQ.matches ? el('chart') : el('mgroup');
+  if (host && n.parentNode !== host) host.appendChild(n);
+}
+MNOTE_MQ.addEventListener('change', placeMnote);
+
 function renderMeasures() {
   const g = el('mgroup'); if (!g) return;
   const on = !!opts.sig;
