@@ -383,6 +383,9 @@ export function makeAnnotPrimitive(state) {
 
               // ① 线段端点：顶红底绿（full_common 的 ellipse，半径 9 / 描边 4）
               if (sh.seg) {
+                // 暂定那一刀 V 同时是暂定段的终点和后面那一截的起点 ⇒ 只画一个圈（虚线那个）；
+                // 两个都画，实线小圈套在虚线圈里，看着像齿轮（实测截图）。
+                const tentEnds = new Set(data.segs.filter((s) => s.tentative).map((s) => `${s.i1}|${s.p1}`));
                 for (const s of data.segs) {
                   const end = segEnd(data, s);
                   const pts = [[s.i0, s.p0], [end.i, end.p]];
@@ -390,10 +393,23 @@ export function makeAnnotPrimitive(state) {
                   for (const [k, [i, p]] of pts.entries()) {
                     const x = vp.xOfBar(i), y = vp.yOfPrice(p);
                     if (!onScreen(x, W, 20) || y === null) continue;
-                    ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+                    const tent = k === 1 && s.tentative;
+                    if (k === 0 && tentEnds.has(`${i}|${p}`)) continue;
+                    const col = (k === 0 ? up : !up) ? CHART.buy : CHART.sell;
+                    ctx.beginPath(); ctx.arc(x, y, tent ? 7 : 4.5, 0, Math.PI * 2);
                     ctx.fillStyle = PAGE.bg; ctx.fill();
-                    ctx.strokeStyle = (k === 0 ? up : !up) ? CHART.buy : CHART.sell;
-                    ctx.lineWidth = 2; ctx.stroke();
+                    ctx.strokeStyle = col;
+                    ctx.lineWidth = tent ? 1.6 : 2;
+                    // ★ 暂定的那一刀（S7 当场判、结局未定）：**虚线圈、大一号**，旁边小字「暂定」。
+                    //   实线圈＝定了的端点；虚线圈＝先画出来的一刀，等第一笔两头谁先被破（S12）再定。
+                    //   字放在圈外、远离线段那一侧（顶往上、底往下），登记 placed，后面的价签会避开它。
+                    if (tent) ctx.setLineDash([3.2, 2.3]);   // 2/2 在这个半径上像齿轮（实测截图），拉长成 7 段左右
+                    ctx.stroke();
+                    if (tent) {
+                      ctx.setLineDash([]);
+                      const top = up;                        // 段向上 ⇒ 终点是顶（字往上）；向下 ⇒ 终点是底（字往下）
+                      placed.push(haloText(ctx, x, top ? y - 12 : y + 22, '暂定', col, 'center').slice(0, 4));
+                    }
                   }
                 }
               }
@@ -1177,7 +1193,9 @@ export function fmtG(v) {
 
 /** 线段的终点：未完成的画到**迄今的极值**（向上段最高、向下段最低），full_common 同一条 */
 function segEnd(data, s) {
-  if (!s.live) return { i: s.i1, p: s.p1 };
+  // ★ 暂定段（S7 当场判，`tentative`）也带 `live`，但它的终点是**判出来的那一刀 V**（段的 i1/p1），不是迄今的极值：
+  //   后面那一截才是真正还在走的未完成段（暂定之后不再往下切，见 core/segment.py）。
+  if (!s.live || s.tentative) return { i: s.i1, p: s.p1 };
   const ext = s.dir === 'up' ? s.hi : s.lo;
   let k = s.PI0;
   for (let j = s.PI0; j <= s.PI1; j++) if (data.pens[j] && data.pens[j].p1 === ext) k = j;
