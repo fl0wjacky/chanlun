@@ -31,8 +31,8 @@
 //      这条对「读数停在旧数上」正是死穴（换品种时旧数是另一种价格量级；换周期时 1h 的时刻
 //      根本不在 4h 那份里），而它**不**管落在相邻哪一根 —— 那件事本来就会跳，见上。
 //
-// 跑法（要**真后台**：两个品种都得有，8742 那个假后台只有一份数据）：
-//   1) python3 web/server.py --port 8792          （只绑回环）
+// 跑法（要**真后台**：两个品种都得有，假后台只有一份数据）：
+//   1) python3 web/server.py --port <端口>          （只绑回环）
 //   2) NODE_PATH=<playwright 的 node_modules> node tools/web_readout_swap_probe.js [页面地址]
 //        [--mut=none|paint|go|read|sub|sticky|sticky2|stale]
 //   不给 --mut ⇒ 八种跑法都跑（这才是完整对照）；给了 ⇒ 只跑那一种。
@@ -51,7 +51,7 @@ try {
   process.exit(2);
 }
 const PAGE = (process.env.E2E_URL || (process.argv[2] && !process.argv[2].startsWith('--')
-  ? process.argv[2] : 'http://127.0.0.1:8792/')).replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
+  ? process.argv[2] : noUrl())).replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
 const MUT = (process.argv.find((a) => a.startsWith('--mut=')) || '--mut=none').split('=')[1];
 // 「新数据还在飞」那段撑多久。★ 2026-10-04 从 2500 提到 6000：D 段要在**同一段窗口**里连动三下，
 //   而真后台这一页是 5040 根（比工装那份样本重得多，每次 evaluate/move 都慢）—— 2500 那次跑，第三下
@@ -325,3 +325,10 @@ async function run(b, mode) {
         + '四条 hideRead 摆法各自分叉在它该分叉的那一格（`paint` 一条都不分叉＝那个位置量不出来）。')));
   process.exit(bad.length ? 1 : 0);
 })().catch((e) => { console.error('探针自己炸了：', e.message); process.exit(2); });
+
+// 不带默认页面地址（部署细节不进仓，card-58518cb5-357）：没给 E2E_URL、也没给地址参数，就直接报错、退出码 2（环境没搭好）。
+// predeploy 会 export E2E_URL。写法跟 tools/web_fs_drag_e2e.js 一致。
+function noUrl() {
+  console.error('缺页面地址：请设 E2E_URL（或把页面地址当参数）。本工装不带默认地址。');
+  process.exit(2);
+}

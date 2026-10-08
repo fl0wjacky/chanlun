@@ -82,12 +82,12 @@
 //
 // 跑法：
 //   1) 真后台，**只绑回环**（部署纪律：不许绑全网卡）：
-//        python3 web/server.py --port 8792
+//        python3 web/server.py --port <端口>
 //   2) playwright：`npm i playwright && npx playwright install chromium`（各机器一次）
 //      node_modules 不在仓里 —— 在装好 playwright 的目录下跑，用 NODE_PATH 指过来即可。
 //   3) node tools/web_measure_e2e.js [输出目录] [页面地址]
 //        输出目录默认 $TMPDIR/measure-e2e（截图落这儿；不写进仓）
-//        页面地址默认 http://127.0.0.1:8792/
+//        页面地址：必须给 E2E_URL（或参数），本工装不带默认
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -101,7 +101,7 @@ try {
 }
 
 const OUT = process.argv[2] || path.join(os.tmpdir(), 'measure-e2e');
-const PAGE = (process.env.E2E_URL || process.argv[3] || 'http://127.0.0.1:8792/').replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
+const PAGE = (process.env.E2E_URL || process.argv[3] || noUrl()).replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
 const QS = '?symbol=ZECUSDT&tf=15m';       // 周期挑最短的那档：首屏快，且这一档的四种看法分得最开
 let bad = 0, n = 0;
 const ck = (name, ok, extra) => {
@@ -1600,3 +1600,10 @@ const shotChart = async (p, tag) => {
   console.log(`\n${n - bad}/${n} 过${bad ? `，${bad} 条红` : ''}　截图：${OUT}`);
   process.exit(bad ? 1 : 0);
 })().catch((e) => { console.error('炸了：', e.message); process.exit(2); });
+
+// 不带默认页面地址（部署细节不进仓，card-58518cb5-357）：没给 E2E_URL、也没给地址参数，就直接报错、退出码 2（环境没搭好）。
+// predeploy 会 export E2E_URL。写法跟 tools/web_fs_drag_e2e.js 一致。
+function noUrl() {
+  console.error('缺页面地址：请设 E2E_URL（或把页面地址当参数）。本工装不带默认地址。');
+  process.exit(2);
+}

@@ -80,7 +80,7 @@
 //      ① 红＝刻度不是正经刻度，② 红＝刻度对不上数据的最大最小（Atlas 的原话）。
 //
 // 跑法（要真后台：
-//   1) python3 web/server.py --port 8799 --no-prewarm      （只绑回环）
+//   1) python3 web/server.py --port <端口> --no-prewarm      （只绑回环）
 //   2) NODE_PATH=<playwright 的 node_modules> node tools/web_macd_axis.js [页面地址] [--mut=nofix|freeze]
 //   不给 --mut ⇒ 只跑原样。--mut=nofix 摘掉那行修（＝复现外测那张图）；
 //   --mut=freeze 换成「轴钉死在全量范围上」（＝Bram 猜的那条，用来证明 ⑤ 有牙）；
@@ -101,7 +101,7 @@ try {
   process.exit(2);
 }
 const PAGE = (process.env.E2E_URL || (process.argv[2] && !process.argv[2].startsWith('--')
-  ? process.argv[2] : 'http://127.0.0.1:8799/')).replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
+  ? process.argv[2] : noUrl())).replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
 const MUT = (process.argv.find((a) => a.startsWith('--mut=')) || '--mut=none').split('=')[1];
 const arg = (k, d) => (process.argv.find((a) => a.startsWith(`--${k}=`)) || `--${k}=${d}`).split('=')[1];
 const SYMBOL = arg('symbol', 'BTCUSDT'), TF = arg('tf', '4h');   // Nova 外测那两张图是 1h 与 4h，都能量
@@ -632,3 +632,10 @@ async function judge(page, tag) {
   await b.close();
   process.exit(red.length ? 1 : (未.length ? 2 : 0));
 })().catch((e) => { console.error('炸了：', e.message); process.exit(2); });
+
+// 不带默认页面地址（部署细节不进仓，card-58518cb5-357）：没给 E2E_URL、也没给地址参数，就直接报错、退出码 2（环境没搭好）。
+// predeploy 会 export E2E_URL。写法跟 tools/web_fs_drag_e2e.js 一致。
+function noUrl() {
+  console.error('缺页面地址：请设 E2E_URL（或把页面地址当参数）。本工装不带默认地址。');
+  process.exit(2);
+}
