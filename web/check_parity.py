@@ -286,6 +286,62 @@ def run_macd(quiet=False):
     return bad
 
 
+def _wolf_ref(dif, dea):
+    """防狼术（均线.md 六.7）的**独立**复算 —— 不调引擎那个函数，照 spec 的字面逐根走一遍：两条都 <0 进、两条都 >0 出、其余维持。"""
+    out, st, i0 = [], None, None
+    for i, (a, b) in enumerate(zip(dif, dea)):
+        nxt = "below" if (a < 0 and b < 0) else ("above" if (a > 0 and b > 0) else st)
+        if nxt == "below" and st != "below":
+            i0 = i
+        if st == "below" and nxt == "above":
+            out.append((i0, i))
+        st = nxt
+    if st == "below":
+        out.append((i0, None))
+    return out
+
+
+def run_wolf(quiet=False):
+    """防狼术 /api/wolf（T13）：① below ＝ 照 spec 字面独立复算的区间（按 /api/chart 那份 K 线的 t）；② 头部跟 /api/chart 一致；
+    ③ /api/chart 里**没有**防狼的字段（默认关、不进图表载荷）；④ 名单外的参数 400。"""
+    eng = sys.modules["core.signals"]
+    files = sorted(os.path.basename(p) for p in glob.glob(data("*.json")))
+    cases = [(fn, dataset(fn)) for fn in files if dataset(fn)]
+    bars_by_key = {key: json.load(open(data(fn), encoding="utf-8")) for fn, key in cases}
+    bad = n = 0
+    with running(bars_by_key) as port:
+        for fn, (sym, tf) in cases:
+            ch = get(port, sym, tf)
+            wf = get_path(port, "/api/wolf?symbol=%s&tf=%s" % (sym, tf))
+            bars = [dict(t=x["t"], o=x["o"], h=x["h"], l=x["l"], c=x["c"]) for x in ch["bars"]]
+            t = [x["t"] for x in bars]
+            dif, dea = eng.macd_lines(bars, 12, 26, 9)
+            want = [[t[i0], None if i1 is None else t[i1]] for i0, i1 in _wolf_ref(dif, dea)]
+            diffs = []
+            if wf.get("below") != want:
+                diffs.append("below ≠ spec 字面复算（%d 段 vs %d 段）" % (len(wf.get("below") or []), len(want)))
+            if any(wf.get(k) != ch.get(k) for k in ("span", "span_max", "earliest", "fetched_at", "engine")):
+                diffs.append("头部回显跟 /api/chart 不一致")
+            if any("wolf" in k for k in ch):
+                diffs.append("/api/chart 里冒出了防狼的字段（应当默认关、单独取）")
+            n += len(want)
+            bad += bool(diffs)
+            if not quiet:
+                print("%s %-18s %s %-3s 防狼 %3d 段%s" % ("✗" if diffs else "✓", fn, sym, tf, len(want),
+                                                     "  ← " + " ｜ ".join(diffs) if diffs else ""))
+        for q in ("symbol=ZECUSDT", "symbol=ZECUSDT&tf=15m&measure=macd", "symbol=ZECUSDT&tf=15m&span=3", "symbol=NOPE&tf=15m"):
+            try:
+                get_path(port, "/api/wolf?" + q)
+                bad += 1
+                if not quiet:
+                    print("✗ /api/wolf?%s 没回 400" % q)
+            except Exception:
+                pass
+    if not quiet:
+        print("防狼术 %d 份、%d 段：不一致 %d 份" % (len(cases), n, bad))
+    return bad
+
+
 def run_default(quiet=False):
     """默认切法 v3（docs/spec/走势分段.md，card-51571a5f-dc2）：
     ① /api/meta 的 cut_default 是 trend、cut_modes 是 extend／trend；② 不带 cut 回显 trend、带 trend 对象、不带旧 cuts；
@@ -478,6 +534,28 @@ def self_test():
             server.MEASURE_ORIG.update(real)
     arms.append(("斜率也标成原文", arm_meta_all_orig))
 
+    def arm_wolf_one_line():
+        """防狼术改成「有一条在 0 轴下就算」（spec 定的是两条都要）⇒ 区间必须对不上。"""
+        real = server.wolf_below
+        eng = sys.modules["core.signals"]
+
+        def one(bars, fast=12, slow=26, sig=9):
+            dif, dea = eng.macd_lines(bars, fast, slow, sig)
+            out, below, i0 = [], False, None
+            for i, (a, b) in enumerate(zip(dif, dea)):
+                if not below and (a < 0 or b < 0):
+                    below, i0 = True, i
+                elif below and a > 0 and b > 0:
+                    below = False
+                    out.append((i0, i))
+            return out + ([(i0, None)] if below else [])
+        server.wolf_below = one
+        try:
+            return run_wolf(quiet=True)
+        finally:
+            server.wolf_below = real
+    arms.append(("防狼术只看一条线", arm_wolf_one_line))
+
     def arm_engine_stale():
         """副图那份头部的引擎版本不跟着进程（比如缓存里留着旧值）⇒ 前端分不出换没换引擎，必须红。"""
         orig = server._macd_body
@@ -530,6 +608,7 @@ if __name__ == "__main__":
     rc = run()[0]
     rc = rc or (1 if run_span() else 0)
     rc = rc or (1 if run_macd() else 0)
+    rc = rc or (1 if run_wolf() else 0)
     rc = rc or (1 if run_meta() else 0)
     rc = rc or (1 if run_default() else 0)
     sys.exit(rc)

@@ -118,6 +118,26 @@ def _units(r, level):
     return r["pens"], r["pens"], r["centers"]
 
 
+def wolf_below(bars, fast=12, slow=26, sig=9):
+    """防狼术（均线.md 六.7，第七章 T13，Nova 10-08 定：独立开关、默认关、**不是判据**）：MACD 黄白线在 0 轴下的区间。
+    → [(i0, i1)]：从 i0 那根起「在下面」，到 i1 那根「站住」为止（i1 不含；还没站住 ⇒ i1 = None）。
+
+    『编者口径』（Nova 09:02／09:03）：DIF、DEA **两条都 < 0** 才进入『在下面』；**两条都 > 0** 才算『站住』；
+    一上一下、或正好等于 0 ⇒ **维持原状态**（带滞后，防来回跳）。开头还没有过一次两条同号 ⇒ 状态未定，不算在下面。
+    只给前端画一层提示；**不进任何结构判定、买卖点、背驰**（那些都不 import 这个函数）。"""
+    dif, dea = macd_lines(bars, fast, slow, sig)
+    out, below, i0 = [], False, None
+    for i, (a, b) in enumerate(zip(dif, dea)):
+        if not below and a < 0 and b < 0:
+            below, i0 = True, i
+        elif below and a > 0 and b > 0:
+            below = False
+            out.append((i0, i))
+    if below:
+        out.append((i0, None))
+    return out
+
+
 # 力度比较的四种看法（单选；docs/spec/背驰.md 第六节，Nova 2026-10-04 定）：
 #   macd  柱子面积（默认）· slope 斜率 · lines 黄白线不创新高低 · peak 柱子一波峰值
 #   macd_or_lines  面积**或**黄白线，一条成立就算（spec 六.3，小栋 10-04 ②A）；两条都成立的点打 std=True

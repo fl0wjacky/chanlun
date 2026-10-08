@@ -35,6 +35,8 @@
   GET /api/meta            → 白名单（前端拿来做下拉）
         engine = 引擎版本（core/*.py＋config.py 的 sha256 前 10 位，启动时算），/api/chart、/api/macd 头部也带同一个；
         measures 仍是字符串列表（契约不变）；measure_orig = {看法: 是否 108 课原文的判法}，slope 为 false（小栋 10-04 ①A）。
+  GET /api/wolf?symbol=&tf=[&span=]   → 防狼术（T13，均线.md 六.7，默认关、不是判据）：这一格 MACD(12,26,9) 黄白线在 0 轴下
+        的区间 below=[[t0, t1|null]]（两条都 <0 进、两条都 >0 出、其余维持），头部同 /api/macd。前端开了开关、按用户选的周期才取。
   GET /  /<静态文件>       → web/ 下的前端文件（只送 STATIC_EXT 里的类型，.py / .md / 点文件一律 404）
 """
 import argparse
@@ -64,7 +66,7 @@ from make_web_fixture import iso, shape                 # noqa: E402
 from core.analyze import analyze                        # noqa: E402
 from core.trend import trend_v3                         # noqa: E402
 import levels as LV                                     # noqa: E402  （web/levels.py：级别联动，不进引擎版本）
-from core.signals import MEASURES, MEASURE_ORIG, macd_lines, signals as engine_signals   # noqa: E402
+from core.signals import MEASURES, MEASURE_ORIG, macd_lines, wolf_below, signals as engine_signals   # noqa: E402
 import core.signals as _engine_signals_mod              # noqa: E402,F401  （见下行：模块对象从 sys.modules 取）
 _ENGINE = sys.modules["core.signals"]                    # core/__init__ 把 signals 导成了函数，模块要从这里拿
 
@@ -311,6 +313,7 @@ def start_refresh(slot, symbol, tf):
 
 MACD_PARAMS = (12, 26, 9)                # 跟引擎背驰判断用的同一组（signals.series_for / macd_hist 的缺省）
 MACD_KEY = "__macd__"                    # mbodies / variants 里副图那一份的键（跟 measure 名字不会撞）
+WOLF_KEY = "__wolf__"                    # 防狼术那一份（T13）的键，同上
 
 
 def _hist(bars):
@@ -335,6 +338,24 @@ def _macd_body(slot, symbol, tf):
             symbol=symbol, tf=tf, params=list(MACD_PARAMS), hist_def="dif-dea",
             t=[x["t"] for x in slot.bars], dif=_clean(dif), dea=_clean(dea),
             hist=_clean(_hist(slot.bars))),
+            ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return b
+
+
+def _wolf_body(slot, symbol, tf):
+    """防狼术（T13，均线.md 六.7）：这一格 K 线上 MACD(12,26,9) 黄白线在 0 轴下的区间，按时间给 —— 前端拿用户选的那个周期
+    请求这一份，再按时间铺到当前图上（周期跟当前图可以不同）。**默认关**：前端不开就不请求，这一份懒算、不进 /api/chart。
+    below = [[t0, t1]]：t0 那根起在下面，t1 那根起站住（t1 为 null ＝ 到现在还在下面）。"""
+    b = slot.mbodies.get(WOLF_KEY)
+    if b is None:
+        head = json.loads(slot.body)
+        t = [x["t"] for x in slot.bars]
+        b = slot.mbodies[WOLF_KEY] = json.dumps(dict(
+            fetched_at=head["fetched_at"], stale=False, refreshing=False,
+            span=head["span"], earliest=head["earliest"], span_max=head["span_max"], engine=head["engine"],
+            symbol=symbol, tf=tf, params=list(MACD_PARAMS), rule="both<0 enter, both>0 leave, else hold",
+            note="防狼术：入门的傻瓜化规则（第 103 课），不是判据，不参与任何结构判定",
+            below=[[t[i0], None if i1 is None else t[i1]] for i0, i1 in wolf_below(slot.bars, *MACD_PARAMS)]),
             ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
     return b
 
@@ -397,6 +418,8 @@ def _measure_body(slot, symbol, tf, measure, cut=DEFAULT_CUT):
     切看法不碰币安。"""
     if measure == MACD_KEY:
         return _macd_body(slot, symbol, tf)              # 副图跟切法无关（默认不是 extend，这一句必须在切法之前）
+    if measure == WOLF_KEY:
+        return _wolf_body(slot, symbol, tf)              # 防狼术同上：跟切法、看法都无关
     if cut != "extend":
         b = slot.mbodies.get((measure, cut))
         if b is None:
@@ -654,6 +677,23 @@ class Handler(BaseHTTPRequestHandler):
             if raw not in {str(v) for v in SPAN_VALUES}:
                 return self._err(400)
             got = get_chart(symbol, tf, min(int(raw), SPAN_MAX[tf]), measure=MACD_KEY)
+            if got is None:
+                return self._err(503)
+            return self._send(200, got[0], gz=got[1])
+        if u.path == "/api/wolf":                         # T13 防狼术：参数跟 /api/macd 同一套
+            try:
+                q = urllib.parse.parse_qs(u.query, keep_blank_values=True, strict_parsing=True, max_num_fields=4)
+            except ValueError:
+                return self._err(400)
+            if not {"symbol", "tf"} <= set(q) <= {"symbol", "tf", "span"} or any(len(v) != 1 for v in q.values()):
+                return self._err(400)
+            symbol, tf = q["symbol"][0].upper(), q["tf"][0]
+            if symbol not in SYMBOLS or tf not in TFS:
+                return self._err(400)
+            raw = q.get("span", ["1"])[0]
+            if raw not in {str(v) for v in SPAN_VALUES}:
+                return self._err(400)
+            got = get_chart(symbol, tf, min(int(raw), SPAN_MAX[tf]), measure=WOLF_KEY)
             if got is None:
                 return self._err(503)
             return self._send(200, got[0], gz=got[1])
