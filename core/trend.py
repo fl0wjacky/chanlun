@@ -406,7 +406,7 @@ def _death_types(r, done, bounds, segments, centers):
       ①② 都比不了（找不到 Z／找不到 A／进入段跟 C 反向）⇒「比不了」，单独一类；没有一买一卖只说明 ① 不成立，照样接着比 ②；
       ①② 真比过、都不成立 ⇒ 前一段是本级别趋势（上涨／下跌、不是升级段）标「小转大」（L43：a+A+b+B+c），否则标「盘整·未见背驰」。
     centers：分界确立以后按刀切开重算的线段中枢（seg_centers）。原地写进 bounds，返回 bounds。"""
-    from .signals import signals, macd_hist, strength
+    from .signals import signals, macd_hist, _panzheng
     sig1 = [s for s in signals(r) if s["kind"] in ("一买", "一卖")]
     first = {(s["bar"], s["kind"]) for s in sig1}
     hist = macd_hist(r["bars"])
@@ -441,8 +441,7 @@ def _death_types(r, done, bounds, segments, centers):
             b["death"], b["death_why"] = "比不了", "进入段反向"
             continue
         newx = (C["p1"] > A["p1"]) if up else (C["p1"] < A["p1"])
-        weak = strength(C, hist) < strength(A, hist)
-        if newx and weak:
+        if _panzheng(A, C, not up, hist):              # 盘整背驰的判法跟 M29 共用一份（signals._panzheng）
             b["death"], b["death_why"] = "盘整背驰", "C 创新%s、面积小于 A" % ("高" if up else "低")
             continue
         why = "C 没创新%s" % ("高" if up else "低") if not newx else "C 面积不小于 A"
@@ -451,6 +450,24 @@ def _death_types(r, done, bounds, segments, centers):
         b["death"], b["death_why"] = ("小转大" if trend else "盘整·未见背驰"), why + ("" if trend else "；前一段是%s" % (
             (sg["type"] + ("·升" if sg["upgraded"] else "")) if sg else "？"))
     return bounds
+
+
+_XZD_SECOND = True                                # 只给自检反向臂关：小转大的刀不出二类
+
+
+def _xzd_seconds(done, bounds):
+    """L53「但在小级别转大级别的情况下，第二类买卖点就是最佳的，因为在这种情况下，没有该级别的第一类买卖点」（买卖点.md:106，第四批）：
+    D2-5 标了小转大的刀，在确立它的那次回抽的终点出二类（D2-5 第 3 条：L 之后一段向上、一段向下不创新低，即 D2-2 的 S[t]）。
+    ★ 放在走势层、单独一个键，**不进 core/signals.py**：J12（买卖点.md 八.5″）要 signals 不读分界，这一类二类点是从分界推出来的，
+      所以单列、带 why＝小转大，前端照二买／二卖画。"""
+    out = []
+    for b in bounds:
+        if b.get("death") != "小转大" or b.get("rule") != "D2-2":
+            continue
+        u = done[b["pullback_line_seg"]]
+        out.append(dict(kind="二买" if b["kind"] == "L" else "二卖", bar=u["i1"], price=u["p1"], confirmed=True,
+                        weak=False, level="seg", why="小转大", from_bar=b["bar"]))
+    return out
 
 
 def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_exceed=True, standardize=True):
@@ -494,4 +511,5 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
     if _DEATH:
         _death_types(r, done, bounds, segments, centers_out)
     return dict(seg_centers=centers_out, bounds=bounds, retracted=res["retracted"],
-                pending=pending(done, ks, res["want"]), segments=segments, units=units_out, reading=reading)
+                pending=pending(done, ks, res["want"]), segments=segments, units=units_out, reading=reading,
+                xzd_seconds=_xzd_seconds(done, bounds) if (_DEATH and _XZD_SECOND) else [])
