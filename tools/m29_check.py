@@ -3,7 +3,7 @@
 
 主跑：data/ 10 份上，线段级、笔级的二类点各多少（照新判据），以及走势层 xzd_seconds（小转大的二类）各多少。
   不变量：① 每颗二类都带 why，且是「不创新低」「创新低＋盘整背驰」之一；② weak 跟「创新低」一致（前端换读 why 之前先两个都给）；
-          ③ xzd_seconds 每颗都对着一把标了「小转大」的 D2-2 刀，位置是那把刀的回抽段终点。
+          ③ xzd_seconds 每颗都对着一把标了「小转大」的 D2-2 刀，位置是刀之后第二段的终点（L53「一个次级别向上、接着一个次级别向下」）。
 --self-test（造出来的，真数据里眼下没有「创新低」的二类）：
   ⑴ 把 zec15 笔级一颗二买那一段压到一买下面（造创新低），盘整背驰判成不成立 ⇒ 这颗二买必须没了；判成成立 ⇒ 必须在、why＝创新低＋盘整背驰；
   ⑵ M29 开关关掉 ⇒ 那颗照旧出（只标弱），证明 ⑴ 拿掉它的确实是 M29；
@@ -41,8 +41,10 @@ def main():
         for x in v["xzd_seconds"]:
             tot["xzd"] += 1
             b = bs.get(x["from_bar"])
-            if not b or b.get("death") != "小转大" or b.get("pullback_end_bar") != x["bar"]:
-                bad.append("%s xzd_seconds bar %d 没对着一把小转大的刀的回抽段终点" % (f, x["bar"]))
+            done = T.find_bounds(r)["done"]
+            ok = b and b.get("death") == "小转大" and b["line_seg"] + 2 < len(done) and done[b["line_seg"] + 2]["i1"] == x["bar"]
+            if not ok:
+                bad.append("%s xzd_seconds bar %d 不在小转大那一刀之后第二段的终点" % (f, x["bar"]))
     print("data/ %d 份：二类 线段级 %d、笔级 %d；小转大的二类 %d" % (len(DATA), tot["seg"], tot["pen"], tot["xzd"]))
     for x in bad:
         print("  ✗", x)
