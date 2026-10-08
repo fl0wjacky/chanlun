@@ -615,11 +615,11 @@ function trendBandView(target, state, prim) {
     // 「这一层到底画了哪几段、铺的什么色」要**量**，不能靠眼睛。
     state.trendDrawn = { bands: [], bounds: [], pending: [], retracted: [], units: [], num: [] };
 
-    // ① 走势背景（§八 1）。★★ 颜色**跟着分界点的类型走，不跟段的 `type` 走** ——
-    //    分界点是**低**（kind='L'）⇒ 这一段是"低 → 高" ⇒ 绿；是**高** ⇒ 红。于是一个
-    //    `type='盘整'` 的段，只要它从低点走到高点，**照样是绿的**。底色讲的是"这一段往哪儿去"，
-    //    不是"这一段被判成什么类型"。（我先前问过"盘整铺什么色" —— 那个问题读错了轴，作废。）
-    //    图头（第一把刀之前）没有方向 ⇒ 灰；最后一段（还在长）⇒ 同色更浅（§八 1）。
+    // ① 走势背景（§八 1）。★★ 10-08 起颜色**跟段型走**（小栋 12:35 选 B，卡 card-fedf32aa-59d）：
+    //    上涨＝绿、下跌＝红，**盘整一律灰**（升级·盘整灰深一档）。原文：「盘整哪里有什么方向，只有趋势才有方向」
+    //    （L31:217-218）。原先跟分界点类型走 —— 一段从低走到高的盘整涂的是跟上涨**同一个绿**，两者色差为 0，
+    //    小栋说「盘整和上涨太难区分」就是这个。「这段从低到高还是从高到低」现在看分界虚线和极值标价。
+    //    图头（第一把刀之前）照旧灰；最后一段（还在长）同色更浅（§八 1）。
     const segs = T.segments, bnd = T.bounds;
     // ①② 归「走势分段」那颗芯片。
     if (sh.trend) {
@@ -629,12 +629,17 @@ function trendBandView(target, state, prim) {
         if (x0 === null || x1 === null || x1 < 0 || x0 > W) continue;   // 滚出去的那几段不画
         let col, a;
         if (s.head || g === 0) { col = TREND.head; a = TREND.headA; }
-        else {
+        else if (s.type === '上涨' || s.type === '下跌') {
           // ★ 绿和红**不是同一个 alpha**：同一个 16% 在白纸上红本来就比绿实（ΔL* 8.55 vs 6.93），
           //   近黑底上要保住这个差，红得给得比绿多。`theme.js` 里那五个数逐个反解过，别拉齐。
-          const up = (bnd[g - 1] || {}).kind === 'L';
+          const up = s.type === '上涨';
           col = up ? TREND.up : TREND.dn;
           a = s.live ? (up ? TREND.liveUp : TREND.liveDn) : (up ? TREND.bandUp : TREND.bandDn);
+        } else {
+          // 盘整（含升级·盘整、以及后台哪天新加的段型）：没有方向 ⇒ 中性灰。**认不得的段型也落到这里** ——
+          //   不知道它往哪去，就不给方向色（不编）。
+          col = TREND.head;
+          a = s.live ? TREND.rangeLive : (s.upgraded ? TREND.rangeUpA : TREND.rangeA);
         }
         ctx.fillStyle = rgba(col, Math.round(a * 255));
         ctx.fillRect(x0, 0, x1 - x0, H);
