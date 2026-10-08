@@ -158,14 +158,15 @@ class IncSegments:
         return _assemble(self.pens, self.segs, self.i, self.tent)
 
 
-def check_series(pens, mode=FEAT_STD_A, stop_at=3):
+def check_series(pens, mode=FEAT_STD_A, stop_at=3, tail=None):
     """A：每个前缀上 增量 vs 整段引擎。B：整段镜像 vs 整段引擎（全长 ＋ 每 10 笔一个前缀）。→ (查了几个, 分歧)。"""
     fails, checked = [], 0
     if mode == FEAT_STD_A:
         inc = IncSegments(mode)
+        lo = 3 if tail is None else max(3, len(pens) - tail + 1)   # 快档：增量照常从头喂，只在最后 tail 个前缀上跟整段对照
         for k in range(1, len(pens) + 1):
             inc.feed(pens[k - 1])
-            if k < 3:
+            if k < lo:
                 continue
             checked += 1
             want = build_segments(pens[:k], mode=mode)
@@ -175,7 +176,10 @@ def check_series(pens, mode=FEAT_STD_A, stop_at=3):
                 if len(fails) >= stop_at:
                     break
     else:
-        for k in sorted(set(range(10, len(pens) + 1, 10)) | {len(pens)}):
+        ks = set(range(10, len(pens) + 1, 10)) | {len(pens)}
+        if tail is not None:
+            ks = {k for k in ks if k > len(pens) - tail}
+        for k in sorted(ks):
             if k < 3:
                 continue
             checked += 1
@@ -258,6 +262,7 @@ def main():
     ap.add_argument("--impl", default="Incremental", choices=["Incremental", "Whole"])
     ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--random", type=int, default=0)
+    ap.add_argument("--tail", type=int, default=None, help="快档：每张图只对照最后 N 个前缀（predeploy 用 200）")
     ap.add_argument("--snap", default=None, help="另加一份本地快照（json.gz：{'<品种> <周期>': {'bars': [...]}}），不进仓")
     a = ap.parse_args()
 
@@ -286,7 +291,7 @@ def main():
                 # 对照臂：整段重算必然自洽（这是"尺子基线"，证明两份实现是同一份代码的不同入口）
                 checked, fails = len(pens) - 2, []
             else:
-                checked, fails = check_series(pens, mode)
+                checked, fails = check_series(pens, mode, tail=a.tail)
             total_checked += checked
             for k, want, got in fails:
                 total_fails.append((fn, mode, k, want, got))
