@@ -56,11 +56,12 @@ def revocations_range(pens, lo, hi, build=build_segments):
 
 
 def cuts(n_pens, parts):
-    """把前缀 [3, n_pens] 切成 parts 段，**按工作量切**（第 n 个前缀要划 n 笔 ⇒ 工作量 ∝ n，累计 ∝ n²）。"""
+    """把前缀 [3, n_pens] 切成 parts 段，**按工作量切**。实测第 n 个前缀划一遍的工夫约 ∝ n²（不是 n：按 n² 累计切的 4 片，
+    zec15 实测 37／61／82／91 秒），累计 ∝ n³ ⇒ 按 n³ 等分。"""
     lo, hi = 3, n_pens + 1
     if parts <= 1 or hi - lo < 2 * parts:
         return [(lo, hi)]
-    edges = [lo] + [int(round((lo * lo + (hi * hi - lo * lo) * k / parts) ** 0.5)) for k in range(1, parts)] + [hi]
+    edges = [lo] + [int(round((lo ** 3 + (hi ** 3 - lo ** 3) * k / parts) ** (1 / 3))) for k in range(1, parts)] + [hi]
     edges = sorted(set(edges))
     return list(zip(edges, edges[1:]))
 
@@ -83,12 +84,12 @@ def main():
     fz = json.load(open(os.path.join(HERE, "fixtures", "headfuzz_pens.json")))["seeds"]   # 直接是笔（Atlas 的随机反例）
     items += [("fixtures/headfuzz_pens.json seed %s" % sd, pens) for sd, pens in fz.items()]
     # 每张按工作量切成若干片（大图多切，小图一片），所有片进同一个进程池 ⇒ 长的那张不会拖住别的
-    total = sum(len(p) ** 2 for _, p in items) or 1
+    total = sum(len(p) ** 3 for _, p in items) or 1
     tasks = []
     for k, (name, pens) in enumerate(items):
-        parts = max(1, round(JOBS * 2 * len(pens) ** 2 / total)) if JOBS > 1 else 1
+        parts = max(1, round(JOBS * 8 * len(pens) ** 3 / total)) if JOBS > 1 else 1   # 切细（每路约 8 片）：片数少了尾巴不齐，实测 2 片/路只快一倍
         tasks += [(k, lo, hi) for lo, hi in cuts(len(pens), parts)]
-    tasks.sort(key=lambda t: -(t[2] ** 2 - t[1] ** 2))        # 大片先发
+    tasks.sort(key=lambda t: -(t[2] ** 3 - t[1] ** 3))        # 大片先发
     if JOBS > 1:
         import concurrent.futures as cf
         with cf.ProcessPoolExecutor(max_workers=JOBS) as ex:
