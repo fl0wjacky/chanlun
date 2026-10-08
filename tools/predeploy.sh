@@ -104,7 +104,11 @@ fi
 #   任何一张（两边慢的那个 ≥100ms）慢过 1.5 倍 ⇒ 红；HEAD 一轮超过基准一轮的 3 倍（至少 20s）直接掐掉记红。约 35 秒，
 #   自检约 50 秒（HEAD 对 HEAD 必须绿；build_segments 每次多划一遍必须红）。解析不出 origin/main（没 fetch）⇒ rc=2 没比成。
 #   缘由：L77 那一版事后手跑才发现慢，别的尺量的全是「对不对」。
-for chk in tools/selfcheck.py web/check_parity.py "web/check_parity.py --self-test" web/check_abuse.py web/check_assets.py "tools/pine_lockstep.py --head HEAD" "notes/pine-incremental-seg.py --self-test" "notes/pine-incremental-seg.py --tail 60" "tools/trend_check.py --self-test" tools/speed_gate.py "tools/speed_gate.py --self-test" tools/seg_prefix_check.py "tools/seg_prefix_check.py --self-test" tools/live_seg_check.py tools/levels_check.py "tools/levels_check.py --self-test" "tools/j18_check.py --self-test" "tools/j19_check.py --self-test" "tools/j17_check.py --self-test" tools/web_theme_sync.py "tools/web_theme_sync.py --selftest" tools/web_footer_check.py "tools/web_footer_check.py --selftest" tools/web_fmt_check.py "tools/web_fmt_check.py --selftest" tools/web_fitbox_check.py "tools/web_fitbox_check.py --selftest" tools/web_more_check.py "tools/web_more_check.py --selftest"; do
+# ★ check_abuse --self-test（card-79464e38-458，10-08 接进来）：15 种改坏后台，主跑必须各自红；一臂一个子进程、5 个并行，约 2 分 20 秒。
+#   接进来之前没人跑它，第 12 臂（替身不收 cut/pen_min）崩了不知多久。一臂崩了算没牙（rc=3 ⇒ 记红）。
+# ★ check_closedue（card-7d3e8748-3d3）：收盘前 1 秒请求过、收盘后打开，照页面真的补数节奏（常量从 app.js 读）敲，
+#   10 秒内必须拿到新那根，每格每根最多多拉币安 1 次。假钟假币安，约 12 秒；自检把 _close_due 摘掉必须红。
+for chk in tools/selfcheck.py web/check_parity.py "web/check_parity.py --self-test" web/check_abuse.py "web/check_abuse.py --self-test" web/check_closedue.py "web/check_closedue.py --self-test" web/check_assets.py "tools/pine_lockstep.py --head HEAD" "notes/pine-incremental-seg.py --self-test" "notes/pine-incremental-seg.py --tail 60" "tools/trend_check.py --self-test" tools/speed_gate.py "tools/speed_gate.py --self-test" tools/seg_prefix_check.py "tools/seg_prefix_check.py --self-test" tools/live_seg_check.py tools/levels_check.py "tools/levels_check.py --self-test" "tools/j18_check.py --self-test" "tools/j19_check.py --self-test" "tools/j17_check.py --self-test" tools/web_theme_sync.py "tools/web_theme_sync.py --selftest" tools/web_footer_check.py "tools/web_footer_check.py --selftest" tools/web_fmt_check.py "tools/web_fmt_check.py --selftest" tools/web_fitbox_check.py "tools/web_fitbox_check.py --selftest" tools/web_more_check.py "tools/web_more_check.py --selftest"; do
   log=$(mktemp)
   "$PY" $chk >"$log" 2>&1
   rc=$?
