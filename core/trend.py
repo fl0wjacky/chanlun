@@ -481,7 +481,8 @@ def _xzd_seconds(done, bounds, r=None):
         else:
             continue
         out.append(dict(kind="二买" if down else "二卖", bar=s2["i1"], price=s2["p1"], confirmed=True,
-                        weak=bool(newx), level="seg", why=why, from_bar=b["bar"]))
+                        weak=bool(newx), level="seg", why=why, from_bar=b["bar"],
+                        known_bar=b["pullback_end_bar"]))   # 事后才知道：点画在 s2，可要到刀确立（回抽段终点）才知道它是小转大
     return out
 
 

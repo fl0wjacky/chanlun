@@ -21,6 +21,7 @@ T = importlib.import_module("core.trend")
 DATA = ["aaplusdt_1h.json", "aaplusdt_2h.json", "aaplusdt_30m.json", "aaplusdt_4h.json", "btc_4h.json",
         "zec15.json", "zec30_cut.json", "zec_1h.json", "zec_2h.json", "zec_4h.json"]
 WHY = ("不创新低", "创新低＋盘整背驰")
+XZD_BASE = {"zec15.json": [452.0], "zec30_cut.json": [452.0]}   # 线上 ZEC 15m／30m 快照也都是 452.0（不在 data/）
 
 
 def main():
@@ -45,6 +46,10 @@ def main():
             ok = b and b.get("death") == "小转大" and b["line_seg"] + 2 < len(done) and done[b["line_seg"] + 2]["i1"] == x["bar"]
             if not ok:
                 bad.append("%s xzd_seconds bar %d 不在小转大那一刀之后第二段的终点" % (f, x["bar"]))
+    for f in XZD_BASE:                                      # 基线：小转大那一刀之后的双底，二买 452.0（Nova 10-08 16:26）
+        got = [round(x["price"], 2) for x in T.trend_v3(analyze_file(f))["xzd_seconds"]]
+        if got != XZD_BASE[f]:
+            bad.append("%s 小转大的二类基线 %s，应为 %s" % (f, got, XZD_BASE[f]))
     print("data/ %d 份：二类 线段级 %d、笔级 %d；小转大的二类 %d" % (len(DATA), tot["seg"], tot["pen"], tot["xzd"]))
     for x in bad:
         print("  ✗", x)
@@ -101,6 +106,27 @@ def self_test():
     ok = bool(on) and not offx
     print("%s 小转大的二类：照常 %d 颗（%s）；关掉 ⇒ %d 颗" % ("✓" if ok else "✗", len(on),
           ", ".join("%s %.2f" % (x["kind"], x["price"]) for x in on), len(offx)))
+    miss += not ok
+
+    # 改回「确立回抽」（D2-2 的回抽段终点，10-08 更正前的写法）⇒ 主跑必须红（30m 会回到 751.36、15m 回到 488.24）
+    real_x = T._xzd_seconds
+    def old_pos(done, bounds, r=None):
+        out = real_x(done, bounds, r)
+        for x in out:
+            b = next(bb for bb in bounds if bb["bar"] == x["from_bar"])
+            u = done[b["pullback_line_seg"]]
+            x.update(bar=u["i1"], price=u["p1"])
+        return out
+    T._xzd_seconds = old_pos
+    try:
+        import io, contextlib
+        with contextlib.redirect_stdout(io.StringIO()):
+            red = main()
+        olds = sorted(round(x["price"], 2) for f in ("zec15.json", "zec30_cut.json") for x in T.trend_v3(analyze_file(f))["xzd_seconds"])
+    finally:
+        T._xzd_seconds = real_x
+    ok = red == 1
+    print("%s 小转大的二类改回「确立回抽」⇒ 主跑%s（那两颗变成 %s）" % ("✓" if ok else "✗", "红了" if ok else "没红（牙没咬到）", olds))
     miss += not ok
 
     xz = [b for b in T.trend_v3(r0)["bounds"] if b.get("death") == "小转大"]

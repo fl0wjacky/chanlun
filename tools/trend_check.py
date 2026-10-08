@@ -279,6 +279,31 @@ def no_future(fn="zec15.json"):
     return bad
 
 
+def no_future_xzd(fn):
+    """④′ 小转大的二类（xzd_seconds）不看未来：每颗都要在它那把刀『最早能确立』的那一根截断时就在（bar、价位都一样），
+    之后再截（＋1 天、＋1 周、＋1 月）都还在、不变。点画在刀后第二段的终点，早于确立，这是『事后才知道』（known_bar 标着），
+    不算未来函数；要防的是它出现以后又挪、又没。"""
+    bars = load(os.path.join(ROOT, "data", fn))
+    _, full = run(fn)
+    bad = []
+    for x in full.get("xzd_seconds", []):
+        k = next(i for i, b in enumerate(full["bounds"]) if b["bar"] == x["from_bar"])
+        want = [(b["bar"], b["kind"]) for b in full["bounds"][:k + 1]]
+        seen = first_seen(fn, k, want, bars, full["bounds"][k]["pullback_end_bar"])
+        if seen is None:
+            bad.append("%d 那颗：刀截到图尾都没有" % x["bar"]); continue
+        key = (x["kind"], x["bar"], x["price"])
+        for t in (seen, seen + 96, seen + 672, seen + 2880):
+            if t >= len(bars):
+                break
+            _, v = run(fn, bars[:t + 1])
+            got = [(y["kind"], y["bar"], y["price"]) for y in v.get("xzd_seconds", []) if y["from_bar"] == x["from_bar"]]
+            if got != [key]:
+                bad.append("%s %.2f：截到 %d 时是 %s" % (x["kind"], x["price"], t, got)); break
+        print("    小转大二类 %s %.2f（bar %d）：刀最早在 %d 确立，known_bar %d" % (x["kind"], x["price"], x["bar"], seen, x["known_bar"]))
+    return bad
+
+
 def main():
     bad = []
 
@@ -311,6 +336,7 @@ def main():
     cell("⑦ D2-0 夹具 zec1m_d2std：04-29 那个 317.74 L 要确立（候选卡死就没有）", d2std_fixture())
     cell("⑧ 同一对 (b, b′) 被 D2-7 去掉最多一次（编者口径；含 zec1m_retract_loop 夹具）", retract_once())
     cell("④ 不看未来（zec15：最早能确立那一根起，之后一直在、不变）", no_future())
+    cell("④′ 小转大的二类不看未来（zec15：刀确立那一根起就在，之后不挪不没）", no_future_xzd("zec15.json"))
     print("全部通过" if not bad else "%d 处不过" % len(bad))
     return 1 if bad else 0
 
