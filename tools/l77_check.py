@@ -9,7 +9,8 @@
   ① 夹具 tools/fixtures/l77_pens.json：1300 合成 15-25、1600 合成 4-10（各是向上 / 向下越过 V 的那一种）、1317 不合；三颗 check_segments 都是 0；
   ② 每个合段**逐笔加长时第一次出现的前缀长度**＝ 引擎算的合段时刻 max(R 确认, c＋1)：合段时刻是二分出来的，
      这一格拿整份逐笔加长去对 —— 两条不同的路算出同一个数，才说明「当下能知道」没算偏；
-  ③ 随机 4000 组（同一个生成器）：check_segments 违规 0（修前 2 组）。
+  ③ 随机 4000 组（同一个生成器）：check_segments 违规 0（修前 2 组）；
+  ④ 独立复核 verify_by_definition 的 case 4 那一支：合段 0 处；终点前后挪 2 笔必须报。
 """
 import json
 import os
@@ -69,6 +70,23 @@ def main(quiet=False):
             ok2 = first == t
             bad += not ok2
             say("%s ② seed %s 合段 %d-%d：逐笔加长第一次出现在前缀 %s，引擎算的合段时刻 %s" % ("✓" if ok2 else "✗", sd, s["PI0"], s["PI1"], first, t))
+    # ④ 独立复核 verify_by_definition 认得合段（它有一支专按 L77 原文的形状判 case 4，不调引擎）：正常 0 处；
+    #    把合段终点往前、往后各挪 2 笔，都必须报「L77 合段不成立」—— 这一支不是摆设
+    for sd, d in (("1300", -2), ("1600", 2)):
+        P = fx[sd]
+        segs = build_segments(P)
+        v0 = S.verify_by_definition(segs, P)
+        m = next((s for s in segs if s.get("case") == 4), None)
+        if m is None:                             # 没有合段（关了 L77_MERGE）：这一格就是不过，不许崩
+            bad += 1
+            say("✗ ④ seed %s：没有合段可挪" % sd)
+            continue
+        m["PI1"] += d
+        m["p1"] = P[m["PI1"]]["p1"]
+        v1 = [x for x in S.verify_by_definition(segs, P) if x[0] == "L77 合段不成立"]
+        ok4 = not v0 and bool(v1)
+        bad += not ok4
+        say("%s ④ seed %s：复核 %d 处；合段终点挪 %+d 笔 ⇒ 报 %d 处「L77 合段不成立」" % ("✓" if ok4 else "✗", sd, len(v0), d, len(v1)))
     hit = [sd for sd in range(4000) if check_segments(build_segments(gen(sd)), gen(sd), [])]
     bad += bool(hit)
     say("%s ③ 随机 4000 组违规 %d 组 %s" % ("✓" if not hit else "✗", len(hit), hit[:8]))
