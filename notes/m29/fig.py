@@ -13,6 +13,19 @@ else:
 r = analyze(bars, tick=tk)
 T._XZD_SECOND = False; A = T.trend_v3(r, reading="A")
 T._XZD_SECOND = True;  Bv = T.trend_v3(r, reading="A")
+def seen_bar(x):
+    """跟 tools/trend_check.no_future_xzd 同一个量法：二分找这颗点第一次出现的那一根（前一根必须还没有）。"""
+    key = (x["kind"], x["bar"], x["price"])
+    def has(t):
+        v = T.trend_v3(analyze(bars[:t + 1], tick=tk), reading="A")
+        return [(y["kind"], y["bar"], y["price"]) for y in v.get("xzd_seconds", []) if y["from_bar"] == x["from_bar"]] == [key]
+    lo, hi = x["bar"], len(bars) - 1
+    while lo < hi:
+        mid = (lo + hi) // 2
+        lo, hi = (lo, mid) if has(mid) else (mid + 1, hi)
+    assert not has(lo - 1), "二分没找准"
+    return lo
+SEEN = {(x["bar"], x["price"]): seen_bar(x) for x in Bv.get("xzd_seconds", [])}
 sig = [s for s in signals(r) if s["kind"] in ("一买", "二买", "三买", "一卖", "二卖", "三卖")]
 ts = lambda i: D.datetime.fromtimestamp(bars[i]["t"]/1000, D.timezone.utc).strftime('%m-%d %H:%M')
 ix = lambda s: next(i for i, b in enumerate(bars) if D.datetime.fromtimestamp(b["t"]/1000, D.timezone.utc).strftime('%m-%d') >= s)
@@ -45,10 +58,10 @@ def panel(k, v, tag, extra):
             if not b0 <= s["bar"] <= b1: continue
             x, y = X(s["bar"]), Y(s["price"])
             d.ellipse([x - 16, y - 16, x + 16, y + 16], outline=(230, 120, 0), width=3)
-            kb = s.get("known_bar")
+            kb = SEEN.get((s["bar"], s["price"]))
             label(x - 40, y + 30, "★ 新加：%s %.2f @%s（%s%s）" % (s["kind"], s["price"], ts(s["bar"]), s["why"],
-                  "，%s 才知道" % ts(kb) if kb is not None else ""), (230, 120, 0))      # 往下错开，别压三买的标签
+                  "，实时 %s 才出现" % ts(kb) if kb is not None else ""), (230, 120, 0))      # 往下错开，别压三买的标签
 panel(0, A, "改前（main：小转大没有二类点）", False)
 panel(1, Bv, "改后（M29：小转大那一刀之后紧接的第二段终点出二买，L53；放走势层 xzd_seconds）", True)
 d.text((ML, PH * 2 + 24), "蓝三角＝信号层买卖点（这一批段级没有变化）；紫虚线＝走势分界；橙圈＝新加的小转大二买", fill=(60, 60, 60), font=fsm)
-img.save(out); print("ok", name, [(s["price"], ts(s["bar"])) for s in Bv["xzd_seconds"]])
+img.save(out); print("ok", name, [(s["price"], ts(s["bar"]), "实时最早", ts(SEEN[(s["bar"], s["price"])])) for s in Bv["xzd_seconds"]])
