@@ -849,8 +849,22 @@ def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
             ok = (prev is not None and prev["PI1"] == i - 1 and s["p0"] == V
                   and not any(past_v(pens[r]) for r in range(i + 1, k + 1)))
             if ok:
+                # (d) 「先越过 V、没先越过本段终点」是对 ⟪然后就转头继续创新低⟫ 里「转头」的读法 ——『编者口径』，原文没逐字写「没先越过终点」
                 first = next((r for r in range(k + 1, N) if past_v(pens[r]) or past_e(pens[r])), None)
                 ok = first is not None and past_v(pens[first]) and not past_e(pens[first])
+            if ok:
+                # (e) 中间真是「A＋R」两个线段（Atlas 23:02；第一支 ⟪如果这个反弹只是一笔……走势A依然延续⟫ 也满足 (a)(b)(d)，
+                #     不加这条复核分不出一支、二支）：找得到切点 m，A＝[i+1..m]、R＝[m+1..k] 各 ≥3 笔、单数；A 跟旧段同向、R 反向；
+                #     A 的终点是段内往旧段方向的极值（A 走到头才被 R 接过去）。
+                #     ★「R 把 A 线段破坏」这里**不独立判**：笔级的两种近似都会误杀原文那种合段 ——「R 越过 A 的起点」误杀 1300
+                #       （A 起于 96.2、R 收在 96.6），「R 越过 A 最后一笔的起点」误杀 1600（R 95.6→96.2、A 最后一笔起于 97.1；
+                #       A 是靠特征序列分型（含追平）被确认破坏的，不是靠哪一笔越过了谁）。真要独立判，得把特征序列那套再写一遍，
+                #       这条留给引擎（_first_seg 的 confirm），复核只守结构：A、R 都是够格的段、方向对、切点在 A 的极值上。
+                def is_seg(a, b, d):              # [a..b] 笔数单数 ≥3，第一笔方向 d
+                    return b - a + 1 >= 3 and (b - a + 1) % 2 == 1 and ((pens[a]["p1"] > pens[a]["p0"]) == d)
+                # 往旧段方向的极值笔；追平取**最晚**那个（A 走到最后一次碰到极值才算走到头 —— 1600 的 95.6 出现两次，第 5、7 笔，A 是 5-7）
+                m = (min if up else max)(range(k, i, -1), key=lambda r: pens[r]["p1"])
+                ok = is_seg(i + 1, m, not up) and is_seg(m + 1, k, up)
             if not ok:
                 bad.append(("L77 合段不成立", n, k))
             continue

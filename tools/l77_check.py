@@ -10,7 +10,8 @@
   ② 每个合段**逐笔加长时第一次出现的前缀长度**＝ 引擎算的合段时刻 max(R 确认, c＋1)：合段时刻是二分出来的，
      这一格拿整份逐笔加长去对 —— 两条不同的路算出同一个数，才说明「当下能知道」没算偏；
   ③ 随机 4000 组（同一个生成器）：check_segments 违规 0（修前 2 组）；
-  ④ 独立复核 verify_by_definition 的 case 4 那一支：合段 0 处；终点前后挪 2 笔必须报。
+  ④ 独立复核 verify_by_definition 的 case 4 那一支：合段 0 处；终点前后挪 2 笔必须报；
+  ⑤ 反弹收成一笔（L77 第一支的形状）却标了合段，复核必须报。
 """
 import json
 import os
@@ -87,6 +88,22 @@ def main(quiet=False):
         ok4 = not v0 and bool(v1)
         bad += not ok4
         say("%s ④ seed %s：复核 %d 处；合段终点挪 %+d 笔 ⇒ 报 %d 处「L77 合段不成立」" % ("✓" if ok4 else "✗", sd, len(v0), d, len(v1)))
+    # ⑤ 复核分得出 L77 第一支、第二支（Atlas 23:02）：把 1600 的反弹 R（8-10）收成一笔、合段照样标 case 4，
+    #    这就是第一支 ⟪如果这个反弹只是一笔……走势A依然延续⟫ 的形状 —— 复核必须报「L77 合段不成立」
+    P0 = fx["1600"]
+    P1 = [dict(p) for p in P0]
+    P1[8] = dict(P1[8], p1=P1[10]["p1"], hi=max(P1[8]["hi"], P1[10]["hi"]), lo=min(P1[8]["lo"], P1[10]["lo"]))
+    del P1[9:11]
+    segs0 = build_segments(P0)
+    m0 = next((s for s in segs0 if s.get("case") == 4), None)
+    if m0 is None:
+        bad += 1
+        say("✗ ⑤ seed 1600：没有合段可改")
+    else:
+        fake = [dict(s) for s in segs0 if s["PI1"] < m0["PI0"]] + [dict(m0, PI1=8, p1=P1[8]["p1"])]
+        v5 = [x for x in S.verify_by_definition(fake, P1) if x[0] == "L77 合段不成立"]
+        bad += not v5
+        say("%s ⑤ 反弹收成一笔（第一支的形状）却标了合段 ⇒ 复核报 %d 处" % ("✓" if v5 else "✗", len(v5)))
     hit = [sd for sd in range(4000) if check_segments(build_segments(gen(sd)), gen(sd), [])]
     bad += bool(hit)
     say("%s ③ 随机 4000 组违规 %d 组 %s" % ("✓" if not hit else "✗", len(hit), hit[:8]))
