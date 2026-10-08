@@ -1684,8 +1684,14 @@ const shotChart = async (p, tag) => {
     // 屏内几段：自己另数一遍（不抄 pzWhere）
     const mine = g ? body.filter((s) => s.i1 >= vv.from && s.i0 <= vv.to).length : -1;
     const tail = g ? lb.slice(-g.chips.length).map((b) => b.slice(0, 4).map(Math.round).join(',')) : [];
+    // 刻度字跟这一帧已经画上去的字（走势那层的 labels ＋ 标注层的 placed）**像素不交叠**
+    const others = [...((app.state.trendDrawn || {}).labels || []), ...lb];
+    const hit = (b) => others.some((q) => b[0] < q[2] && q[0] < b[2] && b[1] < q[3] && q[1] < b[3]);
+    const tl = g ? g.tickLabels : [];
+    const tlBad = tl.filter((t) => t.box && hit(t.box)).map((t) => t.k);
     return { nBody: body.length, H: d.H, pane: app.chart.panes()[0].getHeight(),
       chartH: Math.round(document.querySelector('#chart').getBoundingClientRect().height), railY: d.railY,
+      tl: tl.map((t) => [t.k, t.side]), tlBad, nOthers: others.length,
       groups: d.groups.length, g, mine, tail, chipBoxes: g ? g.chips.map((c) => c.box.map(Math.round).join(',')) : [] };
   });
   const pg = pzForce.g;
@@ -1703,6 +1709,30 @@ const shotChart = async (p, tag) => {
   ck('㊹ 避让：两块 chip **最后登记**（买卖点文字 → 价签 → 我）⇒ 让路的是我，老标签不动',
      pzForce.tail.length > 0 && JSON.stringify(pzForce.tail) === JSON.stringify(pzForce.chipBoxes),
      `登记表末尾 ${JSON.stringify(pzForce.tail)}　chip ${JSON.stringify(pzForce.chipBoxes)}`);
+
+  ck('㊾ 刻度字 k/N 不压别的字：跟分界价格字、价签、买卖点文字、chip 像素都不交叠（撞了翻边，两边都撞就只画刻度）',
+     pzForce.tl.length > 0 && pzForce.tlBad.length === 0,
+     `刻度 ${JSON.stringify(pzForce.tl)}（r＝右／l＝左／null＝只画刻度）　比了 ${pzForce.nOthers} 块字　交叠的 ${JSON.stringify(pzForce.tlBad)}`);
+
+  // ㊾b 牙：把一条分界的价格**挪到刻度字正上方**（那个价字会落进刻度字右边那一格），再画一帧 ——
+  //   刻度字必须翻边或者不写，而且 `blockedR` 得是真的（证明这一帧真撞过，不是碰巧没东西挨着）。
+  const pzBump = await pPZ.evaluate(async () => {
+    const app = window.__app, ts = app.chart.timeScale(), T = app.state.data.trend;
+    const g = app.state.pzDrawn.groups[0]; if (!g || !g.tickAt.length) return { err: '没有刻度' };
+    const { k, x } = g.tickAt[0]; const bar = Math.round(ts.coordinateToLogical(x));
+    const b = T.bounds.reduce((m, q) => (Math.abs(q.bar - bar) < Math.abs(m.bar - bar) ? q : m));
+    const y = app.state.pzDrawn.railY + (b.kind === 'H' ? 6 : -24);
+    b.price = app.state.candleSeries.coordinateToPrice(y);
+    const v = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: v.from + 0.01, to: v.to + 0.01 });
+    await new Promise((r) => setTimeout(r, 700));
+    const gg = app.state.pzDrawn.groups[0], t = gg.tickLabels.find((q) => q.k === k);
+    const others = [...app.state.trendDrawn.labels, ...app.state.labelBoxes];
+    const hit = (bx) => others.some((q) => bx[0] < q[2] && q[0] < bx[2] && bx[1] < q[3] && q[1] < bx[3]);
+    return { k, kind: b.kind, side: t.side, blockedR: t.blockedR, overlap: !!(t.box && hit(t.box)) };
+  });
+  ck('㊾b （牙）分界价格字挪到刻度字右边那一格上 ⇒ 刻度字翻到左边或只画刻度，仍然不交叠',
+     !pzBump.err && pzBump.blockedR === true && pzBump.side !== 'r' && !pzBump.overlap,
+     JSON.stringify(pzBump));
 
   // ㊺ 悬停那块标签 ⇒ 出原文那句（第 38 课正文 ＋ 第 45 课答疑）
   const chipBox = pg && pg.chips[0] ? pg.chips[0].box : null;

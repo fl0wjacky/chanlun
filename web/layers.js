@@ -1171,7 +1171,34 @@ function trendMarkView(target, state, prim) {
         }
       }
     }
+    // 盘整组的段界刻度（卡 card-9f7a80b6-e8a）：落点是标注层这一帧算好的（`state.pzDrawn`），见 `drawPzGroups`。
+    drawPzTicks(ctx, state, mine, W);
   });
+}
+
+/** 盘整组段界上的刻度 ＋ `k/N`。刻度线照画（它是结构）；**字**先放刻度右边，跟已经画上去的字
+ *  （这一层的 `mine`：分界价格／待定／撤回／编号…；标注层的 `placed`：价签／买卖点文字／组的 chip）
+ *  **像素有交叠**就翻到左边，两边都撞就只画刻度不写字（Bram 22:02 定：交叠才修，贴着不算）。
+ *  ★ 字不登记任何一张表：它是最后画的，后面没有谁要躲它。 */
+function drawPzTicks(ctx, state, mine, W) {
+  const P = state.pzDrawn;
+  if (!P || P.railY === null) return;
+  const y = P.railY, others = [...mine, ...(state.labelBoxes || [])];
+  ctx.font = FONT;
+  for (const g of P.groups) {
+    g.tickLabels = [];
+    for (const { k, x } of g.tickAt) {
+      ctx.strokeStyle = TREND.edge; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x, y - 8); ctx.lineTo(x, y + 4); ctx.stroke();
+      const t = `${k}/${g.n}`, tw = ctx.measureText(t).width;
+      const boxR = [x + 5, y - 15, x + 5 + tw, y - 1], boxL = [x - 5 - tw, y - 15, x - 5, y - 1];
+      const ok = (b) => b[0] >= 2 && b[2] <= W - 2 && !hits(b, others);
+      const side = ok(boxR) ? 'r' : ok(boxL) ? 'l' : null;
+      if (side) haloText(ctx, side === 'r' ? x + 5 : x - 5, y - 4, t, TREND.edge, side === 'r' ? 'left' : 'right');
+      // `blockedR`：右边那一格被别的字占了（只为工装：它得证明"撞了"那条路真走到过，不然 ㊾ 是空转）
+      g.tickLabels.push({ k, side, box: side === 'r' ? boxR : side === 'l' ? boxL : null, blockedR: hits(boxR, others) });
+    }
+  }
 }
 
 /** 带描边的一行字（参考图的 `paint-order: stroke` ＋ 3 px 白边，这边那圈是页面底色）。
@@ -1256,7 +1283,8 @@ export function fmtG(v) {
  *  形态是 07:51Z 定的 C（卡上【实现要点】那一条），量出来的，不是挑的：
  *    · **细轨贴价格窗格底边**，不套框 —— 一屏装不下任何一组（ZEC 1h 一组跨十几屏），套框画不出来；
  *      `H` 是**这个窗格**的高（primitive 挂在 K 线那一格上），不是 `#chart` 的高（底下还有成交量／MACD）。
- *    · 组内每条**段界**一根刻度 ＋ `k/N` —— 一屏往往只落得下一两条界，刻度回答的是「我在组的哪儿」；
+ *    · 组内每条**段界**一根刻度 ＋ `k/N` —— 一屏往往只落得下一两条界，刻度回答的是「我在组的哪儿」
+ *      （落点在这儿算，**画在走势那一层的最后**，见 `drawPzTicks`：要躲的分界价格字住在那一层）；
  *    · 主标签：组头在屏内就贴组头，组头滚出左边就**吸视口左边**（吸着组头等于没标签）；
  *    · 有段落在屏外时，右边再排一块「屏内 第 a–b 段」，两头写明「◀ 左边还有 n 段」「右边还有 n 段 ▶」。
  *  ★ 避让：两块 chip **最后登记** `placed`（买卖点文字 → 价签 → 我）⇒ `fitBox` 挪的是我，老标签一个像素不动。
@@ -1295,25 +1323,17 @@ function drawPzGroups(ctx, state, sh, vp, placed, chart, W, H) {
       if (out || x === null) continue;
       ctx.beginPath(); ctx.moveTo(x, railY - 10); ctx.lineTo(x, railY + 6); ctx.stroke();
     }
-    // 段界刻度 k/N：比细轨**亮一档**（轨是容器，刻度是结构）
+    // 段界刻度 k/N：**这里只算落点，画在走势那一层**（`drawPzTicks`）。理由：刻度字要躲的是分界那几个价格字，
+    //   而那些字住在走势那一层自己的占位表（`mine`）里、而且**在这一层之后才画** —— 在这儿画，同一帧里根本看不见它们。
+    //   走势那层排在最后，画到它那儿时 `placed`（价签／买卖点文字／我的 chip）和它自己的 `mine` 都已经是这一帧的了。
     const ticks = [];
-    ctx.textBaseline = 'alphabetic';
     for (let k = 1; k < g.n; k++) {
       const x = xs(g.ends[k - 1]);
-      if (!onScreen(x, W, 0)) continue;
-      ctx.strokeStyle = TREND.edge; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(x, railY - 8); ctx.lineTo(x, railY + 4); ctx.stroke();
-      // 字放在刻度**右边**：段界就是分界，那根竖虚线正好穿过刻度 —— 居中的话虚线会从字中间划过去（实测截图）。
-      //   贴着右沿放不下就翻到刻度左边（不夹、不截字）。
-      const kt = `${k}/${g.n}`;
-      ctx.font = FONT;
-      const right = x + 5 + ctx.measureText(kt).width <= W - 2;
-      haloText(ctx, right ? x + 5 : x - 5, railY - 4, kt, TREND.edge, right ? 'left' : 'right');
-      ticks.push(k);
+      if (onScreen(x, W, 0)) ticks.push({ k, x });
     }
     // 主标签 ＋ 位置 chip
     const lx = leftOut || xa === null ? 8 : Math.max(8, xa + 6);
-    const title = g.n === 2 ? '同一更大横盘的两半' : `同一更大横盘 · ${g.n} 段`;
+    const title = `同一更大横盘 · ${g.n} 段`;   // N＝2 也写「· 2 段」：Nova 21:28 定统一一种写法（Bram 22:02 审出代码跟 spec 两套）
     // 位置 chip 只在**有段落在屏外**时出：组头／组尾只是半截出屏、段一条没少的时候，「屏内 第 1–2 段」是废话。
     const pos = w.inView < g.n
       ? (w.inView === 1 ? `屏内 第 ${w.lo} 段` : `屏内 第 ${w.lo}–${w.hi} 段`) : null;
@@ -1333,7 +1353,8 @@ function drawPzGroups(ctx, state, sh, vp, placed, chart, W, H) {
     if (w.before) { ctx.textAlign = 'left'; ctx.fillText(`◀ 左边还有 ${w.before} 段`, 8, railY - 20); }
     if (w.after) { ctx.textAlign = 'right'; ctx.fillText(`右边还有 ${w.after} 段 ▶`, W - 8, railY - 20); }
     ctx.textAlign = 'left';
-    state.pzDrawn.groups.push({ n: g.n, from: g.from, to: g.to, i0: g.i0, i1: g.i1, leftOut, rightOut, ...w, ticks, chips });
+    state.pzDrawn.groups.push({ n: g.n, from: g.from, to: g.to, i0: g.i0, i1: g.i1, leftOut, rightOut, ...w,
+      ticks: ticks.map((t) => t.k), tickAt: ticks, tickLabels: [], chips });
   }
 }
 
