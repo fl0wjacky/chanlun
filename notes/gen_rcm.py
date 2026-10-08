@@ -49,6 +49,86 @@ KNOWN={
  '笔P9':('core/kline.py `quantize()` 按最小价位取整后逐位比','已实现（第三批 B10）'),
  '笔P8':('core/kline.py 合并时 `bh > p["h"]` 才换 ih（并列取前一根）','不改（Nova 10-08 12:56：L81 数据不够、上下文讲的是包含）'),
 }
+
+# ---- Bram 10-08 填：代码位置／状态（main 3718ca8 上逐条看过代码；行号是 def 那一行）----
+# W、M、J、T、Z 没列在这里的 ⇒ 只是记原文，默认『不进代码』（Nova 13:42）。
+T='core/trend.py'; SG='core/segment.py'; PN='core/pen.py'; KL='core/kline.py'; CT='core/center.py'; SI='core/signals.py'; TC='tools/trend_check.py'
+KNOWN.update({
+ 'C3':(f'{PN} `MIN_GAP_DEFAULT`＝3 ＋ web/server.py `PEN_MIN_OPTIONS`（6／7 开关）＋ tradingview/chanlun.pine `penMin`','已实现（main 3718ca8）'),
+ 'C6':(f'{PN}:254 `check_pens`：顶分型最高 K 线高于底分型最低 K 线（第 77 课），不要求公共部分','已实现'),
+ 'C7':(f'{KL}:111 `fractals()`：只认二（顶）、四（底）；一、三（上升／下降 K 线）不出','已实现'),
+ 'C8':(f'{KL}:39 `_standardize_span`：方向看最后两根（新的更高 ⇒ 向上）','已实现'),
+ 'C9':(f'{PN}:118 `build_pens` 的待定分型／`fix_start`：后面走出来就作废上一笔、换端点','已实现'),
+ '笔P1':(f'{PN}:118 `build_pens` `feed()`：成不了笔的分型不进端点序列；同类只留更极端的','已实现（Bram 10-08 核代码）'),
+ '笔P6':(f'{PN}:118 `build_pens` `feed()` 的 pend：太近、却比前前个端点更极端的反向分型记待定，上一笔包不住它就回头换','已实现（Bram 10-08 核代码）'),
+ 'S8':(f'{SG}:333 `_case_at` ④：V 之后的同类元素按分型方向做包含；E1、E2 之间不做','已实现'),
+ 'S9':(f'{SG}:428 `HEAD_EXT_FIX`（图头修法，card-2783fa1f），不是照 S9 原样写的','已实现（等价：严格照 S9 判 0/25 不同，见表外待办）'),
+ 'S11':(f'{SG}:333 `_case_at` ③ 提前定（先破 X 终点 ⇒ 新段成立）＋ {SG}:260 `_start_check` `S11_START_OK`（自检 A 第三种合法）','已实现'),
+ 'S-待定-1':(f'{SG}:333 `_case_at` ③：X 之后第一个反向线段破没破 V（原写 374-392，C3 以后行号挪了）','已实现'),
+ 'S-待定-2':(f'{SG}:333 `_case_at` 判的是起点已定那一段的终点候选；图头那一段走 `HEAD_EXT_FIX`','请核（前提是隐含的，代码里没有一句单独判它）'),
+ 'S-待定-3':(f'{SG}:333 `_case_at` ③ 的 for 循环：反向线段确认之前，先破 V ⇒ ①、先破 X 终点 ⇒ 新段','已实现'),
+ '不变量C1':('tools/selfcheck.py:405-406 `preprocess(adjust="none")` 断言恒等','已实现'),
+ 'D1':(f'{T}:395 `trend_v3`（整页规则的入口）','已实现'),
+ 'D1-1':(f'{CT}:114 `find_centers` 一直延伸 ＋ {T}:241 `_units` 扩展升级','已实现'),
+ 'D1-2':(f'{T}:395 `trend_v3` 只出一种分解（确定的）','已实现'),
+ 'D1-3':(f'{TC} 不变量 ②（一高一低交替、D2-8 补刀除外）','已实现（推论，由 D2-3／D3 保证；照实标出相邻盘整）'),
+ 'D2':(f'{T}:152 `find_bounds`','已实现'),
+ 'D2-0':(f'{T}:56 `_standardize`','已实现'),
+ 'D2-1':(f'{T}:152 `find_bounds` 候选死点（一样极取后一个）','已实现'),
+ 'D2-2':(f'{T}:121 `_try_confirm`','已实现'),
+ 'D2-3':(f'{T}:152 `find_bounds(alternate=True)`','已实现'),
+ 'D2-4':(f'{T}:37 `_centers_with_cuts`','已实现'),
+ 'D2-5':('—（core/trend.py 文件头写明『另一步做』）','**未实现**（死点类型没标）'),
+ 'D2-6':(f'{T}:199 `pending`','已实现'),
+ 'D2-7':(f'{T}:152 `find_bounds(check_empty=True)` ＋ `_BLOCK_RETRACTED`','已实现'),
+ 'D2-8':(f'{T}:350 `_d28_cuts`','已实现'),
+ 'D3':(f'{T}:219 `_regroup` ＋ {T}:241 `_units`','已实现'),
+ 'D3-1':(f'{T}:299 `_layer`：先按分界切开，再在段里判扩展','已实现'),
+ 'D3-2':(f'{T}:219 `_regroup`（3+3+3 重算，不拼 DD／GG）','已实现'),
+ 'D3-3':(f'{T}:284 `classify`（读法 A）','已实现'),
+ 'D3-4':(f'{T}:241 `_units` `_D3_LIVE_TAIL`','已实现'),
+ 'D4':(f'{T}:395 `trend_v3` seg_centers（按刀分组重算）','已实现（画框用限方向那组，见 D6-4）'),
+ 'D4-1':(f'{T}:37 `_centers_with_cuts`；{TC} 不变量 ② 框不跨分界','已实现'),
+ 'D4-2':(f'{T}:395 `trend_v3`：只按已确立的分界切','已实现'),
+ 'D4-3':(f'{T}:241 `_units` 合成，不断框','已实现'),
+ 'D4-4':(f'{TC} ③ 见证（zec15 bar 1900 不切框）','已实现'),
+ 'D5':(f'{T}:112 `_done`（次级别＝已完成线段）','已实现'),
+ 'D5-1':(f'{T}:112 `_done`；笔层类中枢不进 trend_v3','已实现'),
+ 'D6':(f'{T}:299 `_layer` 限方向那一组','已实现'),
+ 'D6-1':(f'{T}:299 `_layer`','已实现'),
+ 'D6-2':(f'{T}:299 `_layer`（第一个中枢的豁免）','已实现'),
+ 'D6-3':(f'{T}:299 `_layer`（盘整段、图头不限）','已实现'),
+ 'D6-4':(f'{T}:299 `_layer`（先限方向判段型）＋ `_D6_BASE_ONLY`','已实现'),
+ 'R2':('同 D1-2','原文依据，不另进代码'),'R5':('同 D2-1','原文依据，不另进代码'),'R7':('同 D2-2','原文依据，不另进代码'),
+ 'R11':('同 D2-5','原文依据（D2-5 未实现）'),'R12':('同 D2-6','原文依据，不另进代码'),'R13':('同 D2-7','原文依据，不另进代码'),
+ 'R16':('同 D3-2','原文依据，不另进代码'),'R17':('同 D3-3','原文依据，不另进代码'),'R18':('同 D3-4','原文依据，不另进代码'),
+ 'R20':('同 D5-1','原文依据，不另进代码'),'R30':('—','不进代码（层数下限的原文依据）'),
+ '探针P1':(f'{TC}:359 --self-test 臂 P1（regroup=False）','已实现'),
+ '探针P2':(f'{TC}:360 --self-test 臂 P2（alternate=False）','已实现'),
+ '探针P3':(f'{TC} --self-test P3 那颗牙（不标准化那条路上量）','已实现'),
+ '探针P4':(f'{TC} ③ D4-4 见证（笔层一买 213.46 不切框）；原 core/cut.py 已退役','已实现（换了见证）'),
+ '探针P5':(f'{TC}:361 --self-test 臂 P5（check_empty=False）','已实现'),
+ '探针P6':(f'{TC} D3-3 读法的反向验证（读法 B）','已实现'),
+ 'J17':('tools/j17_check.py（agent/bram/b3-j17-w61，未落地）','进行中（6 根下 A 4/47 过不了 5%，只统计）'),
+ 'W61':('tools/j17_check.py 的 B（同上）','进行中（实测约 32%，只统计）'),
+ 'M11':(f'{CT}:114 `find_centers`：`ZG >= ZD` 就成立（重叠成一个价位也算）','已实现'),
+ 'M13':('—','**未实现**（Nova 10-08 06:47 定了命名开关，代码还没有）'),
+ 'M28':(f'{CT}:114 `find_centers` 三买三卖终结 ＋ {SI}:297 `signals` 第三类','已实现'),
+ 'M29':(f'{SI}:297 `signals` 第二类：一买后第二段的终点，跌破一买标「弱」','请核（没判「不创新低或盘整背驰」，只标弱）'),
+ 'W24':(f'{SI}:297 `signals`：一买一卖只从第二个中枢起判（`range(1, len(Z))`）','已实现'),
+ 'W46':(f'{SI}:243 `beichi`（一买＝背驰点）','请核（小转大那个例外没实现，同 D2-5）'),
+ 'W49':(f'{SI}:243 `beichi` 取 A／C 段','已实现'),
+ 'W48':(f'{SI}:64 `zero_axis`（开关，默认不查）','请核（1 分钟级别要看黄白线回抽 0 轴，代码只有开关）'),
+ 'T2':(f'{SI}:243 `beichi`：先定比哪两段再读 MACD','已实现（Nova 10-08 08:14 核过）'),
+ 'T6':(f'{SI}:27 `macd_lines(12, 26, 9)` 默认参数','已实现'),
+ 'T13':(f'{SI}:121 `wolf_below` ＋ web/server.py `/api/wolf`','已实现（独立开关、默认关）'),
+ 'Z1':(f'{CT}:95 `upgrades`：满 9 段升级','已实现'),
+ 'Z2':('同 D6-4','原文依据，不另进代码'),
+ 'Z8':(f'{CT}:114 `find_centers` 用原始式（三段高点取最小、低点取最大）','已实现（不用化简式）'),
+ 'Z11':('—','**未实现**（延伸里另取三段当中枢；依赖 Z14 断开处）'),
+ 'Z13':(f'{CT}:95 `upgrades`：正好 9 段算升级','已实现'),
+ 'Z14':(f'{CT}:114 `find_centers`：出三买三卖才结束（档 ①）','已实现档 ①；档 ②『满 9 段收口』开关**未实现**'),
+})
 # 第 N 章补翻文件里的条目标题（W、M、J、T、Z、C、S、P 这些编号的出处），有就拿它当摘要
 chap=[('HEAD',f) for f in files if f.endswith('.md') and f.split('/')[-1].startswith('第')]
 # 第四到七章的补翻文件不在 main，在各章自己的支上（只读，取条目标题用）
@@ -74,7 +154,7 @@ rows=[]
 key=lambda x:(re.match(r'S-待定|笔P|探针P|不变量C|[A-Z]+',x).group(0),[int(v) for v in re.findall(r'\d+',x)])
 for k in sorted(occ,key=key):
     best=max(occ[k],key=lambda o:score(k,o))
-    code,st=KNOWN.get(k,('',''))
+    code,st=KNOWN.get(k) or ((('—','不进代码') if re.match(r'[WMJTZ]\d',k) else ('','')))
     raw=k[1:] if k.startswith('笔P') else k
     if k.startswith('笔P') and raw in title:
         cf,tt=title[raw];tt=re.sub(r'[|]','／',tt);tt=(tt[:70]+'…') if len(tt)>70 else tt
