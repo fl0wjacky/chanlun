@@ -26,24 +26,31 @@ FILES = {"15m": "zec15.json", "30m": "zec30_cut.json", "1h": "zec_1h.json", "2h"
 
 # §二 2：15m 五个合成框 → (status, {对照图中枢序号: 占比})；占比容 ±1（spec 按开盘时刻量、这里含最后一根的时长）
 # 第 1 个：27% 在 1h #1、其余 73% 在 1h 第一个中枢之前 ⇒ partial（Nova 10-06 定的第四种状态，不算分歧）
-UNITS_15_VS_1H = [("partial", {}), ("match", {1: 100}), ("mismatch", {})]
+UNITS_15_VS_1H_7 = [("partial", {}), ("match", {1: 100}), ("mismatch", {})]   # 7 根档（min_gap=4）
 # 10-07 D3 改 A ＋ D6-4（先限方向，card-66a0fd73-b30）：ZEC 15m 夹具 3 个合成框；对照的 1h 夹具段 1 读成上涨（限方向那组中枢：
 #   #1 502.11～642.87、#2 787.96～888.65）⇒ 03-08→04-06 整个在 1h 第一个中枢之前（partial，pre 100）、
 #   06-05→07-07 整个在 #1 里（match）、07-29→08-15 整个落在 #1 和 #2 之间（mismatch，gap 100）。spec §二 2 由 Atlas 跟着改。
 # §四 第 4 项（L-7）：各图对 15m 的起点
-START = {"30m": "window", "1h": "differs", "2h": "same", "4h": "differs"}
+START_7 = {"30m": "window", "1h": "differs", "2h": "same", "4h": "differs"}   # 7 根档
+# ★ C3（小栋 10-08 ①B）笔默认 6 根以后重量（main 夹具同一份）：15m 合成框 3 → 6 个，跟 1h 对得上的多了 ——
+#   #1 match（1h #1）、#2 match（#3）、#3 match（#4）、#4 match（#4）、#5 mismatch（#4 占 59%，41% 落在两个中枢之间）、#6 match（#6）；
+#   1h 起点由 differs 变 same（两边都从 191.35 起）。7 根档的旧数留在上面。spec 级别联动.md §二 2、§四 4 由 Atlas 照这组数改。
+UNITS_15_VS_1H = [("match", {1: 100}), ("match", {3: 100}), ("match", {4: 100}), ("match", {4: 100}), ("mismatch", {4: 59}), ("match", {6: 100})]
+START = {"30m": "window", "1h": "same", "2h": "same", "4h": "differs"}
 
 
-def view(tf):
+def view(tf, min_gap=None):
     fn = FILES[tf]
     raw = json.load(open(os.path.join(ROOT, "data", fn)))
     bars = raw["bars"] if isinstance(raw, dict) else raw
     bars = [dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"]) for b in bars]
-    v = trend_v3(analyze(bars, tick=tick_of(fn)), reading="A")
+    v = trend_v3(analyze(bars, tick=tick_of(fn), min_gap=min_gap), reading="A")
     return dict(t=[b["t"] for b in bars], step=TFS[tf], bounds=v["bounds"], centers=v["seg_centers"], units=v["units"])
 
 
-def run(V):
+def run(V, units=None, start=None):
+    units = UNITS_15_VS_1H if units is None else units
+    start = START if start is None else start
     bad = []
     if LV.finest_tf(TFS) != "15m":
         bad.append("最细周期 %s ≠ 15m" % LV.finest_tf(TFS))
@@ -52,13 +59,13 @@ def run(V):
     if got_ref != want_ref:
         bad.append("对照周期 %s ≠ %s" % (got_ref, want_ref))
     links = LV.unit_links(V["15m"], V["1h"])
-    if len(links) != len(UNITS_15_VS_1H):
-        bad.append("15m 合成框 %d 个 ≠ spec 的 %d 个" % (len(links), len(UNITS_15_VS_1H)))
-    for k, (got, (st, sh)) in enumerate(zip(links, UNITS_15_VS_1H), 1):
+    if len(links) != len(units):
+        bad.append("15m 合成框 %d 个 ≠ spec 的 %d 个" % (len(links), len(units)))
+    for k, (got, (st, sh)) in enumerate(zip(links, units), 1):
         g = {s["i"]: s["pct"] for s in got["share"]}
         if got["status"] != st or set(g) != set(sh) or any(abs(g[i] - sh[i]) > 1 for i in sh):
             bad.append("15m 第 %d 个合成框：%s ≠ spec %s %s" % (k, got, st, sh))
-    for tf, st in START.items():
+    for tf, st in start.items():
         s = LV.start_link(V[tf], V["15m"], TFS[tf])
         if s["status"] != st:
             bad.append("%s 起点 %s ≠ spec %s（%s）" % (tf, s["status"], st, s))
@@ -114,7 +121,9 @@ def main():
     LV.unit_links = ul0
     src = LV.unit_links
     LV.unit_links = lambda h, r: [dict(u, status="mismatch") if u["status"] == "partial" else u for u in src(h, r)]
-    arms.append(("partial 并回 mismatch", run(V)))
+    # ★ C3 6 根以后夹具里一个 partial 都没有了 ⇒ 这一臂改在 7 根档（还在的开关档）上量，对 7 根档的旧基线
+    V7 = {tf: view(tf, min_gap=4) for tf in TFS}
+    arms.append(("partial 并回 mismatch（7 根档）", run(V7, UNITS_15_VS_1H_7, START_7)))
     LV.unit_links = src
     mult0 = LV.REF_MULT
     LV.REF_MULT = 2                                                              # 对照取下一档

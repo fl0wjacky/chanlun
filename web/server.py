@@ -125,10 +125,10 @@ def _clean(v):
     return v
 
 
-# 笔最少几根 K 线（C3，小栋 10-08 12:42 拍 ①B：默认 6、可切回 7；第一个提交先保持 7，翻默认单独一笔）。
+# 笔最少几根 K 线（C3，小栋 10-08 12:42 拍 ①B：默认 6、可切回 7）。跟 core/pen.MIN_GAP_DEFAULT 一致（selfcheck 不查这一条，改一处记得改另一处）。
 #   6 根 ＝ 顶分型和底分型之间可以没有独立 K 线（L106:4）＝ 标准化序列上 k 相差 ≥ 3；7 根 ＝ 之间至少一根独立 K 线（L62:17、L77:37）＝ ≥ 4。
 PEN_MIN_OPTIONS = (6, 7)
-DEFAULT_PEN_MIN = 7
+DEFAULT_PEN_MIN = 6
 
 
 def gap_of(pen_min):

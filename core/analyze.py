@@ -21,16 +21,17 @@
 import json
 
 from .kline import standardize, fractals, quantize
-from .pen import build_pens
+from .pen import build_pens, MIN_GAP_DEFAULT
 from .center import find_centers, find_centers_by_segment
 from .extend import build_hierarchy
 from .segment import build_segments
 
 
-def analyze(bars, tick=None, pen="old", min_gap=4):
+def analyze(bars, tick=None, pen="old", min_gap=None):
     """tick：价格精度（None = 原样）；pen："old" 老笔（默认，第 77 课）/ "new" 新笔（第 81 课）。"""
     std = standardize(quantize(bars, tick))
     fx = fractals(std)
+    min_gap = MIN_GAP_DEFAULT if min_gap is None else min_gap
     pens, seq = build_pens(fx, std, pen, min_gap)
     segs = build_segments(pens)
     centers = find_centers_by_segment(pens, segs)

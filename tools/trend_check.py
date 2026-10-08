@@ -37,10 +37,21 @@ BASE = {
     #   ⇒ 多出 10038 H（544.28，参照 Z3 [455.16, 476.78]，回抽段终点 10886）、11314 L（367.77，参照 [405.9, 423.0]，回抽段终点 11909）
     "zec30_cut.json": [(134, "L", None), (3476, "H", None), (4219, "L", None), (6150, "H", None), (6805, "L", None)],
 }
+# ★ C3（小栋 10-08 12:42 ①B）：笔默认 6 根（core/pen.MIN_GAP_DEFAULT＝3）。笔多约 40%，往上整条链重算：
+#   zec15 多 6445 H（642.87）、7135 L（486.0）两刀（R6 的 10038、11314 还在）；zec30_cut 多 1547 H、1985 L、4716 H、5354 L；
+#   zec_1h 由 1 刀（205.07）变 5 刀。撤回照旧只有 zec15 的 15295 H。7 根档的旧基线留在上面，切 pen_min=7 时仍是它。
+BASE = {
+    "zec15.json": [(490, "L", None), (3699, "H", None), (4575, "L", None), (6445, "H", None), (7135, "L", None),
+                   (7558, "H", None), (9043, "L", None), (10038, "H", None), (11314, "L", None),
+                   (12906, "H", None), (14215, "L", None), (17604, "L", None)],
+    "zec30_cut.json": [(134, "L", None), (1547, "H", None), (1985, "L", None), (3476, "H", None), (4219, "L", None),
+                       (4716, "H", None), (5354, "L", None), (6150, "H", None), (6805, "L", None)],
+}
 # btc_4h：线段 #1（缺口被之前同一特征序列元素盖住不算缺口，card-fff28d01-f13，小栋 10-07 A）以后 97932.1 → 107473.7
 BASE_PRICE = {"btc_4h.json": [("H", 107473.7)], "zec_1h.json": [("L", 205.07)], "aaplusdt_30m.json": [("L", 300.50)],
               # D2-0 先后（Nova 06:44Z）：中间接点先挪到不动、图头最后挪 ⇒ zec_2h 第一刀 191.35；图头先挪会卡住接点 1，变成 205.07
               "zec_2h.json": [("L", 191.35)]}
+BASE_PRICE["zec_1h.json"] = [("L", 191.35), ("H", 688.6), ("L", 250.0), ("H", 588.8), ("L", 451.54)]   # ★ C3 6 根（原 7 根：205.07 一刀）
 def load(path):
     raw = json.load(open(path))
     raw = raw["bars"] if isinstance(raw, dict) else raw
@@ -74,6 +85,8 @@ TYPES = {"zec15.json": ["盘整", "盘整·升", "盘整", "上涨", "盘整", "
 # ★ R6＝B（10-08）：原第 7 段（250 → 588.8，「升级·盘整」）被 544.28、367.77 两刀切成三段：
 #   250 → 544.28「盘整」、544.28 → 367.77「下跌」（两个依次下移的线段中枢，正是 R6 要的那段反向趋势）、367.77 → 588.8「盘整·升」。
 TYPES = {"zec15.json": ["盘整", "盘整·升", "盘整", "上涨", "盘整", "盘整·升", "下跌", "盘整", "下跌", "盘整·升", "上涨"]}
+# ★ C3 6 根（10-08）：13 段。原第 3 段（3699→4575→7558 那一带）被 6445、7135 切开；R6 那段 544.28→367.77 仍是「下跌」。
+TYPES = {"zec15.json": ["盘整", "盘整·升", "盘整", "盘整", "盘整", "盘整", "盘整·升", "盘整·升", "盘整·升", "盘整·升", "下跌", "盘整·升", "上涨"]}
 # ★ D2-8（10-07，card-22888623-1a7，Nova 定 ④）：第 7 段在 787.96 补一刀，切成「升级·盘整」＋「上涨」（9 段）。
 # ★ D6-4（10-07 09:16Z，先限方向判段型）：第 3 段从「盘整」变「上涨」（限方向找出两个依次上移的中枢）。
 FIX_D2STD = os.path.join(ROOT, "tools", "fixtures", "zec1m_d2std.json")
@@ -373,15 +386,16 @@ def self_test():
         _R.clear()
     print("%s ⑥ 关掉标准化 ⇒ 报出 %d 处（例 %s）" % ("✓" if e6 else "✗", len(e6), e6[:1]))
     miss += not e6
-    T._HEAD_FIRST = True                                 # D2-0 先后反过来（先挪图头）⇒ zec_2h 第一刀必须变
+    T._HEAD_FIRST = True                                 # D2-0 先后反过来（先挪图头）⇒ zec_1h 第一刀必须变
+    # ★ C3 6 根（10-08）以后 zec_2h 这颗牙没了（先挪图头也是 191.35）；data/ 和 fixtures 里只剩 zec_1h 咬得到：照常 191.35、先挪图头 203.35
     _R.clear()
     try:
-        _, hf = run("zec_2h.json")
+        _, hf = run("zec_1h.json")
     finally:
         T._HEAD_FIRST = False
         _R.clear()
     ok = [(b["kind"], round(b["price"], 2)) for b in hf["bounds"]][:1] != [("L", 191.35)]
-    print("%s D2-0 先挪图头 ⇒ zec_2h 第一刀 %s（应为 191.35）" % ("✓" if ok else "✗", [(b["kind"], round(b["price"], 2)) for b in hf["bounds"]][:1]))
+    print("%s D2-0 先挪图头 ⇒ zec_1h 第一刀 %s（照常是 191.35，要变）" % ("✓" if ok else "✗", [(b["kind"], round(b["price"], 2)) for b in hf["bounds"]][:1]))
     miss += not ok
     T._BLOCK_RETRACTED = False                           # 编者口径拿掉 ⇒ ⑧ 必须在 retract_loop 夹具上报出来
     try:
@@ -464,18 +478,20 @@ def self_test():
     ok = ka == ("盘整", True) and kb == ("上涨", True)
     print("%s D3 读法 A／B（造的一段）⇒ A %s ／ B %s" % ("✓" if ok else "✗", ka, kb))
     miss += not ok
-    # D6 只管本级别（card-0374e640-127，Nova 08:00Z）—— 造出来的牙：把 zec15 第 6 段（本级别下跌、D6 会限它的方向）
+    # D6 只管本级别（card-0374e640-127，Nova 08:00Z）—— 造出来的牙：把 zec15 第 10 段（本级别下跌、D6 会限它的方向；
+    #   ★ C3 6 根以后段号从 6 换成 10，就是 R6 那段 544.28→367.77；data/ 里咬得到的还有 zec30_cut 第 6、8 段）
     #   第一遍段型硬改成「升级·下跌」。规则对 ⇒ 这段的框跟不限方向时一样；拿掉这条（_D6_BASE_ONLY=False）⇒ 照样被限、框不一样。
     real_cls = T.classify
     def fake(zz, reading="A", done=None):
         k, up = real_cls(zz, reading, done)
         return (k, True) if zz and zz[0]["PI0"] >= fake.lo and zz[0]["PI0"] < fake.hi and k == "下跌" else (k, up)
     r15, v15 = run("zec15.json")
-    b6 = v15["segments"][6]
+    G6 = 10
+    b6 = v15["segments"][G6]
     dn = T._done(r15)
     fake.lo = next(k for k, x in enumerate(dn) if x["i0"] >= b6["i0"])
     fake.hi = next((k for k, x in enumerate(dn) if x["i0"] >= b6["i1"]), len(dn))
-    box6 = lambda v: sorted((z["X0"], z["X1"]) for z in v["seg_centers"] if z["seg"] == 6)
+    box6 = lambda v: sorted((z["X0"], z["X1"]) for z in v["seg_centers"] if z["seg"] == G6)
     T.classify = fake
     try:
         on = box6(T.trend_v3(r15, reading=READING))
@@ -487,7 +503,7 @@ def self_test():
     finally:
         T.classify, T._DIR_RULE, T._D6_BASE_ONLY = real_cls, True, True
     ok = on == free and off != free
-    print("%s D6 只管本级别：第 6 段假装成升级·下跌 ⇒ 框跟不限时%s；拿掉这条 ⇒ %s" % ("✓" if ok else "✗",
+    print("%s D6 只管本级别：第 %d 段假装成升级·下跌 ⇒ 框跟不限时%s；拿掉这条 ⇒ %s" % ("✓" if ok else "✗", G6,
           "一样" if on == free else "不一样（该一样）", "被限了（该这样）" if off != free else "没被限（牙没咬到）"))
     miss += not ok
     # 线段 #1 的反向验证（card-fff28d01-f13）：拿掉「被盖住的缺口不算」⇒ btc_4h 的分界回到旧的 97932.1
