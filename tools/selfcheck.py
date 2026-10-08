@@ -438,13 +438,37 @@ count("拿掉图头段起点修法后 ZEC 4h 夹具没报出来", 0 if check_seg
 
 # ---- 走势分界 v3（docs/spec/走势分段.md v3 §三，card-51571a5f-dc2）----
 # 基线（zec15／zec30 五个分界＋一次撤回）、不变量（交替、刀在同向线段终点、两刀间有中枢、框不跨分界、首尾相接）、
-# 367.77 不切框、不看未来。反向验证在 tools/trend_check.py --self-test（spec §四 的 P1／P2／P5 各自必须变）。
+# D4-4 见证（笔层一买 1900 不切框）、不看未来。反向验证在 tools/trend_check.py --self-test（spec §四 的 P1／P2／P5 各自必须变）。
 import io as _io, contextlib as _ctx                       # noqa: E402
 from trend_check import main as _trend_main               # noqa: E402
 with _ctx.redirect_stdout(_io.StringIO()) as _tbuf:
     _trc = _trend_main()
 count("走势分界 v3 不合 spec", 0 if _trc == 0 else sum(1 for l in _tbuf.getvalue().splitlines() if l.startswith("✗")),
       "　← tools/trend_check.py%s" % ("" if _trc == 0 else "：" + " ｜ ".join(l for l in _tbuf.getvalue().splitlines() if l.startswith("✗"))[:200]))
+
+# ---- J12：走势分段的起点、终点不自动是本级别买卖点（买卖点.md 八.5″，Nova 10-08）----
+# 买卖点只由 core/signals.py 出，它不读 core/trend.py 的分界。这里反着守：把分界那一整套换成「一调就炸」，
+# 再把 R6 读法来回切，signals 都必须逐条相等 —— 以后谁把分界接进买卖点，这一格先红。
+import core.trend as _T                                    # noqa: E402
+from core.signals import signals as _sigf                 # noqa: E402
+from trend_check import run as _trun                      # noqa: E402
+_rj, _ = _trun("zec15.json")
+_j12_base = [(s["kind"], s["bar"], s["confirmed"]) for s in _sigf(_rj)]
+def _boom(*a, **k):
+    raise RuntimeError("signals 读了走势分界")
+_j12_bad = 0
+_saved = (_T.find_bounds, _T.trend_v3, _T._R6_B)
+try:
+    _T.find_bounds = _T.trend_v3 = _boom
+    for _flag in (True, False):
+        _T._R6_B = _flag
+        try:
+            _j12_bad += [(s["kind"], s["bar"], s["confirmed"]) for s in _sigf(_rj)] != _j12_base
+        except RuntimeError:
+            _j12_bad += 1
+finally:
+    _T.find_bounds, _T.trend_v3, _T._R6_B = _saved
+count("J12：买卖点随走势分界变了（signals 不许读分界）", _j12_bad, "　（zec15，%d 个点）" % len(_j12_base))
 
 # ---- 判据前提：下面那扇「字体覆盖」门自己的基准对不对 ----
 # 那扇门判「缺不缺字」靠 `config._notdef_mask` 投出的 .notdef 基准。基准错了它就是**假绿**：

@@ -46,6 +46,7 @@ def _centers_with_cuts(done, ks):
     return out
 
 
+_R6_B = True                                     # 只给 trend_check --self-test 的探针关：参照中枢退回读法 A（只取起点不晚于 H 的）
 _HEAD_FIRST = False                               # 只给 trend_check --self-test 的探针开：先挪图头／末段再挪中间
 _BLOCK_RETRACTED = True                           # 只给 trend_check --self-test 的探针关：D2-7 去掉过的那一对照旧反复确立／撤回
 _MOVE_ENDS = True                                 # 只给 trend_check --self-test 的探针关：图头起点／末段终点不挪
@@ -135,7 +136,8 @@ def _try_confirm(done, t, ks, typ, lo, no_exceed=True):
                                 else min(a["lo"] for a in after) < done[j]["p1"]):
         return None
     zs = _centers_with_cuts(done[:t + 1], ks)
-    ref = [z for z in zs if z["PI0"] >= lo and z["X0"] <= done[j]["i1"]]
+    # D2-2 第 1 步（R6＝B，小栋 10-08）：两类候选取最后一个 —— ① 起点不晚于 H；② 起点在 H 之后、最后一条线段不晚于 S[t-2]（离开段之前已走完）
+    ref = [z for z in zs if z["PI0"] >= lo and (z["X0"] <= done[j]["i1"] or (_R6_B and z["PI1"] <= t - 2))]
     if not ref:
         return None                              # 本段走势里还没有中枢 ⇒ 一直中阴（D2-6）
     z = ref[-1]

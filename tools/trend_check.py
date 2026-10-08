@@ -8,7 +8,7 @@
   ① 基线（spec §三）：zec15 五个分界（bar、高低、确立那一根）＋ 531.91 撤回一次；zec30 五个；btc_4h／zec_1h／aaplusdt_30m 各一个；
   ② 不变量（data/ 下每份 K 线）：一高一低交替（D2-3）；刀落在同向线段的终点上（D2-1）；确立晚于刀（L88:19-21）；
      相邻两刀之间至少一个中枢（D2-7）；没有框跨过分界（D4-1）；走势首尾相接盖满整张图；每个框的 seg 指对了段；
-  ③ 367.77（zec15 bar 11314）不是分界、落在框里（D4-4）；
+  ③ D4-4 见证：zec15 bar 1900 笔层一买（213.46）不是本级别分界、落在框里（R6＝B 以后 367.77 成了分界，见证换到这里）；
   ④ 不看未来：每个分界从『最早能确立』那一根截断起就在，之后再截都不变（实时确立比回抽段终点晚，印出来）。
 """
 import json
@@ -31,7 +31,10 @@ BASE = {
     # D2-0（card-acbe5855，10-06）整层用标准化后的线段：zec15 多出 3699 H（394.0）、4575 L（299.56）—— 段 23 的真高点在下一段段内，
     #   以前候选是端点那个次高点、P3 又按区间判它「被过了」，卡到 7558 才确立；其余 5 刀不变。
     "zec15.json": [(490, "L", None), (3699, "H", None), (4575, "L", None), (7558, "H", None), (9043, "L", None),
+                   (10038, "H", None), (11314, "L", None),
                    (12906, "H", None), (14215, "L", None), (17604, "L", None)],
+    # ★ R6＝B（小栋 10-08，card-441d2f86-db3）：D2-2 参照中枢取「起点不晚于 H」和「H 之后、离开段之前已走完」两类里最近的一个
+    #   ⇒ 多出 10038 H（544.28，参照 Z3 [455.16, 476.78]，回抽段终点 10886）、11314 L（367.77，参照 [405.9, 423.0]，回抽段终点 11909）
     "zec30_cut.json": [(134, "L", None), (3476, "H", None), (4219, "L", None), (6150, "H", None), (6805, "L", None)],
 }
 # btc_4h：线段 #1（缺口被之前同一特征序列元素盖住不算缺口，card-fff28d01-f13，小栋 10-07 A）以后 97932.1 → 107473.7
@@ -68,10 +71,16 @@ TYPES = {"zec15.json": ["盘整", "盘整", "盘整", "盘整", "盘整", "盘�
 # ★ 10-07 D3 改 A（card-0374e640-127，一A二A）：读法 A、合成框按高一级 3+3+3 重算（D3-2 推广口径 (iii)）、
 #   最后一个中枢还在走不合成（D3-4）。zec15 八段（「·升」＝含合成出来的高一级中枢、整段升一级读）：
 TYPES = {"zec15.json": ["盘整", "盘整·升", "盘整", "上涨", "盘整", "盘整·升", "下跌", "盘整·升", "上涨"]}
+# ★ R6＝B（10-08）：原第 7 段（250 → 588.8，「升级·盘整」）被 544.28、367.77 两刀切成三段：
+#   250 → 544.28「盘整」、544.28 → 367.77「下跌」（两个依次下移的线段中枢，正是 R6 要的那段反向趋势）、367.77 → 588.8「盘整·升」。
+TYPES = {"zec15.json": ["盘整", "盘整·升", "盘整", "上涨", "盘整", "盘整·升", "下跌", "盘整", "下跌", "盘整·升", "上涨"]}
 # ★ D2-8（10-07，card-22888623-1a7，Nova 定 ④）：第 7 段在 787.96 补一刀，切成「升级·盘整」＋「上涨」（9 段）。
 # ★ D6-4（10-07 09:16Z，先限方向判段型）：第 3 段从「盘整」变「上涨」（限方向找出两个依次上移的中枢）。
 FIX_D2STD = os.path.join(ROOT, "tools", "fixtures", "zec1m_d2std.json")
 # card-eecdfd08：ZEC 永续 1m 一段（04-08 前后），旧程序在这里把同一对 (308.24 L, 394.0 H) 确立又撤回 13 次
+# ★ R6＝B（10-08）：原 8000 根（整份 1m 的 [42000:50000]）在读法 B 下不再打转，拿掉编者口径也只撤 1 次 ⇒ 探针没牙。
+#   往后延到 [42000:53000]（11000 根，前 8000 根逐根不变）：读法 B 拿掉编者口径 ⇒ 同一对撤 2 次（第二次在整份 bar 51827）；
+#   读法 A 拿掉 ⇒ 22 次。整份 1m 上 B 是 2 次、A 是 40 次。
 FIX_RETRACT = os.path.join(ROOT, "tools", "fixtures", "zec1m_retract_loop.json")   # Atlas 10-06：ZEC 永续 1m，04-29 317.74 真低点在向上线段段内
 RETRACT = {"zec15.json": [(15295, "H")], "zec30_cut.json": []}
 _R = {}
@@ -256,9 +265,14 @@ def main():
         inv += ["%s %s" % (fn, x) for x in invariants(fn)]
     cell("② 不变量（%d 份样本）" % len(files), inv)
     r, v = run("zec15.json")
-    in_box = [z for z in v["seg_centers"] if z["X0"] < 11314 < z["X1"]]
-    cell("③ 367.77（bar 11314）不是分界、落在框里",
-         [] if 11314 not in [b["bar"] for b in v["bounds"]] and in_box else ["11314 是分界或不在框里"])
+    # D4-4（次级别转折不断框）的见证：R6＝B 以后 367.77 在本级别也是分界了，换成 bar 1900 —— 笔层确认的一买（213.46），
+    #   线段这一级落在 490–2578 那个框（ZD 203.35 ZG 224.79）里、不是分界。笔层那个一买也要在，不然这格就空转了。
+    from core.signals import signals as _sig
+    pen1 = [s for s in _sig(r, level="pen") if s["bar"] == 1900 and s["kind"] == "一买" and s["confirmed"]]
+    in_box = [z for z in v["seg_centers"] if z["X0"] < 1900 < z["X1"]]
+    cell("③ D4-4：笔层一买 213.46（bar 1900）不是本级别分界、落在框里",
+         [] if pen1 and 1900 not in [b["bar"] for b in v["bounds"]] and in_box
+         else ["笔层一买在 %s／1900 是分界 %s／在框里 %s" % (bool(pen1), 1900 in [b["bar"] for b in v["bounds"]], bool(in_box))])
     tys = [s["type"] + ("·升" if s["upgraded"] else "") for s in v["segments"]]
     cell("⑤ 段类型按线上读法 A（spec D3-3，server.TREND_READING）", [] if v["reading"] == "A" and tys == TYPES["zec15.json"]
          else ["读法 %s 段类型 %s" % (v["reading"], tys)])
@@ -326,7 +340,10 @@ def retract_once():
 def self_test():
     """spec §四：P1 不重算 ⇒ zec15 3 个；P2 不交替 ⇒ 撤回 20；P5 不查空段 ⇒ 7 个。各自必须变。"""
     _, base = run("zec15.json")
-    arms = [("P1 拿掉 D2-4（不重算中枢）", dict(regroup=False), lambda v: len(v["bounds"]) != len(base["bounds"])),
+    # P1：R6＝B 以后「不重算」少掉的 H 之后的中枢被读法 B 补上了，10 份样本、线上 15 张的分界列表都不变 ⇒ 比刀数没牙。
+    #   改比 (高低, bar, 回抽段终点)：zec15 的 L 250（bar 9043）回抽段终点 9352 → 10283（参照中枢 [336.22, 399.98] → [413.61, 446.74]）
+    pts = lambda v: [(b["kind"], b["bar"], b["pullback_end_bar"]) for b in v["bounds"]]
+    arms = [("P1 拿掉 D2-4（不重算中枢）", dict(regroup=False), lambda v: pts(v) != pts(base)),
             ("P2 拿掉 D2-3（不交替）", dict(alternate=False), lambda v: len(v["retracted"]) != len(base["retracted"])),
             ("P5 拿掉 D2-7（空段照切）", dict(check_empty=False), lambda v: len(v["bounds"]) != len(base["bounds"])),
 ]
@@ -373,6 +390,17 @@ def self_test():
         T._BLOCK_RETRACTED = True
     print("%s D2-7 编者口径拿掉 ⇒ 报出 %d 处（例 %s）" % ("✓" if e8 else "✗", len(e8), e8[:1]))
     miss += not e8
+    T._R6_B = False                                      # R6 退回读法 A（只认起点不晚于 H 的中枢）⇒ zec15 的 544.28、367.77 必须没了
+    _R.clear()
+    try:
+        _, ra = run("zec15.json")
+    finally:
+        T._R6_B = True
+        _R.clear()
+    lost = [(k, p) for k, p in (("H", 544.28), ("L", 367.77)) if (k, p) not in [(b["kind"], round(b["price"], 2)) for b in ra["bounds"]]]
+    ok = len(lost) == 2
+    print("%s R6 退回读法 A ⇒ zec15 少了 %s（要两个都少）" % ("✓" if ok else "✗", lost))
+    miss += not ok
     T._MOVE_ENDS = False                                 # 图头起点／末段终点不挪 ⇒ 不变量里「段端点＝段内极值」必须报出来
     _R.clear()
     try:
