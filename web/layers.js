@@ -249,6 +249,55 @@ export function boundHitAt(clientX, clientY) {
 // ---------------------------------------------------------------------------
 // 框层：类中枢（与笔同色）→ 线段中枢（与线段同色）→ 各自的「↑高N级」框
 // 挂在 K 线系列上、zOrder=bottom ⇒ 画在 K 线底下，跟 Python 的落笔次序一致（框先、K 线后）。
+// 盘整组标签的**命中格**（卡 card-9f7a80b6-e8a）：跟 `ghostHits` 同一套账，只登记那两块 chip
+// （细轨、刻度不当靶子 —— 一条 2px 的线瞄不中，而它们说的是同一件事）。每帧由标注层重填。
+export const pzHits = { boxes: [], canvas: null };
+export function pzHitAt(clientX, clientY) {
+  const c = pzHits.canvas;
+  if (!c) return null;
+  const r = c.getBoundingClientRect();
+  const x = clientX - r.left, y = clientY - r.top;
+  for (const b of pzHits.boxes) if (x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]) return b[4];
+  return null;
+}
+
+// >>> PZ_GROUPS
+/** 相邻盘整段 → 组（`走势分段.md` §八 第 9 条，小栋 10-07 选 C：**分界一条不动**，只在图上标成一组）。
+ *  ★ 口径三条，都不是这儿定的，照抄：
+ *    ① `type === '盘整'` 才算（「升级·盘整」的 type 也是盘整 ⇒ 算进；「无中枢」不算）；
+ *    ② **图头不算**（第一把刀之前那段是被窗口截断的，方向都未定 —— D2-1／D6-3；
+ *       Atlas `notes/b5/pz_merge.py` 的 `pairs()` 同样跳过 `head`，14 组 / 60 段就是这么数的）；
+ *    ③ 连着 ≥2 段才成组。
+ *  返回 [{ from, to, n, i0, i1, ends }]：`ends[k]` ＝ 组内第 k+1 段的右端 bar（最后一个就是组尾）。 */
+export function pzGroups(T) {
+  const segs = (T && T.segments) || [];
+  const ok = (s) => s.type === '盘整' && !s.head;
+  const G = [];
+  for (let i = 0; i < segs.length;) {
+    if (!ok(segs[i])) { i++; continue; }
+    let j = i;
+    while (j + 1 < segs.length && ok(segs[j + 1])) j++;
+    if (j > i) G.push({ from: i, to: j, n: j - i + 1, i0: segs[i].i0, i1: segs[j].i1,
+      starts: segs.slice(i, j + 1).map((s) => s.i0), ends: segs.slice(i, j + 1).map((s) => s.i1) });
+    i = j + 1;
+  }
+  return G;
+}
+
+/** 视野 `[a, b]`（bar 下标，可以是小数）落在组里的哪几段：三个集合是**划分** ⇒
+ *  `before + (hi − lo + 1) + after === n`（屏内一段都没有时 lo = hi = 0、中间那项记 0）。
+ *  这条恒等式就是这段计数的自检（工装照着它断言；出图那一版第一次数错就是靠它抓到的）。 */
+export function pzWhere(g, a, b) {
+  let before = 0, after = 0, lo = 0, hi = 0;
+  for (let k = 0; k < g.n; k++) {
+    if (g.ends[k] < a) before++;
+    else if (g.starts[k] > b) after++;
+    else { if (!lo) lo = k + 1; hi = k + 1; }
+  }
+  return { before, after, lo, hi, inView: lo ? hi - lo + 1 : 0 };
+}
+// <<< PZ_GROUPS
+
 // ---------------------------------------------------------------------------
 export function makeBoxPrimitive(state) {
   return {
@@ -546,6 +595,9 @@ export function makeAnnotPrimitive(state) {
               //    压在三角上面 ⇒ 数字/字完整可读（与 Python 出图的结论一致）。
               //    `y0` 是②里画三角时算出来的底边 —— 传过来，免得「文字挂在哪条边」这个式子写两份。
               for (const g of sigs) drawSignalText(ctx, placed, g.x, g.y0, g.s, g.tier, H);
+
+              // ④.5 盘整组（卡 card-9f7a80b6-e8a，小栋 10-07 选 C；`走势分段.md` §八 第 9 条）
+              drawPzGroups(ctx, state, sh, vp, placed, this._chart, W, H);
 
               // ⑤ 未收盘的最后一根：虚线框 + 「未收盘」（Python dashed_rect + 琥珀字）
               //    ★ 这一句**不登记 placed** —— 跟 Python 一致：那边它也是直接画的、不在 draw_labels 里
@@ -1198,6 +1250,114 @@ export function fmtG(v) {
   return sign + out;
 }
 // <<< FMT_G
+
+/** ④.5 盘整组：相邻的盘整段在图上标成一组 ——「这几段是同一个更大的盘整」（`L33:162`；
+ *  我们是非同级别分解，原文不许盘整接盘整，`L45:60`）。**分界一条不动**，只加记号。
+ *  形态是 07:51Z 定的 C（卡上【实现要点】那一条），量出来的，不是挑的：
+ *    · **细轨贴价格窗格底边**，不套框 —— 一屏装不下任何一组（ZEC 1h 一组跨十几屏），套框画不出来；
+ *      `H` 是**这个窗格**的高（primitive 挂在 K 线那一格上），不是 `#chart` 的高（底下还有成交量／MACD）。
+ *    · 组内每条**段界**一根刻度 ＋ `k/N` —— 一屏往往只落得下一两条界，刻度回答的是「我在组的哪儿」；
+ *    · 主标签：组头在屏内就贴组头，组头滚出左边就**吸视口左边**（吸着组头等于没标签）；
+ *    · 有段落在屏外时，右边再排一块「屏内 第 a–b 段」，两头写明「◀ 左边还有 n 段」「右边还有 n 段 ▶」。
+ *  ★ 避让：两块 chip **最后登记** `placed`（买卖点文字 → 价签 → 我）⇒ `fitBox` 挪的是我，老标签一个像素不动。
+ *    细轨、刻度、两头那两句**不登记**：整屏宽的一条线登记进去会把所有价签上下推（卡上量过）。
+ *    挤不下就保持原样（`fitBox` 的 `return out`），那是"没地方放"，不是回归。
+ *  ★ 归「走势分段」那颗芯片：组是走势段的事，芯片关了就一笔不画（命中格也清空）。 */
+// 细轨离窗格底边 34：最底下那一格窗格的左下角是 LWC 的 TradingView 标（手机上价格窗格就是最底下那格），
+//   标顶约在底边上 29 —— 贴得更低，「◀ 左边还有 n 段」和细轨都会被它盖住（390 宽实测截图）。
+const PZ_RAIL = 34;
+const FONT_PZ = 'bold 12px -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif';
+function drawPzGroups(ctx, state, sh, vp, placed, chart, W, H) {
+  pzHits.canvas = ctx.canvas;
+  pzHits.boxes = [];
+  state.pzDrawn = { H, railY: null, groups: [] };
+  const T = trendOf(state.data);
+  if (!T || !sh.trend || !chart) return;
+  const G = pzGroups(T);
+  if (!G.length) return;
+  const v = chart.timeScale().getVisibleLogicalRange();
+  if (!v) return;
+  const railY = Math.round(H - PZ_RAIL);
+  state.pzDrawn.railY = railY;
+  const xs = (i) => vp.xOfBar(i);
+  for (const g of G) {
+    if (g.i1 < v.from || g.i0 > v.to) continue;                 // 整组在屏外
+    const w = pzWhere(g, v.from, v.to);
+    const xa = xs(g.i0), xb = xs(g.i1);
+    const leftOut = g.i0 < v.from, rightOut = g.i1 > v.to;
+    // 细轨：两端在屏外就让它溢出（画布自己裁），**不夹回 0／W** —— 夹回来就成了"组只有这么宽"。
+    const x0 = xa === null ? -10 : xa, x1 = xb === null ? W + 10 : xb;
+    ctx.strokeStyle = rgba(TREND.mut, 0.7 * 255); ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x0, railY); ctx.lineTo(x1, railY); ctx.stroke();
+    // 两端下钩（端点在屏内才画；在外的那头由「还有 n 段」那句交代）
+    ctx.strokeStyle = TREND.mut;
+    for (const [out, x] of [[leftOut, xa], [rightOut, xb]]) {
+      if (out || x === null) continue;
+      ctx.beginPath(); ctx.moveTo(x, railY - 10); ctx.lineTo(x, railY + 6); ctx.stroke();
+    }
+    // 段界刻度 k/N：比细轨**亮一档**（轨是容器，刻度是结构）
+    const ticks = [];
+    ctx.textBaseline = 'alphabetic';
+    for (let k = 1; k < g.n; k++) {
+      const x = xs(g.ends[k - 1]);
+      if (!onScreen(x, W, 0)) continue;
+      ctx.strokeStyle = TREND.edge; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x, railY - 8); ctx.lineTo(x, railY + 4); ctx.stroke();
+      // 字放在刻度**右边**：段界就是分界，那根竖虚线正好穿过刻度 —— 居中的话虚线会从字中间划过去（实测截图）。
+      //   贴着右沿放不下就翻到刻度左边（不夹、不截字）。
+      const kt = `${k}/${g.n}`;
+      ctx.font = FONT;
+      const right = x + 5 + ctx.measureText(kt).width <= W - 2;
+      haloText(ctx, right ? x + 5 : x - 5, railY - 4, kt, TREND.edge, right ? 'left' : 'right');
+      ticks.push(k);
+    }
+    // 主标签 ＋ 位置 chip
+    const lx = leftOut || xa === null ? 8 : Math.max(8, xa + 6);
+    const title = g.n === 2 ? '同一更大横盘的两半' : `同一更大横盘 · ${g.n} 段`;
+    // 位置 chip 只在**有段落在屏外**时出：组头／组尾只是半截出屏、段一条没少的时候，「屏内 第 1–2 段」是废话。
+    const pos = w.inView < g.n
+      ? (w.inView === 1 ? `屏内 第 ${w.lo} 段` : `屏内 第 ${w.lo}–${w.hi} 段`) : null;
+    const chips = [];
+    let cx = lx;
+    const top = railY - 56;                                       // chip 一行 → 「还有 n 段」一行 → 刻度字 → 细轨
+    for (const [text, main] of [[title, true], [pos, false]]) {
+      if (!text) continue;
+      const box = pzChip(ctx, placed, cx, top, text, main, W, H);
+      if (!box) continue;
+      pzHits.boxes.push([...box, g]);
+      chips.push({ text, box });
+      cx = box[2] + 6;
+    }
+    // 两头在外几段（chip 跟细轨之间那一行，`FONT_SM` 静音灰；刻度字在它下面一行，竖向不重叠）
+    ctx.font = FONT_SM; ctx.fillStyle = TREND.mut; ctx.textBaseline = 'alphabetic';
+    if (w.before) { ctx.textAlign = 'left'; ctx.fillText(`◀ 左边还有 ${w.before} 段`, 8, railY - 20); }
+    if (w.after) { ctx.textAlign = 'right'; ctx.fillText(`右边还有 ${w.after} 段 ▶`, W - 8, railY - 20); }
+    ctx.textAlign = 'left';
+    state.pzDrawn.groups.push({ n: g.n, from: g.from, to: g.to, i0: g.i0, i1: g.i1, leftOut, rightOut, ...w, ticks, chips });
+  }
+}
+
+/** 一块 chip：页面底色实底 ＋ 静音灰细边 ＋ 亮字。★ 不用 `tag()`：`tag()` 是**价签**（彩色实底黑字），
+ *  价钱是这张图最响的一档，一句说明不能长得跟它一样。避让走同一个 `fitBox`，画的框＝登记的框。 */
+function pzChip(ctx, placed, x, y, text, main, W, H) {
+  ctx.font = main ? FONT_PZ : FONT;
+  const tw = ctx.measureText(text).width;
+  let box = [x, y, x + tw + 14, y + 20];
+  if (box[2] > W - 2) return null;                       // 一行放不下就不画（不截字、不缩字）
+  box = fitBox(box, placed, H);
+  ctx.fillStyle = PAGE.bg;
+  ctx.strokeStyle = rgba(TREND.mut, (main ? 0.9 : 0.6) * 255); ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.roundRect ? ctx.roundRect(box[0] + 0.5, box[1] + 0.5, box[2] - box[0] - 1, box[3] - box[1] - 1, 4)
+    : ctx.rect(box[0] + 0.5, box[1] + 0.5, box[2] - box[0] - 1, box[3] - box[1] - 1);
+  ctx.fill(); ctx.stroke();
+  ctx.fillStyle = main ? PAGE.tx : TREND.mut;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, box[0] + 7, (box[1] + box[3]) / 2 + 0.5);
+  ctx.textBaseline = 'alphabetic';
+  placed.push(box);
+  return box;
+}
 
 /** 线段的终点：未完成的画到**迄今的极值**（向上段最高、向下段最低），full_common 同一条 */
 function segEnd(data, s) {
