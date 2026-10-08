@@ -58,7 +58,7 @@ def norm(v):
     return v
 
 
-def reference(bars, fn, min_gap=4):
+def reference(bars, fn, min_gap=None):
     r = analyze(bars, tick=tick_of(fn), min_gap=min_gap)
     big = []
     for b in r["big"]:

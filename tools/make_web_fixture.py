@@ -46,7 +46,7 @@ def guess(fn):
     raise SystemExit("认不出标的（文件名要以 %s 开头）：%s" % ("/".join(SYMBOL), fn))
 
 
-def shape(bars, tick, symbol, tf, now_ms=None, min_gap=4):
+def shape(bars, tick, symbol, tf, now_ms=None, min_gap=None):
     """K 线 → 前端吃的那一份 JSON（dict）。**后台 web/server.py 也调这一个**：形状只在这里定义一处。
 
     now_ms：判「最后一根收没收盘」用的当前时间（毫秒）；None = 现在。

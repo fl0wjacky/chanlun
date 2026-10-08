@@ -26,7 +26,8 @@
 
 两种成笔标准（rule）：
     "old"  老笔（第 77 课，缠师自己一直用的）：顶、底分型之间至少有一根不属于两个分型的K线
-           → 在标准化序列上 k 相差 ≥ 4（min_gap）。
+           → 在标准化序列上 k 相差 ≥ 4（min_gap＝4，「7 根」档）。★ C3（小栋 10-08）默认改成「6 根」档 min_gap＝3（L106:4），
+             顶底分型之间可以没有独立 K 线；7 根档留作开关。见下面 MIN_GAP_DEFAULT。
     "new"  新笔（第 81 课正文，理由是不同软件结果少打架；定义原文见上）：
            ① 包含处理后顶、底分型不共用K线 → k 相差 ≥ 3；
            ② 顶分型最高那根与底分型最低那根**原始**K线之间（不含这两根）至少 3 根 → i 相差 ≥ 4。
@@ -86,6 +87,12 @@ class RangeExt:
         return best
 
 
+
+# 笔最少几根 K 线的默认档（C3，小栋 10-08 12:42 拍 ①B）：6 根 ⇒ 标准化序列上顶底分型 k 相差 ≥ 3（L106:4「至少延伸6个基本K线单位」，
+# 顶分型和底分型之间可以没有独立 K 线）。开关切 7 根 ⇒ ≥ 4（L62:17、L77:37：顶底之间至少一根独立 K 线；L62 原文另说这种情况
+# 「一般来说，也最好不算一笔」）。各处默认值都读这一个常量，网站后台按请求的 pen_min 显式传。
+MIN_GAP_DEFAULT = 3
+
 def check_range_ext(cls=None, seeds=range(40)):
     """RangeExt 跟切片 max/min 在所有 (k0, k1) 上逐个比 → 不一致处数（0 才对）。
     数组长度 1..65 各种（含 2 的幂边界），价格窄带整数（故意多平价）。"""
@@ -108,7 +115,8 @@ def check_range_ext(cls=None, seeds=range(40)):
     return bad
 
 
-def build_pens(fx, std, rule="old", min_gap=4):
+def build_pens(fx, std, rule="old", min_gap=None):
+    min_gap = MIN_GAP_DEFAULT if min_gap is None else min_gap
     """fx: fractals() 的输出；std: standardize() 的输出。返回 (笔列表, 笔端点序列)。"""
     if rule not in ("old", "new"):
         raise ValueError("rule 只能是 'old'（老笔）或 'new'（新笔）")
@@ -242,7 +250,8 @@ def nonextreme_pens(pens, std):
     return out
 
 
-def check_pens(pens, seq, std, rule="old", min_gap=4):
+def check_pens(pens, seq, std, rule="old", min_gap=None):
+    min_gap = MIN_GAP_DEFAULT if min_gap is None else min_gap
     """自检笔的不变量（不看极值，极值见 nonextreme_pens）。返回违规列表（应为空）。"""
     bad = []
     for n in range(len(seq) - 1):
@@ -261,7 +270,8 @@ def check_pens(pens, seq, std, rule="old", min_gap=4):
     return bad
 
 
-def unsplit_violations(pens, fx, std, rule="old", min_gap=4):
+def unsplit_violations(pens, fx, std, rule="old", min_gap=None):
+    min_gap = MIN_GAP_DEFAULT if min_gap is None else min_gap
     """独立复核（不调用 build_pens 的任何内部函数）：笔内不能再切出合法的三笔。
 
     第 77 课唯一性证明：两个候选端点之间不能再夹一个顶 —— 原文「在这两个底之间不可能还存在一个顶，↵否则这里就不是一笔了」。

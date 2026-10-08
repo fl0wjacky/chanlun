@@ -418,10 +418,12 @@ import json as _json                                         # noqa: E402
 _fx = [dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"])
        for b in _json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "aaplusdt_1h_headdir.json")))]
 from config import tick_of as _tick_of                       # noqa: E402
-_rh = analyze(_fx, tick=_tick_of("aaplusdt_1h.json"))
+# ★ C3（10-08）默认 6 根以后，这份夹具（当时是 7 根下冻的）在 6 根下不再出这个毛病，data/ 10 份、线上 15 张在 6 根下也**无样本**
+#   ⇒ 这一格钉在 7 根档（min_gap=4）上跑：7 根是还在的开关档，修法两档都管。6 根档出了样本再补一份。
+_rh = analyze(_fx, tick=_tick_of("aaplusdt_1h.json"), min_gap=4)
 count("AAPL 1h 夹具线段不变量违规（图头段方向）", len(check_segments(_rh["segs"], _rh["pens"])))
 SG.HEAD_DIR_FIX = False                                       # 反向验证：拿掉这条修法，同一份夹具必须报出来
-_rh0 = analyze(_fx, tick=_tick_of("aaplusdt_1h.json"))
+_rh0 = analyze(_fx, tick=_tick_of("aaplusdt_1h.json"), min_gap=4)
 SG.HEAD_DIR_FIX = True
 count("拿掉图头段方向修法后 AAPL 1h 夹具没报出来", 0 if check_segments(_rh0["segs"], _rh0["pens"]) else 1)
 
