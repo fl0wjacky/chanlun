@@ -37,12 +37,12 @@
 //
 // 跑法（三样都要）：
 //   1) 静态服务，**只绑回环**（部署纪律：不许绑全网卡）：
-//        python3 -m http.server 8791 --bind 127.0.0.1 --directory web
+//        python3 -m http.server <端口> --bind <回环地址> --directory web   （只绑回环）
 //   2) playwright：`npm i playwright && npx playwright install chromium`（各机器一次）
 //      node_modules 不在仓里 —— 在任何装好 playwright 的目录下跑，用 NODE_PATH 指过来即可。
 //   3) node tools/web_more_e2e.js [输出目录] [页面地址] [--throttle=N]
 //        输出目录默认 $TMPDIR/more-e2e（截图落这儿；不写进仓）
-//        页面地址默认 http://127.0.0.1:8791/（服务换个端口就改这个）
+//        页面地址：必须给 E2E_URL（或参数），本工装不带默认
 //        --throttle=N：把这一页的 CPU 拖慢 N 倍（CDP Emulation.setCPUThrottlingRate，默认 1＝不降速）。
 //          ★ 什么时候该用它：这套里有一格量的是**时序竞争**（「打开页面没人拖，它自己会不会去要下一档」）。
 //            竞争这种事**证不了不存在** —— 快机器上连跑 10 次全绿，说明的只是这台机器快。
@@ -62,7 +62,7 @@ try {
 
 const WEB = path.join(__dirname, '..', 'web');           // 仓相对：工装跟着仓走，不写死谁的家目录
 const OUT = process.argv[2] || path.join(os.tmpdir(), 'more-e2e');
-const PAGE = (process.env.E2E_URL || process.argv[3] || 'http://127.0.0.1:8791/').replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
+const PAGE = (process.env.E2E_URL || process.argv[3] || noUrl()).replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
 // --throttle=4：把这一页的 CPU 拖慢 4 倍（CDP）。默认 1＝不降速。
 // 为什么要有：这条工装里有一格量的是**时序竞争**（没人拖的时候会不会自己发请求）。
 // 竞争**证不了不存在**——快机器上 10/10 绿什么都不说明。要验它，就得能故意把机器拖慢。
@@ -1173,3 +1173,10 @@ const snap = (p) => p.evaluate(() => {
   }
   process.exit(bad.length ? 1 : 0);
 })();
+
+// 不带默认页面地址（部署细节不进仓，card-58518cb5-357）：没给 E2E_URL、也没给地址参数，就直接报错、退出码 2（环境没搭好）。
+// predeploy 会 export E2E_URL。写法跟 tools/web_fs_drag_e2e.js 一致。
+function noUrl() {
+  console.error('缺页面地址：请设 E2E_URL（或把页面地址当参数）。本工装不带默认地址。');
+  process.exit(2);
+}

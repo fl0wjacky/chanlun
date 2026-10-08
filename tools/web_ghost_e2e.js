@@ -47,7 +47,7 @@
 //
 // 跑法：
 //   1) 真后台（只用来取那份真数据 ＋ /api/meta），**只绑回环**（部署纪律：不许绑全网卡）：
-//        python3 web/server.py --port 8796
+//        python3 web/server.py --port <端口>
 //   2) node tools/web_ghost_e2e.js [输出目录] [页面地址]
 //        （playwright 的 node_modules 不在仓里，用 NODE_PATH 指过来）
 const fs = require('fs');
@@ -63,7 +63,7 @@ try {
 }
 
 const OUT = process.argv[2] || path.join(os.tmpdir(), 'ghost-e2e');
-const PAGE = (process.env.E2E_URL || process.argv[3] || 'http://127.0.0.1:8796/').replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
+const PAGE = (process.env.E2E_URL || process.argv[3] || noUrl()).replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
 const QS = '?symbol=ZECUSDT&tf=15m';
 const EDGE_BAR = 100;          // 注入的那个"离左沿很近"的已确认点（真数据里 bar<200 处没有点）
 const TARGET_BAR = 4004;       // 拿它当"消失"的那个点（线段中枢层、实心，好量）
@@ -1400,3 +1400,10 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   console.log(`\n${n - bad}/${n} 过　截图：${OUT}`);
   process.exit(bad ? 1 : 0);
 })().catch((e) => { console.error('✗ 炸了：' + (e && e.stack || e)); process.exit(2); });
+
+// 不带默认页面地址（部署细节不进仓，card-58518cb5-357）：没给 E2E_URL、也没给地址参数，就直接报错、退出码 2（环境没搭好）。
+// predeploy 会 export E2E_URL。写法跟 tools/web_fs_drag_e2e.js 一致。
+function noUrl() {
+  console.error('缺页面地址：请设 E2E_URL（或把页面地址当参数）。本工装不带默认地址。');
+  process.exit(2);
+}
