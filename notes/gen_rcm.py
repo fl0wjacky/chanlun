@@ -37,17 +37,37 @@ KNOWN={
  'S-待定-1':('core/segment.py:374-392（Bram 10-08 摸底）','已实现'),
  'W53':('—','不进代码（Nova 10-08 11:34）'),'W26':('—','未实现，这批不做（W26 后半）'),
  'C3':('core/pen.py min_gap（第三批 ①参数 ②默认 6）','进行中'),
+ 'P8':('core/kline.py 合并时 `bh > p["h"]` 才换 ih','跟作者 L81 并列取法不同（0.8%），待 Nova 定'),
 }
+# 第 N 章补翻文件里的条目标题（W、M、J、T、Z、C、S、P 这些编号的出处），有就拿它当摘要
+chap=[('HEAD',f) for f in files if f.endswith('.md') and f.split('/')[-1].startswith('第')]
+# 第四到七章的补翻文件不在 main，在各章自己的支上（只读，取条目标题用）
+for br,f in [('origin/agent/atlas/ch4-zsbc','docs/spec/第四章-走势类型与背驰.md'),('origin/agent/atlas/ch5-mmd','docs/spec/第五章-买卖点.md'),
+             ('origin/agent/atlas/ch6-jb','docs/spec/第六章-级别.md'),('origin/agent/atlas/ch7-gj','docs/spec/第七章-辅助工具.md')]:
+    chap.append((br,f))
+title={}
+for ref,f in chap:
+    t=subprocess.run(['git','show',ref+':'+f],capture_output=True,text=True).stdout
+    for line in t.split('\n'):
+        m=re.match(r'\*\*('+idre+r')(?:[（(][^）)]*[）)])?\s*·\s*(.+?)\*\*',line)
+        if m and m.group(1) not in title: title[m.group(1)]=(f.split('/')[-1],m.group(2))
+        m=re.match(r'\|\s*('+idre+r')\s*\|\s*(.+?)\s*\|',line)
+        if m and m.group(1) not in title: title[m.group(1)]=(f.split('/')[-1],re.sub(r'[*`]','',m.group(2)))
 rows=[]
 key=lambda x:(re.match(r'S-待定|[A-Z]+',x).group(0),[int(v) for v in re.findall(r'\d+',x)])
 for k in sorted(occ,key=key):
     best=max(occ[k],key=lambda o:score(k,o))
     code,st=KNOWN.get(k,('',''))
-    rows.append(f"| {k} | `{best[0]}:{best[1]}` | {label(k,best[2])} | {code} | {st} |")
+    if k in title and re.match(r'[WMJTZ]\d',k):
+        cf,tt=title[k];tt=re.sub(r'[|]','／',tt);tt=(tt[:70]+'…') if len(tt)>70 else tt
+        summ=f"{tt}（出处：{cf}）"
+    else:
+        summ=label(k,best[2])
+    rows.append(f"| {k} | `{best[0]}:{best[1]}` | {summ} | {code} | {st} |")
 hdr=f"""# 规则对代码总表（底账）
 
 > 基于 main `{M}`。**用途**：spec 里每一条编了号的规则，写清楚代码在哪、还没实现、还是只是说明不进代码。以后拿它防『spec 定了、代码没跟上』。第三批 B13 的 S7、S10、S12 就是这样漏的。
-> **怎么生成的**：`notes/gen_rcm.py`。扫 `docs/spec/` 下 17 份主题文件（不含『第 N 章』补翻记录），按编号抓出现处：W、M、J、T、Z、R、C、S、P、D 加数字，以及 S-待定-N。**一个编号常出现在好几处，这里只取最像定义的那一处**（『规则 X』开头、标题、加粗）。摘要是那一行的标题或加粗文字，**可能取错**，以定义处原文为准。
+> **怎么生成的**：`notes/gen_rcm.py`。扫 `docs/spec/` 下 17 份主题文件（不含『第 N 章』补翻记录），按编号抓出现处：W、M、J、T、Z、R、C、S、P、D 加数字，以及 S-待定-N。**一个编号常出现在好几处，这里只取最像定义的那一处**（『规则 X』开头、标题、加粗）。W、M、J、T、Z 的摘要取『第 N 章』补翻文件里这个编号的条目标题（标明出处，第四到七章的文件在各章自己的支上）；D、R、S、C、P 和没找到标题的，取 spec 那一行的标题或加粗字，**可能取错**，以定义处原文为准。
 > **分工**：Atlas 列规则，并填上已经核过的几条；Bram 填『代码位置』和『状态』。状态五选一：已实现／**未实现**／不进代码（只是说明或操作建议）／进行中／请核。
 > W、M、J、T、Z 是各章补翻的条目号，很多只是『原文怎么说』的记录，不是规则，这类直接填『不进代码』。
 
