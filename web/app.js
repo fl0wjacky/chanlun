@@ -868,16 +868,23 @@ function paint(d) {
   penDash.setData(pens.length > 1 ? penA.slice(-1).concat([{ time: T(pens.at(-1).i1), value: pens.at(-1).p1 }]) : []);
 
   // 线段：已完成的实线、未完成的虚线（画到迄今的极值，跟 Python 同一条）
-  const segs = d.segs, done = segs.filter((s) => !s.live), live = segs.find((s) => s.live);
+  // ★ S7「暂定」（card-d5a92ea2-3b2）：暂定段也带 live ⇒ 未完成的可能有**两条**首尾相接：暂定段（起点 → 判出来的那一刀 V）
+  //   ＋ 它后面真正还在走的那一截（V → 迄今的极值）。原来只取 `find` 第一条 ⇒ 后面那一截**整条不画**。
+  //   两条都是虚线、在 V 处拐弯，V 上那个虚线圈和「暂定」两个字在 layers.js 端点那一层画。
+  const segs = d.segs, done = segs.filter((s) => !s.live), lives = segs.filter((s) => s.live);
   const segA = done.length ? [{ time: T(done[0].i0), value: done[0].p0 }] : [];
   for (const s of done) segA.push({ time: T(s.i1), value: s.p1 });
   segSolid.setData(segA);
-  if (live) {
-    const ext = live.dir === 'up' ? live.hi : live.lo;
-    let k = live.PI0;
-    for (let j = live.PI0; j <= live.PI1; j++) if (d.pens[j] && d.pens[j].p1 === ext) k = j;
-    segDash.setData([{ time: T(live.i0), value: live.p0 }, { time: T(d.pens[k].i1), value: ext }]);
-  } else segDash.setData([]);
+  const dash = [];
+  for (const s of lives) {
+    if (!dash.length) dash.push({ time: T(s.i0), value: s.p0 });
+    if (s.tentative) { dash.push({ time: T(s.i1), value: s.p1 }); continue; }
+    const ext = s.dir === 'up' ? s.hi : s.lo;
+    let k = s.PI0;
+    for (let j = s.PI0; j <= s.PI1; j++) if (d.pens[j] && d.pens[j].p1 === ext) k = j;
+    dash.push({ time: T(d.pens[k].i1), value: ext });
+  }
+  segDash.setData(dash);
 
   overlay.setData(bars.length ? [{ time: bars.at(-1).time, value: bars.at(-1).close }] : []);
   paintVol(d);
@@ -2282,6 +2289,12 @@ function renderLegend() {
   const items = [];
   if (opts.pen) items.push(['line', CHART.pen, 1, '笔'], ['line-dash', CHART.pen, 1, '未完成的笔']);
   if (opts.seg) items.push(['line', CHART.seg, 2, '线段'], ['line-dash', CHART.seg, 2, '未完成的线段']);
+  // ★ 「暂定」那一格**只在屏上真有暂定那一刀时才挂**：大多数图没有（25 张里 3 张），平白多一格会把图例顶折
+  //   （见下面「会变」那段量过的账）。手机上没有悬停，所以说明不只靠 title：样例＋两个字就能对上屏上那个虚线圈。
+  const tent = opts.seg && state.data && (state.data.segs || []).find((s) => s.tentative);
+  // 样例圈的颜色跟屏上那个圈同一条：暂定段向上 ⇒ 那一刀是顶（红）；向下 ⇒ 底（绿）
+  if (tent) items.push(['ring-dash', tent.dir === 'up' ? CHART.sell : CHART.buy, 0, '暂定',
+    '先判出来的一刀：要等这一刀后面第一笔的两头谁先被突破，才知道它算不算数']);
   if (opts.pc) items.push(['box', CHART.pen, 2, '类中枢（与笔同色）'], ['box-split', CHART.pen, 2, '前三实线 / 延续虚线']);
   if (opts.sc) items.push(['box', CHART.seg, 4, '线段中枢（与线段同色）']);
   // ★ 「会变」那一档（§八 8，卡 card-06d7f9a1-3ad，小栋选的 C+）。挂**照旧那一格样例**：
@@ -2322,6 +2335,8 @@ function renderLegend() {
       ? `<span class="tagsw" style="background:${col};color:${CHART.tag_ink}">[ZD, ZG]</span>`
       : kind === 'tri-fill'
         ? `<svg width="30" height="14"><polygon points="15,1 6,13 24,13" fill="${col}"/></svg>`
+        : kind === 'ring-dash'
+          ? `<svg width="30" height="14"><circle cx="15" cy="7" r="5.5" fill="none" stroke="${col}" stroke-width="1.6" stroke-dasharray="3 2.3"/></svg>`
         : kind === 'tri-hollow'
           ? `<svg width="30" height="14"><polygon points="15,1 6,13 24,13" fill="none" stroke="${col}" stroke-width="2"/></svg>`
           : kind === 'box' || kind === 'box-split' || kind === 'box-fade'
