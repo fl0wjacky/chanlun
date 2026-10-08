@@ -3,13 +3,17 @@ M=subprocess.run(['git','rev-parse','--short','origin/main'],capture_output=True
 files=subprocess.run(['git','-c','core.quotepath=off','ls-tree','--name-only','HEAD','docs/spec/'],capture_output=True,text=True).stdout.split()
 topic=[f for f in files if f.endswith('.md') and not f.split('/')[-1].startswith('第')]
 idre=r'(?:S-待定-\d|(?:W|M|J|T|Z|R|C|S|P|D)\d{1,2}(?:-\d+)?)'
-pat=re.compile(r'(?<![A-Za-z0-9])('+idre+r')(?![0-9-])')
+pat=re.compile(r'(?<![A-Za-z0-9])('+idre+r')(?![0-9XS-])')   # 不收『S1X1S2X2…』『S1S2…Sn』那种笔序列记号
 occ=collections.OrderedDict()
 for f in topic:
     t=subprocess.run(['git','show','HEAD:'+f],capture_output=True,text=True).stdout
     for n,line in enumerate(t.split('\n'),1):
         for m in pat.finditer(line):
-            occ.setdefault(m.group(1),[]).append((f.split('/')[-1],n,line))
+            k=m.group(1); fn=f.split('/')[-1]
+            # 同一个『字母＋数字』在不同文件里是两套编号，按文件分开（Nova 10-08 12:54 逮到 P 撞名）
+            if re.match(r'P\d',k): k=('笔' if fn in ('笔.md','分型.md') else '探针')+k
+            if re.match(r'C\d',k) and fn=='复权.md': k='不变量'+k
+            occ.setdefault(k,[]).append((fn,n,line))
 def first_bold(l):
     b=re.search(r'\*\*(.+?)\*\*',l);return b.group(1) if b else ''
 def score(k,o):
@@ -37,7 +41,7 @@ KNOWN={
  'S-待定-1':('core/segment.py:374-392（Bram 10-08 摸底）','已实现'),
  'W53':('—','不进代码（Nova 10-08 11:34）'),'W26':('—','未实现，这批不做（W26 后半）'),
  'C3':('core/pen.py min_gap（第三批 ①参数 ②默认 6）','进行中'),
- 'P8':('core/kline.py 合并时 `bh > p["h"]` 才换 ih','跟作者 L81 并列取法不同（0.8%），待 Nova 定'),
+ '笔P8':('core/kline.py 合并时 `bh > p["h"]` 才换 ih','跟作者 L81 并列取法不同（0.8%），待 Nova 定'),
 }
 # 第 N 章补翻文件里的条目标题（W、M、J、T、Z、C、S、P 这些编号的出处），有就拿它当摘要
 chap=[('HEAD',f) for f in files if f.endswith('.md') and f.split('/')[-1].startswith('第')]
@@ -61,11 +65,15 @@ NOW={
  'W60':'现状：已定（Nova 10-08 06:25，以 L52 自己的例子为准，不否定小转大）',
 }
 rows=[]
-key=lambda x:(re.match(r'S-待定|[A-Z]+',x).group(0),[int(v) for v in re.findall(r'\d+',x)])
+key=lambda x:(re.match(r'S-待定|笔P|探针P|不变量C|[A-Z]+',x).group(0),[int(v) for v in re.findall(r'\d+',x)])
 for k in sorted(occ,key=key):
     best=max(occ[k],key=lambda o:score(k,o))
     code,st=KNOWN.get(k,('',''))
-    if k in title and re.match(r'[WMJTZ]\d',k):
+    raw=k[1:] if k.startswith('笔P') else k
+    if k.startswith('笔P') and raw in title:
+        cf,tt=title[raw];tt=re.sub(r'[|]','／',tt);tt=(tt[:70]+'…') if len(tt)>70 else tt
+        summ=f"{tt}（出处：{cf}）"
+    elif k in title and re.match(r'[WMJTZ]\d',k):
         cf,tt=title[k];tt=re.sub(r'[|]','／',tt);tt=(tt[:70]+'…') if len(tt)>70 else tt
         summ=f"{tt}（出处：{cf}）"
         if k in NOW: summ+=' ★'+NOW[k]
@@ -76,7 +84,7 @@ hdr=f"""# 规则对代码总表（底账）
 
 > **本表不是规范，规范以 `docs/spec` 为准。**
 > 基于 main `{M}`。**用途**：spec 里每一条编了号的规则，写清楚代码在哪、还没实现、还是只是说明不进代码。以后拿它防『spec 定了、代码没跟上』。第三批 B13 的 S7、S10、S12 就是这样漏的。
-> **怎么生成的**：`notes/gen_rcm.py`。扫 `docs/spec/` 下 17 份主题文件（不含『第 N 章』补翻记录），按编号抓出现处：W、M、J、T、Z、R、C、S、P、D 加数字，以及 S-待定-N。**一个编号常出现在好几处，这里只取最像定义的那一处**（『规则 X』开头、标题、加粗）。W、M、J、T、Z 的摘要取『第 N 章』补翻文件里这个编号的条目标题（标明出处，第四到七章的文件在各章自己的支上）；D、R、S、C、P 和没找到标题的，取 spec 那一行的标题或加粗字，**可能取错**，以定义处原文为准。
+> **怎么生成的**：`notes/gen_rcm.py`。扫 `docs/spec/` 下 17 份主题文件（不含『第 N 章』补翻记录），按编号抓出现处：W、M、J、T、Z、R、C、S、P、D 加数字，以及 S-待定-N。**同一个编号在不同文件里可能是两套东西，按文件分开**：笔.md／分型.md 里的 P 写成『笔P』（第一章待定项），走势分段.md／级别联动.md 里的 P 写成『探针P』（§四反向探针）；复权.md 的 C1 写成『不变量C1』；线段.md 里『S1X1S2X2…』『S1S2…Sn』那种笔序列记号不收。D、R、Z、W、M、J、T 查过，各文件里是同一套。**一个编号常出现在好几处，这里只取最像定义的那一处**（『规则 X』开头、标题、加粗）。W、M、J、T、Z 的摘要取『第 N 章』补翻文件里这个编号的条目标题（标明出处，第四到七章的文件在各章自己的支上）；D、R、S、C、P 和没找到标题的，取 spec 那一行的标题或加粗字，**可能取错**，以定义处原文为准。
 > **分工**：Atlas 列规则，并填上已经核过的几条；Bram 填『代码位置』和『状态』。状态五选一：已实现／**未实现**／不进代码（只是说明或操作建议）／进行中／请核。
 > W、M、J、T、Z 是各章补翻的条目号，很多只是『原文怎么说』的记录，不是规则，这类直接填『不进代码』。
 
