@@ -61,8 +61,10 @@ try {
 }
 
 const WEB = path.join(__dirname, '..', 'web');           // 仓相对：工装跟着仓走，不写死谁的家目录
-const OUT = process.argv[2] || path.join(os.tmpdir(), 'more-e2e');
-const PAGE = (process.env.E2E_URL || process.argv[3] || noUrl()).replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
+const ARGS = process.argv.slice(2).filter((a) => !a.startsWith('--'));   // 位置参数；--selftest／--throttle= 不算
+const SELFTEST = process.argv.includes('--selftest');
+const OUT = ARGS[0] || path.join(os.tmpdir(), 'more-e2e');
+const PAGE = (process.env.E2E_URL || ARGS[1] || noUrl()).replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
 // --throttle=4：把这一页的 CPU 拖慢 4 倍（CDP）。默认 1＝不降速。
 // 为什么要有：这条工装里有一格量的是**时序竞争**（没人拖的时候会不会自己发请求）。
 // 竞争**证不了不存在**——快机器上 10/10 绿什么都不说明。要验它，就得能故意把机器拖慢。
@@ -101,7 +103,7 @@ const servedFirst = new Set();        // 哪个页名已经供过第一份了（
 // shift：副图那个口回的 `t[]` **错开一根**（见 tools/fake_macd.js 第三段注释）。㉓ 用；
 //   别的格必须关着 —— 开着的话响应里第一根页面没有、最后一根页面也没有，⑲㉑ 的「逐根对齐」就没得比了。
 const DEFAULT_SCEN = { winmode: null, pageWin: null, earliestFlag: false, badNext: false, spanMax: 8, delay: 0,
-                       withVol: false, shift: false };
+                       withVol: false, shift: false, holdFrom: null };
 const SCEN = Object.assign({}, DEFAULT_SCEN);
 const scenKeys = Object.keys(DEFAULT_SCEN).sort();
 const scenSnap = () => scenKeys.map((k) => k + '=' + JSON.stringify(SCEN[k] === null ? null : SCEN[k])).join(',');
@@ -110,6 +112,11 @@ const scenBad = [];                // 对不上的（跑完统一报红）
 let lastOpenVer = 0;               // 上一次开页时的 scenVer（查「这一页之前声明过没有」）
 let scenVer = 0;              // 每调一次 scen() 加一：开页时对一下，就知这一页是不是「声明过场景」的
 const scen = (o) => { Object.assign(SCEN, DEFAULT_SCEN, o || {}); holdRelease = null; scenVer++; return scenSnap(); };
+// ㉑ 的牙（--selftest）：span ≥ holdFrom 的那几趟主图请求**扣住**，由 race21 在拖完 4 秒后放行
+//   （比旧写法死等的 3 秒晚）—— 「最后一档还在路上」从碰运气变成一定成立，跟 holdRelease 同一个道理。
+let lateGate = null, lateOpen = null;
+const lateArm = () => { lateGate = new Promise((r) => { lateOpen = r; }); };
+const lateFree = () => { if (lateOpen) lateOpen(); lateGate = null; lateOpen = null; };
 // ★★ 「响应扣在后台、由工装决定什么时候放行」（2026-10-04 改）。
 //   原来靠 delay 跟拖拽赛跑：delay 是**时钟**，拖一下要多久是**机器快慢**决定的 ——
 //   降速 4 倍时，一次拖拽能比 900ms 还长，等拖完再去看提示，那一趟早就落地了（实测「加载更早数据…」
@@ -228,6 +235,7 @@ async function serve(ctx) {
     try {
       if (SCEN.delay) await new Promise((r) => setTimeout(r, SCEN.delay));
       if (holdRelease) await holdRelease;                 // ★ 工装扣住的那一趟：等它说放行
+      if (SCEN.holdFrom != null && span >= SCEN.holdFrom && lateGate) await lateGate;   // ㉑ 的牙：最后那几档扣住
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(payload(span)) });
     } finally { inflight--; }
   });
@@ -274,6 +282,43 @@ const snap = (p) => p.evaluate(() => {
            span: paging.span, url: location.search };
 });
 
+// ㉑ 拖出换档、再比主图／副图两本请求账。mode：
+//   'wait'  —— 现行：先等主图把**最后要的那一档**画上去、再等副图跟上那一档（各最多 15 秒），然后才比；
+//   'fixed' —— 旧写法：拖完死等 3 秒就比（只给 --selftest 当「必须红」的那一边用）。
+// ★ 为什么要等：副图是在主图**画完**那一份以后才去要的（app.js paint → syncSub）。最后一趟还在路上时就比，
+//   两本账当然差一格 —— 10-08 实测红过一次（主图 [2,4,8]、副图 [2,4]，屏上却是 span 4 那份、逐根对齐）。
+// ★ SCEN.holdFrom 开着时（--selftest）：拖完 4 秒才放行被扣住的那几档 —— 比旧写法那 3 秒晚，竞态一定成立。
+async function race21(page, mode) {
+  const reqBefore = requests.length, macdBefore = macdCalls.length;
+  if (SCEN.holdFrom != null) lateArm();
+  const box = await page.evaluate(() => { const r = document.getElementById('chart').getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
+  for (let k = 0; k < 6; k++) {                     // 真拖（脚本摆视口不算用户动作）
+    await page.mouse.move(box.x + box.w * 0.2, box.y + box.h * 0.4);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.w * 0.85, box.y + box.h * 0.4, { steps: 10 });
+    await page.mouse.up();
+    await page.waitForTimeout(250);
+  }
+  const release = SCEN.holdFrom != null ? setTimeout(lateFree, 4000) : null;
+  await page.waitForTimeout(3000);
+  let why = '';                                     // 等超时就记原因（Bram 10-08 17:48：别把 15 秒超时静默吞掉）
+  if (mode === 'wait') {
+    const lastMain = requests.slice(reqBefore).at(-1);
+    if (lastMain != null) {
+      const painted = await page.waitForFunction((s) => window.__app && window.__app.state.data && window.__app.state.data.span === s,
+        lastMain, { timeout: 15000 }).then(() => true, () => false);
+      if (!painted) why = `主图 15 秒内没把 span=${lastMain} 画上去`;
+      let w = 0;
+      for (; w < 30 && macdCalls.slice(macdBefore).at(-1) !== lastMain; w++) await page.waitForTimeout(500);
+      if (macdCalls.slice(macdBefore).at(-1) !== lastMain) why += (why ? '；' : '') + `副图 15 秒内没去要 span=${lastMain}`;
+      await page.waitForTimeout(800);                  // 副图那一份画上去
+    }
+  }
+  const out = { spans: requests.slice(reqBefore), mspans: macdCalls.slice(macdBefore), why };
+  if (release) { clearTimeout(release); lateFree(); }   // 旧写法那一边比完以后才放行，别把页面卡死在半路
+  return out;
+}
+
 (async () => {
   fs.mkdirSync(OUT, { recursive: true });
   const b = await chromium.launch();
@@ -309,6 +354,32 @@ const snap = (p) => p.evaluate(() => {
     (cond ? ok : bad).push(line);
     console.log((cond ? '  ✓ ' : '  ✗ ') + line);          // 边跑边印：中途炸了也知道跑到哪
   };
+  // ---- --selftest：只跑 ㉑ 那条牙（Nova 10-08 17:41）。最后那几档扣到拖完 4 秒才放 ⇒
+  //   旧写法（死等 3 秒）**必须红**、现行写法（等画完）**必须绿**；两边都对才算这条判据有牙。
+  if (SELFTEST) {
+    await p.close();
+    const res = {};
+    for (const mode of ['fixed', 'wait']) {
+      scen({ spanMax: 16, withVol: true, holdFrom: 4 });
+      const q = await openPage('st-' + mode);
+      await q.setViewportSize({ width: 1280, height: 860 });
+      await q.goto(PAGE + '?symbol=ZECUSDT&tf=1h', { waitUntil: 'domcontentloaded' });
+      await q.waitForFunction(() => window.__app && window.__app.sub && window.__app.sub.data, null, { timeout: 30000 }).catch(() => {});
+      await q.waitForTimeout(800);
+      const r = await race21(q, mode);
+      r.same = r.spans.length > 0 && r.mspans.length > 0 && r.mspans.at(-1) === r.spans.at(-1);
+      res[mode] = r;
+      await q.close();
+    }
+    const fixedRed = !res.fixed.same, waitGreen = res.wait.same;
+    t('自检：旧写法（拖完死等 3 秒就比）在「最后一档晚到」时**必须红**', fixedRed,
+      `主图要了 ${JSON.stringify(res.fixed.spans)}、副图要了 ${JSON.stringify(res.fixed.mspans)}`);
+    t('自检：现行写法（等主图画完、副图跟上再比）同一场景**必须绿**', waitGreen,
+      `主图要了 ${JSON.stringify(res.wait.spans)}、副图要了 ${JSON.stringify(res.wait.mspans)}${res.wait.why ? '；★ ' + res.wait.why : ''}`);
+    console.log(bad.length ? `\n自检 ${bad.length} 处不对` : '\n自检两条都对：㉑ 有牙');
+    process.exit(bad.length ? 1 : 0);
+  }
+
   // ★ 截图必须**指定是哪一页**：工装同时开着好几页，写死第一页就会拿另一页的「没有这句提示」当失败
   //   （⑧ 那格就是这么假红过一次：提示明明在 4 号页上亮着）。
   // ★ 盯着一句话**出现过**（驱动侧轮询，不是页面侧 rAF 轮询）。
@@ -1089,22 +1160,12 @@ const snap = (p) => p.evaluate(() => {
       + `再打开 ${SC.n} 格、请求累计 ${macdCalls.length - macd0} 次`);
 
     // ㉑ 往左拖换档：副图必须**跟主图同一个 span** 一起换、换完还是逐根对齐
-    const reqBefore = requests.length, macdBefore = macdCalls.length;
-    const box17 = await p17.evaluate(() => { const r = document.getElementById('chart').getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
-    for (let k = 0; k < 6; k++) {                     // 真拖（脚本摆视口不算用户动作）
-      await p17.mouse.move(box17.x + box17.w * 0.2, box17.y + box17.h * 0.4);
-      await p17.mouse.down();
-      await p17.mouse.move(box17.x + box17.w * 0.85, box17.y + box17.h * 0.4, { steps: 10 });
-      await p17.mouse.up();
-      await p17.waitForTimeout(250);
-    }
-    await p17.waitForTimeout(3000);
-    const spans17 = requests.slice(reqBefore), mspans17 = macdCalls.slice(macdBefore);
+    const { spans: spans17, mspans: mspans17, why: why17 } = await race21(p17, 'wait');
     const SD = await subProbe(p17, spans17.at(-1) || 1);
     t('㉑ 换档：往左拖出 span=2 ⇒ 副图跟着要**同一个 span**，换完之后仍然逐根对齐（点数＝主图根数）',
       spans17.length > 0 && mspans17.length > 0 && mspans17.at(-1) === spans17.at(-1)
       && SD.bad === 0 && SD.pts.every((x) => x === SD.bars),
-      `主图要了 ${JSON.stringify(spans17)}、副图要了 ${JSON.stringify(mspans17)}；`
+      `主图要了 ${JSON.stringify(spans17)}、副图要了 ${JSON.stringify(mspans17)}；${why17 ? '★ ' + why17 + '；' : ''}`
       + `换完 ${SD.bars} 根、副图 ${SD.pts.join('/')} 点、逐根差 ${SD.bad} 处`);
     await p17.close();
 
