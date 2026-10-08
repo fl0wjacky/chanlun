@@ -456,6 +456,7 @@ def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT, memo=None):
 HEAD_DIR_FIX = True                       # 探针开关：图头那一段终点没越过起点就往后挪一笔（card-24dd71cb-003）
 HEAD_EXT_FIX = True                       # 探针开关：图头那一段起点非段内极值、且不是 L78 ① 型（检查器会报的那种）就往后挪一笔（card-2783fa1f-da8）
 HEAD_EXT_CUTOFF = True                    # 探针开关：图头那一条判 ① 型只看到确认图头段的那一笔（关掉 ⇒ 随机 seed 2435／4750 撤回已确认段）
+HEAD_DIR_NO_TENT = True                   # 探针开关：图头挪位不踩 S7 暂定那一刀（card-6dd83a22-a76；关掉 ⇒ 随机 seed 1754／2068 撤回已确认段）
 GAP_COVER = True                          # 探针开关：缺口被之前同一特征序列元素盖住不算缺口（线段 #1，card-fff28d01-f13）
 S10_TIE = True                            # 探针开关：两处「相等」（S10，线段.md 附第 5 条）：① 追平 X 的起点／终点算破；② V 跟分界前那个元素一端相同算分界
 S7_NOW = True                             # 探针开关：第一种情况等不到结局时当场判（S7，附第 2 条）—— 有分型就先切、标「暂定」（case 3）
@@ -526,7 +527,10 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=
         # ★ 图头那一段：终点没越过起点（向下段终点不低于起点 / 向上段不高于起点）⇒ 起点那一笔是图头外面上一段的尾巴，
         #   这一段划错了（L78:9-10）。跟开头三笔无重叠同一个处理：往后挪一笔再划（card-24dd71cb-003，线上 AAPL 1h/2h）。
         #   只管图头（segs 还空、且不是 _first_seg 从段中间起找）：段界之后的起点由上一段的终点定，不在这里挪。
-        if HEAD_DIR_FIX and not segs and start == 0 and (
+        # ★ 暂定那一刀（case 3，S7）不触发挪位（card-6dd83a22-a76，Atlas 10-08，Nova 23:07 定）：暂定是「结局要是后来定成 ①，
+        #   这一刀作废、只当未完成段对待」（线段.md 附 3′ 第 2 步）。拿它当真结局去挪起点，挪出来的段却是确认的；
+        #   等暂定作废、图头又成了待定，挪出来的确认段就被撤（随机 seed 1754：前缀 14 从第 1 笔起确认 1-5，前缀 15 撤；2068 同形）。
+        if HEAD_DIR_FIX and not (HEAD_DIR_NO_TENT and case == 3) and not segs and start == 0 and (
                 (seg_dir == "down" and pens[end_pen]["p1"] >= pens[i]["p0"]) or
                 (seg_dir == "up" and pens[end_pen]["p1"] <= pens[i]["p0"])):
             i += 1
