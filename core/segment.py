@@ -424,6 +424,8 @@ def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT, memo=None):
             if _beyond(p, L, not up, S10_TIE and r > k + 2):
                 return 1, r                       # 先破 X 的结束位置：V 是终点，新段在 r 才确立（第三笔就破 ＝ S11）
         if ok_rev:
+            if memo is not None:
+                memo[("A", i, k)] = rev           # L77 第二支要用：② 是由这个反向线段 A 走完坐实的（主循环划下一段时回头看）
             return 1, rev["confirm"]              # ② 反向线段走完、没破 V：V 是终点，新段到反向线段确认时才确立
         if S7_NOW:                                # ★ S7（小栋 10-07 23:51 定 A）：等不到结局 ⇒ 分界点之后的元素单独做包含，有分型就当场判，标「暂定」
             e3 = _s7_fractal(pens, k, up)
@@ -456,9 +458,95 @@ def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT, memo=None):
 HEAD_DIR_FIX = True                       # 探针开关：图头那一段终点没越过起点就往后挪一笔（card-24dd71cb-003）
 HEAD_EXT_FIX = True                       # 探针开关：图头那一段起点非段内极值、且不是 L78 ① 型（检查器会报的那种）就往后挪一笔（card-2783fa1f-da8）
 HEAD_EXT_CUTOFF = True                    # 探针开关：图头那一条判 ① 型只看到确认图头段的那一笔（关掉 ⇒ 随机 seed 2435／4750 撤回已确认段）
+HEAD_DIR_NO_TENT = True                   # 探针开关：图头挪位不踩 S7 暂定那一刀（card-6dd83a22-a76；关掉 ⇒ 随机 seed 1754／2068 撤回已确认段）
 GAP_COVER = True                          # 探针开关：缺口被之前同一特征序列元素盖住不算缺口（线段 #1，card-fff28d01-f13）
 S10_TIE = True                            # 探针开关：两处「相等」（S10，线段.md 附第 5 条）：① 追平 X 的起点／终点算破；② V 跟分界前那个元素一端相同算分界
 S7_NOW = True                             # 探针开关：第一种情况等不到结局时当场判（S7，附第 2 条）—— 有分型就先切、标「暂定」（case 3）
+
+
+L77_MERGE = True                          # 探针开关：L77 第二支硬合（card-c784a101-791，b5-spec 第 3 步「② 坐实以后又越过 V」）
+L77_STRICT_NEWLOW = True                  # 探针开关：L77 的「（没有）创新低」照字面严格，追平不算越过 V（关掉 ⇒ 跟 S10① 一样追平算）
+
+
+def _earliest(pred, lo, hi):
+    """pred(n) 对 n 单调（假→真）：返回 [lo, hi] 里第一个为真的 n；都假 ⇒ None。
+    「当下能知道的时刻」＝ 逐根截断时这个判定第一次成立的前缀长度 —— 这就是 b5-spec 编者口径的定义本身。
+    前提是已确认段只增不撤（seg_prefix_check 守着），所以 pred 单调、可以二分。只在 L77 合段候选上调（很少见）。"""
+    if hi < lo or not pred(hi):
+        return None
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if pred(mid):
+            hi = mid
+        else:
+            lo = mid + 1
+    return lo
+
+
+def _done_at(pens, start, PI1, mode):
+    """从 start 起的第一个已完成线段、终点是 PI1 —— 最早在多长的前缀上就成立了（前缀长度；不成立 ⇒ None）。"""
+    def ok(n):
+        segs = build_segments(pens[:n], mode=mode, start=start, first_only=True)
+        return bool(segs) and not segs[0].get("live") and segs[0]["PI1"] == PI1
+    return _earliest(ok, PI1 + 2, len(pens))
+
+
+def _first_done_by(pens, start, PI1, mode, n):
+    """前缀长度 n 上，从 start 起的第一个已完成线段是不是终点在 PI1 的那一段（＝ 到 n 为止它是不是已经被知道走完了）。"""
+    segs = build_segments(pens[:n], mode=mode, start=start, first_only=True)
+    return bool(segs) and not segs[0].get("live") and segs[0]["PI1"] == PI1
+
+
+def _seg_known_by(pens, i, e, mode, n, born):
+    """前缀长度 n 上，(i, e) 这一段是不是已经确认了 —— 要带着**原来的上下文**看：N 的终点受上一段带来的 born 管着，
+    不带 born 从 i 单独起划会划出另一个终点（seed 2909 就这么错过）。带上 born 从 i 局部划，跟整份从头划是同一个结果，
+    只是不用把前面几百笔再划一遍（整份重划那版 zec15 多花 0.19s，速度门过不了）。"""
+    segs = build_segments(pens[:n], mode=mode, start=i, first_only=True, born0=born)
+    return bool(segs) and not segs[0].get("live") and segs[0]["PI1"] == e
+
+
+def _l77_end(pens, i, prev, mode, memo, normal_end, born=0):
+    """L77 第二支（原博 L77：「把第一笔的笔破坏、走势 A、一个反弹合成一个线段」）。
+    prev：上一段（收在 V，由 ② 坐实，带 _A＝那个反向线段 A）；i：这一段 N 的起点（＝ X）；normal_end：N 照常找出来的终点（没有 ⇒ None）。
+    返回整数 e ⇒ N 硬收在 e（R 的终点）；None ⇒ 照常。
+    ★ 曾有一条「先不收」（R 没走完、照常终点又把越过 V 那一笔包进去 ⇒ N 先留成未完成）：随机 4000 组逐笔加长一次都打不到
+      （A 能被判走完，R 就已经是一个往前长着的段了），照仓里「没样本能打的死代码不写」删了（Nova 10-08 21:58）。
+      真出现那种形状，seg_prefix_check 会报撤销，那时按样本补。
+    要合，下面三条都得成立：
+      ① A 之后有一个已完成的反弹线段 R，R 之后第一笔越过 V（往旧段方向）的是 c；
+      ② 「A 走完」被知道的时刻早于「X 的终点被破」—— 提前定优先（L71：先破终点就是终局，L69 不许改）；
+      ③ N 照常的终点要么把 c 包进去了（那是错段，不跟合段比），要么被知道得比合段晚。
+    「被知道的时刻」＝ 最早在多长的前缀上成立。★ 比先后**不求那个时刻本身**，只在对方的时刻上问一次「这时候成立了没有」：
+      前缀上成立是单调的（seg_prefix_check 守着），所以「tA ≤ rL」就等于「截在 rL 时 A 已经走完」—— 一次划段，不用二分。
+      （第一版对每个时刻都二分，zec15 一张从 0.23s 涨到 3.2s，速度门红了，10-08 22:5x。）便宜的判断都排在前面，大多数候选在不划段的地方就出去了。"""
+    A = prev["_A"]
+    old_up = prev["dir"] == "up"
+    V = prev["p1"]
+    # c ＝ 越过 V 的第一笔：原文 ⟪然后就转头继续创新低⟫，「创新低」照字面**严格**（追平不算），跟 L78「直接新高或新低」同一个词、
+    #   同一个读法（Nova 10-08 22:04 定「新高」严格；Atlas 23:02 指出 L77 这两处也该一致）。S10① 管的是「破」，不管「新低」。
+    c0 = next((r for r in range(A["PI1"] + 1, len(pens)) if _beyond(pens[r], V, old_up, not L77_STRICT_NEWLOW and S10_TIE)), None)
+    if c0 is None:
+        return None                               # 还没越过 V：不是 L77 第二支的形状
+    R = _first_seg(pens, A["PI1"] + 1, mode, memo)
+    if R is None:
+        return None                               # R 还没走完：合不了，照常
+    if R["dir"] == prev["dir"] or R["PI1"] >= c0:
+        return None                               # R 走完了，可越过 V 那一下落在 R 里面（seed 191）／方向不对：不是 L77 第二支的形状，照常
+    # ② 提前定优先：X 终点 L 被破（往 N 的方向）的第一笔 rL。tA ≤ rL ⇔ 截在 rL（前缀长度 rL，不含第 rL 笔）时 A 已经走完
+    L = pens[i]["p1"]
+    rL = next((r for r in range(i + 1, len(pens)) if _beyond(pens[r], L, not old_up, S10_TIE and r > i + 1)), None)
+    if rL is not None and not _first_done_by(pens, i + 1, A["PI1"], mode, rL):
+        return None                               # X 的终点先被破：新段早已成立，是终局，这一支不碰
+    if normal_end is None or normal_end >= c0:
+        return R["PI1"]                           # 照常没有终点，或者照常的终点把 c 包进去了（错段，不跟合段比先后）
+    # ③ 照常的终点在 c 之前：合段时刻 tM ＝ max(R 被知道走完, c 出现)。tN ≤ tM 就照常
+    if _seg_known_by(pens, i, normal_end, mode, c0 + 1, born):
+        return None                               # c 出现的时候照常终点就已经知道了
+    if not _first_done_by(pens, A["PI1"] + 1, R["PI1"], mode, c0 + 1):
+        tR = _done_at(pens, A["PI1"] + 1, R["PI1"], mode)     # R 比 c 晚被知道：只有这时才需要 R 的确切时刻（局部划，便宜）
+        if tR is None or _seg_known_by(pens, i, normal_end, mode, tR, born):
+            return None
+    return R["PI1"]
 
 
 def _first_seg(pens, start, mode=FEAT_STD_DEFAULT, memo=None):
@@ -476,7 +564,7 @@ def _first_seg(pens, start, mode=FEAT_STD_DEFAULT, memo=None):
     return s
 
 
-def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=False, _memo=None):
+def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=False, _memo=None, l77=True, born0=0):
     """把笔聚合成线段 —— 第 67 课的定义 + 第 71 课的当下程序（逐个假设分界点）。
 
     原文：
@@ -488,7 +576,8 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=
     """
     segs, i, n = [], start, len(pens)
     memo = {} if _memo is None else _memo
-    born = 0                                  # 本段方向确立的那一笔（上一段第一种情况确认时的破位笔）
+    born = born0                              # 本段方向确立的那一笔（上一段第一种情况确认时的破位笔）；born0 只给 L77 局部重划用（带上一段的上下文）
+    prevA = None                              # L77 第二支：上一段是由 ② 坐实收在 V 的 ⇒ 那个反向线段 A（只对紧接着的下一段有用）
     while i + min_pens - 1 < n:
         # ★ L65:50-51／L77:69-70：线段开始的那三笔必须有重合。没有公共重叠 ⇒ i 处**构不成线段**
         #   ⇒ 往后挪一笔再看（原文：「开始三笔没有重合的，是构不成线段的」）。
@@ -520,13 +609,30 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=
             if resume is not None:                # 待定区间内的候选不判：跳到破位处之后的同向笔
                 while k < resume:
                     k += 2
+        # ★ L77 第二支（card-c784a101-791，b5-spec 第 3 步「② 坐实以后又越过 V」）：这一段 N 是从上一段的 V 起的、
+        #   上一段由 ② 坐实（A 走完没破 V）⇒ A 被反弹线段 R 破坏、之后越过 V 的，N 硬收在 R 的终点（哪怕那里不是分型）。
+        #   只修**还在长的这一段**：上一段（已完成）一律不动。条件和「谁先知道」见 _l77_end。
+        if L77_MERGE and l77 and prevA is not None and segs and segs[-1]["PI1"] == i - 1 and not first_only:
+            e = _l77_end(pens, i, dict(segs[-1], _A=prevA), mode, memo, found[0] if found else None, born)
+            prevA = None
+            if e is not None:
+                segs.append(dict(
+                    PI0=i, PI1=e, i0=pens[i]["i0"], i1=pens[e]["i1"], p0=pens[i]["p0"], p1=pens[e]["p1"],
+                    dir=seg_dir, npens=e - i + 1, case=4,
+                    hi=max(pens[q]["hi"] for q in range(i, e + 1)), lo=min(pens[q]["lo"] for q in range(i, e + 1))))
+                i, born = e + 1, 0
+                continue
+        prevA = None
         if found is None:
             break
         end_pen, case, at = found
         # ★ 图头那一段：终点没越过起点（向下段终点不低于起点 / 向上段不高于起点）⇒ 起点那一笔是图头外面上一段的尾巴，
         #   这一段划错了（L78:9-10）。跟开头三笔无重叠同一个处理：往后挪一笔再划（card-24dd71cb-003，线上 AAPL 1h/2h）。
         #   只管图头（segs 还空、且不是 _first_seg 从段中间起找）：段界之后的起点由上一段的终点定，不在这里挪。
-        if HEAD_DIR_FIX and not segs and start == 0 and (
+        # ★ 暂定那一刀（case 3，S7）不触发挪位（card-6dd83a22-a76，Atlas 10-08，Nova 23:07 定）：暂定是「结局要是后来定成 ①，
+        #   这一刀作废、只当未完成段对待」（线段.md 附 3′ 第 2 步）。拿它当真结局去挪起点，挪出来的段却是确认的；
+        #   等暂定作废、图头又成了待定，挪出来的确认段就被撤（随机 seed 1754：前缀 14 从第 1 笔起确认 1-5，前缀 15 撤；2068 同形）。
+        if HEAD_DIR_FIX and not (HEAD_DIR_NO_TENT and case == 3) and not segs and start == 0 and (
                 (seg_dir == "down" and pens[end_pen]["p1"] >= pens[i]["p0"]) or
                 (seg_dir == "up" and pens[end_pen]["p1"] <= pens[i]["p0"])):
             i += 1
@@ -545,6 +651,8 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=
             born = 0
             continue
         born = (at or 0) if case in (1, 3) else 0  # 方向确立只对第一种情况（含 S7 暂定）有意义；第二种情况的 at 只给 _first_seg 当「确认那一笔」
+        if case == 1:
+            prevA = memo.get(("A", i, end_pen))   # 由 ② 坐实的才有（_case_at 记的）；下一段划的时候看 L77 第二支
         segs.append(dict(
             PI0=i, PI1=end_pen,
             i0=pens[i]["i0"], i1=pens[end_pen]["i1"],
@@ -735,6 +843,45 @@ def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
         if s.get("live"):
             continue
         i, k, up = s["PI0"], s["PI1"], s["dir"] == "up"
+        if s.get("case") == 4:
+            # ★ L77 第二支硬合（card-c784a101-791）：终点是反弹线段 R 的终点，**原文说哪怕那里不是特征序列的分型**，
+            #   所以不拿①～④ 那套去判。改按 L77 那段原文的形状另写一遍（不调引擎的 _l77_end / _first_seg）：
+            #   (a) 接着上一段的终点 V 起；(b) 段内没有一笔越过 V（起点是段内极值）；
+            #   (d) 终点之后，价格**先越过 V**（往旧段方向），没有先越过本段终点 —— 这就是「然后就转头继续创新低」。
+            #   ★ 不要求终点是段内同向极值：X＋A＋R 合成的段，X 的终点可以比 R 的终点更远（1300：X 到 96.2、R 到 96.6），原文没这条。
+            prev = segs[n - 1] if n > 0 else None
+            V = prev["p1"] if prev else None
+            # 往旧段方向越过 V：原文是 ⟪没有创新低⟫／⟪转头继续创新低⟫，「创新低」照字面严格（跟引擎 L77_STRICT_NEWLOW 同一个读法）
+            if L77_STRICT_NEWLOW:
+                past_v = (lambda p: p["lo"] < V) if up else (lambda p: p["hi"] > V)
+            else:
+                past_v = (lambda p: p["lo"] <= V) if up else (lambda p: p["hi"] >= V)
+            past_e = (lambda p: p["hi"] > s["p1"]) if up else (lambda p: p["lo"] < s["p1"])
+            ok = (prev is not None and prev["PI1"] == i - 1 and s["p0"] == V
+                  and not any(past_v(pens[r]) for r in range(i + 1, k + 1)))
+            if ok:
+                # (d) 「先越过 V、没先越过本段终点」是对 ⟪然后就转头继续创新低⟫ 里「转头」的读法 ——『编者口径』，原文没逐字写「没先越过终点」
+                first = next((r for r in range(k + 1, N) if past_v(pens[r]) or past_e(pens[r])), None)
+                ok = first is not None and past_v(pens[first]) and not past_e(pens[first])
+            if ok:
+                # (e) 中间真是「A＋R」两个线段（Atlas 23:02／23:04；第一支 ⟪如果这个反弹只是一笔……走势A依然延续⟫ 也满足 (a)(b)(d)，
+                #     不加这条复核分不出一支、二支）：A＝[i+1..m]、R＝[m+1..k] 各单数 ≥3 笔，A 跟旧段同向、R 反向，
+                #     **两段的头三笔各有公共重叠**（L65 分解定理 ⟪有重叠部分的连续三笔⟫ 那一半；判法跟 `_opening_overlaps` 同一条，这里另写一遍）。
+                #     切点 m ＝ 段内往旧段方向的极值那一笔：A ⟪没有创新低⟫，R 从 A 的终点反过来，A 的终点就是 X 之后往旧段方向最远的那一点；
+                #     追平取**最晚**那个（前一个之后还有一样远的一笔，A 还没走完；1600 的 95.6 在第 5、7 两笔，取早 A 只剩一笔，取晚 A 是 5-7）。
+                #     ★ 这是**必要条件、不是充分条件**。「R 把 A 线段破坏」本身照 L67 精确化以后的定义（特征序列分型）判，
+                #       复核不重写，交给引擎（`_first_seg` 的 confirm）和 seg_prefix_check。笔级的两种近似都试过、都会误杀原文那种合段：
+                #       「R 越过 A 的起点」误杀 1300，「R 越过 A 最后一笔的起点」误杀 1600；L65 的「被笔破坏」（gj ≥ di）又太弱，一笔反弹也算。
+                def is_seg(a, b, d):              # [a..b] 笔数单数 ≥3、第一笔方向 d、头三笔有公共重叠
+                    if b - a + 1 < 3 or (b - a + 1) % 2 == 0 or (pens[a]["p1"] > pens[a]["p0"]) != d:
+                        return False
+                    t = pens[a:a + 3]
+                    return max(p["lo"] for p in t) <= min(p["hi"] for p in t)
+                m = (min if up else max)(range(k, i, -1), key=lambda r: pens[r]["p1"])
+                ok = is_seg(i + 1, m, not up) and is_seg(m + 1, k, up)
+            if not ok:
+                bad.append(("L77 合段不成立", n, k))
+            continue
         if judge(i, k, up)[0] != "yes":
             bad.append(("终点处不满足定义", n, k))
         skip = 0                                  # 方向确立前 / 待定区间：其间候选不判
