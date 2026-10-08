@@ -1161,7 +1161,11 @@ signalsOf(array<Unit> AU, array<Ctr> Z, int nDone, bool lastLive, bool segLevel,
                                 if conf and c + 2 < nAU
                                     s2 = AU.get(c + 2)
                                     weak = wantDown ? s2.p1 < C.p1 : s2.p1 > C.p1
-                                    out.push(Sig.new(wantDown ? 2 : 5, s2.i1, s2.p1, not (lastLive and c + 2 == nAU - 1), weak))
+                                    // M29（同 Python signals 第二类，第四批）：不创新低 ⇒ 出；创新低但对一买那段 C 有盘整背驰 ⇒ 出；
+                                    //   创新低又没有盘整背驰 ⇒ 不是二类，不出。盘整背驰同 Python _panzheng：s2 力度 < C 力度 × divRatio。
+                                    //   weak 先留着（前端换成读 why 以前别删）；小转大那颗二类在走势层，Pine 没有走势层，不出。
+                                    if not weak or strengthOf(s2, off) < strengthOf(C, off) * divRatio
+                                        out.push(Sig.new(wantDown ? 2 : 5, s2.i1, s2.p1, not (lastLive and c + 2 == nAU - 1), weak))
     out
 
 // ───────────────────────── 画图 ─────────────────────────
