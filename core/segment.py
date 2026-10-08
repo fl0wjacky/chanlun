@@ -516,8 +516,11 @@ def _l77_end(pens, i, prev, mode, memo, normal_end):
         return None                               # X 的终点先被破：新段早已成立，是终局，这一支不碰
     bad_normal = normal_end is not None and normal_end >= c0
     R = _first_seg(pens, A["PI1"] + 1, mode, memo)
-    if R is None or R["dir"] == prev["dir"] or R["PI1"] >= c0:
-        return "hold" if bad_normal else None     # R 还没走完（或形状不对）：合不了；照常的终点要是错段，就先别收
+    if R is None:
+        return "hold" if bad_normal else None     # R 还没走完：合不了；照常的终点要是错段，就先别收，等 R 走完再说
+    if R["dir"] == prev["dir"] or R["PI1"] >= c0:
+        return None                               # R 走完了，可越过 V 那一下落在 R 里面（seed 191）／方向不对：不是 L77 第二支的形状，照常
+        #   （之前这里也回 "hold"，N 就一直挂成未完成挂到图尾 —— 191 挂了 46 笔。逐根加长看：先挂着、R 走完后照常收，是未完成→完成，不算撤销）
     if bad_normal:
         return R["PI1"]
     if normal_end is not None:                    # ③ 照常的终点在 c 之前：谁先被知道听谁的
