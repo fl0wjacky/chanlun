@@ -383,6 +383,9 @@ export function makeAnnotPrimitive(state) {
 
               // ① 线段端点：顶红底绿（full_common 的 ellipse，半径 9 / 描边 4）
               if (sh.seg) {
+                // 暂定那一刀 V 同时是暂定段的终点和后面那一截的起点 ⇒ 只画一个圈（虚线那个）；
+                // 两个都画，实线小圈套在虚线圈里，看着像齿轮（实测截图）。
+                const tentEnds = new Set(data.segs.filter((s) => s.tentative).map((s) => `${s.i1}|${s.p1}`));
                 for (const s of data.segs) {
                   const end = segEnd(data, s);
                   const pts = [[s.i0, s.p0], [end.i, end.p]];
@@ -390,10 +393,27 @@ export function makeAnnotPrimitive(state) {
                   for (const [k, [i, p]] of pts.entries()) {
                     const x = vp.xOfBar(i), y = vp.yOfPrice(p);
                     if (!onScreen(x, W, 20) || y === null) continue;
-                    ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+                    const tent = k === 1 && s.tentative;
+                    if (k === 0 && tentEnds.has(`${i}|${p}`)) continue;
+                    // ★ 未完成段的末端**不画圈**（card-23700ca2-307，Nova 10-08 16:06 定）：那一点只是「迄今的极值」，
+                    //   还会被更极端的取代。画个实线圈就跟定了的端点长得一样；虚线圈又已经是「暂定」那一刀的记号，
+                    //   不能再拿来表示「未完成」（两个意思撞在一起）。暂定段的终点是 V，照旧画虚线圈。
+                    if (k === 1 && s.live && !s.tentative) continue;
+                    const col = (k === 0 ? up : !up) ? CHART.buy : CHART.sell;
+                    ctx.beginPath(); ctx.arc(x, y, tent ? 7 : 4.5, 0, Math.PI * 2);
                     ctx.fillStyle = PAGE.bg; ctx.fill();
-                    ctx.strokeStyle = (k === 0 ? up : !up) ? CHART.buy : CHART.sell;
-                    ctx.lineWidth = 2; ctx.stroke();
+                    ctx.strokeStyle = col;
+                    ctx.lineWidth = tent ? 1.6 : 2;
+                    // ★ 暂定的那一刀（S7 当场判、结局未定）：**虚线圈、大一号**，旁边小字「暂定」。
+                    //   实线圈＝定了的端点；虚线圈＝先画出来的一刀，等第一笔两头谁先被破（S12）再定。
+                    //   字放在圈外、远离线段那一侧（顶往上、底往下），登记 placed，后面的价签会避开它。
+                    if (tent) ctx.setLineDash([3.2, 2.3]);   // 2/2 在这个半径上像齿轮（实测截图），拉长成 7 段左右
+                    ctx.stroke();
+                    if (tent) {
+                      ctx.setLineDash([]);
+                      const top = up;                        // 段向上 ⇒ 终点是顶（字往上）；向下 ⇒ 终点是底（字往下）
+                      placed.push(haloText(ctx, x, top ? y - 12 : y + 22, '暂定', col, 'center').slice(0, 4));
+                    }
                   }
                 }
               }
@@ -411,7 +431,11 @@ export function makeAnnotPrimitive(state) {
               //    判据一处就够：每颗点过一遍 `sigAt`。
               const sigs = [];
               for (const tier of ['seg', 'pen']) {
-                for (const s of data.signals?.[tier] || []) {
+                // ★ M29（买卖点.md:106，L53）：小转大那一刀的二类放在走势层 `trend.xzd_seconds`，不在 signals 里（J12：signals 不读分界）。
+                //   画法、开关、避让都跟段级买卖点同一条路：过同一个 sigAt（大开关＋「二买／二卖」芯片），三角同一个样子，
+                //   只是字不一样（见 sigLabel）。
+                const extra = tier === 'seg' ? (data.trend?.xzd_seconds || []) : [];
+                for (const s of [...(data.signals?.[tier] || []), ...extra]) {
                   if (!sh.sigAt(s)) continue;   // 大开关 ＋ kind chip ＋ 待确认，全在 shownOf 里
                   const x = vp.xOfBar(s.bar), y = vp.yOfPrice(s.price);
                   if (!onScreen(x, W, 40) || y === null) continue;
@@ -1177,7 +1201,9 @@ export function fmtG(v) {
 
 /** 线段的终点：未完成的画到**迄今的极值**（向上段最高、向下段最低），full_common 同一条 */
 function segEnd(data, s) {
-  if (!s.live) return { i: s.i1, p: s.p1 };
+  // ★ 暂定段（S7 当场判，`tentative`）也带 `live`，但它的终点是**判出来的那一刀 V**（段的 i1/p1），不是迄今的极值：
+  //   后面那一截才是真正还在走的未完成段（暂定之后不再往下切，见 core/segment.py）。
+  if (!s.live || s.tentative) return { i: s.i1, p: s.p1 };
   const ext = s.dir === 'up' ? s.hi : s.lo;
   let k = s.PI0;
   for (let j = s.PI0; j <= s.PI1; j++) if (data.pens[j] && data.pens[j].p1 === ext) k = j;
@@ -1339,7 +1365,7 @@ function drawSignalGhost(ctx, x, y, s, tier) {
 function drawSignalText(ctx, placed, x, y0, s, tier, H) {
   const buy = s.kind.endsWith('买');
   const base = buy ? CHART.buy : CHART.sell;
-  const txt = s.kind + (s.weak ? SIG.weakText : '') + (tier === 'pen' ? '·笔' : '') + (s.confirmed ? '' : SIG.pendingMark);
+  const txt = sigLabel(s, tier);
   ctx.font = FONT_SM;
   const tw = ctx.measureText(txt).width;
   const anchor = y0 + (buy ? 13 : -6);                                   // 原来的字位，不许漂
@@ -1352,6 +1378,23 @@ function drawSignalText(ctx, placed, x, y0, s, tier, H) {
   ctx.fillText(txt, x, ty);
   ctx.textAlign = 'left';
   placed.push(box);                                                      // ★ 与 fillRect 同一个 box
+
+}
+
+/** 买卖点的字。★ M29 以后二类带 `why`（core/signals.py，Atlas m29-code）：
+ *    不创新低／不创新高 ⇒ 就是「二买／二卖」；创新低（高）＋盘整背驰 ⇒ 「二买·盘背」；
+ *    小转大（走势层 xzd_seconds）⇒ 「二买·小转大（事后才确认）」，创新了又有盘整背驰的在「小转大」后面加「·盘背」。
+ *  没有 `why` 的（一类、三类，或旧后台）照旧：`weak` 加「(弱)」。`weak` 字段这一版先不删（Nova 10-08 16:44）。 */
+export function sigLabel(s, tier) {
+  const w = typeof s.why === 'string' ? s.why : '';
+  let tag;
+  // 小转大：固定带「（事后才确认）」、不写日期（Nova 10-08 16:46 定）—— 点画在第二段终点，可当时并不知道那一刀是小转大；
+  //   具体哪天才出现只放在给小栋的图上（Bram m29-figs），后台也不带这个字段（Atlas c84a098 去掉了 known_bar）。
+  if (w.startsWith('小转大')) tag = '·小转大' + (w.includes('盘整背驰') ? '·盘背' : '') + '（事后才确认）';
+  else if (w.includes('盘整背驰')) tag = '·盘背';
+  else if (w) tag = '';
+  else tag = s.weak ? SIG.weakText : '';
+  return s.kind + tag + (tier === 'pen' ? '·笔' : '') + (s.confirmed ? '' : SIG.pendingMark);
 }
 
 // ---------------------------------------------------------------------------

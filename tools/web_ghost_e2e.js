@@ -209,6 +209,8 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
     }
     // ⑬：第 2 趟（收盘后自动重取那一趟）少了目标点，而且**真的带回了新那根**
     if (which === 'auto') return i <= 1 ? NOTHING : { drop: D_TARGET, opt: { grow: true } };
+    // ⑬k：跟 'auto' 同一份剧本，只是首屏那一趟晚到（扣到收盘后 4 秒，见 /api/chart 那条路由）
+    if (which === 'late') return i <= 1 ? NOTHING : { drop: D_TARGET, opt: { grow: true } };
     // ⑬g/⑬i：第 1 趟之后**每一趟都还是旧数据**（头里 refreshing、末尾不带新那根）——
     //   这就是"后台一直没把新那根拉回来"那种情形：页面该补（⑬g），但**不许无限补**（补到上限就停，
     //   然后 ③ 那道闸要拦住可见性来回切）(⑬i)。
@@ -281,9 +283,14 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
     //   （定的定时器早就过点了，跟"切到后台不发请求"这道闸没关系）。
     const NOWP = Date.now();
     const lastT = base.bars[base.bars.length - 1].t;
-    const soon = which === 'auto' || which === 'swr' || which === 'fallback'
+    const soon = which === 'auto' || which === 'swr' || which === 'fallback' || which === 'late'
                || which === 'engsame' || which === 'engine' || which === 'engmiss';
-    const shift = (soon ? NOWP - STEP_MS + 3000 : NOWP) - lastT;      // soon：还差 3 秒收盘
+    // ★ 收盘时刻按这一页**第一趟取数进来那一刻**定（card-7d3e8748-3d3，10-08）：原来按 open() 一进来就定（NOWP＋3 秒），
+    //   这 3 秒里还要建 context、挂路由、goto、等加载 —— 机器一忙，首屏那一趟就落到收盘**之后**，
+    //   「收盘前打开、收盘后自动补」那一段根本没发生（10-08 实测：首屏在收盘后 2.2 秒，⑬g～⑬j 四格一起红）。
+    let T0 = null;
+    const anchor = () => (T0 == null ? (T0 = Date.now()) : T0);
+    const shiftNow = () => (soon ? anchor() - STEP_MS + 3000 : anchor()) - lastT;   // soon：还差 3 秒收盘
     const reqAt = [];                                                 // 每次取数的时刻（⑬ 量错峰用）
     // ⑰：切法那几张页面（card-e346ede6-996）。控件是**名单驱动**的（`/api/meta` 的 `cut_modes`）——
     //   名单到没到，在这一层由工装说了算：`nocut` 那页量的是「名单没到 ⇒ 不画控件、也不发参数」，
@@ -315,7 +322,9 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
       //    这条路的危险在于：样本是**另一份数据**，画上去账本会当场把整屏读成"全没了"。
       if (which === 'fallback' && hits[m] >= 2) { await route.abort(); return; }
       const { drop, opt } = plan(which, hits[m], m, sp);
-      const body = mk(m, drop, shift, opt, sp);
+      const body = mk(m, drop, shiftNow(), opt, sp);
+      // ⑬k：首屏那一趟**扣到收盘后 4 秒**才回 ⇒ 页面第一次画上去时，手上这份就已经过期了（收盘后才打开的那种人）。
+      if (which === 'late' && hits[m] === 1) { const wait = anchor() + 3000 + 4000 - Date.now(); if (wait > 0) await sleep(wait); }
       // ⑰ 切法（card-e346ede6-996）。Bram 那一半的契约：请求带 `cut`、**顶层回显** `cut`、
       //   `cuts[]` 报每一刀（`cut_bar` / `by` / `level` / `status`，`boxes` 只挂在 pending 上）。
       //   假后台照抄这个形状 —— 页面读的是**回显**，不是它自己点的那颗 chip（⑰c 就量这一条）。
@@ -354,15 +363,16 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
       // ⑯k：这一页的跳价**扣在手里 2 秒**才回 —— 要的就是"响应还在飞"的那一段（真网络抖一下就有，
       //   不是编出来的）：这 2 秒里把品种换掉，看那一趟回来会不会动**新图**的最后一根。
       if (which === 'tickslow') await sleep(2000);
-      const body = which.startsWith('tick') ? tickBody(which, tick.n, shift)
-                                            : { ...tickBody('tick', tick.n, shift), t: TICK_BASE.t + shift + 7 * STEP_MS };
+      const sh = shiftNow();
+      const body = which.startsWith('tick') ? tickBody(which, tick.n, sh)
+                                            : { ...tickBody('tick', tick.n, sh), t: TICK_BASE.t + sh + 7 * STEP_MS };
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
       tick.done++; tick.doneAt = Date.now();
     });
     await p.goto(PAGE + qs, { waitUntil: 'domcontentloaded' });
     await p.waitForFunction(() => window.__app && window.__app.state && window.__app.state.data, null, { timeout: 60000 });
     await sleep(1200);                     // 等 /api/meta 那一趟（控件由它驱动）
-    return { c, p, hits, reqAt, tick, cutReq, closeAt: NOWP + 3000 };
+    return { c, p, hits, reqAt, tick, cutReq, get closeAt() { return (T0 == null ? NOWP : T0) + 3000; } };
   };
 
   /** 切看法并等它落地（等的是**页面上那份数据**的 measure，不是请求 —— 请求回来之前那次不算数）。
@@ -917,6 +927,26 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   await setVisible(s2, 'visible'); await sleep(2500);
   ck('⑬j 一分钟内最多一次：这份数据**确实还是过期的**，切回来两次也不许再敲第三个请求',
      overdue && S2.hits.macd === b4, `数据过期=${overdue}；切了两轮，取数 ${b4} → ${S2.hits.macd}`);
+
+  // ---- ⑬k 收盘**之后**才打开（首屏那一趟扣到收盘后 4 秒才回）：手上这份一画上去就已经过期了 ⇒
+  //      页面得照常错峰 2～10 秒**自己补一趟**，不许推到下一根（card-7d3e8748-3d3：原来 autoPlan 一见收盘已过 2 秒
+  //      就往后推一整根，收盘后一分钟内打开的人要等 15 分钟／4 小时才看到新那根）。
+  //      ★ 这一格是**造出来的竞态**：旧 app.js 必须红（一整根都不补），修好的必须绿。
+  console.log('\n13k 收盘之后才打开（首屏晚到 4 秒，手上一画上去就过期）⇒ 页面 2～10 秒内自己补一趟');
+  const LT = await open('late');
+  const lt = LT.p;
+  await lt.locator('.chip[data-key="sig"]').click();
+  const paintedAt = Date.now();
+  while (LT.hits.macd < 2 && Date.now() - paintedAt < 20000) await sleep(250);
+  await sleep(900);
+  const lts = await snap(lt);
+  const landed = LT.closeAt + 4000;                       // 首屏那一份回到页面的时刻（扣到收盘后 4 秒）
+  const lag = LT.reqAt.length >= 2 ? LT.reqAt[1] - landed : null;   // 那一份画上去以后多久自己补的
+  ck('⑬k 收盘之后才打开（首屏晚到，一画上去就过期）⇒ 页面**自己**错峰补一趟，不推到下一根',
+     LT.hits.macd >= 2 && lag != null && lag >= 1500 && lag <= 12000
+     && lts.ghosts.length === 1 && lts.ghosts[0].bar === target.bar,
+     `首屏那一份在收盘后 4 秒才回｜回来以后 ${lag ?? '—'} ms 自己补了一趟（要落在错峰 2～10 秒一带）｜macd ${LT.hits.macd}｜报 ${lts.ghosts.length} 个`);
+  await LT.c.close();
 
   // ---- ⑭ 收盘那一趟**后台挂了**（abort，不是"回旧数据"）：load() 会悄悄退回仓里的样本。
   //      为什么必须单钉一格：样本跟手上这份**是两份数据**，一旦画上去，账本会把整屏读成"全没了"

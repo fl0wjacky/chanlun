@@ -116,7 +116,11 @@ const shape = (p) => p.evaluate(() => {
   const d = window.__app.state.data;
   const J = (x) => JSON.stringify(x);
   return {
-    struct: [J(d.bars), J(d.pens), J(d.segs), J(d.centers), J(d.seg_centers), J(d.big)].join('#'),
+    // ★ 最后一根的 o/h/l/c **不进比较**：跳价（app.js `tickApply`，card-f3fffac4-83d）会就地改它，
+    //   两份快照之间撞上一趟跳价 ⇒「同一趟取数」照样不等，这一格白红（10-08 两次实测：15:25Z、16:00Z）。
+    //   跳价只动最后一根的价、不动开盘时间也不动结构，所以最后一根只比 `t`，其余照旧逐字节比。
+    struct: [J(d.bars.slice(0, -1)), J(d.bars.length ? d.bars[d.bars.length - 1].t : null),
+             J(d.pens), J(d.segs), J(d.centers), J(d.seg_centers), J(d.big)].join('#'),
     sigs: J(d.signals), nbars: d.bars.length, span: d.span, measure: d.measure,
     fetched: d.fetched_at,      // ★ ⑤ 那一格的闸：这两份是不是**同一趟币安取数**（见下面那段说明）
     range: window.__app.chart.timeScale().getVisibleLogicalRange(),

@@ -88,7 +88,16 @@ TYPES = {"zec15.json": ["盘整", "盘整·升", "盘整", "上涨", "盘整", "
 # ★ C3 6 根（10-08）：13 段。原第 3 段（3699→4575→7558 那一带）被 6445、7135 切开；R6 那段 544.28→367.77 仍是「下跌」。
 TYPES = {"zec15.json": ["盘整", "盘整·升", "盘整", "盘整", "盘整", "盘整", "盘整·升", "盘整·升", "盘整·升", "盘整·升", "下跌", "盘整·升", "上涨"]}
 # ★ D2-8（10-07，card-22888623-1a7，Nova 定 ④）：第 7 段在 787.96 补一刀，切成「升级·盘整」＋「上涨」（9 段）。
+# ★ S7／S10／S12（第四批 ②，10-08）：S10 追平算破、一端相同算分界 ⇒ zec15 的 787.96→821.48、821.48→805.0 多切出两条线段
+#   （S7／S10／S12 卷题 3），前一个中枢 677.40～860.28 的末端延到 09-02 16:15，787.96 落进框里 ⇒ D2-8 补刀挪到框结束以后的最低点
+#   17659 L 805.0（09-03 01:00）。段型不变。这一刀不在这波涨势的最低点上，要不要接受交小栋拍板（Nova 14:29：A 照新规则／B 例外）。
+BASE["zec15.json"] = [b for b in BASE["zec15.json"] if b[0] != 17604] + [(17659, "L", None)]
 # ★ D6-4（10-07 09:16Z，先限方向判段型）：第 3 段从「盘整」变「上涨」（限方向找出两个依次上移的中枢）。
+# ★ D2-5（第四批 ①；口径照 agent/atlas/d25-a 169d63b，Nova 14:32）：分界标死点类型，不动刀。zec15 12 刀：
+#   小转大 1（L 451.54 @07-29 04:00：前一段本级别下跌，没有一买，C 面积不小于 A）、盘整·未见背驰 3、比不了 7、D2-8 补刀 1；
+#   夹具里没有落在刀上的一买一卖 ⇒ 没有趋势背驰。
+DEATH = {"zec15.json": ["比不了", "盘整·未见背驰", "比不了", "比不了", "盘整·未见背驰", "比不了", "比不了", "比不了",
+                        "盘整·未见背驰", "比不了", "小转大", "D2-8 补刀"]}
 FIX_D2STD = os.path.join(ROOT, "tools", "fixtures", "zec1m_d2std.json")
 # card-eecdfd08：ZEC 永续 1m 一段（04-08 前后），旧程序在这里把同一对 (308.24 L, 394.0 H) 确立又撤回 13 次
 # ★ R6＝B（10-08）：原 8000 根（整份 1m 的 [42000:50000]）在读法 B 下不再打转，拿掉编者口径也只撤 1 次 ⇒ 探针没牙。
@@ -171,6 +180,12 @@ def invariants(fn):
         g = z.get("seg")
         if g is None or not (0 <= g < len(seg)) or not (seg[g]["i0"] <= z["X0"] and z["X1"] <= seg[g]["i1"]):
             bad.append("框 %d–%d 的 seg=%r 不对" % (z["X0"], z["X1"], g))
+    for b in bs:                                  # D2-5（第四批 ①）：每一刀都标死点类型，三选一
+        if b.get("death") not in ("趋势背驰", "盘整背驰", "小转大", "盘整·未见背驰", "比不了", "D2-8 补刀") or not b.get("death_why"):
+            bad.append("刀 %d 没标死点类型（D2-5）：%r" % (b["bar"], b.get("death")))
+    for b in bs:                                  # D2-5：一买／一卖落在刀所在线段里却跟刀 bar 对不上 ⇒ 报（不许悄悄降到 ②）
+        if b.get("death_warn"):
+            bad.append("刀 %d 死点类型可能判错：%s" % (b["bar"], b["death_warn"]))
     for b in bs:                                  # 每一刀都要说清按哪条规则落的（前端只读 rule，card-22888623-1a7）
         if b.get("rule") not in ("D2-2", "D2-8"):
             bad.append("刀 %d 没有 rule 或 rule 不认识：%r" % (b["bar"], b.get("rule")))
@@ -264,6 +279,42 @@ def no_future(fn="zec15.json"):
     return bad
 
 
+def no_future_xzd(fn):
+    """④′ 小转大的二类（xzd_seconds）不看未来。点画在刀后第二段的终点，早于刀确立，这是『事后才知道』，不算未来函数；
+    要守的是：它**第一次出现**的那一根（二分找，记 seen）前一根必须还没有；出现以后再截（＋96、＋672、＋2880 根）都还在、不挪。
+    ★ seen 直接按「这颗点在不在」找，不借 first_seen（那个要求整串分界前缀都跟终态一样，比「这一刀在」严，zec30_cut 上会晚一根）。
+    回放／回测本来就是逐根截断，这颗点会在 seen 那一根自然出现；引擎不另带 known_bar（Nova 10-08 16:41）。"""
+    import datetime as _dt
+    bars = load(os.path.join(ROOT, "data", fn))
+    _, full = run(fn)
+    bad = []
+    for x in full.get("xzd_seconds", []):
+        key = (x["kind"], x["bar"], x["price"])
+
+        def has(t):
+            _, v = run(fn, bars[:t + 1])
+            return [(y["kind"], y["bar"], y["price"]) for y in v.get("xzd_seconds", []) if y["from_bar"] == x["from_bar"]] == [key]
+        lo, hi = x["bar"], len(bars) - 1
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if has(mid):
+                hi = mid
+            else:
+                lo = mid + 1
+        seen = lo
+        if has(seen - 1):
+            bad.append("%s %.2f：%d 之前一根就在了（二分没找准）" % (x["kind"], x["price"], seen))
+        for t in (seen + 96, seen + 672, seen + 2880):
+            if t >= len(bars):
+                break
+            if not has(t):
+                bad.append("%s %.2f：%d 出现、截到 %d 又不一样了" % (x["kind"], x["price"], seen, t)); break
+        print("    %s 小转大二类 %s %.2f（bar %d）：实时最早在 bar %d（%s UTC）出现，前一根还没有" % (
+            fn, x["kind"], x["price"], x["bar"], seen,
+            _dt.datetime.fromtimestamp(bars[seen]["t"] / 1000, _dt.timezone.utc).strftime("%m-%d %H:%M")))
+    return bad
+
+
 def main():
     bad = []
 
@@ -289,10 +340,14 @@ def main():
     tys = [s["type"] + ("·升" if s["upgraded"] else "") for s in v["segments"]]
     cell("⑤ 段类型按线上读法 A（spec D3-3，server.TREND_READING）", [] if v["reading"] == "A" and tys == TYPES["zec15.json"]
          else ["读法 %s 段类型 %s" % (v["reading"], tys)])
+    dts = [b.get("death") for b in v["bounds"]]
+    cell("⑤′ D2-5 死点类型（zec15）：小转大 1、盘整·未见背驰 3、比不了 7、D2-8 补刀 1", [] if dts == DEATH["zec15.json"]
+         else ["死点类型 %s" % dts])
     cell("⑥ 每个分界是两邻分界之间的极值（直接从 K 线算，不经线段）", extreme_between())
     cell("⑦ D2-0 夹具 zec1m_d2std：04-29 那个 317.74 L 要确立（候选卡死就没有）", d2std_fixture())
     cell("⑧ 同一对 (b, b′) 被 D2-7 去掉最多一次（编者口径；含 zec1m_retract_loop 夹具）", retract_once())
     cell("④ 不看未来（zec15：最早能确立那一根起，之后一直在、不变）", no_future())
+    cell("④′ 小转大的二类不看未来（zec15、zec30_cut：第一次出现前一根没有，之后不挪不没）", no_future_xzd("zec15.json") + no_future_xzd("zec30_cut.json"))
     print("全部通过" if not bad else "%d 处不过" % len(bad))
     return 1 if bad else 0
 
@@ -453,11 +508,11 @@ def self_test():
         _R.clear()
     print("%s L24:85 拿掉中枢方向限制 ⇒ 报出 %d 个框（例 %s）" % ("✓" if dirv else "✗", len(dirv), dirv[:1]))
     miss += not dirv
-    # D2-8 的反向验证（card-22888623-1a7）：① 关掉 D2-8 ⇒ zec15 少 787.96 那刀；
+    # D2-8 的反向验证（card-22888623-1a7）：① 关掉 D2-8 ⇒ zec15 少那一刀（S10 以后是 805.0，原 787.96）；
     #   ② 自检兜底：关掉方向限制（_DIR_RULE）⇒ 补刀后那截照不限方向读成盘整 ⇒ 这一刀必须撤掉，不许硬切。
     def has_cut():
         _, vv = run("zec15.json")
-        return any(b.get("rule") == "D2-8" and round(b["price"], 2) == 787.96 for b in vv["bounds"])
+        return any(b.get("rule") == "D2-8" and round(b["price"], 2) == 805.0 for b in vv["bounds"])
     on = has_cut()
     T._D28 = False
     off = has_cut()
@@ -466,8 +521,55 @@ def self_test():
     nodir = has_cut()
     T._DIR_RULE = True
     ok = on and not off and not nodir
-    print("%s D2-8：照常 %s 787.96 ／ 关掉 D2-8 %s ／ 关掉方向限制（兜底该撤刀）%s" % ("✓" if ok else "✗",
+    print("%s D2-8：照常 %s 805.0 ／ 关掉 D2-8 %s ／ 关掉方向限制（兜底该撤刀）%s" % ("✓" if ok else "✗",
           "有" if on else "没有", "有" if off else "没有", "有" if nodir else "没有"))
+    miss += not ok
+    # D2-5 的反向验证：关掉标注 ⇒ ② 报「没标死点类型」；只标不判（全写小转大）⇒ ⑤′ 的 486.0 盘整背驰没了
+    T._DEATH = False
+    _R.clear()
+    try:
+        nod = [x for x in invariants("zec15.json") if "没标死点类型" in x]
+    finally:
+        T._DEATH = True
+        _R.clear()
+    real_dt = T._death_types
+    T._death_types = lambda r, done, bounds, *_: [b.update(death="小转大", death_why="拧坏") for b in bounds] and bounds
+    _R.clear()
+    try:
+        _, vv = run("zec15.json")
+        flat = [b["death"] for b in vv["bounds"]] != DEATH["zec15.json"]
+    finally:
+        T._death_types = real_dt
+        _R.clear()
+    ok = bool(nod) and flat
+    print("%s D2-5 关掉标注 ⇒ 报出 %d 刀没标；全写小转大 ⇒ 基线%s" % ("✓" if ok else "✗", len(nod), "变了" if flat else "没变（牙没咬到）"))
+    miss += not ok
+    # D2-5 一买对不上分界就报（第四批，Atlas）：真数据里眼下没有对不上的，造一颗。
+    #   在 signals 的输出里塞一颗一买／一卖，落在 zec15 某刀所在的那条线段里：
+    #   ⑴ bar 比刀早一根 ⇒ 必须报「死点类型可能判错」；⑵ bar 正对刀 ⇒ 判成趋势背驰、不报；⑶ 关掉这条检查再塞⑴ ⇒ 不报（报出来的确实是这条检查）。
+    import importlib; _SG = importlib.import_module("core.signals")   # core 包把 signals 函数导出成同名，别用 import core.signals
+    real_sig = _SG.signals
+    _, b0 = run("zec15.json")
+    tgt = next(b for b in b0["bounds"] if b.get("rule") == "D2-2" and b["death"] != "趋势背驰")
+    k1 = "一卖" if tgt["kind"] == "H" else "一买"
+    def _inject(off):
+        def f(r, *a, **kw):
+            return real_sig(r, *a, **kw) + [dict(kind=k1, bar=tgt["bar"] + off, price=tgt["price"], confirmed=True)]
+        return f
+    def _probe(off, check=True):
+        _SG.signals = _inject(off); T._DEATH_MATCH_CHECK = check; _R.clear()
+        try:
+            _, vv = run("zec15.json")
+            bb = next(b for b in vv["bounds"] if b["bar"] == tgt["bar"])
+            return bb.get("death"), bool(bb.get("death_warn")), [x for x in invariants("zec15.json") if "死点类型可能判错" in x]
+        finally:
+            _SG.signals = real_sig; T._DEATH_MATCH_CHECK = True; _R.clear()
+    d1, w1, rep1 = _probe(-1)
+    d2, w2, rep2 = _probe(0)
+    d3, w3, rep3 = _probe(-1, check=False)
+    ok = w1 and bool(rep1) and d2 == "趋势背驰" and not w2 and not rep2 and not w3 and not rep3
+    print("%s D2-5 一买对不上分界：错一根 ⇒ %s；正对 ⇒ %s、%s；关掉检查 ⇒ %s" % ("✓" if ok else "✗",
+          "报了" if rep1 else "没报（牙没咬到）", d2, "不报" if not rep2 else "误报", "不报" if not rep3 else "还在报"))
     miss += not ok
     # D3-3 读法的反向验证。★ D3-2（3+3+3 重算）＋ D6-4（先限方向）以后，data/、tools/fixtures、线上 15 张**没有一份**
     #   读法 A／B 段型不同（10-07 实测），真数据咬不到了 ⇒ 造一段：一对扩展中枢（合成成一个单元）＋ 它上方一个不重叠的中枢。

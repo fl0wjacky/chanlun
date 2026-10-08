@@ -579,8 +579,25 @@ process.stdout.write(JSON.stringify({t: sigTierText([
     return n_ok == len(cases)
 
 
+# ── 命令行参数：两种自测拼法都认，**不认识的参数直接报错退出**（rc=2）─────────────
+# ★ card-b6609942-1ad：原来写的是 `if "--selftest" in sys.argv` —— 不认识的参数被**静默吞掉**、
+#   闷头跑主跑。自测没跑，看着却像跑过了：`--self-test`（带连字符，check_parity 就是这么写的）
+#   在这一版会被吞 ⇒ 印出来的是**主跑**的结果；拼错的旗标同理，而主跑恰好绿的时候，
+#   看上去就是「一次通过的自测」。rc=2 跟 argparse 的用法错误同码（①⑥ 本来就是这么退的）。
+_SELFTEST_FLAGS = ("--selftest", "--self-test")
+
+
+def _selftest_requested(argv):
+    unknown = [x for x in argv if x not in _SELFTEST_FLAGS]
+    if unknown:
+        sys.stderr.write("不认识的参数：%s（只认 %s）\n"
+                         % (" ".join(unknown), " / ".join(_SELFTEST_FLAGS)))
+        sys.exit(2)
+    return any(x in _SELFTEST_FLAGS for x in argv)
+
+
 if __name__ == "__main__":
-    if "--selftest" in sys.argv:
+    if _selftest_requested(sys.argv[1:]):
         sys.exit(0 if selftest() else 1)
     print("图脚「买卖点」段的宽度尺（390px 视口，量「标签＋列表」整句）\n")
     try:

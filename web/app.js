@@ -579,7 +579,7 @@ function structKey(d, t0, t1, shown, levels) {
   // 买卖点：一个点 —— 三角和它的字都画在这个 x 上。画不画由 shownOf 说了算
   //   （大开关 ＋ 六个 kind 的 chip ＋ 待确认；带了 shown 就必须带 sigAt，缺了当场炸，不静默放过）
   const sigs = (a) => (a || []).filter((s) => at(ts(s.bar)) && (!sh || sh.sigAt(s)))
-    .map((s) => `${ts(s.bar)}@${s.price},${s.kind}${s.confirmed === false ? ',未确认' : ''}`).join('|');
+    .map((s) => `${ts(s.bar)}@${s.price},${s.kind}${s.why ? ',' + s.why : ''}${s.confirmed === false ? ',未确认' : ''}`).join('|');
   const done = (d.segs || []).filter((s) => !s.live);   // 线段中枢的 host（跟 layers.js doneSegs 同一条）
   // 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）。★ 跟别的层同一条账：**层关着就不算「看得见」**
   //   —— 开着它却不算它的账，换档之后走势段整个换了一批、屏幕上明明白白变了，那句话却不出声。
@@ -612,7 +612,8 @@ function structKey(d, t0, t1, shown, levels) {
   return [on('pen') ? part(d.pens) : '', on('seg') ? part(d.segs) : '',
           on('pc') ? boxes(d.centers, d.pens || [], on('up')) : '',
           on('sc') ? boxes(d.seg_centers, done, on('up')) : '',
-          sigs((d.signals || {}).seg), sigs((d.signals || {}).pen),
+          // 小转大的二类（走势层 xzd_seconds，M29）画在段级买卖点那一路里 ⇒ 算进段级那一份；字（why）也算，二买 ↔ 二买·盘背 是看得见的变化
+          sigs([...((d.signals || {}).seg || []), ...((d.trend || {}).xzd_seconds || [])]), sigs((d.signals || {}).pen),
           (on('trend') || on('up')) ? trend() : ''].join('#');
 }
 // 可视窗口 → 时间区间。★ 换档前取一次、换档后用**同一段时间**再取一次：
@@ -868,16 +869,23 @@ function paint(d) {
   penDash.setData(pens.length > 1 ? penA.slice(-1).concat([{ time: T(pens.at(-1).i1), value: pens.at(-1).p1 }]) : []);
 
   // 线段：已完成的实线、未完成的虚线（画到迄今的极值，跟 Python 同一条）
-  const segs = d.segs, done = segs.filter((s) => !s.live), live = segs.find((s) => s.live);
+  // ★ S7「暂定」（card-d5a92ea2-3b2）：暂定段也带 live ⇒ 未完成的可能有**两条**首尾相接：暂定段（起点 → 判出来的那一刀 V）
+  //   ＋ 它后面真正还在走的那一截（V → 迄今的极值）。原来只取 `find` 第一条 ⇒ 后面那一截**整条不画**。
+  //   两条都是虚线、在 V 处拐弯，V 上那个虚线圈和「暂定」两个字在 layers.js 端点那一层画。
+  const segs = d.segs, done = segs.filter((s) => !s.live), lives = segs.filter((s) => s.live);
   const segA = done.length ? [{ time: T(done[0].i0), value: done[0].p0 }] : [];
   for (const s of done) segA.push({ time: T(s.i1), value: s.p1 });
   segSolid.setData(segA);
-  if (live) {
-    const ext = live.dir === 'up' ? live.hi : live.lo;
-    let k = live.PI0;
-    for (let j = live.PI0; j <= live.PI1; j++) if (d.pens[j] && d.pens[j].p1 === ext) k = j;
-    segDash.setData([{ time: T(live.i0), value: live.p0 }, { time: T(d.pens[k].i1), value: ext }]);
-  } else segDash.setData([]);
+  const dash = [];
+  for (const s of lives) {
+    if (!dash.length) dash.push({ time: T(s.i0), value: s.p0 });
+    if (s.tentative) { dash.push({ time: T(s.i1), value: s.p1 }); continue; }
+    const ext = s.dir === 'up' ? s.hi : s.lo;
+    let k = s.PI0;
+    for (let j = s.PI0; j <= s.PI1; j++) if (d.pens[j] && d.pens[j].p1 === ext) k = j;
+    dash.push({ time: T(d.pens[k].i1), value: ext });
+  }
+  segDash.setData(dash);
 
   overlay.setData(bars.length ? [{ time: bars.at(-1).time, value: bars.at(-1).close }] : []);
   paintVol(d);
@@ -2119,10 +2127,20 @@ function autoPlan() {
   const step = (TF_SEC[state.data && state.data.tf] || 0) * 1000;
   let at = autoCloseAt(state.data);
   if (at == null) return;
-  // ★ 那个时刻**已经过去**了（切回来过了一根、后台卡着没动）⇒ 往前推到**下一根**再排。
-  //   不推的话 `Math.max(1000, 过去 - 现在)` 会变成"每秒来一次"的空转 —— 一次取数都不发
-  //   （③ 那道闸拦着），但一秒一个定时器白烧电，而且它掩盖了真正该问的问题：这一根到底取到没有。
-  while (at + AUTO_LAG_MIN <= Date.now()) at += step;
+  // ★ 那个时刻**已经过去**了：
+  //   · 这一根收盘以后**还没有自动取过一次**（autoAt < at）⇒ 照常错峰 2～10 秒补一趟，不往后推
+  //     （card-7d3e8748-3d3，10-08：收盘后才打开的那一页，首屏拿到的就是过期的那份 —— 后台还没把新那根拉回来
+  //       （SWR）。原来这里一律推到下一根，那人要等 15 分钟／4 小时才看到新那根）；
+  //   · 已经为这一根取过了（切回来过了一根、后台卡着没动）⇒ 往前推到**下一根**再排。
+  //     不推的话 `Math.max(1000, 过去 - 现在)` 会变成"每秒来一次"的空转 —— 一次取数都不发
+  //     （③ 那道闸拦着），但一秒一个定时器白烧电，而且它掩盖了真正该问的问题：这一根到底取到没有。
+  //   防连环请求还是那两道闸：一分钟一次（autoFire 里的 AUTO_MIN_GAP_MS）、补的次数上限（AUTO_RETRY_MAX）。
+  if (at + AUTO_LAG_MIN <= Date.now()) {
+    // 只认「刚收盘、手上就差最新这一根」（收盘不到一个周期）：旧了几根以上的（冻结的样本、停了的盘）不是这回事，
+    //   照旧往后推 —— 否则每开一次页面都白多敲一趟（e2e more ⑨⑪ 用的就是冻结数据，当场多出一个请求，实测红过）。
+    if (autoAt < at && Date.now() - at < step) at = Date.now();   // 没为这一根取过 ⇒ 从现在起错峰（下面加 2～10 秒）
+    else while (at + AUTO_LAG_MIN <= Date.now()) at += step;
+  }
   // ⑤ 错峰：每一根**重新摇一次**（不记住上一根摇的数 —— 记住了大家还是会在同一秒撞上）。
   const lag = AUTO_LAG_MIN + Math.random() * (AUTO_LAG_MAX - AUTO_LAG_MIN);
   // 看不见的时候到点了也**什么都不做**：这一次不是跳过，是留给 visibilitychange 那次补
@@ -2282,6 +2300,12 @@ function renderLegend() {
   const items = [];
   if (opts.pen) items.push(['line', CHART.pen, 1, '笔'], ['line-dash', CHART.pen, 1, '未完成的笔']);
   if (opts.seg) items.push(['line', CHART.seg, 2, '线段'], ['line-dash', CHART.seg, 2, '未完成的线段']);
+  // ★ 「暂定」那一格**只在屏上真有暂定那一刀时才挂**：大多数图没有（25 张里 3 张），平白多一格会把图例顶折
+  //   （见下面「会变」那段量过的账）。手机上没有悬停，所以说明不只靠 title：样例＋两个字就能对上屏上那个虚线圈。
+  const tent = opts.seg && state.data && (state.data.segs || []).find((s) => s.tentative);
+  // 样例圈的颜色跟屏上那个圈同一条：暂定段向上 ⇒ 那一刀是顶（红）；向下 ⇒ 底（绿）
+  if (tent) items.push(['ring-dash', tent.dir === 'up' ? CHART.sell : CHART.buy, 0, '暂定',
+    '先判出来的一刀：要等这一刀后面第一笔的两头谁先被突破，才知道它算不算数']);
   if (opts.pc) items.push(['box', CHART.pen, 2, '类中枢（与笔同色）'], ['box-split', CHART.pen, 2, '前三实线 / 延续虚线']);
   if (opts.sc) items.push(['box', CHART.seg, 4, '线段中枢（与线段同色）']);
   // ★ 「会变」那一档（§八 8，卡 card-06d7f9a1-3ad，小栋选的 C+）。挂**照旧那一格样例**：
@@ -2322,6 +2346,8 @@ function renderLegend() {
       ? `<span class="tagsw" style="background:${col};color:${CHART.tag_ink}">[ZD, ZG]</span>`
       : kind === 'tri-fill'
         ? `<svg width="30" height="14"><polygon points="15,1 6,13 24,13" fill="${col}"/></svg>`
+        : kind === 'ring-dash'
+          ? `<svg width="30" height="14"><circle cx="15" cy="7" r="5.5" fill="none" stroke="${col}" stroke-width="1.6" stroke-dasharray="3 2.3"/></svg>`
         : kind === 'tri-hollow'
           ? `<svg width="30" height="14"><polygon points="15,1 6,13 24,13" fill="none" stroke="${col}" stroke-width="2"/></svg>`
           : kind === 'box' || kind === 'box-split' || kind === 'box-fade'
@@ -2447,7 +2473,7 @@ function renderMeta(d) {
     `${d.name || d.symbol} · ${d.tf} ｜ ${d.nbars} 根 ｜ 笔 ${d.pens.length} ｜ 类中枢 ${d.centers.length}`
     + ` ｜ 完成线段 ${done}（+${d.segs.length - done} 未完成）｜ 线段中枢 ${d.seg_centers.length}`
     + ` ｜ 精度 ${d.meta?.tick} ｜ ${d.meta?.pen_rule === 'new' ? '新笔' : '老笔'}${Number.isFinite(d.pen_min) ? `（最少 ${d.pen_min} 根）` : ''}`
-    + ` ｜ 买卖点 线段中枢层 ${sigTierText(d.signals?.seg || [])} · 类中枢层 ${sigTierText(d.signals?.pen || [])}`
+    + ` ｜ 买卖点 线段中枢层 ${sigTierText([...(d.signals?.seg || []), ...(d.trend?.xzd_seconds || [])])} · 类中枢层 ${sigTierText(d.signals?.pen || [])}`
     + measureText(d)
     + cutText(d)
     // 分界那一刀的说明（卡 card-22888623-1a7）。★ 它**只在这儿写一次**：这句是"整句说明"，

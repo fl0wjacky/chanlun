@@ -461,6 +461,35 @@ else:
     _P[_j + 1]["p0"] = _P[_j]["p1"]
     count("第 313 笔压到第一笔终点以下后仍判合法（S11 那一支没看第三笔）", 1 if SG._start_check(_s31, _P) == "ok" else 0)
 
+# ---- S7／S10／S12（第四批 ②，线段.md 附第 1～5 条和 3′；Iris 卷 10-08 14:13，两份答卷都过）----
+# 见证 ①：L79 题 5（笔端点 13,4,8,3,12,4,8,6,11,7,10）⇒ 2 段，3 是**暂定**分界（S7 当场判＋S10② 高点 8 一端相同）；关掉 S7 ⇒ 1 段待定。
+# 见证 ②：zec15 pens 1385-1390 ⇒ 787.96→821.48、821.48→805.0 两刀（S10① 第三笔追平 X 终点算破；S10② V 跟 E1 低点相同算分界）；关掉 S10 ⇒ 没有。
+# 反向臂（三个人各自踩过的坑，Iris 14:25）：追平 X 终点不排除紧接 X 的那一笔（r==k+2）⇒ 见证 ① 的 3 会被当成定死、不再是暂定。
+def _l79():
+    _p = [13, 4, 8, 3, 12, 4, 8, 6, 11, 7, 10]
+    return [dict(i0=k, i1=k + 1, x0=k, x1=k + 1, p0=a, p1=b, hi=max(a, b), lo=min(a, b)) for k, (a, b) in enumerate(zip(_p, _p[1:]))]
+def _l79_ok():
+    _sg = SG.build_segments(_l79())
+    return len(_sg) == 2 and _sg[0]["PI1"] == 2 and _sg[0].get("tentative") is True and _sg[1].get("live") is True
+count("S7 见证：L79 题 5 不是「13→3 暂定、3→10 未完成」两段", 0 if _l79_ok() else 1)
+SG.S7_NOW = False
+count("S7 反向臂：关掉当场判 L79 题 5 还是两段（牙没咬到）", 1 if _l79_ok() else 0)
+SG.S7_NOW = True
+_real_beyond = SG._beyond
+SG._beyond = lambda p, level, up, tie: _real_beyond(p, level, up, True)   # 拧坏：追平一律算破，连 r==k+2 那一笔也算
+count("S10① r==k+2 反向臂：追平不排除紧接 X 那一笔，L79 题 5 照样判成暂定（牙没咬到）", 1 if _l79_ok() else 0)
+SG._beyond = _real_beyond
+from trend_check import load as _tload                    # noqa: E402
+_rz = analyze(_tload(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "zec15.json")), tick=_tick_of("zec15.json"))
+def _z_cuts(r_):
+    return sorted(round(x["p1"], 2) for x in r_["segs"] if 1384 <= x["PI1"] <= 1390 and not x.get("live"))
+count("S10 见证：zec15 1385-1390 不是 787.96／821.48／805.0 三刀", 0 if _z_cuts(_rz) == [787.96, 805.0, 821.48] else 1,
+      "" if _z_cuts(_rz) == [787.96, 805.0, 821.48] else "　← %s" % _z_cuts(_rz))
+SG.S10_TIE = False
+_rz0 = analyze(_tload(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "zec15.json")), tick=_tick_of("zec15.json"))
+SG.S10_TIE = True
+count("S10 反向臂：关掉两处相等 zec15 照样切出 821.48／805.0（牙没咬到）", 1 if _z_cuts(_rz0) == [787.96, 805.0, 821.48] else 0)
+
 # ---- 走势分界 v3（docs/spec/走势分段.md v3 §三，card-51571a5f-dc2）----
 # 基线（zec15／zec30 五个分界＋一次撤回）、不变量（交替、刀在同向线段终点、两刀间有中枢、框不跨分界、首尾相接）、
 # D4-4 见证（笔层一买 1900 不切框）、不看未来。反向验证在 tools/trend_check.py --self-test（spec §四 的 P1／P2／P5 各自必须变）。

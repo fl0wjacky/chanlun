@@ -294,6 +294,16 @@ def beichi(AU, Z, k, kind, diverge_fn, hist, measure="macd", ratio=1.0,
                 a=a, c=c, A=A, B=B, C=C, ok=ok, p3=p3, p4=p4)
 
 
+def _panzheng(A, C, want_down, data, measure="macd", ratio=1.0):
+    """盘整背驰（D2-5 ② 和 M29 二类共用这一份，第四批）：C 比 A 创了更低（更高）的点，而且 C 对 A 背驰（_diverges，默认 MACD 面积）。
+    比哪两段由调用方定：D2-5 比进入、离开同一个中枢的两段（L24），M29 比二类三段里的第一、第三段（L27）。"""
+    newx = (C["p1"] < A["p1"]) if want_down else (C["p1"] > A["p1"])
+    return newx and _diverges(A, C, want_down, data, measure, ratio)
+
+
+_M29 = True          # 只给自检反向臂关：二类照旧（跌破只标弱、不判盘整背驰）
+
+
 def signals(r, level="seg", measure="macd", ratio=1.0, fast=12, slow=26, sig=9,
             premise3=True, p3_strict=True):
     """level: "seg" 线段中枢（默认）/ "pen" 类中枢；measure: MEASURES 五选一（默认 macd）；
@@ -348,7 +358,15 @@ def signals(r, level="seg", measure="macd", ratio=1.0, fast=12, slow=26, sig=9,
             if confirmed and c + 2 < len(AU):                             # 第二类：一买后第二段次级别走势的终点
                 s2 = AU[c + 2]
                 weak = (s2["p1"] < C["p1"]) if want_down else (s2["p1"] > C["p1"])
-                add(k2, c + 2, k, weak)
+                # M29（买卖点.md:109，L53／L57 正文；第四批）：次级别下、次级别上，不创新低，或者创新低但有盘整背驰，才是二类。
+                #   盘整背驰拿二类三段里的第一段（一买那段 C）跟第三段 s2 比（L27「把第一、第三段看成两个走势类型之间的比较」）。
+                #   创新低又没有盘整背驰 ⇒ 不是二类，不出（原来留着标「弱」）。weak 字段先留着给前端，前端换成读 why 以后再删。
+                if not _M29:
+                    add(k2, c + 2, k, weak)
+                elif not weak:
+                    add(k2, c + 2, k, weak); out[-1]["why"] = "不创新低" if want_down else "不创新高"
+                elif _panzheng(C, s2, want_down, hist, measure, ratio):
+                    add(k2, c + 2, k, weak); out[-1]["why"] = "创新低＋盘整背驰" if want_down else "创新高＋盘整背驰"
     out.sort(key=lambda s: (s["bar"], s["kind"]))
     return out
 

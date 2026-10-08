@@ -157,7 +157,10 @@ def draw_layers(g, r, X, Y, keep=lambda a, b: True, bar_w=2):
             else:
                 g.line([a, b], fill=C["seg"], width=C["seg_w"])
             up = s["dir"] == "up"
-            for (x, y), col in ((a, GR if up else RD), (b, RD if up else GR)):
+            # 未完成段的末端不画圈（跟 web/layers.js 同一条，card-23700ca2-307）：那一点只是「迄今的极值」，还会被取代，
+            # 画个实线圈就跟定了的端点一样。暂定段（tentative）的终点是判出来的那一刀，照画。
+            ends = ((a, GR if up else RD),) if s.get("live") and not s.get("tentative") else ((a, GR if up else RD), (b, RD if up else GR))
+            for (x, y), col in ends:
                 g.ellipse([x - 9, y - 9, x + 9, y + 9], fill=BG, outline=col, width=4)
     return labels
 

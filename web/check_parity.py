@@ -408,7 +408,7 @@ def run_default(quiet=False):
     cases = [(fn, dataset(fn)) for fn in files if dataset(fn)]
     bars_by_key = {key: json.load(open(data(fn), encoding="utf-8")) for fn, key in cases}
     bad = 0
-    keys = ("bounds", "retracted", "pending", "segments", "units")
+    keys = ("bounds", "retracted", "pending", "segments", "units", "xzd_seconds")   # 跟 web/server.py _cut_cc 交出去的那几个键同一份（M29 加了 xzd_seconds）
     with running(bars_by_key) as port:
         m = get_path(port, "/api/meta")
         if m.get("cut_default") != "trend" or sorted(m.get("cut_modes") or []) != ["extend", "trend"]:
@@ -680,8 +680,25 @@ def self_test():
     return 3 if miss else 0
 
 
+# ── 命令行参数：两种自测拼法都认，**不认识的参数直接报错退出**（rc=2）─────────────
+# ★ card-b6609942-1ad：原来写的是 `if "--self-test" in sys.argv` —— 不认识的参数被**静默吞掉**、
+#   闷头跑主跑。这把尺的拼法是**带连字符**的 `--self-test`（六把里唯一一个），
+#   所以「照抄别人那句 `--selftest`」在这儿会被吞 ⇒ 印出来的是**主跑**的结果（9 份不一致 0），
+#   看着完全像一次通过的自测。rc=2 跟 argparse 的用法错误同码（①⑥ 本来就是这么退的）。
+_SELFTEST_FLAGS = ("--selftest", "--self-test")
+
+
+def _selftest_requested(argv):
+    unknown = [x for x in argv if x not in _SELFTEST_FLAGS]
+    if unknown:
+        sys.stderr.write("不认识的参数：%s（只认 %s）\n"
+                         % (" ".join(unknown), " / ".join(_SELFTEST_FLAGS)))
+        sys.exit(2)
+    return any(x in _SELFTEST_FLAGS for x in argv)
+
+
 if __name__ == "__main__":
-    if "--self-test" in sys.argv:
+    if _selftest_requested(sys.argv[1:]):
         sys.exit(self_test())
     rc = run()[0]
     rc = rc or (1 if run_span() else 0)

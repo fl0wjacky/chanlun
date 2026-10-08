@@ -405,7 +405,7 @@ def _cut_cc(slot, symbol, pen_min=DEFAULT_PEN_MIN):
         r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"), min_gap=gap_of(pen_min))
         v = trend_v3(r, reading=TREND_READING)
         cc = slot.mbodies[(CUT_KEY, pen_min)] = (v["seg_centers"], {k: v[k] for k in
-                                      ("bounds", "retracted", "pending", "segments", "units")}, v["reading"])
+                                      ("bounds", "retracted", "pending", "segments", "units", "xzd_seconds")}, v["reading"])
     return cc
 
 
@@ -528,11 +528,24 @@ def start_prefetch(symbol, tf, span):
     threading.Thread(target=_prefetch, args=(symbol, tf, nxt), daemon=True).start()
 
 
+def _close_due(slot, tf, now):
+    """手上最后一根**已经收盘**、而上次碰币安是在收盘**之前** ⇒ 该拉了，不等 REFRESH_S（card-7d3e8748-3d3，10-08）。
+    只看时间的话：收盘前 1 秒有人要过这一格，后台要到收盘后 59 秒才肯再拉；页面那边收盘后 2～10 秒补第一趟、
+    5 秒一次补 4 次，大约 22～30 秒就放弃 ⇒ 中间那 30 秒页面落空，又等一整根。
+    不放大：收盘后第一次碰币安以后 tried_at 就在收盘之后，这一条对这一根不再成立 ⇒ 每格每根最多多拉 1 次；
+    单飞照旧（slot.refreshing）。失败了 tried_at 也在收盘后 ⇒ 回到 RETRY_S 那条节流，不会每个请求都打币安。"""
+    if not slot.bars:
+        return False
+    close = (slot.bars[-1]["t"] + TFS[tf]) / 1000.0
+    return slot.tried_at < close <= now
+
+
 def get_chart(symbol, tf, span=1, prefetch=True, touch=True, measure="macd", cut=DEFAULT_CUT, pen_min=DEFAULT_PEN_MIN):
     """→ (json bytes, gzip bytes) 或 None（一次都没拉成功过）。
 
     · 冷（还没有缓存）：同步拉，持锁 ⇒ 并发进来的都等这一次，不回空；
-    · 有缓存、过期了（成功后 REFRESH_S / 失败后 RETRY_S）：起**一个**后台刷新，立刻回旧缓存
+    · 有缓存、过期了（成功后 REFRESH_S / 失败后 RETRY_S，或者最后一根收盘以后还没拉过 —— 见 _close_due）：
+      起**一个**后台刷新，立刻回旧缓存
       （stale-while-revalidate；币安一抖不会挂到用户请求上）；
     · 旗：stale = 上一次拉取失败；refreshing = 这次回的是旧缓存、后台正在拉；
     · 送出之后：后台预拉下一档（start_prefetch）。"""
@@ -542,7 +555,7 @@ def get_chart(symbol, tf, span=1, prefetch=True, touch=True, measure="macd", cut
     with slot.lock:
         if touch:
             slot.used_at = now
-        due = now - slot.tried_at >= (RETRY_S if slot.failed else REFRESH_S)
+        due = now - slot.tried_at >= (RETRY_S if slot.failed else REFRESH_S) or _close_due(slot, tf, now)
         if slot.body is None:
             if due:
                 slot.tried_at = now

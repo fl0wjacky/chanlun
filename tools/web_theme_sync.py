@@ -249,7 +249,10 @@ def selftest():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--selftest", action="store_true")
+    # ★ card-b6609942-1ad：两种自测拼法都认。六把尺里 check_parity 写的是 `--self-test`（带连字符），
+    #   其余五把写 `--selftest` —— 名字在两把之间来回抄必错一个，而错的那个**原来会被静默吞掉**。
+    #   argparse 本来就拒未知参数（rc=2），加个别名就六把一致了。
+    ap.add_argument("--selftest", "--self-test", action="store_true")
     ap.add_argument("--theme", default=THEME)
     a = ap.parse_args()
     if a.selftest:
