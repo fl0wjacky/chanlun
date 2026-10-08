@@ -13,11 +13,11 @@
 //     ⑥   桌面 1280×860 上角上是**全写**（带日期），开关不在（display:none）—— 防的是「为了手机改了桌面」
 //
 // 跑法：
-//   1) cd <这个仓的一份检出> && python3 web/server.py --port 8792 --no-prewarm   （只绑回环）
+//   1) cd <这个仓的一份检出> && python3 web/server.py --port <端口> --no-prewarm   （只绑回环）
 //   2) NODE_PATH=<playwright 的 node_modules> node tools/web_mobile_share.js [页面地址]
 //   退出码：0＝六条都过；1＝有判据没过（把没过的那条连数一起印出来）；2＝环境没搭好（没用真后台/页面没起来）。
 const Page = (process.env.E2E_URL || (process.argv[2] && !process.argv[2].startsWith('--')
-  ? process.argv[2] : 'http://127.0.0.1:8792/')).replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
+  ? process.argv[2] : noUrl())).replace(/\/?$/, '/');   // E2E_URL 优先（上线门统一给，card-9b0fe913-758）
 let chromium;
 try {
   ({ chromium } = require('playwright'));
@@ -212,3 +212,10 @@ const probeFold = (p) => p.evaluate(() => {
       + `＋ 收起开关自己占 29.5px 一行；⑦ 那条（注入 ${SAFE_PX}px 安全区）改前展开态压住图 25px。`);
   process.exit(bad.length ? 1 : 0);
 })().catch((e) => { console.error('尺自己炸了：', e.message); process.exit(2); });
+
+// 不带默认页面地址（部署细节不进仓，card-58518cb5-357）：没给 E2E_URL、也没给地址参数，就直接报错、退出码 2（环境没搭好）。
+// predeploy 会 export E2E_URL。写法跟 tools/web_fs_drag_e2e.js 一致。
+function noUrl() {
+  console.error('缺页面地址：请设 E2E_URL（或把页面地址当参数）。本工装不带默认地址。');
+  process.exit(2);
+}

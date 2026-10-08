@@ -22,7 +22,7 @@
 //     但它不参与判定。
 //
 // 跑法（要**真后台**：`web/app.js` 得能取到真数据）：
-//   1) python3 web/server.py --port 8795 --no-prewarm      （只绑回环）
+//   1) python3 web/server.py --port <端口> --no-prewarm      （只绑回环）
 //   2) NODE_PATH=<playwright 的 node_modules> node tools/web_subhead_slot_probe.js [页面地址]
 //        [--self-test]  牙齿自检：把 app.js 里那道「拿不到格高就不摆」的闸**改成 `if (false)`**
 //                       （＝回到修之前），要求**至少一个节奏变红**。一个都不红 ⇒ 这条判据是死的 ⇒ 退 1。
@@ -46,7 +46,7 @@ try {
 }
 const PAGE = (process.env.E2E_URL
   || process.argv.slice(2).find((a) => /^https?:\/\//.test(a))
-  || 'http://127.0.0.1:8795/').replace(/\/?$/, '/');
+  || noUrl()).replace(/\/?$/, '/');
 const SELFTEST = process.argv.includes('--self-test');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -169,3 +169,10 @@ const ROUNDS = [[0, 0], [0, 50], [0, 300], [200, 500], [1200, 800], [2500, 2500]
   console.log(`${ran}/${ran} 过 —— ${ran} 种「关→开」节奏下页头都贴着副图格顶（相对格顶 ≤ ${LIMIT}px）${tag}`);
   process.exit(0);
 })().catch((e) => { console.error('✗ 炸了：', e.message); process.exit(2); });
+
+// 不带默认页面地址（部署细节不进仓，card-58518cb5-357）：没给 E2E_URL、也没给地址参数，就直接报错、退出码 2（环境没搭好）。
+// predeploy 会 export E2E_URL。写法跟 tools/web_fs_drag_e2e.js 一致。
+function noUrl() {
+  console.error('缺页面地址：请设 E2E_URL（或把页面地址当参数）。本工装不带默认地址。');
+  process.exit(2);
+}
