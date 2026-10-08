@@ -511,6 +511,14 @@ with _ctx.redirect_stdout(_io.StringIO()) as _j19buf:
 print("  J19 笔状态联动（只报警）         : %d 处违反%s" % (_j19_v, "" if not _j19_v else "　← tools/j19_check.py：" +
       " ｜ ".join(l.strip() for l in _j19buf.getvalue().splitlines() if l.strip().startswith("违反"))[:200]))
 
+# ---- J17／W61：走势完成后必有大一级中枢震荡（走势分段.md 六之三 乙4，Nova 10-08）—— **只统计，不进违规数** ----
+# C3 6 根以后 A（三段公共重叠）实测 4／47 也过不了 5%，B 约 25%，都只统计。见 tools/j17_check.py 文件头。
+from j17_check import main as _j17_main                  # noqa: E402
+with _ctx.redirect_stdout(_io.StringIO()) as _j17buf:
+    _j17_v = _j17_main()
+print("  J17 走势后大一级中枢（只统计）   : A %d 处　｜ %s" % (_j17_v,
+      next((l.strip() for l in _j17buf.getvalue().splitlines() if l.startswith("合计")), "")))
+
 # ---- 判据前提：下面那扇「字体覆盖」门自己的基准对不对 ----
 # 那扇门判「缺不缺字」靠 `config._notdef_mask` 投出的 .notdef 基准。基准错了它就是**假绿**：
 # 拿一个没有墨的空白遮罩当 .notdef，所有真字形都"不等于它" ⇒ 报「一个都不缺」。
