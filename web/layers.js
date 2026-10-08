@@ -395,6 +395,10 @@ export function makeAnnotPrimitive(state) {
                     if (!onScreen(x, W, 20) || y === null) continue;
                     const tent = k === 1 && s.tentative;
                     if (k === 0 && tentEnds.has(`${i}|${p}`)) continue;
+                    // ★ 未完成段的末端**不画圈**（card-23700ca2-307，Nova 10-08 16:06 定）：那一点只是「迄今的极值」，
+                    //   还会被更极端的取代。画个实线圈就跟定了的端点长得一样；虚线圈又已经是「暂定」那一刀的记号，
+                    //   不能再拿来表示「未完成」（两个意思撞在一起）。暂定段的终点是 V，照旧画虚线圈。
+                    if (k === 1 && s.live && !s.tentative) continue;
                     const col = (k === 0 ? up : !up) ? CHART.buy : CHART.sell;
                     ctx.beginPath(); ctx.arc(x, y, tent ? 7 : 4.5, 0, Math.PI * 2);
                     ctx.fillStyle = PAGE.bg; ctx.fill();
