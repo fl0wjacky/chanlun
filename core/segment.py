@@ -353,6 +353,11 @@ def _s7_fractal(pens, k, up):
     return None
 
 
+def _set_pend(t):
+    global _PEND_AT
+    _PEND_AT = t
+
+
 def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT, memo=None):
     """第 71 课：假设 pens[k] 的终点 V 是分界点，按原文程序考察。
 
@@ -418,6 +423,7 @@ def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT, memo=None):
         for r in range(k + 2, stop + 1):
             p = pens[r]
             if _beyond(p, V, up, S10_TIE):
+                _set_pend(r)                      # 实验乙
                 return None, r                    # 破了 X 的起点：① 旧线段延续，从 r 起再找（S10① 追平也算破）
             # ★ 追平 X 的终点只从 r > k+2 起算：pens[k+2] 就是从 X 的终点出发的，它「追平 L」恒成立 ——
             #   S7／S10／S12 那份卷子出题人和两个答卷人各自在这里踩了一次（Iris 10-08 14:25），自检有反向臂专抓这个。
@@ -450,6 +456,7 @@ def _case_at(pens, i, k, seg_dir, mode=FEAT_STD_DEFAULT, memo=None):
     ok, brk = _reverse_scan(pens, k, seg_dir, mode)
     if ok:
         return 2, _reverse_confirm_pen(pens, k, seg_dir, mode, j)
+    _set_pend(j if brk is None else max(j, brk))  # 实验乙：这个结论是在哪一笔才知道的（待定：E3 那一笔；破位：破位那一笔）
     return None, (brk if brk is not None else len(pens))   # 新高/新低 → 从破位处再找；否则待定
 
 
@@ -458,6 +465,7 @@ HEAD_EXT_FIX = True                       # 探针开关：图头那一段起点
 HEAD_EXT_CUTOFF = True                    # 探针开关：图头那一条判 ① 型只看到确认图头段的那一笔（关掉 ⇒ 随机 seed 2435／4750 撤回已确认段）
 GAP_COVER = True                          # 探针开关：缺口被之前同一特征序列元素盖住不算缺口（线段 #1，card-fff28d01-f13）
 S10_TIE = True                            # 探针开关：两处「相等」（S10，线段.md 附第 5 条）：① 追平 X 的起点／终点算破；② V 跟分界前那个元素一端相同算分界
+_B = False; _C = False; _E = False; _E2 = False; _PEND_AT = None  # 实验开关（Atlas 草稿，不推）
 S7_NOW = True                             # 探针开关：第一种情况等不到结局时当场判（S7，附第 2 条）—— 有分型就先切、标「暂定」（case 3）
 
 
@@ -513,9 +521,28 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=
         while k < born:                       # 方向确立之前，本段不能结束
             k += 2
         while k < n - 1:
+            global _PEND_AT
+            _PEND_AT = None
             case, resume = _case_at(pens, i, k, seg_dir, mode, memo)
+            if case and _E2 and case in (1, 2) and resume is not None:   # 实验乙′：k 定案在 resume 那一笔；后面有更早定案的候选 ⇒ 它算
+                t_k, k2, best = resume, k + 2, None
+                while k2 < min(t_k, n - 1):
+                    c2, r2 = _case_at(pens, i, k2, seg_dir, mode, memo)
+                    if c2 in (1, 2) and r2 is not None and r2 < t_k and (best is None or r2 < best[2]):
+                        best = (k2, c2, r2)
+                    k2 += 2
+                if best:
+                    found = best; break
             if case:
                 found = (k, case, resume); break
+            if _E and resume is not None and _PEND_AT is not None:   # 实验乙：k 的结论（待定／破位）知道得比后面某个候选的定案晚 ⇒ 早定的那个算
+                t_pend, k2 = _PEND_AT, k + 2
+                while k2 < min(resume, n - 1):
+                    c2, r2 = _case_at(pens, i, k2, seg_dir, mode, memo)
+                    if c2 in (1, 2) and r2 is not None and r2 < t_pend:
+                        found = (k2, c2, r2); break
+                    k2 += 2
+                if found: break
             k += 2
             if resume is not None:                # 待定区间内的候选不判：跳到破位处之后的同向笔
                 while k < resume:
@@ -526,7 +553,7 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=
         # ★ 图头那一段：终点没越过起点（向下段终点不低于起点 / 向上段不高于起点）⇒ 起点那一笔是图头外面上一段的尾巴，
         #   这一段划错了（L78:9-10）。跟开头三笔无重叠同一个处理：往后挪一笔再划（card-24dd71cb-003，线上 AAPL 1h/2h）。
         #   只管图头（segs 还空、且不是 _first_seg 从段中间起找）：段界之后的起点由上一段的终点定，不在这里挪。
-        if HEAD_DIR_FIX and not segs and start == 0 and (
+        if HEAD_DIR_FIX and not (_B and case == 3) and not segs and start == 0 and (
                 (seg_dir == "down" and pens[end_pen]["p1"] >= pens[i]["p0"]) or
                 (seg_dir == "up" and pens[end_pen]["p1"] <= pens[i]["p0"])):
             i += 1
@@ -536,7 +563,7 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=
         #   而且不是 L78 ① 型（自检 A 会报的那种）⇒ 起点那一笔是图头外面上一段的尾巴，同样往后挪一笔（L78:14）。
         #   窄版：判定跟 check_segments 共用 _start_check —— 宽版（凡起点非极值就挪）会把合法的 ① 型图头也挪掉，
         #   zec_2h 夹具 191.35 那个真低点就这么丢过。「量不了」不挪；判定只用到确认这一段的那一笔，之后不再翻（不撤回）。
-        if HEAD_EXT_FIX and not segs and start == 0 and _start_check(dict(
+        if HEAD_EXT_FIX and not (_C and case == 3) and not segs and start == 0 and _start_check(dict(
                 dir=seg_dir, PI0=i, PI1=end_pen, p0=pens[i]["p0"],
                 hi=max(pens[q]["hi"] for q in range(i, end_pen + 1)),
                 lo=min(pens[q]["lo"] for q in range(i, end_pen + 1))), pens, mode, memo,
