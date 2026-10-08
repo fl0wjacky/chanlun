@@ -464,6 +464,7 @@ S7_NOW = True                             # 探针开关：第一种情况等不
 
 
 L77_MERGE = True                          # 探针开关：L77 第二支硬合（card-c784a101-791，b5-spec 第 3 步「② 坐实以后又越过 V」）
+L77_STRICT_NEWLOW = True                  # 探针开关：L77 的「（没有）创新低」照字面严格，追平不算越过 V（关掉 ⇒ 跟 S10① 一样追平算）
 
 
 def _earliest(pred, lo, hi):
@@ -520,7 +521,9 @@ def _l77_end(pens, i, prev, mode, memo, normal_end, born=0):
     A = prev["_A"]
     old_up = prev["dir"] == "up"
     V = prev["p1"]
-    c0 = next((r for r in range(A["PI1"] + 1, len(pens)) if _beyond(pens[r], V, old_up, S10_TIE)), None)
+    # c ＝ 越过 V 的第一笔：原文 ⟪然后就转头继续创新低⟫，「创新低」照字面**严格**（追平不算），跟 L78「直接新高或新低」同一个词、
+    #   同一个读法（Nova 10-08 22:04 定「新高」严格；Atlas 23:02 指出 L77 这两处也该一致）。S10① 管的是「破」，不管「新低」。
+    c0 = next((r for r in range(A["PI1"] + 1, len(pens)) if _beyond(pens[r], V, old_up, not L77_STRICT_NEWLOW and S10_TIE)), None)
     if c0 is None:
         return None                               # 还没越过 V：不是 L77 第二支的形状
     R = _first_seg(pens, A["PI1"] + 1, mode, memo)
@@ -844,7 +847,11 @@ def verify_by_definition(segs, pens, mode=FEAT_STD_DEFAULT):
             #   ★ 不要求终点是段内同向极值：X＋A＋R 合成的段，X 的终点可以比 R 的终点更远（1300：X 到 96.2、R 到 96.6），原文没这条。
             prev = segs[n - 1] if n > 0 else None
             V = prev["p1"] if prev else None
-            past_v = (lambda p: p["lo"] <= V) if up else (lambda p: p["hi"] >= V)      # 往旧段方向越过 V（追平算，S10①）
+            # 往旧段方向越过 V：原文是 ⟪没有创新低⟫／⟪转头继续创新低⟫，「创新低」照字面严格（跟引擎 L77_STRICT_NEWLOW 同一个读法）
+            if L77_STRICT_NEWLOW:
+                past_v = (lambda p: p["lo"] < V) if up else (lambda p: p["hi"] > V)
+            else:
+                past_v = (lambda p: p["lo"] <= V) if up else (lambda p: p["hi"] >= V)
             past_e = (lambda p: p["hi"] > s["p1"]) if up else (lambda p: p["lo"] < s["p1"])
             ok = (prev is not None and prev["PI1"] == i - 1 and s["p0"] == V
                   and not any(past_v(pens[r]) for r in range(i + 1, k + 1)))
