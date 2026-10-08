@@ -470,6 +470,14 @@ finally:
     _T.find_bounds, _T.trend_v3, _T._R6_B = _saved
 count("J12：买卖点随走势分界变了（signals 不许读分界）", _j12_bad, "　（zec15，%d 个点）" % len(_j12_base))
 
+# ---- J18：高级别的改变必须先从低级别开始（级别联动.md 七，Nova 10-08）—— **只报警，不进违规数** ----
+# 判法和为什么这么判见 tools/j18_check.py 文件头；反向臂（小周期上下翻转 ⇒ 每刀都报）在它的 --self-test。
+from j18_check import main as _j18_main                  # noqa: E402
+with _ctx.redirect_stdout(_io.StringIO()) as _jbuf:
+    _j18_v = _j18_main()
+print("  J18 级别先后（只报警）           : %d 处违反%s" % (_j18_v, "" if not _j18_v else "　← tools/j18_check.py：" +
+      " ｜ ".join(l.strip() for l in _jbuf.getvalue().splitlines() if l.strip().startswith("违反"))[:200]))
+
 # ---- 判据前提：下面那扇「字体覆盖」门自己的基准对不对 ----
 # 那扇门判「缺不缺字」靠 `config._notdef_mask` 投出的 .notdef 基准。基准错了它就是**假绿**：
 # 拿一个没有墨的空白遮罩当 .notdef，所有真字形都"不等于它" ⇒ 报「一个都不缺」。
