@@ -492,11 +492,10 @@ def _done_at(pens, start, PI1, mode):
 def _l77_end(pens, i, prev, mode, memo, normal_end):
     """L77 第二支（原博 L77：「把第一笔的笔破坏、走势 A、一个反弹合成一个线段」）。
     prev：上一段（收在 V，由 ② 坐实，带 _A＝那个反向线段 A）；i：这一段 N 的起点（＝ X）；normal_end：N 照常找出来的终点（没有 ⇒ None）。
-    返回：
-      · 整数 e ⇒ N 硬收在 e（R 的终点）；
-      · "hold" ⇒ N 照常找出来的终点把越过 V 的那一笔包进去了（这样的段起点不是段内极值，自检 A 必报），
-        而 R 还没走完、合不了 ⇒ 这一段先不收，留成未完成，等 R 走完再合 —— 不然逐根加长时会先出一个错段、再撤掉；
-      · None ⇒ 照常。
+    返回整数 e ⇒ N 硬收在 e（R 的终点）；None ⇒ 照常。
+    ★ 曾有一条「先不收」（R 没走完、照常终点又把越过 V 那一笔包进去 ⇒ N 先留成未完成）：随机 4000 组逐笔加长一次都打不到
+      （A 能被判走完，R 就已经是一个往前长着的段了），照仓里「没样本能打的死代码不写」删了（Nova 10-08 21:58）。
+      真出现那种形状，seg_prefix_check 会报撤销，那时按样本补。
     要合，下面三条都得成立：
       ① A 之后有一个已完成的反弹线段 R，R 之后第一笔越过 V（往旧段方向）的是 c；
       ② 「A 走完」被知道的时刻早于「X 的终点被破」—— 提前定优先（L71：先破终点就是终局，L69 不许改）；
@@ -517,10 +516,9 @@ def _l77_end(pens, i, prev, mode, memo, normal_end):
     bad_normal = normal_end is not None and normal_end >= c0
     R = _first_seg(pens, A["PI1"] + 1, mode, memo)
     if R is None:
-        return "hold" if bad_normal else None     # R 还没走完：合不了；照常的终点要是错段，就先别收，等 R 走完再说
+        return None                               # R 还没走完：合不了，照常
     if R["dir"] == prev["dir"] or R["PI1"] >= c0:
         return None                               # R 走完了，可越过 V 那一下落在 R 里面（seed 191）／方向不对：不是 L77 第二支的形状，照常
-        #   （之前这里也回 "hold"，N 就一直挂成未完成挂到图尾 —— 191 挂了 46 笔。逐根加长看：先挂着、R 走完后照常收，是未完成→完成，不算撤销）
     if bad_normal:
         return R["PI1"]
     if normal_end is not None:                    # ③ 照常的终点在 c 之前：谁先被知道听谁的
@@ -603,8 +601,6 @@ def build_segments(pens, min_pens=3, mode=FEAT_STD_DEFAULT, start=0, first_only=
         if L77_MERGE and l77 and prevA is not None and segs and segs[-1]["PI1"] == i - 1 and not first_only:
             e = _l77_end(pens, i, dict(segs[-1], _A=prevA), mode, memo, found[0] if found else None)
             prevA = None
-            if e == "hold":
-                break                             # 这一段先留成未完成（尾部那条照常记成 live）
             if e is not None:
                 segs.append(dict(
                     PI0=i, PI1=e, i0=pens[i]["i0"], i1=pens[e]["i1"], p0=pens[i]["p0"], p1=pens[e]["p1"],
