@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""L77 第二支（card-c784a101-791，b5-spec 第 3 步「② 坐实以后又越过 V」）：A 被一个反弹线段 R 破坏、之后越过 V ⇒ X＋A＋R 合成一段。
+
+    python3 tools/l77_check.py              # rc=0 才算过
+    python3 tools/l77_check.py --self-test  # 关掉 L77_MERGE（＝修之前的引擎）⇒ 主跑必须红（rc=0 ＝ 红了）
+
+逐格：
+  ① 夹具 tools/fixtures/l77_pens.json：1300 合成 15-25、1600 合成 4-10（各是向上 / 向下越过 V 的那一种）、1317 不合；三颗 check_segments 都是 0；
+  ② 每个合段**逐笔加长时第一次出现的前缀长度**＝ 引擎算的合段时刻 max(R 确认, c＋1)：合段时刻是二分出来的，
+     这一格拿整份逐笔加长去对 —— 两条不同的路算出同一个数，才说明「当下能知道」没算偏；
+  ③ 随机 4000 组（同一个生成器）：check_segments 违规 0（修前 2 组）。
+"""
+import json
+import os
+import random
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
+import core.segment as S                                 # noqa: E402
+from core.segment import build_segments, check_segments  # noqa: E402
+
+WANT = {"1300": [(15, 25)], "1600": [(4, 10)], "1317": []}
+
+
+def gen(sd):
+    """跟夹具同一个生成器（note 里写的那个）。"""
+    rng = random.Random(sd)
+    n = rng.choice([30, 50, 80])
+    P, p, up = [], 100.0, None
+    up = rng.random() < .5
+    for k in range(n):
+        d = rng.choice([0.3, 0.6, 1, 1.5, 2.5, 4]) * (1 if up else -1)
+        q = round(p + d, 2)
+        P.append(dict(p0=p, p1=q, hi=max(p, q), lo=min(p, q), i0=k * 5, i1=k * 5 + 5, dir="up" if up else "down"))
+        p, up = q, not up
+    return P
+
+
+def merge_time(P, seg, segs):
+    """引擎口径的合段时刻：max(R 确认的前缀长度, c＋1)。"""
+    i = seg["PI0"]
+    prev = next(t for t in segs if t["PI1"] == i - 1)
+    A = S._first_seg(P, i + 1)
+    R = S._first_seg(P, A["PI1"] + 1)
+    up = prev["dir"] == "up"
+    c = next(r for r in range(A["PI1"] + 1, len(P)) if S._beyond(P[r], prev["p1"], up, S.S10_TIE))
+    return max(S._done_at(P, A["PI1"] + 1, R["PI1"], S.FEAT_STD_DEFAULT), c + 1)
+
+
+def main(quiet=False):
+    say = (lambda *a: None) if quiet else print
+    bad = 0
+    fx = json.load(open(os.path.join(HERE, "fixtures", "l77_pens.json")))["seeds"]
+    for sd, P in fx.items():
+        segs = build_segments(P)
+        v = check_segments(segs, P, [])
+        got = [(s["PI0"], s["PI1"]) for s in segs if s.get("case") == 4]
+        ok = not v and got == WANT[sd]
+        bad += not ok
+        say("%s ① seed %s：合段 %s（应为 %s），违规 %d %s" % ("✓" if ok else "✗", sd, got, WANT[sd], len(v), v[:1] if v else ""))
+        for s in [s for s in segs if s.get("case") == 4]:
+            first = next((n for n in range(3, len(P) + 1)
+                          if any(t["PI0"] == s["PI0"] and t["PI1"] == s["PI1"] and t.get("case") == 4 and not t.get("live")
+                                 for t in build_segments(P[:n]))), None)
+            t = merge_time(P, s, segs)
+            ok2 = first == t
+            bad += not ok2
+            say("%s ② seed %s 合段 %d-%d：逐笔加长第一次出现在前缀 %s，引擎算的合段时刻 %s" % ("✓" if ok2 else "✗", sd, s["PI0"], s["PI1"], first, t))
+    hit = [sd for sd in range(4000) if check_segments(build_segments(gen(sd)), gen(sd), [])]
+    bad += bool(hit)
+    say("%s ③ 随机 4000 组违规 %d 组 %s" % ("✓" if not hit else "✗", len(hit), hit[:8]))
+    say("全部通过" if not bad else "%d 格不过" % bad)
+    return 1 if bad else 0
+
+
+def self_test():
+    S.L77_MERGE = False
+    try:
+        rc = main(quiet=True)
+    finally:
+        S.L77_MERGE = True
+    print("%s 关掉 L77_MERGE（修之前的引擎）⇒ %s" % ("✓" if rc else "✗", "红" if rc else "没红（尺子没牙）"))
+    return 0 if rc else 3
+
+
+if __name__ == "__main__":
+    sys.exit(self_test() if "--self-test" in sys.argv else main())
