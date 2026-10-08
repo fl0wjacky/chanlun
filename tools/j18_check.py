@@ -9,12 +9,12 @@
   - 比**时间周期之间**：同一份 K 线（data/ 冻结夹具）聚合出两个周期，小的那个是原样、大的那个按整点对齐聚合。
   - 时刻取大周期那个分界**实时确立的那一根 c**（最早一个截断长度：截到 c 为止就有这一刀；之后一直在，见 trend_check ④）。
     两级都只用到 c 那根大 K 线收盘为止的数据（小周期取收盘不晚于它的那些根）。
-  - 判法（★ 提议版，待 Nova 定；大周期在 c 确立 L、极值在大 K 线 E 上为例，H 反过来）：
+  - 判法（Nova 10-08 09:22 定，级别联动.md 七 J18『编者口径』；大周期在 c 确立 L、极值在大 K 线 E 上为例，H 反过来）：
       小周期（只用到 c 收盘的数据）在 E 那根大 K 线的时间范围里**有一个已确立的 L** ⇒ 通过；
       没有已确立的、但**待定的 L 候选落在 E 里** ⇒ 『中阴』，单独报、不算违反；
       大周期这一刀是它自己的第一刀（图头，want 两头开）⇒ 『图头』，单独报、不算违反；
       其余 ⇒ **违反**（大周期在 E 转了，小周期在 E 上既没确立也没待定同向的转折）。
-    ★ 为什么不用 spec 原写法「小周期最后一个分界」：D2-6 下，最后一个是 H 时**几乎总有** L 候选（H 之后的最低点），
+    ★ 为什么不用作废的原写法「c 时刻小周期最后一个分界」：D2-6 下，最后一个是 H 时**几乎总有** L 候选（H 之后的最低点），
       『中阴』兜住了一切 ⇒ 把小周期整段上下翻转都报 0 处违反，断言没牙。小周期在 E 之后又反向确立，也不算违反：
       大周期确立很晚（c 比 E 晚几十到上千根），这期间小周期早就走到下一段了，L102 说的是「先后」，不是 c 那一刻的状态。
 """
@@ -63,7 +63,9 @@ def _has(v, kind, bar):
 
 
 def confirm_at(big, fn, kind, bar, lo, hi):
-    """最早的截断长度 n（big[:n]）使这一刀出现；二分后再核两头（不单调就退回逐根往前找）。→ c ＝ n-1。"""
+    """最早的截断长度 n（big[:n]）使这一刀出现 → c ＝ n-1。
+    先二分（前提是「确立后一直在」，trend_check ④ 守的就是这条，但它只量 zec15）；二分完**核两头**：
+    big[:n] 有、big[:n-1] 没有。核不过（这份数据上不单调）⇒ 退回从 lo 起逐根往后找第一次出现。"""
     a, b = lo, hi                                             # 不变量：big[:b] 有、big[:a] 没有
     while b - a > 1:
         m = (a + b) // 2
@@ -71,8 +73,12 @@ def confirm_at(big, fn, kind, bar, lo, hi):
             b = m
         else:
             a = m
-    return b - 1
-
+    if _has(_trend(big[:b], fn), kind, bar) and not _has(_trend(big[:b - 1], fn), kind, bar):
+        return b - 1
+    for n in range(lo + 1, hi + 1):                           # 不单调：逐根找第一次出现（慢，但不会给错的 c）
+        if _has(_trend(big[:n], fn), kind, bar):
+            return n - 1
+    return hi - 1
 
 def check_pair(fn, fstep, bstep, small=None):
     """→ [dict(big_kind, big_bar, big_price, c, t_c, verdict, small_last, small_pending)]。small 可替换（self-test 用）。"""
