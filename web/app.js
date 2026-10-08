@@ -1397,7 +1397,9 @@ function syncSubView() { syncSub(); setUrl(); }
 // （画法见 layers.js makeWolfPrimitive），任何一层都不读它。
 // 周期由用户选（下拉），默认「跟图」＝ 这张图的周期；后台按时间回区间，前端按时间落到这张图上。
 // 跟 MACD 副图同一套取数口径：懒取、按「品种|周期|档位」认格、换格作废在飞的那一份、取不到就说取不到。
-const wolf = { on: false, below: null, label: '', note: '', err: '', slot: null, reqId: 0 };
+const wolf = { on: false, below: null, label: '', note: '', err: '', slot: null, reqId: 0, fromT: null,
+  // 「只算到 X 之后」里那个 X 按**图上的坐标**念（UTC，跟时间轴、光标读数同一句话，见 timeLabel）
+  fmt: (ms) => timeLabel(ms / 1000) };
 state.wolf = wolf;
 let wolfTf = SUB_Q.get('wolftf') || '';          // '' ＝ 跟图
 const WOLF_NAME = '防狼术';
@@ -1412,7 +1414,7 @@ function syncWolf() {
   const sel = el('wolftf');
   if (sel) sel.hidden = !opts.wolf;
   if (!opts.wolf) {                                 // 关着不付：清掉、不请求
-    wolf.below = null; wolf.slot = null; wolf.err = ''; wolf.reqId++;
+    wolf.below = null; wolf.slot = null; wolf.err = ''; wolf.fromT = null; wolf.reqId++;
     repaint();
     return;
   }
@@ -1420,12 +1422,15 @@ function syncWolf() {
   const symbol = el('symbol').value, tf = wolfTf || el('tf').value;
   const want = `${symbol}|${tf}|${paging.span}`;
   if (wolf.slot === want) return;
-  wolf.slot = want; wolf.below = null; wolf.err = ''; wolf.label = wolfLabel(tf);
+  wolf.slot = want; wolf.below = null; wolf.err = ''; wolf.fromT = null; wolf.label = wolfLabel(tf);
   repaint();
   const id = ++wolf.reqId;
   loadWolf(symbol, tf, paging.span).then((m) => {
     if (id !== wolf.reqId || !opts.wolf) return;
     wolf.below = Array.isArray(m.below) ? m.below : [];
+    // 后台算到的第一根（Bram eb89f5b）：周期比图细时 span 会被钳，更早那截是**没算**，不是「不在下面」。
+    // 画法那边拿它把没算那截单独画出来，并在那句字后面补「只算到 X 之后」（随图往左补数据自动变，不在这儿算死）。
+    wolf.fromT = typeof m.from_t === 'number' ? m.from_t : null;
     wolf.note = typeof m.note === 'string' ? m.note : '';
     const chip = document.querySelector('.chip[data-key="wolf"]');
     if (chip) chip.title = wolf.note ? `${wolfLabel(tf)} ｜ ${wolf.note}` : wolfLabel(tf);

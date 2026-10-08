@@ -1380,7 +1380,25 @@ function wolfView(target, state, prim) {
     const firstGE = (t) => { let lo = 0, hi = n; while (lo < hi) { const m = (lo + hi) >> 1; if (ts[m] < t) lo = m + 1; else hi = m; } return lo; };
     const lastLE = (t) => firstGE(t + 1) - 1;
     const y0 = H - WOLF_STRIP;
-    let labelX = null;                               // 有一段画上了才写那句字
+    // ★ 后台没算到的那一截（from_t 之前；用户选的周期比图细、span 被钳时会有）：同一条道上画**斜线灰**，
+    //   跟「站上 0 轴」（空着）分得开 —— 空着说的是「算了，不在下面」，斜线说的是「没算」。
+    let uncomputed = false;
+    if (typeof w.fromT === 'number' && ts[0] < w.fromT) {
+      const iEnd = firstGE(w.fromT) - 1;
+      const xa = vp.xOfBar(0), xb = vp.xOfBar(Math.min(iEnd, n - 1));
+      if (xa !== null && xb !== null && xb >= 0) {
+        const x0 = Math.max(0, xa - vp.spacing / 2), x1 = Math.min(W, xb + vp.spacing / 2);
+        ctx.save();
+        ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, WOLF_STRIP); ctx.clip();
+        ctx.fillStyle = rgba(PAGE.bg, 255); ctx.fillRect(x0, y0, x1 - x0, WOLF_STRIP);
+        ctx.strokeStyle = rgba(PAGE.mu, 150); ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let x = x0 - WOLF_STRIP; x < x1; x += 4) { ctx.moveTo(x, y0 + WOLF_STRIP); ctx.lineTo(x + WOLF_STRIP, y0); }
+        ctx.stroke(); ctx.restore();
+      }
+      uncomputed = true;
+    }
+    let labelX = 44;                                 // 让开左下角 TradingView 那枚标（MACD 副图关着时它就落在主图这一格左下角）
     for (const [t0, t1] of w.below) {
       const i0 = firstGE(t0), i1 = t1 == null ? n - 1 : lastLE(t1);
       if (i0 >= n || i1 < 0 || i1 < i0) continue;   // 整段落在这份数据外面
@@ -1396,17 +1414,23 @@ function wolfView(target, state, prim) {
       ctx.fillStyle = rgba(SUB.dn, 190);
       ctx.fillRect(x0, y0, x1 - x0, WOLF_STRIP);
       state.wolfDrawn.push({ i0, i1, open: t1 == null });
-      labelX = 44;   // 让开左下角 TradingView 那枚标（MACD 副图关着时它就落在主图这一格左下角；手机缺省就是关着）
     }
-    if (labelX !== null && w.label) {
-      // 左下角固定一处：有带才写，滚动时不跟着跳。字底下垫一块底色（量柱就在这一截，不垫读不清）。
+    const extra = uncomputed && w.fmt ? `只算到 ${w.fmt(w.fromT)} 之后` : '';
+    if (w.label) {
+      // 左下角固定一处（开着就写，滚动时不跟着跳）。字底下垫一块底色（量柱就在这一截，不垫读不清）。
+      // ★ 一行放不下（手机 390 上「只算到 …」那半句接上去会出画布）就折成两行，后半句在上面那一行。
       ctx.font = '11px system-ui, sans-serif';
       ctx.textBaseline = 'bottom'; ctx.textAlign = 'left';
-      const tw = ctx.measureText(w.label).width;
-      ctx.fillStyle = rgba(PAGE.bg, 220);
-      ctx.fillRect(labelX - 3, y0 - 17, tw + 6, 15);
-      ctx.fillStyle = rgba(PAGE.mu, 255);
-      ctx.fillText(w.label, labelX, y0 - 3);
+      const one = extra ? `${w.label} · ${extra}` : w.label;
+      const lines = ctx.measureText(one).width <= W - labelX - 8 ? [one] : [extra, w.label].filter(Boolean);
+      lines.forEach((line, k) => {
+        const yb = y0 - 3 - (lines.length - 1 - k) * 15;
+        const tw = ctx.measureText(line).width;
+        ctx.fillStyle = rgba(PAGE.bg, 220);
+        ctx.fillRect(labelX - 3, yb - 14, tw + 6, 15);
+        ctx.fillStyle = rgba(PAGE.mu, 255);
+        ctx.fillText(line, labelX, yb);
+      });
     }
   });
 }
