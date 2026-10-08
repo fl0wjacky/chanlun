@@ -388,7 +388,7 @@ body.fs-fake main { position: fixed; inset: 0; z-index: 50; height: 100dvh; back
          量开关自己写进 `--fold-w`（加载完、改字号、转屏各重量一次）。它比开关实宽大 ⇒ 兜个偏保守的数，
          宁可我这边空一格，也不许 chip 在 JS 到位前那一瞬间停在开关底下。
          Atlas 复核时记过一条：把 reserveFold() 摘掉全尺还是绿的 —— 就是这个兜底在顶（等价变异，不挡）。 */
-    padding-right: calc(10px + var(--fold-w, 150px));
+    padding-right: calc(26px + var(--fold-w, 150px));   /* 26 ＝ 开关左边那道渐变的宽（main::after）：滑到头时最后一颗整颗落在渐变外面（Bram 10-08 18:44） */
   }
   /* **收起**（body 上有 m-fold）的时候这一行就是屏幕最下面那一行 ⇒ 底下那条安全区（iPhone 的横条）
      由它让出来（原先这条账挂在收起开关上 —— 它就是当时最下面那一格）。展开的时候下面还长着图例跟
@@ -485,6 +485,22 @@ body.fs-fake main { position: fixed; inset: 0; z-index: 50; height: 100dvh; back
     background: var(--panel); color: var(--mu); font: inherit; font-size: 12px;
     border: 1px solid var(--line);
   }
+  /* ★ 开关底下、左边那一截不许露 chip（卡 card-3ee85285-6f9，10-08）：条子是横滑的，开关压在它上面 ——
+     静止时 390 宽实测「线段中枢」被盖 44px、「高一级」被盖 74px，被盖住半截的那颗只露出「线段」两个字，
+     读起来像第二颗「线段」被挡了，不像「右边还有」。（`.panel` 的 padding-right 只管**滑到头**那一刻。）
+     ⇒ 在开关**底下**垫一层条子底色：从开关左沿往左 26px 是渐变（透明 → 底色），往右一直铺到屏幕右边（含开关右边那 8px 缝）。
+       chip 滑到开关跟前是**淡出去**的，一眼看得出往右还有。
+     ★ 垫在 main 上（z 2，开关是 z 3、横滑条在流里）：不能挂在开关自己身上 —— 挂上去会压住开关的边框，
+       开关圆角外那几个角也会露出底下的 chip，各截出一道硬边（两样都实截过）。也不用 mask：mask 连条子的底色和
+       1px 顶线一起裁掉，开关后面露出更深的页面底色，像条子被截断了（也实截过）。
+     ★ 宽 ＝ `--fold-w`（开关实宽＋右边 8px）＋ 26px 渐变；高 ＝ 条子里面那一截（不含 1px 顶线）：8＋30＋8＋0.5 ＝ 46.5px，
+       收起时这一行贴着屏幕底，跟 `.panel` 同一条账把安全区加上。 */
+  main::after {
+    content: ''; position: absolute; right: 0; bottom: 0; z-index: 2; pointer-events: none;
+    width: calc(var(--fold-w, 150px) + 26px); height: 46.5px;
+    background: linear-gradient(to right, transparent, var(--panel) 26px);
+  }
+  body.m-fold main::after { height: calc(46.5px + env(safe-area-inset-bottom, 0px)); }
   .fold .chev { color: var(--dim); transition: transform .15s; }
   body:not(.m-fold) .fold .chev { transform: rotate(180deg); }   /* 展开着 ⇒ 箭头朝上（点它＝收起） */
   body.m-fold #legend, body.m-fold .foot { display: none; }
