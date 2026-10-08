@@ -31,7 +31,7 @@
 //      这条对「读数停在旧数上」正是死穴（换品种时旧数是另一种价格量级；换周期时 1h 的时刻
 //      根本不在 4h 那份里），而它**不**管落在相邻哪一根 —— 那件事本来就会跳，见上。
 //
-// 跑法（要**真后台**：两个品种都得有，8742 那个假后台只有一份数据）：
+// 跑法（要**真后台**：两个品种都得有，假后台只有一份数据）：
 //   1) python3 web/server.py --port <端口>          （只绑回环）
 //   2) NODE_PATH=<playwright 的 node_modules> node tools/web_readout_swap_probe.js [页面地址]
 //        [--mut=none|paint|go|read|sub|sticky|sticky2|stale]
