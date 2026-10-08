@@ -108,14 +108,16 @@ fi
 #   接进来之前没人跑它，第 12 臂（替身不收 cut/pen_min）崩了不知多久。一臂崩了算没牙（rc=3 ⇒ 记红）。
 # ★ check_closedue（card-7d3e8748-3d3）：收盘前 1 秒请求过、收盘后打开，照页面真的补数节奏（常量从 app.js 读）敲，
 #   10 秒内必须拿到新那根，每格每根最多多拉币安 1 次。假钟假币安，约 12 秒；自检把 _close_due 摘掉必须红。
-# ★ 并行池（card-b71b1600-253，Nova 10-08 20:39 点头）：先把下面这些条目交给 tools/predeploy_pool.py 跑（默认 4 路，长的先发、
-#   check_abuse 排池子末尾、速度门不进池子最后单独串跑），每条的输出 / 退出码 / 用时落到临时目录；再**按原顺序**一条条读回来，
-#   分类、记表跟原来一字不差。PREDEPLOY_JOBS=1 ＝ 跟原来一样一条一条串着跑（对拍：两种跑法逐条的绿／红／没比成必须一样）。
+# ★ 并行池（card-b71b1600-253）：条目交给 tools/predeploy_pool.py 跑，每条的输出 / 退出码 / 用时落到临时目录；再**按原顺序**
+#   一条条读回来，分类、记表跟原来一字不差，每格说明栏开头多一个这一条的用时。
+#   **默认 1 路（Nova 10-08 23:01 定）**：10-08 干净机器上量过 4 路，Python 那半 457 → 341 秒，可单条被挤慢（selfcheck 46 → 176 秒，
+#   seg_prefix 自己又起 4 个进程，加上机器底噪，超订了），整门只省 129 秒。代码留着，`PREDEPLOY_JOBS=N` 可开；
+#   开的话速度门照样在池子之后单独串跑、check_abuse 排池子末尾。两种跑法 37 格逐条绿红一样（10-08 对拍过）。
 #   为什么不按「改了哪些文件才跑」挑：10-08 web_more_check 那一格，恰好是「谁也没想到会碰到它」的红。
 CHECKS=(tools/selfcheck.py web/check_parity.py "web/check_parity.py --self-test" web/check_abuse.py "web/check_abuse.py --self-test" web/check_closedue.py "web/check_closedue.py --self-test" web/check_assets.py "tools/pine_lockstep.py --head HEAD" "notes/pine-incremental-seg.py --self-test" "notes/pine-incremental-seg.py --tail 60" "tools/trend_check.py --self-test" tools/speed_gate.py "tools/speed_gate.py --self-test" tools/seg_prefix_check.py "tools/seg_prefix_check.py --self-test" tools/live_seg_check.py tools/levels_check.py "tools/levels_check.py --self-test" "tools/j18_check.py --self-test" "tools/j19_check.py --self-test" "tools/j17_check.py --self-test" tools/web_theme_sync.py "tools/web_theme_sync.py --selftest" tools/web_footer_check.py "tools/web_footer_check.py --selftest" tools/web_fmt_check.py "tools/web_fmt_check.py --selftest" tools/web_fitbox_check.py "tools/web_fitbox_check.py --selftest" tools/web_more_check.py "tools/web_more_check.py --selftest")
 POOLDIR=$(mktemp -d)
 POOL_T0=$(date +%s)
-"$PY" tools/predeploy_pool.py --dir "$POOLDIR" --jobs "${PREDEPLOY_JOBS:-4}" --python "$PY" -- "${CHECKS[@]}"
+"$PY" tools/predeploy_pool.py --dir "$POOLDIR" --jobs "${PREDEPLOY_JOBS:-1}" --python "$PY" -- "${CHECKS[@]}"
 POOL_SEC=$(( $(date +%s) - POOL_T0 ))
 ci=0
 for chk in "${CHECKS[@]}"; do
@@ -193,7 +195,7 @@ fi
 
 echo "================ 上线前检查 ================"
 echo "HEAD $HEAD_SHA · python $PYV（PIL $PIL）· node $NODEV · playwright $PWV · 临时端口 ${PORT:-没起}"
-echo "Python 那半墙钟 ${POOL_SEC}s（并行 ${PREDEPLOY_JOBS:-4} 路；速度门在池子之后单独串跑；每格「说明」栏开头是这一条自己的用时）"
+echo "Python 那半墙钟 ${POOL_SEC}s（并行 ${PREDEPLOY_JOBS:-1} 路；速度门在池子之后单独串跑；每格「说明」栏开头是这一条自己的用时）"
 for line in "${RESULTS[@]}"; do echo "$line"; done
 if [ ${#KEPT[@]} -gt 0 ]; then
   echo "---- 没过的那几步，日志和截图留着 ----"

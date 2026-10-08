@@ -3,7 +3,7 @@
 """predeploy 的 Python 那半：按并行池跑条目，每条的输出和退出码落到目录里，predeploy.sh 再**按原顺序**读回去分类、记表。
 （card-b71b1600-253，Nova 10-08 20:39 点头：整门 16 分钟，Python 那半串着跑约 964 秒。）
 
-    python3 tools/predeploy_pool.py --dir D --jobs 4 [--python PY] -- 条目1 条目2 …
+    python3 tools/predeploy_pool.py --dir D [--jobs N] [--python PY] -- 条目1 条目2 …   （默认 1 路，Nova 10-08 23:01）
     ⇒ D/<i>.log  第 i 条的 stdout+stderr
        D/<i>.rc   第 i 条的退出码
        D/<i>.sec  第 i 条的用时（秒）
@@ -49,7 +49,7 @@ def run_one(py, i, chk, d):
 
 
 def main(argv):
-    jobs, d, py = 4, None, sys.executable
+    jobs, d, py = 1, None, sys.executable
     if "--" not in argv:
         print("用法：predeploy_pool.py --dir D --jobs N [--python PY] -- 条目…", file=sys.stderr)
         return 2
