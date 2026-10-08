@@ -345,7 +345,8 @@ def _macd_body(slot, symbol, tf):
 def _wolf_body(slot, symbol, tf):
     """防狼术（T13，均线.md 六.7）：这一格 K 线上 MACD(12,26,9) 黄白线在 0 轴下的区间，按时间给 —— 前端拿用户选的那个周期
     请求这一份，再按时间铺到当前图上（周期跟当前图可以不同）。**默认关**：前端不开就不请求，这一份懒算、不进 /api/chart。
-    below = [[t0, t1]]：t0 那根起在下面，t1 那根起站住（t1 为 null ＝ 到现在还在下面）。"""
+    below = [[t0, t1]]：t0 那根起在下面，t1 那根起站住（t1 为 null ＝ 到现在还在下面）。
+    from_t ＝ 这一格第一根 K 线的 t：它之前的时间**没算**（不是「不在下面」）—— 用户选的周期比图细时 span 会被钳，盖不满整张图。"""
     b = slot.mbodies.get(WOLF_KEY)
     if b is None:
         head = json.loads(slot.body)
@@ -355,6 +356,7 @@ def _wolf_body(slot, symbol, tf):
             span=head["span"], earliest=head["earliest"], span_max=head["span_max"], engine=head["engine"],
             symbol=symbol, tf=tf, params=list(MACD_PARAMS), rule="both<0 enter, both>0 leave, else hold",
             note="防狼术：入门的傻瓜化规则（第 103 课），不是判据，不参与任何结构判定",
+            from_t=t[0] if t else None,                  # 这份算到的第一根：周期比图细、span 被钳时，前端据此知道更早那截没算
             below=[[t[i0], None if i1 is None else t[i1]] for i0, i1 in wolf_below(slot.bars, *MACD_PARAMS)]),
             ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
     return b

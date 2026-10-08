@@ -320,6 +320,8 @@ def run_wolf(quiet=False):
             diffs = []
             if wf.get("below") != want:
                 diffs.append("below ≠ spec 字面复算（%d 段 vs %d 段）" % (len(wf.get("below") or []), len(want)))
+            if wf.get("from_t") != (t[0] if t else None):
+                diffs.append("from_t %r ≠ 这份 K 线第一根 %r" % (wf.get("from_t"), t[0] if t else None))
             if any(wf.get(k) != ch.get(k) for k in ("span", "span_max", "earliest", "fetched_at", "engine")):
                 diffs.append("头部回显跟 /api/chart 不一致")
             if any("wolf" in k for k in ch):
