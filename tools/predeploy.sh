@@ -100,7 +100,11 @@ fi
 #  ★ ①③ 要 PIL（① 经 `render/style.py`，③ 经 `from render.style import CHART`）⇒ 缺 PIL 时它们
 #    打顶格的 `ModuleNotFoundError`，按下面「崩了」那条归 **rc=99 记「没比成」**（不是红）。标题那行
 #    印的 `PIL 无` 就是给这个看的：门要用带 PIL 的解释器跑（`PYTHON=`）。
-for chk in tools/selfcheck.py web/check_parity.py "web/check_parity.py --self-test" web/check_abuse.py web/check_assets.py "tools/pine_lockstep.py --head HEAD" "notes/pine-incremental-seg.py --self-test" "notes/pine-incremental-seg.py --tail 60" "tools/trend_check.py --self-test" tools/seg_prefix_check.py "tools/seg_prefix_check.py --self-test" tools/live_seg_check.py tools/levels_check.py "tools/levels_check.py --self-test" "tools/j18_check.py --self-test" "tools/j19_check.py --self-test" "tools/j17_check.py --self-test" tools/web_theme_sync.py "tools/web_theme_sync.py --selftest" tools/web_footer_check.py "tools/web_footer_check.py --selftest" tools/web_fmt_check.py "tools/web_fmt_check.py --selftest" tools/web_fitbox_check.py "tools/web_fitbox_check.py --selftest" tools/web_more_check.py "tools/web_more_check.py --selftest"; do
+# ★ speed_gate（card-5a1f2ec2-650，Nova 10-08 18:48）：每张图整段划一次（analyze＋trend_v3），跟 origin/main 同机交替比，
+#   任何一张（两边慢的那个 ≥100ms）慢过 1.5 倍 ⇒ 红；HEAD 一轮超过基准一轮的 3 倍（至少 20s）直接掐掉记红。约 35 秒，
+#   自检约 50 秒（HEAD 对 HEAD 必须绿；build_segments 每次多划一遍必须红）。解析不出 origin/main（没 fetch）⇒ rc=2 没比成。
+#   缘由：L77 那一版事后手跑才发现慢，别的尺量的全是「对不对」。
+for chk in tools/selfcheck.py web/check_parity.py "web/check_parity.py --self-test" web/check_abuse.py web/check_assets.py "tools/pine_lockstep.py --head HEAD" "notes/pine-incremental-seg.py --self-test" "notes/pine-incremental-seg.py --tail 60" "tools/trend_check.py --self-test" tools/speed_gate.py "tools/speed_gate.py --self-test" tools/seg_prefix_check.py "tools/seg_prefix_check.py --self-test" tools/live_seg_check.py tools/levels_check.py "tools/levels_check.py --self-test" "tools/j18_check.py --self-test" "tools/j19_check.py --self-test" "tools/j17_check.py --self-test" tools/web_theme_sync.py "tools/web_theme_sync.py --selftest" tools/web_footer_check.py "tools/web_footer_check.py --selftest" tools/web_fmt_check.py "tools/web_fmt_check.py --selftest" tools/web_fitbox_check.py "tools/web_fitbox_check.py --selftest" tools/web_more_check.py "tools/web_more_check.py --selftest"; do
   log=$(mktemp)
   "$PY" $chk >"$log" 2>&1
   rc=$?
