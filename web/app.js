@@ -126,7 +126,10 @@ const CUT_HIDDEN = ['extend'];
 //   切法同理（`?cut=extend` 可分享），所以这两个词的初值都是**地址栏说的那个**。
 const paging = { span: 1, spanMax: null, earliest: false, nogain: false, stop: null, loading: false, failedAt: 0, reqId: 0, applying: false,
                  measure: new URLSearchParams(location.search).get('measure') || DEFAULT_MEASURE,
-                 cut: new URLSearchParams(location.search).get('cut') || DEFAULT_CUT };
+                 cut: new URLSearchParams(location.search).get('cut') || DEFAULT_CUT,
+                 // ★ 笔的根数：地址栏点名的那个（`?pen=7`），没点名就是 null ＝「听后台的缺省」。
+                 //   名单到了以后 loadMeasures 会把 null／名单外的数摆回 `pens.def`。
+                 pen: Number(new URLSearchParams(location.search).get('pen')) || null };
 
 // ---- 背驰看法（卡 card-84091d2d-c97：四选一、默认不动、图脚标明当前用的是哪种）----
 // 口径在 docs/spec/背驰.md 第六节，四个名字的出处是 core/signals.py 的 MEASURES 上面那一行。
@@ -149,6 +152,11 @@ const measures = { list: [], orig: {}, note: {} };
 //   整张图会挂在这一个词上（跟 measure 那次是同一个洞，见 load() 里那段注释）。
 // ★ 名单没到就自己编一对名字发出去，是这里最坏的做法：看着能用，直到后台把那颗点成 400。
 const cuts = { list: [] };
+// ---- 笔最少几根 K 线（C3，小栋 10-08 12:42 定：默认 6、可切 7；卡 card-2e6bb3bd-4ae）----
+// 口径：`/api/chart?…&pen_min=6|7`（Bram 2007121）。能选哪几档、缺省是哪一档**都听 /api/meta**
+//   （`pen_min_options`／`pen_min_default`），前端不写死 —— 默认这会儿还是 7，第二步才翻成 6，
+//   写死哪个都会在另一步里变成一句假话。名单没到 ⇒ 这一组不画、这个参数一个字都不发（跟切法同一个洞）。
+const pens = { list: [], def: null };
 let viewSet = null;
 let settleTimer = 0;
 const SETTLE_MS = 40;      // 「自己摆视口」的认回声窗口，见 holdView()
@@ -374,7 +382,7 @@ function fixtureNames(symbol, tf) {
 //   在换一次看法之后就自己弹回去了，而且屏幕上没有任何东西说过这件事。（工装 ⑰f 就是这么逮到的：
 //   深链 `?cut=extend` 打开，首屏那一趟没带参数，图脚和 chip 一起摆回当时那一档缺省。）
 //   ★ 这条理由跟**哪一档当缺省**无关，缺省从 extend 换到 turn 再换到 trend，**机制一个字不变**。
-async function load(symbol, tf, span, measure, cut = paging.cut) {
+async function load(symbol, tf, span, measure, cut = paging.cut, pen = paging.pen) {
   try {
     const q = new URLSearchParams({ symbol, tf, span: String(span) });
     // ★ 名单还没到手（离线样本、旧后台、或者首屏那个并行的 /api/meta 还没回来）⇒ measure 一个字都不带，
@@ -384,6 +392,8 @@ async function load(symbol, tf, span, measure, cut = paging.cut) {
     // 切法同一条闸门、同一个理由。★ 缺省的 trend **不带**：后台缺省就是它（同一次部署），带上只是噪音，
     //   而且地址栏那份（setUrl）也得跟着少一个词 —— 两处对「缺省」的判断得是同一个（都用 DEFAULT_CUT）。
     if (cuts.list.length && cut && cut !== DEFAULT_CUT) q.set('cut', cut);
+    // 笔的根数：同一条闸门。缺省那档**不带**（后台缺省就是它），名单没到也不带。
+    if (pens.list.length && pen != null && pen !== pens.def) q.set('pen_min', String(pen));
     const r = await fetch(`/api/chart?${q}`);
     if (r.ok) return vetted({ ...(await r.json()), source: 'api' });
   } catch (e) { /* 静态打开（file:// 或本地 http.server）时没有后台，走样本 */ }
@@ -477,6 +487,8 @@ function adopt(cur, d, prevLen) {
   const s = { measure: typeof d.measure === 'string' && d.measure ? d.measure : cur.measure,
               // 切法也认回显（跟 measure 同一格）：点的那颗可能失败，屏幕上画的到底是哪种只有后台那份说了算
               cut: typeof d.cut === 'string' && d.cut ? d.cut : cur.cut,
+              // 笔的根数也认回显：屏上画的到底是几根的笔，只有后台那份说了算
+              pen: Number.isFinite(d.pen_min) ? d.pen_min : cur.pen,
               span: Number.isFinite(d.span) ? d.span : cur.span,          // 回显的档位就是真档位
               spanMax: Number.isFinite(d.span_max) ? d.span_max : cur.spanMax,
               // 三个字段同一条规矩：**回了就听回显的，没回就维持现状**。
@@ -686,7 +698,11 @@ function ghostReconcile(d) {
   //   ★ 读 **chart 自己那份**，不读 /api/meta：meta 只在页面打开时取一次，部署之后开着的页面手里还是旧 meta
   //   （Bram 指出的）。旧后台/样本没有这个字段 ⇒ 取 `''`，跟今天的行为一模一样。
   //   往回滚也一样：E1→E2→E1 各算各的桶，不会拿 E2 那份去比 E1 的本子。
-  const key = [d.symbol, d.tf, d.measure || paging.measure, d.span ?? paging.span, d.engine ?? ''].join('|');
+  // ★ 切法（`cut`）和笔的根数（`pen_min`）**也进键**，理由跟 engine 一样：换的是**规则**，不是同一份数据刷新了。
+  //   漏掉的话，用户从 7 根切到 6 根，上一份（7 根）的已确认点在新的一份里对不上，当场被记成「消失的点 34」
+  //   —— 用户只是换了个设置（10-08 实测逮到）。切法那一半原来就漏着，同一个洞，一起补。
+  const key = [d.symbol, d.tf, d.measure || paging.measure, d.cut || paging.cut, d.pen_min ?? paging.pen ?? '',
+               d.span ?? paging.span, d.engine ?? ''].join('|');
   const prev = ghostBuckets.get(key);
   const now = ghostConfirmed(d);
   if (prev) {
@@ -1506,6 +1522,7 @@ function applyToggles() {
   renderMeasures();
   // 切法那组同理：中枢两层都关着时它得跟灰（判据在 renderCuts 一处，别在这儿再写一遍）。
   renderCuts();
+  renderPens();
 }
 
 function buildChips() {
@@ -1772,6 +1789,14 @@ async function loadMeasures() {
       if (want && !cl.includes(want)) paging.cut = cl.includes(DEFAULT_CUT) ? DEFAULT_CUT : cl[0];
       if (shown.length >= 2) buildCuts();    // 只剩一档＝没什么可切的：不画这一组、也不发这个参数
     }
+    // 笔的根数（C3）：两个字段**都**得在、都得是整数，才画这一组。缺省不在名单里 ⇒ 当没这回事（不编）。
+    const po = Array.isArray(m.pen_min_options) ? m.pen_min_options.filter((x) => Number.isInteger(x)) : [];
+    const pd = Number.isInteger(m.pen_min_default) ? m.pen_min_default : null;
+    if (po.length >= 2 && pd != null && po.includes(pd)) {
+      pens.list = po; pens.def = pd;
+      if (paging.pen == null || !po.includes(paging.pen)) paging.pen = pd;   // 没点名／点了名单外的 ⇒ 缺省
+      buildPens();
+    }
   } catch (e) { /* 没后台（离线样本）或没这个接口：没有看法/切法可切，页面上不多一个字 */ }
 }
 
@@ -1886,6 +1911,7 @@ async function setMeasure(id) {
     if (anchor) draw(d, anchor); else draw(d);
     renderMeasures();
     renderCuts();                      // 切法这一趟也带着走（load 的缺省就是 paging.cut）⇒ chip 跟回显对齐
+    renderPens();
     el('state').textContent = d.closed ? '已收盘' : '未收盘（最后一根还在走）';
     el('state').className = 'badge ' + (d.closed ? '' : 'live');
   } catch (e) {
@@ -1967,6 +1993,69 @@ async function setCut(id) {
     if (id0 !== paging.reqId) return;
     el('state').textContent = String(e.message || e); el('state').className = 'badge bad';
     renderCuts();                      // 没换成 ⇒ 亮回原来那一颗
+  } finally {
+    if (id0 === paging.reqId) paging.loading = false;
+  }
+}
+
+// ---------------------------------------------------------------- 笔最少几根那一组（C3，卡 card-2e6bb3bd-4ae）
+// 形态跟「中枢切法」同一套（单选 radiogroup ＋ aria-checked），另起一组：它换的是**笔怎么划**，往上线段、
+// 中枢、走势、买卖点整段跟着重算 —— 跟切法、看法都不是一件事，并进去会让人以为能同时选。
+// ★ 「（默认）」两个字跟着 `pens.def` 走，不写死在 6 或 7 上（第二步才把缺省翻过去）。
+const PEN_TITLE = {
+  6: '笔最少 6 根 K 线：顶分型和底分型之间可以没有独立 K 线（第 106 课「至少延伸6个基本K线单位」）',
+  7: '笔最少 7 根 K 线：顶和底之间至少隔一根独立 K 线（第 62、77 课；第 62 课说只差这一根的「一般来说，也最好不算一笔」）',
+};
+function buildPens() {
+  const box = el('panel');
+  const g = document.createElement('div');
+  g.className = 'mgroup'; g.id = 'pgroup';
+  g.setAttribute('role', 'radiogroup'); g.setAttribute('aria-label', '笔最少几根 K 线');
+  const cap = document.createElement('span');
+  cap.className = 'mcap'; cap.textContent = '笔最少几根 K 线';
+  g.appendChild(cap);
+  for (const n of pens.list) {
+    const b = document.createElement('button');
+    b.className = 'chip mchip'; b.type = 'button'; b.dataset.pen = String(n);
+    b.textContent = `${n} 根`;
+    b.title = (PEN_TITLE[n] || `笔最少 ${n} 根 K 线（后台新加的一档，前端还没有说明）`) + (n === pens.def ? '（默认）' : '');
+    b.setAttribute('role', 'radio');
+    b.onclick = () => setPen(n);
+    g.appendChild(b);
+  }
+  const after = el('cgroup') || el('mgroup');
+  if (after) box.insertBefore(g, after.nextSibling);   // 挨着前面两组：几组单选都在图层那排**前面**
+  else box.prepend(g);
+  watchOverflow(box);
+  renderPens();
+}
+// 亮哪一颗看回显（paging.pen 是 adopt() 从响应里认来的）。笔这一层关着也照样能点：
+//   它不只换笔，往上线段、中枢、走势全跟着变，屏上看得见差别，所以不置灰。
+function renderPens() {
+  const g = el('pgroup'); if (!g) return;
+  for (const b of g.querySelectorAll('.mchip')) b.setAttribute('aria-checked', Number(b.dataset.pen) === paging.pen ? 'true' : 'false');
+}
+async function setPen(n) {
+  if (!pens.list.includes(n) || n === paging.pen || paging.loading) return;
+  const own = state.data;
+  const id0 = ++paging.reqId;
+  paging.loading = true;
+  el('state').textContent = '换笔的根数…'; el('state').className = 'badge';
+  try {
+    // 锚点按**时间**抓：笔一变，后面全都重画，但 K 线一根不多不少，按时间对回去视口就不动。
+    const anchor = own ? anchorOf(own.bars, chart.timeScale().getVisibleLogicalRange()) : null;
+    const d = await load(el('symbol').value, el('tf').value, paging.span, paging.measure, paging.cut, n);
+    if (id0 !== paging.reqId) return;
+    Object.assign(paging, adopt(paging, d));
+    setUrl();
+    if (anchor) draw(d, anchor); else draw(d);
+    renderPens();
+    el('state').textContent = d.closed ? '已收盘' : '未收盘（最后一根还在走）';
+    el('state').className = 'badge ' + (d.closed ? '' : 'live');
+  } catch (e) {
+    if (id0 !== paging.reqId) return;
+    el('state').textContent = String(e.message || e); el('state').className = 'badge bad';
+    renderPens();
   } finally {
     if (id0 === paging.reqId) paging.loading = false;
   }
@@ -2357,7 +2446,7 @@ function renderMeta(d) {
   el('meta').textContent =
     `${d.name || d.symbol} · ${d.tf} ｜ ${d.nbars} 根 ｜ 笔 ${d.pens.length} ｜ 类中枢 ${d.centers.length}`
     + ` ｜ 完成线段 ${done}（+${d.segs.length - done} 未完成）｜ 线段中枢 ${d.seg_centers.length}`
-    + ` ｜ 精度 ${d.meta?.tick} ｜ ${d.meta?.pen_rule === 'new' ? '新笔' : '老笔'}`
+    + ` ｜ 精度 ${d.meta?.tick} ｜ ${d.meta?.pen_rule === 'new' ? '新笔' : '老笔'}${Number.isFinite(d.pen_min) ? `（最少 ${d.pen_min} 根）` : ''}`
     + ` ｜ 买卖点 线段中枢层 ${sigTierText(d.signals?.seg || [])} · 类中枢层 ${sigTierText(d.signals?.pen || [])}`
     + measureText(d)
     + cutText(d)
@@ -2497,6 +2586,9 @@ function setUrl() {
   //   `paging.cut` 重写 ⇒ 改名之后第一次 setUrl 就把它归一成 trend（或者直接抹掉）。
   if (cuts.list.length && paging.cut !== DEFAULT_CUT) q.set('cut', paging.cut);
   else q.delete('cut');
+  // 笔的根数同理：跟**后台的缺省**一样就抹掉，不一样才写（`?pen=7`）；名单没到也抹掉。
+  if (pens.list.length && paging.pen != null && paging.pen !== pens.def) q.set('pen', String(paging.pen));
+  else q.delete('pen');
   // 副图那两颗同理：跟**这一屏的默认**（桌面开、手机关，见 SUB_DEF）不一样才写上去。
   // 这样地址栏永远只写"这一屏再从零打开会不一样的东西"—— 写着默认值是噪音，换屏时还得记得抹掉。
   for (const k of ['vol', 'macd']) {
@@ -2546,6 +2638,7 @@ async function go(span = 1) {
     draw(d);
     renderMeasures();                            // 亮哪一颗看回显（名单是后到的，首屏画完得补一次）
     renderCuts();
+    renderPens();
     el('state').textContent = d.closed ? '已收盘' : '未收盘（最后一根还在走）';
     el('state').className = 'badge ' + (d.closed ? '' : 'live');
     // ★ levels 到这儿才落上来 —— **在 `draw()` 之后登记 `.then`**：先画图、标后补，顺序写死在这儿
@@ -2586,7 +2679,9 @@ const metaReady = loadMeasures();
   //   （跟 `?load=` 超白名单会被钳是同一类账，只是那边前端能自己钳、这边得先问后台认哪几个）。
   //   没点名（绝大多数）⇒ 一个字都不等，立刻发第一趟；那一趟不带 measure，走后台自己的缺省。
   //   切法（`?cut=`）同一条：点名了就得等名单 —— 名单外的词发出去，挂掉的是整张图。
-  if (q.has('measure') || q.has('cut')) await metaReady;
+  //   笔的根数（`?pen=`）同一条：点名了就先等名单，不然首屏那一趟不带它 ⇒ 回显是缺省那档 ⇒ 地址栏被
+  //   抹掉，分享出去的 `?pen=7` 一打开就弹回缺省（10-08 实测逮到）。
+  if (q.has('measure') || q.has('cut') || q.has('pen')) await metaReady;
   // ?load=N：直接打开某一档（可分享 / 可截图复现；N 不在白名单上就退回它下面的那一档）
   go(ladderSpan(q.get('load')));
 })();
