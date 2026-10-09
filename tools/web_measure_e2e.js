@@ -1841,6 +1841,10 @@ const shotChart = async (p, tag) => {
   ck('㊿d 悬停分界 ⇒ 「死点：<后台原值>」＋「出处：…」（图上缩写、悬停不缩）',
      dmTips.at.length > 0 && tipBad.length === 0, `挑了 ${dmTips.at.length} 类　${tipBad.length ? '✗ ' + JSON.stringify(tipBad) : '都对'}`);
   // ㊿e 牙：把屏上一刀的价挪到「往外那一行放不下」的位置（H 顶到格顶、L 压到格底）⇒ 必须换格（right／left）或不写，而且不压字
+  //   ★ 两个落点是照 layers.js 的式子算出来的，别「改成贴边更稳」（Bram 10-09 01:42 问过，算一遍就知道会假红）：
+  //     L 刀 y=H−30 ⇒ 价字 ly=y+20=H−10（不翻）⇒ 外一行 dy=H+4，框底出画布，一定放不下；
+  //       换成 y=H−8 ⇒ ly=H+12>H−6 翻到 y−10=H−18 ⇒ 外一行 dy=H−4、框 H−15..H−1 **放得下** ⇒ mode=out，假红。
+  //     H 刀 y=8 ⇒ ly=−2<14 翻到 y+20=28 ⇒ 外一行 dy=14、框顶 3，压进「等确认」带（带底 15），放不下。
   const dmBump = await pDM.evaluate(async () => {
     const app = window.__app, ts = app.chart.timeScale(), s = app.state.candleSeries, T = app.state.data.trend;
     const H = app.chart.panes()[0].getHeight();

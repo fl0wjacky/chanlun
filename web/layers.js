@@ -890,22 +890,20 @@ function trendMarkView(target, state, prim) {
           //   （悬停里照样有全名，见 app.js `boundText`）。要躲的字有两张表：这一层自己的 `mine`，和标注层那张
           //   `placed`（价签／买卖点文字／盘整组 chip，`state.labelBoxes`，标注层先画，这一帧已经齐了）。
           //   ★ 实截踩过：1699 那种贴格顶的顶，往外一行压进「等确认」斜线带；改成接在右边，又压在 [1631.1, 1681.99] 价签上。
-          ctx.font = FONT_SM;
-          const tw = ctx.measureText(dt).width;
           ctx.font = FONT;
           const pw = ctx.measureText(fmtG(b.price)).width;
           const dy = ly + (b.kind === 'H' ? -14 : 14);
           const top = TREND.hatchTop + TREND.hatchH + 1;
           const cand = [
-            [x - tw / 2, dy, 'center', x, dt],
-            [x + pw / 2 + 5, ly, 'left', x + pw / 2 + 5, '· ' + dt],
-            [x - pw / 2 - 5, ly, 'right', x - pw / 2 - 5, dt + ' ·'],
+            [dy, 'center', x, dt],
+            [ly, 'left', x + pw / 2 + 5, '· ' + dt],
+            [ly, 'right', x - pw / 2 - 5, dt + ' ·'],
           ];
           const others = [...mine, ...(state.labelBoxes || [])];
           // 只读出口：每一刀记号落在哪一格（out＝往外一行／right／left／null＝三格都压、不写），工装拿它量「不压字」和配色
           const rec = { bar: b.bar, death: b.death, txt: null, mode: null, box: null, col };
-          (D.deaths = D.deaths || []).push(rec);
-          for (const [, yy, al, ax, txt] of cand) {
+          D.deaths.push(rec);
+          for (const [yy, al, ax, txt] of cand) {
             ctx.font = FONT_SM;
             const w = ctx.measureText(txt).width;
             const x0 = al === 'center' ? ax - w / 2 : al === 'right' ? ax - w : ax;
