@@ -72,6 +72,7 @@ def panel(k, D, tag):
         q.rectangle([xa + 1, 34, xb - 1, 56], fill=c + (70,), outline=c + (200,))
         t = f"{s['type']}（{s['n']} 个中枢）" if xb - xa > 150 else s['type']
         if xb - xa > 40: q.text((xa + 6, 36), t, fill=TX, font=Fs)
+    placed = []
     for bd in D['bounds']:                                    # 分界：竖虚线＋规则、价、时间
         i = bd['bar']
         if i < b0 or i > b1: continue
@@ -85,7 +86,10 @@ def panel(k, D, tag):
         if bad: t += f"\n{segs[j - 1]['type']}接{segs[j]['type']} —— L43 不允许"
         tw = q.multiline_textbbox((0, 0), t, font=Fb)[2]
         tx = X(i) + 8 if X(i) + 8 + tw < W - MR else X(i) - 8 - tw     # 靠右边出框 ⇒ 字放到线左边
-        bb = q.multiline_textbbox((tx, ty), t, font=Fb); q.rectangle(bb, fill=BG + (230,))
+        bb = q.multiline_textbbox((tx, ty), t, font=Fb)
+        while any(bb[0] < o[2] and o[0] < bb[2] and bb[1] < o[3] and o[1] < bb[3] for o in placed):   # 跟已放的字撞了 ⇒ 往上挪一行
+            ty -= bb[3] - bb[1] + 6; bb = q.multiline_textbbox((tx, ty), t, font=Fb)
+        placed.append(bb); q.rectangle(bb, fill=BG + (230,))
         q.multiline_text((tx, ty), t, fill=WARN if bad else TX, font=Fb)
     q.rectangle([0, 0, ML - 1, PH], fill=BG); q.rectangle([W - MR + 1, 0, W, PH], fill=BG); q.rectangle([0, bot + 1, W, PH], fill=BG)
     q.rectangle([ML, 34, W - MR, bot], outline=(60, 66, 80))

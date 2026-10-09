@@ -2,11 +2,15 @@
 #   python l43_dump.py --root <引擎仓> --file zec15.json --out x.json
 import sys, os, json, argparse, datetime as DT
 ap = argparse.ArgumentParser(); ap.add_argument('--root', required=True); ap.add_argument('--file', required=True); ap.add_argument('--out', required=True)
+ap.add_argument('--set', action='append', default=[], help='core.trend 的开关，NAME=VAL（VAL 按 Python 字面量解析，比如 S5_FIX="Z"）')
 a = ap.parse_args(); out = os.path.abspath(a.out)
 sys.path[:0] = [a.root]; os.chdir(a.root)
 import config
 from core.analyze import analyze
 import core.trend as TR
+import ast
+for kv in a.set:
+    k, v = kv.split('=', 1); assert hasattr(TR, k), k; setattr(TR, k, ast.literal_eval(v)); print('set', k, '=', getattr(TR, k))
 bars = json.load(open(config.data(a.file), encoding='utf-8')); tick = config.tick_of(a.file)
 r = analyze(bars, tick=tick); t = TR.trend_v3(r)
 u = lambda i: DT.datetime.fromtimestamp(bars[i]['t'] / 1000, DT.timezone.utc).strftime('%m-%d %H:%M')
