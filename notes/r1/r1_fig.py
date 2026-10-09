@@ -10,7 +10,7 @@ ap.add_argument('--base-label', default=None, help='表头里底座那一截的�
 ap.add_argument('--mark', action='append', default=[], help='下格圈一个点："MM-DD HH:MM|价|说明"（S-13 非极值端点那张用来圈笔内真正的极值）')
 ap.add_argument('--base', action='append', default=[], help='上下两格都翻的开关（比如上格要 S9 当底座）')
 ap.add_argument('--file'); ap.add_argument('--out'); ap.add_argument('--rank', action='store_true')
-ap.add_argument('--std-segs', action='store_true', help='线段画标准化那一套（trend._done，D-3 C 之后网站画的就是它），不画原始线段')
+ap.add_argument('--raw-segs', action='store_true', help='线段画原始那一套。缺省画标准化的（trend._done）：D-3 C（小栋 10-09 12:57）以后网站画的就是它，图得跟网站一致（Nova 14:5x）')
 ap.add_argument('--same', action='store_true', help='上下两格同一份结果（不翻任何开关），只给下格加 --mark —— 「只加显示标记」那种前后图用')
 ap.add_argument('--from', dest='frm'); ap.add_argument('--to')
 ap.add_argument('--label-a', default='现行：非同级别分解'); ap.add_argument('--label-b', default='同级别分解（开关）')
@@ -40,7 +40,7 @@ def run(fn, flipped):
         for m, at, v in saved: setattr(m, at, v)
     return dict(bars=r['bars'] if 'bars' in r else None, r=r,
                 pens=[(p['i0'], p['i1'], p['p0'], p['p1']) for p in r['pens']],
-                segs=[(s['i0'], s['i1'], s['p0'], s['p1']) for s in (TR._done(r) if a.std_segs else [x for x in r['segs'] if not x.get('live')])],
+                segs=[(s['i0'], s['i1'], s['p0'], s['p1']) for s in (TR._done(r) if not a.raw_segs else [x for x in r['segs'] if not x.get('live')])],
                 live=[(s['i0'], s['i1'], s['p0'], s['p1']) for s in r['segs'] if s.get('live')],
                 bounds=[(b['bar'], b['kind'], b['price'], b.get('death')) for b in t['bounds']],
                 moved=[(m['from_bar'], m['to_bar'], m['kind']) for m in t.get('moved', [])],
