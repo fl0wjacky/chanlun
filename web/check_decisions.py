@@ -40,12 +40,13 @@ def req(port, method, path, body=None, token=None, raw=None):
 
 def run(quiet=False):
     tmp = tempfile.mkdtemp()
-    saved = (decisions.SPEC, decisions.STATE, decisions.CHOICES, decisions.HISTORY, decisions.TOKEN)
+    saved = (decisions.SPEC, decisions.STATE, decisions.CHOICES, decisions.HISTORY, decisions.TOKEN, decisions.SPEC_LIVE)
     decisions.SPEC = os.path.join(tmp, "decisions.json")
     decisions.STATE = os.path.join(tmp, "state")
     decisions.CHOICES = os.path.join(decisions.STATE, "decisions-choices.json")
     decisions.HISTORY = os.path.join(decisions.STATE, "decisions-choices.jsonl")
     decisions.TOKEN = os.path.join(decisions.STATE, "decisions.token")
+    decisions.SPEC_LIVE = os.path.join(decisions.STATE, "decisions.json")
     srv = server.make_server(0)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     port = srv.server_address[1]
@@ -97,9 +98,16 @@ def run(quiet=False):
             if tmp in s or TOKEN in s or os.sep + "state" in s:
                 leaks.append(s)
         chk("错误回包不漏路径、口令", not leaks, leaks)
+        live = {"items": [{"id": "S-13", "title": "审过的新一批", "options": [{"key": "A"}, {"key": "B"}]}]}
+        with open(decisions.SPEC_LIVE, "w", encoding="utf-8") as f:
+            json.dump(live, f, ensure_ascii=False)
+        c, b = req(port, "GET", "/api/decisions"); chk("状态目录有数据 ⇒ 优先用它", c == 200 and json.loads(b) == live, (c, b[:60]))
+        c, b = req(port, "POST", P, {"id": "R-1", "option": "A"}, TOKEN); chk("校验跟着用的那份走（R-1 不在新一批里 ⇒ 400）", c == 400, c)
+        os.remove(decisions.SPEC_LIVE)
+        c, b = req(port, "GET", "/api/decisions"); chk("状态目录那份拿掉 ⇒ 回到仓库那份", c == 200 and json.loads(b) == SPEC, (c, b[:60]))
     finally:
         srv.shutdown(); srv.server_close()
-        decisions.SPEC, decisions.STATE, decisions.CHOICES, decisions.HISTORY, decisions.TOKEN = saved
+        decisions.SPEC, decisions.STATE, decisions.CHOICES, decisions.HISTORY, decisions.TOKEN, decisions.SPEC_LIVE = saved
         shutil.rmtree(tmp, ignore_errors=True)
     if not quiet:
         print("全部通过" if not bad else "%d 处不过" % len(bad))

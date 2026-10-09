@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """决策树网页的后端（card-fe3aebd3-819，小栋 10-09 11:10）：给数据、存小栋的选择。
 
-数据：docs/spec/decisions.json（Atlas 维护，字段见那份文件）。每次请求现读，部署 clone pull 了就是新的，不用重启。
+数据：状态目录里有 decisions.json 就用它（Nova 审过一批，Bram 从 Atlas 的数据支同步过去，不用等合 main）；
+      没有就用仓库里的 docs/spec/decisions.json（Atlas 维护，字段见那份文件）。每次请求现读，不用重启。
 选择：存在**仓库外**的状态目录里，默认是「这份 checkout 旁边」的 .chanlun-state/（跟仓库同级，不在仓库里）；
       要换位置设环境变量 CHANLUN_STATE_DIR。目录、口令都不进仓库、不进页面。
   · decisions-choices.json   当前每条的选择 {id: {option, note, at, seq}}，原子写（临时文件 + rename）
@@ -18,6 +19,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SPEC = os.path.join(ROOT, "docs", "spec", "decisions.json")
 STATE = os.environ.get("CHANLUN_STATE_DIR") or os.path.join(os.path.dirname(ROOT), ".chanlun-state")
+SPEC_LIVE = os.path.join(STATE, "decisions.json")   # 有就优先：审过的最新一批
 CHOICES = os.path.join(STATE, "decisions-choices.json")
 HISTORY = os.path.join(STATE, "decisions-choices.jsonl")
 TOKEN = os.path.join(STATE, "decisions.token")
@@ -34,12 +36,14 @@ class Bad(Exception):
 
 
 def spec_bytes():
-    """→ decisions.json 原样字节；文件不在 ⇒ None（接口回 503）。"""
-    try:
-        with open(SPEC, "rb") as f:
-            return f.read()
-    except FileNotFoundError:
-        return None
+    """→ decisions.json 原样字节：状态目录那份优先，没有就用仓库那份；两份都不在 ⇒ None（接口回 503）。"""
+    for p in (SPEC_LIVE, SPEC):
+        try:
+            with open(p, "rb") as f:
+                return f.read()
+        except FileNotFoundError:
+            continue
+    return None
 
 
 def _items():
