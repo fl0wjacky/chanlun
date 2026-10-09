@@ -135,7 +135,7 @@ def _try_confirm(done, t, ks, typ, lo, no_exceed=True):
     if no_exceed and after and (max(a["hi"] for a in after) > done[j]["p1"] if typ == "H"
                                 else min(a["lo"] for a in after) < done[j]["p1"]):
         return None
-    zs = _centers_with_cuts(done[:t + 1], ks)
+    zs = (_sl_centers_with_cuts if (SAME_LEVEL and SAME_LEVEL_D2) else _centers_with_cuts)(done[:t + 1], ks)
     # D2-2 第 1 步（R6＝B，小栋 10-08）：两类候选取最后一个 —— ① 起点不晚于 H；② 起点在 H 之后、最后一条线段不晚于 S[t-2]（离开段之前已走完）
     ref = [z for z in zs if z["PI0"] >= lo and (z["X0"] <= done[j]["i1"] or (_R6_B and z["PI1"] <= t - 2))]
     if not ref:
@@ -147,6 +147,47 @@ def _try_confirm(done, t, ks, typ, lo, no_exceed=True):
     else:
         ok = leave["p1"] > z["ZG"] and back["p1"] > z["ZG"] and not _is_up(back)
     return (j, z) if ok else None
+
+
+_C8 = {"first": None, "hist": None}
+
+
+def _c8_init(r):
+    from .signals import signals, macd_hist
+    _C8["first"] = {(x["bar"], x["kind"]) for x in signals(r) if x["kind"] in ("一买", "一卖")}
+    _C8["hist"] = macd_hist(r["bars"])
+
+
+def _find_bounds_direct(r, standardize=True):
+    """S10 乙：背驰点直接切。每条线段走完，看它是不是本组里的新极值、方向对、死点是背驰 ⇒ 当场立刀；
+    之后同方向再出更极端的点（刀还没被下一刀接住）⇒ 把刀挪过去，记一次 moved（碰要求 6）。不用 D2-2 的反向三类点。"""
+    _c8_init(r)
+    done = _done(r, standardize)
+    ks, bounds, moved = [], [], []
+    for t in range(len(done)):
+        cz = _sl_centers_with_cuts(done[:t + 1], ks) if SAME_LEVEL_D2 else _centers_with_cuts(done[:t + 1], ks)
+        typ = "H" if _is_up(done[t]) else "L"
+        if bounds and bounds[-1]["kind"] == typ and (done[t]["p1"] > bounds[-1]["price"] if typ == "H" else done[t]["p1"] < bounds[-1]["price"]):
+            if _sl_beichi(r, done, t, typ, cz, _C8["first"], _C8["hist"]):
+                old = bounds.pop(); ks.pop()
+                moved.append(dict(from_bar=old["bar"], to_bar=done[t]["i1"], kind=typ, at_bar=done[t]["i1"]))
+                ks.append(t + 1)
+                bounds.append(dict(rule="S10乙", line_seg=t, bar=done[t]["i1"], kind=typ, price=done[t]["p1"],
+                                   pullback_line_seg=t, pullback_end_bar=done[t]["i1"], ZD=None, ZG=None))
+            continue
+        if bounds and bounds[-1]["kind"] == typ:
+            continue
+        lo = ks[-1] if ks else 0
+        same = [k for k in range(lo, t + 1) if _is_up(done[k]) == (typ == "H")]
+        if not same or max(same, key=lambda k: (done[k]["p1"] if typ == "H" else -done[k]["p1"], k)) != t:
+            continue
+        if not [z for z in cz if z["PI0"] >= lo and z["PI1"] < t]:
+            continue                                   # 这一组里还没中枢，谈不上走势完成
+        if _sl_beichi(r, done, t, typ, cz, _C8["first"], _C8["hist"]):
+            ks.append(t + 1)
+            bounds.append(dict(rule="S10乙", line_seg=t, bar=done[t]["i1"], kind=typ, price=done[t]["p1"],
+                               pullback_line_seg=t, pullback_end_bar=done[t]["i1"], ZD=None, ZG=None))
+    return dict(bounds=bounds, retracted=[], ks=ks, done=done, want=None, moved=moved)
 
 
 def find_bounds(r, regroup=True, alternate=True, check_empty=True, no_exceed=True, standardize=True):
@@ -177,8 +218,14 @@ def find_bounds(r, regroup=True, alternate=True, check_empty=True, no_exceed=Tru
                 k2 = max(opp, key=(lambda k: (-done[k]["p1"], k)) if typ == "H" else (lambda k: (done[k]["p1"], k)))
                 if k2 == blocked[(typ, j)]:
                     continue
+            if SAME_LEVEL and SAME_LEVEL_C8 == "filter":   # S10 甲：只有背驰的死点才确立
+                if _C8["first"] is None:
+                    _c8_init(r)
+                cz = _sl_centers_with_cuts(done[:t + 1], ks) if SAME_LEVEL_D2 else _centers_with_cuts(done[:t + 1], ks)
+                if _sl_beichi(r, done, j, typ, cz, _C8["first"], _C8["hist"]) is None:
+                    continue
             if ks and check_empty:               # D2-7：上一刀 → 这一刀之间得有中枢
-                zz = _centers_with_cuts(done[:t + 1], ks + [j + 1])
+                zz = (_sl_centers_with_cuts if (SAME_LEVEL and SAME_LEVEL_D2) else _centers_with_cuts)(done[:t + 1], ks + [j + 1])
                 if not [q for q in zz if q["PI0"] >= lo and q["PI1"] <= j]:
                     ks.pop()
                     prev = bounds.pop()
@@ -492,6 +539,9 @@ def _xzd_seconds(done, bounds, r=None):
 # ---------------------------------------------------------------- R-1 同级别分解（试验开关，默认关；docs/spec/读法-R1-分解方式.md S1～S6）
 SAME_LEVEL = False                                # 决策树 R-1 还没定：开了就照同级别切（只给量数、出前后图），默认关＝现行非同级别，输出逐字节不变
 SAME_LEVEL_OVERLAP = "ZDZG"                       # S3「判重叠用哪个区间」小栋还没认：ZDZG（拟）或 DDGG，两个都量
+SAME_LEVEL_D2 = False                             # S9：D2 的参照中枢也换成同级别三段中枢（R-1＝A 以后的「完整同级别」）
+SAME_LEVEL_C8 = None                              # S10 丙8 在同级别下：None＝照现行；"filter"＝甲（只有趋势背驰／盘整背驰的死点才确立）；
+                                                  #   "direct"＝乙（背驰点直接切，不等反向三类点；后面再出新极值就挪刀，记 moved）
 
 
 def _sl_centers(done, a, b):
@@ -519,6 +569,31 @@ def _sl_rel(z1, z2):
     if z2[hi] < z1[lo]:
         return "下"
     return "叠"
+
+
+def _sl_centers_with_cuts(done, ks):
+    """S9：同 _centers_with_cuts，但每组里找的是同级别三段中枢（S1＋S2）。"""
+    edges = [0] + list(ks) + [len(done)]
+    out = []
+    for a, b in zip(edges, edges[1:]):
+        out += _sl_centers(done, a, b)
+    return out
+
+
+def _sl_beichi(r, done, j, typ, centers, first, hist):
+    """S10：死点 done[j] 是不是背驰（趋势背驰＝signals 的一买／一卖正好落在这一刀；盘整背驰＝A、C 进出同一个同级别三段中枢，
+    C 创新高／低、面积小于 A）。centers 只用 j 之前走完的。→ "趋势背驰"／"盘整背驰"／None"""
+    from .signals import _panzheng
+    up = typ == "H"
+    if (done[j]["i1"], "一卖" if up else "一买") in first:
+        return "趋势背驰"
+    zs = [z for z in centers if z["PI1"] < j]
+    if not zs or zs[-1]["PI0"] == 0:
+        return None
+    A, C = done[zs[-1]["PI0"] - 1], done[j]
+    if _is_up(A) != up:
+        return None
+    return "盘整背驰" if _panzheng(A, C, not up, hist) else None
 
 
 def _sl_layer(done, ks, bounds_, n):
@@ -567,8 +642,13 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
       ★ n_centers_level 是**本级别**中枢个数，跟读法无关；读法 A 的升级段，字母挂在 units 上，个数不是它；
     units：D3 合成出来的高一级中枢（只列 n>1 的），带 seg，给前端画升级框；
     reading：这一跑用的 D3 读法（A／B），前端据此决定字母挂哪一级（spec §八 第 6 条）。"""
-    res = find_bounds(r, regroup=regroup, alternate=alternate, check_empty=check_empty, no_exceed=no_exceed,
-                      standardize=standardize)
+    if SAME_LEVEL and SAME_LEVEL_C8 in ("filter", "direct"):
+        _C8["first"] = None
+    if SAME_LEVEL and SAME_LEVEL_C8 == "direct":
+        res = _find_bounds_direct(r, standardize=standardize)
+    else:
+        res = find_bounds(r, regroup=regroup, alternate=alternate, check_empty=check_empty, no_exceed=no_exceed,
+                          standardize=standardize)
     done, ks = res["done"], res["ks"]
     n = len(r["bars"])
     if not done:
@@ -583,7 +663,7 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
         bounds = sorted(bounds + extra, key=lambda x: x["bar"])
         return dict(seg_centers=centers_out, bounds=bounds, retracted=res["retracted"],
                     pending=pending(done, ks, res["want"]), segments=segments, units=[], reading="same_level",
-                    xzd_seconds=[])
+                    xzd_seconds=[], moved=res.get("moved", []))
     segments, units_out, centers_out = _layer(done, ks, bounds, reading, n)
     if _D28:
         cuts = _d28_cuts(done, ks, segments, units_out, centers_out)
