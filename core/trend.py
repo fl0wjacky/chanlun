@@ -118,6 +118,14 @@ def _is_up(s):
     return s["dir"] == "up"                      # 按线段自己的方向，不按端点高低（spec D2-0；线段层偶有终点不高于起点的坏段，card-24dd71cb-003）
 
 
+# D2-T1 来历二（R6＝B「最近中枢」）四种读法对着量（Nova 10-09 20:16，草稿支只量，默认 B＝现行一字不差）：
+#   A：参照中枢只取起点不晚于极值的；B：现行；Cp（C′）：B＋L 后中枢按旧方向排就整组作废退回 A；C：C′＋那段段型判盘整。
+#   _D2T1_GATE：all＝看所有相邻对，last＝只看最后一对。走环境变量，只给测量脚本切。
+import os as _os
+_D2T1_READ = _os.environ.get("D2T1_READ", "B")
+_D2T1_GATE = _os.environ.get("D2T1_GATE", "all")
+
+
 def _try_confirm(done, t, ks, typ, lo, no_exceed=True):
     """第 t 步、方向 typ（'H'/'L'）能不能确立 → (j, Z) 或 None。j ＝ 死点所在线段（刀落在 done[j]['i1']）。"""
     cand = range(lo, t - 1)                      # 到 t-2 为止：后面要留离开段、回抽段
@@ -137,7 +145,17 @@ def _try_confirm(done, t, ks, typ, lo, no_exceed=True):
         return None
     zs = (_sl_centers_with_cuts if (SAME_LEVEL and SAME_LEVEL_D2) else _centers_with_cuts)(done[:t + 1], ks)
     # D2-2 第 1 步（R6＝B，小栋 10-08）：两类候选取最后一个 —— ① 起点不晚于 H；② 起点在 H 之后、最后一条线段不晚于 S[t-2]（离开段之前已走完）
-    ref = [z for z in zs if z["PI0"] >= lo and (z["X0"] <= done[j]["i1"] or (_R6_B and z["PI1"] <= t - 2))]
+    r6b = _R6_B and _D2T1_READ != "A"
+    ref = [z for z in zs if z["PI0"] >= lo and (z["X0"] <= done[j]["i1"] or (r6b and z["PI1"] <= t - 2))]
+    if _D2T1_READ in ("Cp", "C"):
+        # C′（Atlas 10-09 20:17，草稿只量）：L 之后的中枢只在「按新方向排」时才收；有一对相邻同级别中枢按旧方向排 ⇒ 整组作废，退回 A 类
+        _post = [z for z in zs if z["PI0"] >= lo and z["X0"] > done[j]["i1"] and z["PI1"] <= t - 2]
+        _old = "下" if typ == "L" else "上"
+        _pairs = [_sl_rel(a, b) for a, b in zip(_post, _post[1:])]
+        if _D2T1_GATE == "last":
+            _pairs = _pairs[-1:]
+        if _old in _pairs:
+            ref = [z for z in ref if z["X0"] <= done[j]["i1"]]
     if not ref:
         return None                              # 本段走势里还没有中枢 ⇒ 一直中阴（D2-6）
     z = ref[-1]
@@ -638,6 +656,9 @@ def _sl_layer(done, ks, bounds_, n):
             kind = "盘整"
         else:
             kind = "上涨" if _sl_rel(zz[0], zz[1]) == "上" else "下跌"
+            # 读法 C：D2 刀后那一截（组的第一截）中枢按旧方向排 ⇒ 段型判盘整，不判趋势（L 之后的旧方向＝下跌，H 之后＝上涨）
+            if _D2T1_READ == "C" and bk.get(a) in ("L", "H") and kind == ("下跌" if bk[a] == "L" else "上涨"):
+                kind = "盘整"
         centers_out += [dict(z, seg=g) for z in zz]
         segments.append(dict(i0=0 if a == 0 else done[a - 1]["i1"], i1=n - 1 if last else done[b - 1]["i1"],
                              type=kind, upgraded=False, head=a == 0, live=last, n_centers_level=len(zz)))
