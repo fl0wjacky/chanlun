@@ -82,7 +82,7 @@ const ck = (name, ok, msg) => { if (!ok) red++; console.log(`${ok ? '✓' : '✗
   const A = await one('A');
   ck('② 待确认（D2 刀）⇒ 空心点＋字「<短名>（待确认）」（刀挪到格中，必须写得出来）',
      !!A.st && A.st.hollow && !!A.dd && !!A.dd.mode && bare(A) === pick.short + '（待确认）', `刀 ${pick.bar}（${pick.death}）　${desc(A)}`);
-  const othersSolid = (o) => (o.r.states || []).filter((s) => s.bar !== pick.bar).every((s) => !s.hollow)
+  const othersSolid = (o) => (o.r.states || []).length > 0 && (o.r.states || []).filter((s) => s.bar !== pick.bar).every((s) => !s.hollow)
     && o.r.deaths.filter((x) => x.bar !== pick.bar).every((x) => !(x.txt || '').includes('待确认'));
   ck('②c 其余 confirmed 的刀：实心、不带「待确认」', othersSolid(A), `屏上 ${(A.r.states || []).length} 刀`);
 
