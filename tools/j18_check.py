@@ -139,6 +139,8 @@ def check_pair(fn, fstep, bstep, small=None):
         t_end = big[c]["t"] + bstep                          # c 那根大 K 线收盘
         t0 = big[bd["bar"]]["t"]
         t1 = t0 + bstep                                      # E ＝ 极值那根大 K 线覆盖的时间
+        # 判词（通过／中阴／违反）故意用到 c 的小周期数据：J18 问的就是「大周期在 c 确立这一刻，小周期转了没有」，c 是题目本身的时刻，
+        #   不是偷看（Nova 10-09 20:15）。只有下面多印的那两样（段类型、最后同向分界）要只用到 E 收盘，见 smE／vsE。
         sm = [b for b in small if b["t"] + fstep <= t_end]
         vs = _trend(sm, fn)
         inE = lambda x: t0 <= sm[x["bar"]]["t"] < t1
