@@ -6,6 +6,7 @@ import sys, os, json, argparse, importlib, math, datetime as DT
 ap = argparse.ArgumentParser()
 ap.add_argument('--root', required=True); ap.add_argument('--flag', action='append', default=[])
 ap.add_argument('--kw-b', action='append', default=[], help='下格给 trend_v3 的关键字参数，比如 alternate=False（D-0 交替开关不是模块常量）')
+ap.add_argument('--base-label', default=None, help='表头里底座那一截的简称（开关全名太长会冲出右边）')
 ap.add_argument('--mark', action='append', default=[], help='下格圈一个点："MM-DD HH:MM|价|说明"（S-13 非极值端点那张用来圈笔内真正的极值）')
 ap.add_argument('--base', action='append', default=[], help='上下两格都翻的开关（比如上格要 S9 当底座）')
 ap.add_argument('--file'); ap.add_argument('--out'); ap.add_argument('--rank', action='store_true')
@@ -87,7 +88,7 @@ im = Image.new('RGB', (W, 90 + 2 * (PH + 30) + (70 if a.note else 40)), BG); d =
 win = bars[b0:b1 + 1]; lo = min(x['l'] for x in win) * 0.985; hi = max(x['h'] for x in win) * 1.015
 LL, LH = math.log(lo), math.log(hi)
 nm = lambda fs: ' '.join(f.rsplit('.', 1)[-1] if '=True' in f else f.split('.')[-1] for f in fs)   # 只留常量名：上下两格的名字已经写在格子左上角，表头再写一遍会冲出右边
-d.text((ML, 14), f'{a.file} · {a.title}' + (f' · 底座 {nm(a.base)}' if a.base else '') + f' · 下格加 {" ".join([nm(a.flag)] + [f"{k}={v}" for k, v in KWB.items()]).strip() or ("笔 " + a.pen + " → " + a.pen_b)}', fill=TX, font=F)
+d.text((ML, 14), f'{a.file} · {a.title}' + (f' · 底座 {a.base_label or nm(a.base)}' if a.base else '') + f' · 下格加 {" ".join([nm(a.flag)] + [f"{k}={v}" for k, v in KWB.items()]).strip() or ("笔 " + a.pen + " → " + a.pen_b)}', fill=TX, font=F)
 dd = diff(A, B)
 d.text((ML, 48), f'窗口 {utc(b0):%Y-%m-%d} → {utc(b1):%Y-%m-%d}（UTC）｜整张：笔 上独有 {dd["pen_only_a"]} / 下独有 {dd["pen_only_b"]}，线段 上独有 {dd["seg_only_a"]} / 下独有 {dd["seg_only_b"]}，分界刀 上独有 {dd["bnd_only_a"]} / 下独有 {dd["bnd_only_b"]}，段型变 {dd["type_changed"]}｜加粗＝只在这一格有',
        fill=MU, font=Fs)
