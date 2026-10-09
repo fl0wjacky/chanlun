@@ -82,7 +82,8 @@ W, PH, ML, MR = 2000, 560, 80, 20
 im = Image.new('RGB', (W, 90 + 2 * (PH + 30) + (70 if a.note else 40)), BG); d = ImageDraw.Draw(im)
 win = bars[b0:b1 + 1]; lo = min(x['l'] for x in win) * 0.985; hi = max(x['h'] for x in win) * 1.015
 LL, LH = math.log(lo), math.log(hi)
-d.text((ML, 14), f'{a.file} · {a.title} · 上：{a.label_a} ／ 下：{a.label_b} · 开关 {" ".join(a.flag) or ("笔 " + a.pen + " → " + a.pen_b)}', fill=TX, font=F)
+nm = lambda fs: ' '.join(f.rsplit('.', 1)[-1] if '=True' in f else f.split('.')[-1] for f in fs)   # 只留常量名：上下两格的名字已经写在格子左上角，表头再写一遍会冲出右边
+d.text((ML, 14), f'{a.file} · {a.title}' + (f' · 底座 {nm(a.base)}' if a.base else '') + f' · 下格加 {nm(a.flag) or ("笔 " + a.pen + " → " + a.pen_b)}', fill=TX, font=F)
 dd = diff(A, B)
 d.text((ML, 48), f'窗口 {utc(b0):%Y-%m-%d} → {utc(b1):%Y-%m-%d}（UTC）｜整张：笔 上独有 {dd["pen_only_a"]} / 下独有 {dd["pen_only_b"]}，线段 上独有 {dd["seg_only_a"]} / 下独有 {dd["seg_only_b"]}，分界刀 上独有 {dd["bnd_only_a"]} / 下独有 {dd["bnd_only_b"]}，段型变 {dd["type_changed"]}｜加粗＝只在这一格有',
        fill=MU, font=Fs)
@@ -115,12 +116,12 @@ def panel(k, R, other, tag):
         if i1 < b0 or i0 > b1: continue
         mine = s not in oth and s in R['segs']
         q.line([X(i0), Y(p0), X(i1), Y(p1)], fill=(80, 200, 255) if mine else (196, 137, 1), width=5 if mine else 2)
-    for (bar, kind, price, death) in R['bounds']:
+    for (bar, kind, price, death) in R['bounds']:                # 价签夹在画框里：贴边的价签不许被框外刷底色刷掉
         if bar < b0 or bar > b1: continue
         mine = (bar, kind) not in othb; x = X(bar)
         for yy in range(top, bot, 10): q.line([x, yy, x, yy + 5], fill=(234, 238, 246, 255 if mine else 150), width=3 if mine else 1)
         q.ellipse([x - 5, Y(price) - 5, x + 5, Y(price) + 5], fill=TX)
-        q.text((x + 6, Y(price) + (-26 if kind == 'H' else 8)), f'{price:g}' + (f' · {death}' if death else ''), fill=TX if mine else MU, font=Fs)
+        q.text((x + 6, min(bot - 22, max(top + 2, Y(price) + (-26 if kind == 'H' else 8)))), f'{price:g}' + (f' · {death}' if death else ''), fill=TX if mine else MU, font=Fs)
     for (fb, tb, kind) in R.get('moved', []):                  # 挪刀：橙色空心圈＝刀原来立的地方，箭头指到挪过去的地方
         if max(fb, tb) < b0 or min(fb, tb) > b1: continue
         px = lambda i: bars[i]['h'] if kind == 'H' else bars[i]['l']
