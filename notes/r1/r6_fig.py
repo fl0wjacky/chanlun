@@ -10,7 +10,7 @@ ap.add_argument('--a', required=True); ap.add_argument('--b', required=True)
 ap.add_argument('--ta', required=True); ap.add_argument('--tb', required=True)
 ap.add_argument('--from', dest='frm', required=True); ap.add_argument('--to', required=True)
 ap.add_argument('--box-b', default=''); ap.add_argument('--legend2', default=''); ap.add_argument('--mark-b', default='')
-ap.add_argument('--title', default=''); ap.add_argument('--note', default=''); ap.add_argument('--out', required=True)
+ap.add_argument('--title', default=''); ap.add_argument('--tf', default='1 小时'); ap.add_argument('--note', default=''); ap.add_argument('--out', required=True)
 a = ap.parse_args(); out = os.path.abspath(a.out)
 A = json.load(open(a.a)); B = json.load(open(a.b))
 sys.path[:0] = [a.root]; os.chdir(a.root)
@@ -30,8 +30,9 @@ im = Image.new('RGB', (W, 74 + 2 * (PH + 26) + NOTE_H), BG); d = ImageDraw.Draw(
 win = bars[b0:b1 + 1]; lo = min(x['l'] for x in win) * 0.95; hi = max(x['h'] for x in win) * 1.03
 LL, LH = math.log(lo), math.log(hi)
 d.text((ML, 12), a.title, fill=TX, font=F)
-d.text((ML, 44), f'同一个窗口、同一把尺（对数轴）· {utc(b0):%Y-%m-%d} → {utc(b1):%Y-%m-%d} · 1 小时 K 线', fill=MU, font=Fs)
+d.text((ML, 44), f'同一个窗口、同一把尺（对数轴）· {utc(b0):%Y-%m-%d} → {utc(b1):%Y-%m-%d} · {a.tf} K 线', fill=MU, font=Fs)
 GOLD, RED, GRN, GRY, AMB, WARN = (196, 137, 1), (230, 92, 92), (70, 175, 120), (150, 156, 170), (255, 190, 60), (255, 80, 80)
+px = lambda v: ('%.2f' % v).rstrip('0').rstrip('.')                 # 价原样写：:g 只留 6 位有效数字，117875.2 会被截成 117875
 TC = {'上涨': RED, '下跌': GRN, '盘整': GRY, '无中枢': GRY}
 
 def panel(k, D, tag, box=None, mark=None):
@@ -72,9 +73,18 @@ def panel(k, D, tag, box=None, mark=None):
             r = 6; q.ellipse([x - r, y - r, x + r, y + r], outline=(j in D['bad']) and WARN or TX, width=2)
         else:
             r = 8; q.ellipse([x - r, y - r, x + r, y + r], fill=TX, outline=BG, width=2)
+            if j in D['bad']:                                 # 这一刀两边是同向趋势（上涨接上涨）
+                q.ellipse([x - 14, y - 14, x + 14, y + 14], outline=WARN, width=3)
+                late.append(((x + 10, y + 34 if bd['kind'] == 'H' else y - 60), f"{segs[j - 1]['type']}接{segs[j]['type']}（第 43 课原文不允许）", WARN))
             q.line([x, 34, x, bot], fill=TX + (90,), width=1)
             ty = y + 12 if bd['kind'] == 'L' else y - 34
-            late.append(((x + 10, min(bot - 24, max(60, ty))), f"分界 {bd['price']:g} · {utc(i):%Y-%m-%d}", TX))
+            late.append(((x + 10, min(bot - 24, max(60, ty))), f"分界 {px(bd['price'])} · {utc(i):%Y-%m-%d}", TX))
+    for w in D.get('retracted', []):                         # 确认过、后来被撤掉的分界：红叉＋价和日期
+        i = w['bar']
+        if i < b0 or i > b1: continue
+        x, y = X(i), Y(w['price'])
+        q.line([x - 9, y - 9, x + 9, y + 9], fill=WARN, width=3); q.line([x - 9, y + 9, x + 9, y - 9], fill=WARN, width=3)
+        late.append(((x + 12, y + 12 if w['kind'] == 'L' else y - 34), f"撤掉了 {px(w['price'])} · {utc(i):%Y-%m-%d}（{utc(w['rbar']):%m-%d} 撤）" if w.get('rbar') is not None else f"撤掉了 {px(w['price'])} · {utc(i):%Y-%m-%d}", WARN))
     if mark:                                                   # 指定的一根（48888 那根急跌底）
         md, mp, lab = mark
         i = min(range(pick(md), pick(md) + 24), key=lambda i: abs(bars[i]['l'] - mp))
@@ -111,7 +121,7 @@ def parse_mark(s):
 panel(0, A, a.ta)
 panel(1, B, a.tb, box=parse_box(a.box_b), mark=parse_mark(a.mark_b))
 yb = 74 + 2 * (PH + 26) + 4
-d.text((ML, yb), '画法：顶上色带＝走势段（红＝上涨，绿＝下跌，灰＝盘整）；框＝同级别中枢；金线＝线段；实心点＝走势转折处的分界（写价和日期）；空心圈也是分界（盘整相连）。', fill=MU, font=Fs)
+d.text((ML, yb), '画法：顶上色带＝走势段（红＝上涨，绿＝下跌，灰＝盘整）；框＝价格来回震荡围出来的区间；金线＝线段；实心点＝走势转折处的分界（写价和日期）；空心圈也是分界（盘整相连）；红叉＝确认过、后来撤掉的分界；红圈＝两边同向趋势相连。', fill=MU, font=Fs)
 if a.legend2: d.text((ML, yb + 24), a.legend2, fill=MU, font=Fs)
 if a.note: d.multiline_text((ML, yb + 52), a.note, fill=TX, font=Fs)
 im.save(out); print('saved', out, im.size)
