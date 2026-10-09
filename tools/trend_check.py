@@ -409,6 +409,19 @@ def _rel(z1, z2):
     return "上" if z2[4] > z1[5] else "下" if z2[5] < z1[4] else "叠"
 
 
+def _z_split(sx, r, byseg, segorder, s5bars, zr):
+    """S4′ 的 land-z 口子（Atlas 19:00）：单中枢那截 sx 是 Z 单列出来的 ⇔ 它左边紧挨着的那截是趋势（≥2 个中枢、相邻都同一个方向 d）、
+    两截之间是 S5 接缝、而且这截往右的那一对也是方向 d（Z 拆开的本来是一段同向趋势）。别的不叠单中枢接缝照旧红。只用中枢，独立判。"""
+    k = segorder.index(sx)
+    if k == 0:
+        return False
+    prev = byseg[segorder[k - 1]]
+    if len(prev) < 2 or prev[-1]["X1"] not in s5bars:
+        return False
+    ways = {_rel(zr(p), zr(q)) for p, q in zip(prev, prev[1:])}
+    return len(ways) == 1 and r in ways and r in ("上", "下")
+
+
 def sl_check(v):
     bad = []
     done = v.get("_done")
@@ -433,14 +446,23 @@ def sl_check(v):
         if "叠" in rels or len(set(rels)) > 1:
             bad.append("T3′ 第 %d 段走势里相邻中枢按 [ZD,ZG] 是 %s，不该同在一段" % (g, rels))
     ordered = sorted(zz, key=lambda z: z["X0"])
+    segorder = list(dict.fromkeys(z["seg"] for z in ordered))
     for x, y in zip(ordered, ordered[1:]):
         if x["X1"] in s5bars and x["seg"] != y["seg"]:
             way = [_rel(zr(p), zr(q)) for p, q in zip(byseg[x["seg"]], byseg[x["seg"]][1:])]
             r = _rel(zr(x), zr(y))
             if r != "叠" and way and r == way[0]:
                 bad.append("T3′ S5 刀 %d 两边中枢按 [ZD,ZG] 是「%s」、跟前段同向，不该切" % (x["X1"], r))
-            if not way and r != "叠":                   # S4′（Atlas cd88a3c，L38:19-21 推论）：前段只有一个中枢 ⇒ 接缝两边必叠
+            if not way and r != "叠" and not _z_split(x["seg"], r, byseg, segorder, s5bars, zr):
+                # S4′（Atlas cd88a3c，L38:19-21 推论）：前段只有一个中枢 ⇒ 接缝两边必叠。
+                #   land-z 口子（Atlas 19:00、Nova 19:01，待小栋选 B 才合）：这截单中枢盘整是 Z 单列出来的才放行，见 _z_split
                 bad.append("T3′ S5 刀 %d 前段只有一个中枢，接缝两边按 [ZD,ZG] 却是「%s」不是「叠」（S4′）" % (x["X1"], r))
+    # L43:9（原文「不允许上涨+上涨、下跌+下跌」）：S5 接缝两边不许都是同向趋势。land-z 起一律查（Z 关掉 ⇒ 落地支 60c72a4 的老切法会红）
+    sg = v["segments"]
+    s5i = {b["bar"] for b in v["bounds"] if b["rule"] == "S5"}
+    for x, y in zip(sg, sg[1:]):
+        if y["i0"] in s5i and x["type"] == y["type"] and x["type"] in ("上涨", "下跌"):
+            bad.append("L43 S5 刀 %d 两边都是%s（原文不允许上涨+上涨／下跌+下跌）" % (y["i0"], x["type"]))
     # T2（S6）：同级别不升级
     if v.get("units"):
         bad.append("T2 同级别下 units 不空（%d 个）" % len(v["units"]))
@@ -853,6 +875,36 @@ def self_test():
     finally:
         T.SAME_LEVEL_OVERLAP = _ov
     print("%s G6 拧坏「判重叠换成 DDGG」⇒ T3′ 自己报出 %d 处（例 %s）" % ("✓" if hit else "✗", len(hit), hit[:1]))
+    miss += not hit
+    _fix = T.S5_FIX
+    try:
+        T.S5_FIX = None                                 # 臂①：Z 关掉（落地支 60c72a4 的老切法）⇒ 上涨+上涨回来，L43 那格必须红
+        hit = [x for fn in kline_files() for x in sl_check(sl_run(fn)) if x.startswith("L43")]
+    finally:
+        T.S5_FIX = _fix
+    print("%s G6 关掉 Z（S5 两边同向照切）⇒ L43 报出 %d 处（例 %s）" % ("✓" if hit else "✗", len(hit), hit[:1]))
+    miss += not hit
+    def brk_inside(v):                                  # 臂②：在一段趋势里、两个不叠的中枢之间人为插一刀 S5（不是 Z 单列的）⇒ S4′ 必须红
+        zz = sorted(v["seg_centers"], key=lambda z: z["X0"]); s5 = {b["bar"] for b in v["bounds"] if b["rule"] == "S5"}
+        segs = list(dict.fromkeys(z["seg"] for z in zz)); by = {}
+        for z in zz: by.setdefault(z["seg"], []).append(z)
+        for k, g in enumerate(segs):
+            cs = by[g]
+            if len(cs) < 2:
+                continue
+            prev = by[segs[k - 1]] if k else []
+            if len(prev) >= 2 and prev[-1]["X1"] in s5:  # 左边是 S5 接上来的趋势 ⇒ 会被当成 Z 单列，换一段
+                continue
+            cs[0]["seg"] = 10 ** 6                       # 第一个中枢单列成一截
+            v["bounds"].append(dict(rule="S5", bar=cs[0]["X1"], kind="H", price=0.0, state="pending", death="盘整相连"))
+            return True
+        return False
+    hit = []
+    for fn in kline_files():
+        v = copy.deepcopy(sl_run(fn))
+        if brk_inside(v):
+            hit += [x for x in sl_check(v) if "S4′" in x]
+    print("%s G6 在趋势里人为插一刀 S5（不是 Z 单列的）⇒ S4′ 报出 %d 处（例 %s）" % ("✓" if hit else "✗", len(hit), hit[:1]))
     miss += not hit
     ok0 = not sl_check(v0)
     print("%s G6 没拧的原样 ⇒ 0 处" % ("✓" if ok0 else "✗"))
