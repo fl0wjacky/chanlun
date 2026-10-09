@@ -509,7 +509,7 @@ def _death_types(r, done, bounds, segments, centers):
             b["death"], b["death_why"] = "D2-8 补刀", "不分类（中枢排布切出来的）"
             continue
         if b.get("rule") == "S5":                      # 同级别：盘整接盘整的接缝（L38:19-20），不是背驰、也不是三类点确立的，不分类
-            b["death"], b["death_why"] = "盘整接盘整", "不分类（同级别相邻中枢重叠的接缝）"
+            b["death"], b["death_why"] = "盘整相连", "不分类（同级别两个盘整的连接，L38:20；S12）"
             continue
         up = b["kind"] == "H"
         kind1 = "一卖" if up else "一买"
