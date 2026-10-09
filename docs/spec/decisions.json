@@ -1340,7 +1340,7 @@
       ],
       "recommendation": {
         "choice": "A",
-        "by": "Atlas（待 Nova 审）",
+        "by": "Nova",
         "basis": "原文",
         "reason": "作者给重要条目起名字（「缠中说禅……定理」），这是他自己标的分量；不起名字的照讲解算，规则最好懂。"
       },
@@ -1412,7 +1412,7 @@
       ],
       "recommendation": {
         "choice": "A",
-        "by": "Atlas（待 Nova 审）",
+        "by": "Nova",
         "basis": "原文",
         "reason": "作者两次答「不复权」，一次答「无所谓，但选定了别换」。三处都是答疑。"
       },
@@ -1438,7 +1438,7 @@
       "status": {
         "kind": "原文定",
         "verified": true,
-        "note": "查过原文以后，两个数都有正文出处，不是我们拍的：MACD 12、26、9（L25 正文）；「C 段面积小于 A 段面积」就是倍数 1.0、严格小于（L24 正文）。原来标「没人点过头」，是因为当时没找出处。"
+        "note": "查过原文以后，两个数都有正文出处，不是我们拍的：MACD 12、26、9（L25 正文）；「C 段面积小于 A 段面积」就是倍数 1.0、严格小于（L24 正文）。原来标「没人点过头」，是因为当时没找出处。另：L24:36 作者还给了一个 C 段没走完时的估算法（柱子伸长变慢时，把已有面积乘 2 当成该段面积），引擎没用，只在 C 段走完后比面积（Bram 11:37 核代码）。"
       },
       "what": {
         "plain": "判断一段走势「没力气了」（背驰），是拿后一段（C）的 MACD 面积跟前一段（A）比。MACD 本身有三个参数；比的时候 C 要小于 A 多少才算，也是个数。",
@@ -1475,7 +1475,7 @@
       ],
       "recommendation": {
         "choice": "原文",
-        "by": "Atlas（待 Nova 审）",
+        "by": "Nova",
         "basis": "原文",
         "reason": "两个数都在正文里。"
       },
@@ -1497,7 +1497,7 @@
         "kind": "待定",
         "verified": true,
         "date": null,
-        "note": "你 10-09 03:41 定过「当下可用、出来不收回」（笔层除外）。S-13 你选了 B（笔会回头改），实测确认过的线段、分界偶尔会被撤，所以这条要你重新选。（原 Q-4 并入这一条。）"
+        "note": "你 10-09 03:41:45 回「加」，定过「当下可用、出来不收回」（笔层除外）。S-13 你选了 B（笔会回头改），实测确认过的线段、分界偶尔会被撤，所以这条要你重新选。（原 Q-4 并入这一条。）"
       },
       "title": "笔会回头改（你 S-13 选的 B），所以确认过的线段、分界偶尔会被撤。上线时怎么办",
       "what": {
@@ -1619,6 +1619,71 @@
       "open": []
     },
     {
+      "id": "D-3",
+      "layer": "走势分界",
+      "layer_order": 5,
+      "status": {
+        "kind": "待定",
+        "verified": true,
+        "note": "Nova 04:15 请你先别回、上层定了再问；现在上层（R-1、S-13）定了，放上来。"
+      },
+      "title": "图上画的线段，用原始的，还是「标准化」过的",
+      "what": {
+        "plain": "切走势分界时，我们用的是「标准化」过的线段：把每段的端点挪到真正的最高、最低点上，首尾接起来。可图上画的线段是原始的。两套不完全一样，所以图上有些线段端点跟分界用的那套对不上。选 A：图上照画原始线段（分界照用标准化）；选 B：走势层也改用原始线段。",
+        "analogy": "像施工图和效果图：施工按一套尺寸，墙上挂的是另一套。是两张都挂（A），还是施工也改用效果图的尺寸（B）？"
+      },
+      "sources": [
+        {
+          "layer": "推论",
+          "source": "编者",
+          "text": "「走势层用标准化线段」是 Nova 10-06 依 L78:50-51 定的（D-2）；原文只说「标准化为最高或最低点都在端点」「首尾相连」，接点怎么挪是编者口径。"
+        }
+      ],
+      "options": [
+        {
+          "key": "A",
+          "label": "分界用标准化线段；图上照画原始线段（现在这样）",
+          "effect": "分界不动；图上有一部分线段的端点跟分界用的那套对不上。",
+          "numbers": {
+            "图上线段跟分界那套对不上的（25 张）": "约 358 条（两套增删 716）"
+          },
+          "figures": []
+        },
+        {
+          "key": "B",
+          "label": "走势层也改用原始线段",
+          "effect": "图上看到的就是分界用的那套；但分界跟着大换。",
+          "numbers": {
+            "变的图（25 张）": "16",
+            "分界刀": "±103",
+            "走势段增删": "153"
+          },
+          "figures": []
+        }
+      ],
+      "recommendation": {
+        "choice": null,
+        "by": null,
+        "basis": null,
+        "reason": "待 Nova 写推荐。"
+      },
+      "affects": [
+        "D-2",
+        "Q-6",
+        "V-C（框和线）"
+      ],
+      "depends_on": [
+        "D-2",
+        "R-1"
+      ],
+      "docs": [
+        "docs/spec/走势分段.md D2-0"
+      ],
+      "open": [
+        "Q-6 说的「看得见端点跳」次数要按前缀回放量（Bram 约 15 分钟），要不要量等 Nova 定"
+      ]
+    },
+    {
       "id": "R-4",
       "layer": "读法选择",
       "layer_order": 0,
@@ -1708,9 +1773,13 @@
       "layer_order": 2,
       "title": "一笔最少几根 K 线",
       "status": {
+        "date": "2026-10-08 12:42:41",
+        "quote": "1B（加可选A）2C 3A",
+        "choice": "B",
+        "via": "Nova 私信 12:42:41",
+        "note": "默认 6 根，留开关切回 7 根。V-A9 是同一条。",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-08 12:42"
+        "verified": true
       },
       "skeleton": true
     },
@@ -1720,9 +1789,12 @@
       "layer_order": 2,
       "title": "当下的笔能不能改",
       "status": {
+        "date": "2026-10-07 22:48:23",
+        "quote": "A，并专门开一个文档收集这些矛盾点与我们的判断逻辑与解决方案",
+        "choice": "A",
+        "via": "Nova 私信 22:48:23",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-07 22:48"
+        "verified": true
       },
       "skeleton": true
     },
@@ -1804,9 +1876,12 @@
       "layer_order": 3,
       "title": "第三笔落在第一笔范围内：等，还是当场合并判",
       "status": {
+        "date": "2026-10-07 23:51:52",
+        "quote": "A,确认一下后面会有回头改的过程吗",
+        "choice": "A",
+        "via": "Nova 私信 23:51:52",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-07 23:51"
+        "verified": true
       },
       "skeleton": true
     },
@@ -1816,9 +1891,12 @@
       "layer_order": 3,
       "title": "判『破』时追平算不算",
       "status": {
+        "date": "2026-10-08 00:34",
+        "quote": "原话未能调出，依据 Nova 回执：「收到，按 B：碰到就算破」",
+        "choice": "B",
+        "via": "Nova 私信 00:34:10 回执",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-08 00:33"
+        "verified": true
       },
       "skeleton": true
     },
@@ -1880,9 +1958,13 @@
       "layer_order": 3,
       "title": "缺口被之前同序列元素盖住算不算缺口",
       "status": {
+        "date": "2026-10-07 08:45:25",
+        "quote": "1A2A",
+        "choice": "A",
+        "via": "Nova 私信 08:45:25",
+        "note": "1A 是这一条。",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-07 08:45"
+        "verified": true
       },
       "skeleton": true
     },
@@ -1892,9 +1974,12 @@
       "layer_order": 3,
       "title": "特征序列标准化 A／B（开头怎么定方向）",
       "status": {
+        "date": "2026-10-02 03:04:42",
+        "quote": "⑤A；默认这个，可选项是B，后续更新到TradingView 记得要保留这个可选项",
+        "choice": "A",
+        "via": "Nova 私信 03:04:42",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-02 "
+        "verified": true
       },
       "skeleton": true
     },
@@ -1904,9 +1989,12 @@
       "layer_order": 3,
       "title": "缺口的『逆』指什么",
       "status": {
+        "date": "2026-10-03 08:58:27",
+        "quote": "甲默认，乙可选",
+        "via": "Nova 私信 08:58:27",
+        "note": "另有 Nova 09:11 回执「收到 B：缺口先不做」。「与装着缺口那一笔反向」是后来我们细化的，不是你的话。",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-03"
+        "verified": true
       },
       "skeleton": true
     },
@@ -1976,9 +2064,13 @@
       "layer_order": 4,
       "title": "升级出来的中枢怎么读",
       "status": {
+        "date": "2026-10-07 07:04:20",
+        "quote": "一A二A",
+        "choice": "A",
+        "via": "Nova 私信 07:04:20",
+        "note": "一A 是这一条。",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-07 07:04"
+        "verified": true
       },
       "skeleton": true
     },
@@ -1988,9 +2080,13 @@
       "layer_order": 4,
       "title": "合成框的区间怎么算",
       "status": {
+        "date": "2026-10-07 07:04:20",
+        "quote": "一A二A",
+        "choice": "A",
+        "via": "Nova 私信 07:04:20",
+        "note": "二A 是这一条。",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-07"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2036,9 +2132,9 @@
       "layer_order": 4,
       "title": "高一级中枢从哪一段起划",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "不再适用",
+        "verified": true,
+        "note": "因为 R-1 选 A（同级别分解），本级不升级（S6），这条不用定了。"
       },
       "skeleton": true
     },
@@ -2048,9 +2144,13 @@
       "layer_order": 4,
       "title": "延伸在哪断开",
       "status": {
+        "date": "2026-10-08 06:28:55",
+        "quote": "A 会不会有一种情况，甲一直没出第三类买卖点，然后都满9段就只能升级了？",
+        "choice": "A",
+        "via": "Nova 私信 06:28:55",
+        "note": "页上选项是甲／乙，你回的是 A，Nova 当时记成甲，这是我们对应的。",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-08"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2084,9 +2184,12 @@
       "layer_order": 4,
       "title": "中枢方向：上涨里只认下上下",
       "status": {
+        "date": "2026-10-07 05:58",
+        "quote": "原话未能调出，依据 Nova 回执：Nova 的记录「05:58Z 小栋选 A」",
+        "choice": "A",
+        "via": "Nova 记录",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-07 05:57"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2120,9 +2223,12 @@
       "layer_order": 4,
       "title": "中枢读法三条、什么时候算走完",
       "status": {
+        "date": "2026-10-02 01:47:28",
+        "quote": "②A ③A",
+        "choice": "A",
+        "via": "Nova 私信 01:47:28",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-02 01:47"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2132,9 +2238,13 @@
       "layer_order": 4,
       "title": "类中枢从哪一笔起算；类中枢关系只在同一线段内",
       "status": {
+        "date": "2026-10-03 07:35:19",
+        "quote": "A,另外有一个叫 LuxAlgo开源的图表引擎…",
+        "choice": "A",
+        "via": "Nova 私信 07:35:19",
+        "note": "第二个 A 只有回执。",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-03"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2187,26 +2297,17 @@
       "skeleton": true
     },
     {
-      "id": "D-3",
-      "layer": "走势分界",
-      "layer_order": 5,
-      "title": "图上画哪套线段（页上 ②）",
-      "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
-      },
-      "skeleton": true
-    },
-    {
       "id": "D-4",
       "layer": "走势分界",
       "layer_order": 5,
       "title": "确立＝死点之后第一个反方向三类点；参照中枢取哪个",
       "status": {
+        "date": "2026-10-08 08:52",
+        "quote": "B",
+        "choice": "B",
+        "via": "Nova 私信 08:52",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-08"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2228,9 +2329,13 @@
       "layer_order": 5,
       "title": "D2-8 大一级盘整里切出本级别趋势",
       "status": {
+        "date": "2026-10-07 08:45:25",
+        "quote": "1A2A",
+        "choice": "A",
+        "via": "Nova 私信 08:45:25",
+        "note": "2A 是这一条：要切。",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-07 08:45"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2256,9 +2361,12 @@
       "layer_order": 5,
       "title": "背驰是不是分段依据（丙8）",
       "status": {
+        "date": "2026-10-08 13:59",
+        "quote": "A ／ A",
+        "choice": "A",
+        "via": "Nova 私信 13:59（14:04 再确认）",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-08 14:04"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2280,9 +2388,9 @@
       "layer_order": 5,
       "title": "确立以后从分界那一点起整段重算中枢（D2-4）",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "不再适用",
+        "verified": true,
+        "note": "同级别分解下中枢按分界分组重找，这条自动成立（Bram 量 25 张：开关开关 0 变）。"
       },
       "skeleton": true
     },
@@ -2292,9 +2400,12 @@
       "layer_order": 5,
       "title": "盘整接盘整",
       "status": {
+        "date": "2026-10-07 07:35",
+        "quote": "原话未能调出，依据 Nova 回执：「…，C」",
+        "choice": "C",
+        "via": "Nova 私信 07:35:01 回执",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-07 "
+        "verified": true
       },
       "skeleton": true
     },
@@ -2316,9 +2427,12 @@
       "layer_order": 5,
       "title": "『会变的框』截到第几条分界",
       "status": {
+        "date": "2026-10-06 06:41:06",
+        "quote": "C+",
+        "choice": "C+",
+        "via": "Nova 私信 06:41:06",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-06"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2328,9 +2442,12 @@
       "layer_order": 6,
       "title": "背驰的几种看法",
       "status": {
+        "date": "2026-10-04 00:36",
+        "quote": "原话未能调出，依据 Nova 回执：「背驰加两种原文里的看法，做成可以切换，默认不变」",
+        "choice": "B",
+        "via": "Nova 私信 00:36:29 回执",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-04"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2340,9 +2457,13 @@
       "layer_order": 6,
       "title": "面积和黄白线怎么组合",
       "status": {
+        "date": "2026-10-04 12:54:56",
+        "quote": "1A2A3A",
+        "choice": "A",
+        "via": "Nova 私信 12:54:56",
+        "note": "1A2A3A 依次是 M-2、M-3、T-1。",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-04"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2352,9 +2473,13 @@
       "layer_order": 6,
       "title": "斜率这条看法",
       "status": {
+        "date": "2026-10-04 12:54:56",
+        "quote": "1A2A3A",
+        "choice": "A",
+        "via": "Nova 私信 12:54:56",
+        "note": "1A2A3A 依次是 M-2、M-3、T-1。",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-04"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2472,9 +2597,13 @@
       "layer_order": 7,
       "title": "三道题（合成中枢怎么读／叠图／以哪张为准）",
       "status": {
+        "date": "2026-10-06 01:28:57",
+        "quote": "CAB",
+        "choice": "CAB",
+        "via": "Nova 私信 01:28:57",
+        "note": "三道题依次 C、A、B。",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-06 01:29"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2484,9 +2613,12 @@
       "layer_order": 7,
       "title": "第一刀随窗口跳",
       "status": {
+        "date": "2026-10-06 06:41:06",
+        "quote": "C+",
+        "choice": "C+",
+        "via": "Nova 私信 06:41:06",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-06 06:41"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2532,9 +2664,12 @@
       "layer_order": 7,
       "title": "图周期默认 4 小时",
       "status": {
+        "date": "2026-10-01 10:26:45",
+        "quote": "①A(默认做法需讨论) ②A（默认4h） ③A",
+        "via": "Nova 私信 10:26:45",
+        "note": "「图默认 4 小时」是 Nova 当时的理解。",
         "kind": "小栋定",
-        "verified": false,
-        "date": null
+        "verified": true
       },
       "skeleton": true
     },
@@ -2580,9 +2715,13 @@
       "layer_order": 8,
       "title": "成交量、MACD 副图",
       "status": {
+        "date": "2026-10-04 05:00:34",
+        "quote": "按你的",
+        "choice": "按推荐",
+        "via": "Nova 私信 05:00:34",
+        "note": "你回「按你的」，照推荐做。其中「桌面开、手机关」不在那一页里，是我们实现时加的，那一半算我们替你定的，你可以推翻。",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-04 05:00"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2642,9 +2781,11 @@
       "layer_order": 8,
       "title": "背驰看法默认",
       "status": {
+        "date": "2026-10-04 00:36",
+        "quote": "原话未能调出，依据 Nova 回执：「背驰加两种原文里的看法，做成可以切换，默认不变」",
+        "via": "Nova 私信 00:36:29 回执",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-04"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2654,9 +2795,13 @@
       "layer_order": 8,
       "title": "笔最少几根 K 线",
       "status": {
+        "date": "2026-10-08 12:42:41",
+        "quote": "1B（加可选A）2C 3A",
+        "choice": "B",
+        "via": "Nova 私信 12:42:41",
+        "note": "同 B-1。",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-08"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2666,9 +2811,12 @@
       "layer_order": 8,
       "title": "背景按什么上色",
       "status": {
+        "date": "2026-10-08 12:34",
+        "quote": "B；B，全屏那个已合",
+        "choice": "B",
+        "via": "Nova 私信 12:34、12:35:41",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-08 12:35"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2704,9 +2852,11 @@
       "layer_order": 8,
       "title": "『等确认』条（原中阴）放哪、叫什么",
       "status": {
-        "kind": "小栋定",
-        "verified": false,
-        "date": "10-05 23:46"
+        "by": "Nova",
+        "date": "2026-10-05 23:45:57",
+        "note": "你 23:45:57 提的是栅栏挡住成交量；挪到顶上、叫「等确认」是 Nova 提的，算我们替你定的，你可以推翻。",
+        "kind": "我们定",
+        "verified": true
       },
       "skeleton": true
     },
@@ -2728,9 +2878,12 @@
       "layer_order": 8,
       "title": "相邻盘整段怎么标",
       "status": {
+        "date": "2026-10-07 07:35",
+        "quote": "原话未能调出，依据 Nova 回执：「…，C」",
+        "choice": "C",
+        "via": "Nova 私信 07:35:01 回执",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-07 07:34"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2740,9 +2893,12 @@
       "layer_order": 8,
       "title": "会变的框",
       "status": {
+        "date": "2026-10-06 06:41:06",
+        "quote": "C+",
+        "choice": "C+",
+        "via": "Nova 私信 06:41:06",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-06"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2764,9 +2920,12 @@
       "layer_order": 8,
       "title": "中枢框拆两截",
       "status": {
+        "date": "2026-10-02 06:20:13",
+        "quote": "确定的部分用实线，没确定的部分用虚线",
+        "via": "Nova 私信 06:20:13",
+        "note": "这是你自己提的；细节 B 只有 Nova 的记录。",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-02"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2776,9 +2935,12 @@
       "layer_order": 8,
       "title": "高一级的框怎么上色、归哪颗芯片",
       "status": {
+        "date": "2026-10-05 23:38:12",
+        "quote": "A，另外如果我一直往右拖，左上角的 升级 二字会出现很长时间，你觉得这样会不会让人产生困惑？",
+        "choice": "A",
+        "via": "Nova 私信 23:38:12",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-05 23:3x"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2878,9 +3040,12 @@
       "layer_order": 8,
       "title": "幽灵点（确认过、后来没了）",
       "status": {
+        "date": "2026-10-05 00:48:17",
+        "quote": "①A ②A",
+        "choice": "A",
+        "via": "Nova 私信 00:48:17",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-05"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2942,9 +3107,12 @@
       "layer_order": 8,
       "title": "页头时间用哪个时区",
       "status": {
+        "date": "2026-10-06 06:42:06",
+        "quote": "顶部显示的…这两个时间点要换成本地时间",
+        "via": "Nova 私信 06:42:06",
+        "note": "「页头写时区」是我们的实现。",
         "kind": "小栋定",
-        "verified": false,
-        "date": null
+        "verified": true
       },
       "skeleton": true
     },
@@ -2954,9 +3122,12 @@
       "layer_order": 8,
       "title": "最后一根实时跳价",
       "status": {
+        "date": "2026-10-05 04:0x",
+        "quote": "原话未能调出，依据 Nova 回执：Nova 的记录",
+        "choice": "A",
+        "via": "Nova 记录",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-05"
+        "verified": true
       },
       "skeleton": true
     },
@@ -2992,9 +3163,13 @@
       "layer_order": 9,
       "title": "回测范围",
       "status": {
+        "date": "2026-10-04 12:54:56",
+        "quote": "1A2A3A",
+        "choice": "A",
+        "via": "Nova 私信 12:54:56",
+        "note": "1A2A3A 依次是 M-2、M-3、T-1。",
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-04"
+        "verified": true
       },
       "skeleton": true
     },
