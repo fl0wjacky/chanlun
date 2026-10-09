@@ -162,14 +162,14 @@ def fuzz_pens(sd):
     return P
 
 
-FUZZ_EXPECT = 18                       # 随机 4000 组的撤销组数（B 之后；等甲）。Nova 10-08 23:07 定
+FUZZ_EXPECT = 18                       # 随机 4000 组的撤销组数（B 之后）。Nova 10-08 23:07 定；小栋 10-09 选 B（追平不算新高），18 是已知现状
 
 
 def fuzz(n_seeds):
     """--fuzz N（Nova 10-08 21:49）：随机 N 组笔逐笔加长查撤销。10-08 land-b4c 上 4000 组有 20 组撤销（card-6dd83a22-a76）；
-    B（图头挪位不踩暂定刀，HEAD_DIR_NO_TENT）进第五批以后剩 **18** 组，都等「追平算不算新高」（甲，上小栋那页）。
+    B（图头挪位不踩暂定刀，HEAD_DIR_NO_TENT）进第五批以后剩 **18** 组，根在「追平算不算新高」。小栋 10-09 00:26 选 B（不算，维持严格），这 18 组是已知现状。
     ⇒ 期望值冻成 FUZZ_EXPECT（只对 N=4000 判）：撤销组数**正好**等于它才绿 —— 谁动了线段层，这个数一变就红（多了是新撤销，
-    少了是有人顺手改了判定、得说清楚）。先不进 predeploy（4000 组单跑约 30 秒、4 路），甲定了、改成 0 以后再接。"""
+    少了是有人顺手改了判定、得说清楚）。先不进 predeploy（4000 组单跑约 30 秒、4 路）；原先写的「甲定了、改成 0 以后再接」作废（小栋选 B），接不接门 Nova 另定。"""
     import concurrent.futures as cf
     with cf.ProcessPoolExecutor(max_workers=JOBS) as ex:
         res = list(ex.map(_fuzz_one, range(n_seeds), chunksize=50))
