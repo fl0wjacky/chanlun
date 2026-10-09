@@ -694,7 +694,7 @@ function trendBandView(target, state, prim) {
     const vp = viewport(prim._chart, state.candleSeries || prim._series, data);
     // 只读出口（跟 `state.boxesDrawn` 同性质：**这一帧**交给这一层的清单，每帧开头重写）——
     // 「这一层到底画了哪几段、铺的什么色」要**量**，不能靠眼睛。
-    state.trendDrawn = { bands: [], bounds: [], pending: [], retracted: [], units: [], num: [] };
+    state.trendDrawn = { bands: [], bounds: [], pending: [], retracted: [], units: [], num: [], states: [] };
 
     // ① 走势背景（§八 1）。★★ 10-08 起颜色**跟段型走**（小栋 12:35 选 B，卡 card-fedf32aa-59d）：
     //    上涨＝绿、下跌＝红，**盘整一律灰**（升级·盘整灰深一档）。原文：「盘整哪里有什么方向，只有趋势才有方向」
@@ -836,9 +836,10 @@ function trendMarkView(target, state, prim) {
   target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
     const W = mediaSize.width, H = mediaSize.height;
     const vp = viewport(prim._chart, state.candleSeries || prim._series, data);
-    const D = state.trendDrawn || (state.trendDrawn = { bands: [], bounds: [], pending: [], retracted: [], units: [], num: [] });
+    const D = state.trendDrawn || (state.trendDrawn = { bands: [], bounds: [], pending: [], retracted: [], units: [], num: [], states: [] });
     D.labels = [];
     D.deaths = [];
+    D.states = [];
     // 命中带的画布：跟 `ghostHits` 同一条账 —— `ctx.canvas` 就是这个窗格的画布，
     // `useMediaCoordinateSpace` 给的坐标就是它的 CSS 像素，所以「客户端坐标 − getBoundingClientRect」
     // 正好落在同一个系里。每帧重设：窗格重建过之后旧的 canvas 是个死元素，量出来的坐标全是错的。
@@ -868,9 +869,14 @@ function trendMarkView(target, state, prim) {
         boundHits.bands.push({ x0: x - 4, x1: x + 4, bound: b });
         // 那个点：填结构色、外面描一圈**页面底色** —— 参考图那边是"深点 ＋ 白圈"，这边正好反过来，
         // 干的是同一件事：把点从背后的带子里"抠"出来，别糊成一片。
+        // ①D 待确认（D-5，Nova 10-09 06:42 定）：点画**空心**（里面填页面底色、外圈结构色），确认了才填实。
+        //   ★ 不借「待定」那套灰点线：那是 D2-6 的**候选极值**（`trend.pending`），这里是**已经立了、还没坐稳的刀**，
+        //     两件事要一眼分得开。分界竖虚线照画 —— 这把刀确实切开了段，只是还可能被撤。
+        //   ★ 只认后台给的 `b.state`（S5 刀的也由后台按 D-4 派生好），前端一律不自己推（Bram／Nova 06:43 定）。
+        const pending = b.state === 'pending';
         ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2);
-        ctx.fillStyle = TREND.edge; ctx.fill();
-        ctx.strokeStyle = TREND.halo; ctx.lineWidth = 2; ctx.stroke();
+        ctx.fillStyle = pending ? TREND.halo : TREND.edge; ctx.fill();
+        ctx.strokeStyle = pending ? TREND.edge : TREND.halo; ctx.lineWidth = pending ? 1.8 : 2; ctx.stroke();
         // 价格跟着极值走：极值在上面就往上写、在下面就往下写（参考图的 dy -10 / +20），免得字压在带子上。
         // ★ 多一条**翻边**：极值本来就贴着格顶（ZEC 15m 那个 1699 就是）⇒ 往上写会顶出画布、
         //   只剩半行字。翻到下面去写 —— 位置仍然钉在那一根上，只是站到点的另一侧。
@@ -883,9 +889,14 @@ function trendMarkView(target, state, prim) {
         //   ★ 只标不改刀（spec D2-5：类型不决定刀落在哪）。全名放悬停（app.js `boundShow`），图上只写短名。
         //   ★ 深浅分两档：真判出来的三种（趋势背驰／盘整背驰／小转大）用结构色，编者口径那三种（盘整·未见背驰／比不了／D2-8 补刀）
         //     用静音灰 —— 「比不了」占了线上 15 张的六成，跟真死点一个颜色的话图上满眼都是它，读的人分不出哪几刀是真背驰。
-        const dt = DEATH_SHORT[b.death];
+        // ★ 「盘整相连」（S5 刀，S12）**故意不在 DEATH_SHORT 里**：图上不挂字，只在悬停里有（Nova 10-09 06:42 定）——
+        //   S5 刀占正式口径一半多（194 把里 106），每把都挂字会把真背驰那几把淹掉。
+        const dt0 = DEATH_SHORT[b.death];
+        // ★ 连写用全角括号「趋势背驰（待确认）」，不用「 · 」：左格本来就在尾巴上接一个「 ·」，用点连会变成「趋势背驰 · 待确认 ·」（实截踩过）
+        const dt = dt0 ? (pending ? dt0 + '（待确认）' : dt0) : (pending ? '待确认' : null);
+        D.states.push({ bar: b.bar, state: b.state || null, hollow: pending });
         if (dt) {
-          const col = DEATH_REAL.has(b.death) ? TREND.edge : TREND.mut;
+          const col = dt0 && DEATH_REAL.has(b.death) ? TREND.edge : TREND.mut;
           // 候选格按顺序取第一个**不压字**的：价格字往外一行 → 同一行接在右边 → 同一行接在左边；都不行就不写
           //   （悬停里照样有全名，见 app.js `boundText`）。要躲的字有两张表：这一层自己的 `mine`，和标注层那张
           //   `placed`（价签／买卖点文字／盘整组 chip，`state.labelBoxes`，标注层先画，这一帧已经齐了）。
@@ -901,7 +912,7 @@ function trendMarkView(target, state, prim) {
           ];
           const others = [...mine, ...(state.labelBoxes || [])];
           // 只读出口：每一刀记号落在哪一格（out＝往外一行／right／left／null＝三格都压、不写），工装拿它量「不压字」和配色
-          const rec = { bar: b.bar, death: b.death, txt: null, mode: null, box: null, col };
+          const rec = { bar: b.bar, death: b.death, state: b.state || null, txt: null, mode: null, box: null, col };
           D.deaths.push(rec);
           for (const [yy, al, ax, txt] of cand) {
             ctx.font = FONT_SM;

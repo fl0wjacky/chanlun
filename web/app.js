@@ -802,11 +802,20 @@ const DEATH_INFO = {
   '盘整·未见背驰': ['跟「小转大」一样都比过、都不成立，但前一段是盘整，不叫小转大。', '编者口径'],
   '比不了': ['没法比力度：找不到它离开的中枢，或者找不到进入段，或者进入段方向跟 C 相反。不算小转大。', '编者口径'],
   'D2-8 补刀': ['这一刀是大一级盘整里按中枢排布切出来的，不是背驰，也不是反方向三类点确立的，不分类。', '编者口径'],
+  // S5 刀（同级别正式版，S12，Atlas 定名）。原文 L38:20「那么就当成两个 30 分钟盘整类型的连接」（语料硬折行，这半句整在第 20 行）。
+  //   图上不挂字（layers.js 故意不收进 DEATH_SHORT），只在这里讲。
+  '盘整相连': ['两个同级别盘整首尾相接的接缝：前一个中枢的第三段走完，后一个中枢就从这里起。不是背驰，也不是三类点确立的，不分类。', 'L38:20 正文「当成两个 30 分钟盘整类型的连接」；编者口径 S12'],
+};
+// ①D（同级别正式版，D-1／D-3／D-5）：刀上 `state`。只读后台给的值，前端不推（S5 的也由后台按 D-4 派生）。
+const STATE_TIP = {
+  pending: '状态：待确认 —— 确认条件还没满足，这把刀还可能被撤回（图上空心点）。确认以后就不再撤。',
+  confirmed: '状态：已确认 —— 以后不再撤。',
 };
 function boundText(b) {
-  if (!b.death) return b.rule === 'D2-8' ? BOUND_TIP : '';
+  const st = STATE_TIP[b.state] || '';        // 没有 state（老后台／现行口径）⇒ 不写这一行，跟改之前一个字不差
+  if (!b.death) return [b.rule === 'D2-8' ? BOUND_TIP : '', st].filter(Boolean).join('\n');
   const [say, src] = DEATH_INFO[b.death] || ['', ''];
-  const d = [`死点：${b.death}${say ? ' —— ' + say : ''}`, b.death_why ? `这一刀：${b.death_why}` : '', src ? `出处：${src}` : '']
+  const d = [`死点：${b.death}${say ? ' —— ' + say : ''}`, b.death_why ? `这一刀：${b.death_why}` : '', src ? `出处：${src}` : '', st]
     .filter(Boolean).join('\n');
   // ★ 刀的位置不归类型管（spec D2-5：类型只影响「中阴从哪一刻开始」和图上标什么字），所以这里一句都不提刀为什么落在这儿
   return b.rule === 'D2-8' ? BOUND_TIP + '\n' + d : d;

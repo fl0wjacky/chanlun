@@ -1798,7 +1798,8 @@ const shotChart = async (p, tag) => {
     const others = (r) => [...D.labels.filter((q) => q[4] !== r.txt), ...lb];
     return {
       n: recs.length,
-      wrongTxt: recs.filter((r) => r.mode && r.txt.replace(/^· | ·$/g, '') !== SHORT[r.death]).map((r) => [r.death, r.txt]),
+      // 期望字：有短名 ⇒ 短名（待确认再接「（待确认）」）；没短名（盘整相连）⇒ 只在待确认时写「待确认」（①D D-5，Nova 06:42）
+      wrongTxt: recs.filter((r) => r.mode && r.txt.replace(/^· | ·$/g, '') !== (SHORT[r.death] ? SHORT[r.death] + (r.state === 'pending' ? '（待确认）' : '') : '待确认')).map((r) => [r.death, r.state, r.txt]),
       wrongCol: recs.filter((r) => r.col !== (REAL.includes(r.death) ? TREND.edge : TREND.mut)).map((r) => [r.death, r.col]),
       overlap: recs.filter((r) => r.box && others(r).some((q) => hit(r.box, q))).map((r) => r.death),
       modes: recs.map((r) => [r.death, r.mode]),
