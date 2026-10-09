@@ -87,7 +87,7 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
     // 整份载荷一把 pending 都没有（行情走到哪都可能：比如 10-09 15:2x 的 ZEC 15m，30 把全 confirmed）⇒ 这一格没东西可量，记跳过，不记红也不记绿
     const anyPend = await hasPend(pp);
     if (!anyPend) console.log(`－ ④ 跳过：试过 ${tried4.join('、')}，这一刻都没有待确认的刀`);
-    else ck('④ 真载荷：屏上每把刀「空心 ⟺ state=pending」；字跟 state／death 对得上（盘整相连 confirmed 不写字）',
+    else ck(`④ 真载荷（${tried4.at(-1)}）：屏上每把刀「空心 ⟺ state=pending」；字跟 state／death 对得上（盘整相连 confirmed 不写字）`,
        real.states.length > 0 && nPend > 0 && !badDot.length && !badTxt.length,
        `屏上 ${real.states.length} 刀（pending ${nPend}）${badDot.length ? '　✗ 点不对 ' + JSON.stringify(badDot) : ''}${badTxt.length ? '　✗ 字不对 ' + JSON.stringify(badTxt) : ''}`);
   } else console.log('－ ④ 跳过：这个后台还不给 state');
