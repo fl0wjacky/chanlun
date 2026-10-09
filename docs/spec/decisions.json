@@ -1355,6 +1355,141 @@
       "open": []
     },
     {
+      "id": "B-12",
+      "layer": "K 线、分型、笔",
+      "layer_order": 2,
+      "title": "K 线用不复权的价，还是复权后的价",
+      "what": {
+        "plain": "股票分红、送股那天，价格会突然跳一截，这一跳不是行情走出来的。「复权」是把历史价按比例调平，让 K 线连起来；「不复权」就照交易所原价画。笔、线段、中枢都是从 K 线算出来的，用哪种价，图会不一样。",
+        "analogy": "像量身高时鞋子穿没穿：都行，但前后要一致，不能今天量光脚、明天量穿鞋。"
+      },
+      "sources": [
+        {
+          "lesson": 15,
+          "lines": "153",
+          "layer": "答疑",
+          "source": "镜像",
+          "text": "缠中说禅：不复权。缺口只是一个参考。",
+          "speaker": "作者（读者问依哪个图为准）"
+        },
+        {
+          "lesson": 10,
+          "lines": "47",
+          "layer": "答疑",
+          "source": "镜像",
+          "text": "缠中说禅：不复权，复权的可参看历史阻力、支持位；",
+          "speaker": "作者"
+        },
+        {
+          "lesson": 23,
+          "lines": "163",
+          "layer": "答疑",
+          "source": "镜像",
+          "text": "缠中说禅：无所谓，但如果你选好不复权就一直用不复权的，别换来换去。",
+          "speaker": "作者"
+        },
+        {
+          "layer": "原文没写",
+          "source": "编者",
+          "text": "正文里没有讲复权，只在答疑里谈过。现在的数据大多是加密币，没有分红送股，选哪个图都一样；代码里这一层现在什么也不做（原价进、原价出）。"
+        }
+      ],
+      "options": [
+        {
+          "key": "A",
+          "label": "不复权（照原价）",
+          "effect": "跟现在实际效果一样。将来接股票数据时，除权那天会出现一个缺口。",
+          "numbers": {},
+          "figures": []
+        },
+        {
+          "key": "B",
+          "label": "前复权",
+          "effect": "将来接股票数据时，历史价按比例调平；现在的加密币数据不受影响。",
+          "numbers": {},
+          "figures": []
+        }
+      ],
+      "recommendation": {
+        "choice": "A",
+        "by": "Atlas（待 Nova 审）",
+        "basis": "原文",
+        "reason": "作者两次答「不复权」，一次答「无所谓，但选定了别换」。三处都是答疑。"
+      },
+      "affects": [
+        "将来接股票数据"
+      ],
+      "depends_on": [],
+      "docs": [
+        "docs/spec/复权.md"
+      ],
+      "open": [],
+      "status": {
+        "kind": "待定",
+        "verified": true,
+        "note": "还没人定过；选哪个都不动图，只改说明文字的写法。"
+      }
+    },
+    {
+      "id": "M-14",
+      "layer": "背驰、买卖点",
+      "layer_order": 6,
+      "title": "判背驰时，MACD 用什么参数；后一段要比前一段弱多少才算",
+      "status": {
+        "kind": "原文定",
+        "verified": true,
+        "note": "查过原文以后，两个数都有正文出处，不是我们拍的：MACD 12、26、9（L25 正文）；「C 段面积小于 A 段面积」就是倍数 1.0、严格小于（L24 正文）。原来标「没人点过头」，是因为当时没找出处。"
+      },
+      "what": {
+        "plain": "判断一段走势「没力气了」（背驰），是拿后一段（C）的 MACD 面积跟前一段（A）比。MACD 本身有三个参数；比的时候 C 要小于 A 多少才算，也是个数。",
+        "analogy": "像比两次跳远：用哪把尺量（参数），第二次要比第一次近多少才算「跳不动了」（倍数）。"
+      },
+      "sources": [
+        {
+          "lesson": 25,
+          "lines": "9",
+          "layer": "正文",
+          "source": "原博",
+          "url": "http://blog.sina.com.cn/s/blog_486e105c010008ak.html",
+          "sha256": "011a91caf8dc",
+          "text": "MACD的灵敏度，和参数有关，一般都取用12、26、9为参数"
+        },
+        {
+          "lesson": 24,
+          "lines": null,
+          "layer": "正文",
+          "source": "原博",
+          "url": "http://blog.sina.com.cn/s/blog_486e105c0100087y.html",
+          "sha256": "c69b3a799c60",
+          "text": "一旦出现MACD柱子的C段面积小于A段面积，其后必定有回跌。"
+        }
+      ],
+      "options": [
+        {
+          "key": "原文",
+          "label": "MACD 12、26、9；C 小于 A 就算（倍数 1.0）",
+          "effect": "现在就是这样。",
+          "numbers": {},
+          "figures": []
+        }
+      ],
+      "recommendation": {
+        "choice": "原文",
+        "by": "Atlas（待 Nova 审）",
+        "basis": "原文",
+        "reason": "两个数都在正文里。"
+      },
+      "affects": [
+        "M-1",
+        "D-8"
+      ],
+      "depends_on": [],
+      "docs": [
+        "core/signals.py beichi()"
+      ],
+      "open": []
+    },
+    {
       "id": "R-4",
       "layer": "读法选择",
       "layer_order": 0,
@@ -1447,18 +1582,6 @@
       "title": "分析窗口取多长",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
-      },
-      "skeleton": true
-    },
-    {
-      "id": "B-12",
-      "layer": "K 线、分型、笔",
-      "layer_order": 2,
-      "title": "复权",
-      "status": {
-        "kind": "待定",
         "verified": false,
         "date": null
       },
@@ -2211,18 +2334,6 @@
       "title": "二类买点三种结果（不创新低／创新低＋盘整背驰／小转大）",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
-      },
-      "skeleton": true
-    },
-    {
-      "id": "M-14",
-      "layer": "背驰、买卖点",
-      "layer_order": 6,
-      "title": "背驰力度的参数：两段比的倍数、MACD 参数",
-      "status": {
-        "kind": "待定",
         "verified": false,
         "date": null
       },
