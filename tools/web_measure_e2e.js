@@ -1071,6 +1071,10 @@ const shotChart = async (p, tag) => {
     const u = us[us.length - 1];
     return { X0: u.X0, X1: u.X1, seg: u.seg, n: u.n };
   });
+  // 同级别正式版（载荷 trend_reading=same_level）：不升级、不合成，「高一级」芯片藏起来（Nova 10-09 09:07）⇒
+  //   下面「勾上高一级」那四格的前提根本不存在，**照实印「跳过」**，不拿空表去算过（也不算红）。现行后台照旧全量。
+  const sameLevelU = await dU.p.evaluate(() => (window.__app.state.data || {}).trend_reading === 'same_level');
+  const ckU = (name, ok, extra) => (sameLevelU ? ck(name, true, '－ 跳过：同级别正式版没有合成框这一层（Nova 10-09 09:07）') : ck(name, ok, extra));
   await dU.c.close();
 
   ck('合成大框**默认不画**（「高一级」没勾 ⇒ 一个框、一个「升级」字都没有），但走势那一层照常画',
@@ -1099,14 +1103,14 @@ const shotChart = async (p, tag) => {
   const anyUnit = onP.find((s) => s.got.length);
   const offStill = pages.every((p) => p.off.got.length === 0 && p.off.upLabels.length === 0);
 
-  ck('勾上「高一级」⇒ 合成框**才**画，且画了几个 == 载荷里落在这一屏的几个（逐个对，不是"大于零"）',
+  ckU('勾上「高一级」⇒ 合成框**才**画，且画了几个 == 载荷里落在这一屏的几个（逐个对，不是"大于零"）',
      !!clicked && !!anyUnit && onP.every((s) => s.got.length === s.want)
        && pages.filter((p) => p.clickErr).length === 0,
      (clicked ? '' : '★ 那颗芯片点不动：' + (pages.map((p) => p.clickErr).filter(Boolean)[0] || '(没报错)') + '　')
        + pages.map((p, i) => `at+${SWEEP[i].at - (pick ? pick.X0 : 0)}：载荷 ${p.on.want} / 画了 ${p.on.got.length}`
          + `（关着时 ${p.off.got.length}）`).join('　'));
 
-  ck('框**按级别上色**：画上去的那个色 == `/theme.js` 的级别色（这一层的合成框都是**线段中枢升的** ⇒ `up_seg`）',
+  ckU('框**按级别上色**：画上去的那个色 == `/theme.js` 的级别色（这一层的合成框都是**线段中枢升的** ⇒ `up_seg`）',
      !!anyUnit && onP.every((s) => s.got.every((u) => u.col === UCHART.up_seg)),
      `画上去的色 ${JSON.stringify([...new Set(onP.flatMap((s) => s.got.map((u) => u.col)))])}`
        + `　theme 的 up_seg=${UCHART.up_seg}　up_pen=${UCHART.up_pen}（两个色相同时这格就成死闸：印出来）`);
@@ -1117,7 +1121,7 @@ const shotChart = async (p, tag) => {
     return { L, u };
   }));
   const dxs = owned.filter((o) => o.u).map((o) => Math.round((o.L.x - o.u.x0) * 10) / 10);
-  ck('「升级」二字的 x **在它那个框里**，且贴左沿 6 px（不是段的左上角、更不是视口的左上角）',
+  ckU('「升级」二字的 x **在它那个框里**，且贴左沿 6 px（不是段的左上角、更不是视口的左上角）',
      !!anyUnit && owned.length > 0 && owned.every((o) => !!o.u) && dxs.every((d) => Math.abs(d - 6) <= 1.5),
      `${owned.length} 个字：` + owned.map((o, i) => o.u
        ? `x=${o.L.x} ∈ 框[${o.u.x0}, ${o.u.x1}]（差 ${dxs[i]}）`
@@ -1129,7 +1133,7 @@ const shotChart = async (p, tag) => {
   const sawOffLeft = onP.some((s) => s.got.some((u) => u.x0 !== null && u.x0 < 0));
   const orphans = onP.flatMap((s) => s.upLabels.filter((L) =>
     !s.got.some((u) => u.x0 !== null && u.x0 >= 0 && L.x >= u.x0 - 1 && L.x <= u.x1 + 1)));
-  ck('框左沿滚出屏幕 ⇒ 那个「升级」**一个字都不画**（老毛病：夹在 `Math.max(x,4)` 上钉死在视口左上角）',
+  ckU('框左沿滚出屏幕 ⇒ 那个「升级」**一个字都不画**（老毛病：夹在 `Math.max(x,4)` 上钉死在视口左上角）',
      !!anyUnit && sawOffLeft && orphans.length === 0,
      `这一趟里左沿出屏的框：` + onP.map((s, i) => `${s.got.filter((u) => u.x0 < 0).length} 个`).join('／')
        + `　没人认领的字：${orphans.length}${orphans.length ? '　★ ' + orphans.map((L) => `x=${L.x}`).join(',') : ''}`
@@ -1798,7 +1802,8 @@ const shotChart = async (p, tag) => {
     const others = (r) => [...D.labels.filter((q) => q[4] !== r.txt), ...lb];
     return {
       n: recs.length,
-      wrongTxt: recs.filter((r) => r.mode && r.txt.replace(/^· | ·$/g, '') !== SHORT[r.death]).map((r) => [r.death, r.txt]),
+      // 期望字：有短名 ⇒ 短名（待确认再接「（待确认）」）；没短名（盘整相连）⇒ 只在待确认时写「待确认」（①D D-5，Nova 06:42）
+      wrongTxt: recs.filter((r) => r.mode && r.txt.replace(/^· | ·$/g, '') !== (SHORT[r.death] ? SHORT[r.death] + (r.state === 'pending' ? '（待确认）' : '') : '待确认')).map((r) => [r.death, r.state, r.txt]),
       wrongCol: recs.filter((r) => r.col !== (REAL.includes(r.death) ? TREND.edge : TREND.mut)).map((r) => [r.death, r.col]),
       overlap: recs.filter((r) => r.box && others(r).some((q) => hit(r.box, q))).map((r) => r.death),
       modes: recs.map((r) => [r.death, r.mode]),
@@ -1848,7 +1853,7 @@ const shotChart = async (p, tag) => {
   const dmBump = await pDM.evaluate(async () => {
     const app = window.__app, ts = app.chart.timeScale(), s = app.state.candleSeries, T = app.state.data.trend;
     const H = app.chart.panes()[0].getHeight();
-    const bd = T.bounds.find((q) => { const x = ts.logicalToCoordinate(q.bar); return q.death && x !== null && x > 200 && x < 1100; });
+    const bd = T.bounds.find((q) => { const x = ts.logicalToCoordinate(q.bar); return q.death && q.death !== '盘整相连' && x !== null && x > 80 && x < 1250; });   // 盘整相连图上本来不写字（S12），挑它就量成 missing
     if (!bd) return { err: '屏上没有刀' };
     bd.price = s.coordinateToPrice(bd.kind === 'H' ? 8 : H - 30);
     const v = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: v.from + 0.01, to: v.to + 0.01 });
@@ -1861,6 +1866,32 @@ const shotChart = async (p, tag) => {
      !dmBump.err && dmBump.mode !== 'out' && dmBump.mode !== 'missing' && dm2.overlap.length === 0,
      `${JSON.stringify(dmBump)}　压字 ${JSON.stringify(dm2.overlap)}`);
   await pDM.context().close();
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // 51 买卖点子芯片：亮＝总开关开着并且这一类勾着（card-963457e4-e31，Nova 10-09 12:08 定）
+  //   ★ 真点 chip（不改 opts）：缺省 ⇒ 7 颗都是 没按下＋按灰；开总开关 ⇒ 6 颗亮、能点；关掉二买 ⇒ 它灭；
+  //     总开关关了再开 ⇒ 二买还是灭、其余 5 颗亮（子项的勾没被总开关冲掉）。
+  console.log('\n51 买卖点子芯片：总开关关着时一颗都不亮；子项的勾跟着总开关一关一开原样回来');
+  const SK = ['sig:一买', 'sig:二买', 'sig:三买', 'sig:一卖', 'sig:二卖', 'sig:三卖', 'sigPend'];
+  const dS = await open(TQ);
+  const sigRow = () => dS.p.evaluate((ks) => Object.fromEntries(ks.map((k) => {
+    const c = document.querySelector(`.chip[data-key="${k}"]`);
+    return [k, c ? (c.getAttribute('aria-pressed') === 'true' ? '亮' : '灭') + (c.disabled ? '灰' : '') : '无'];
+  })), SK);
+  const clickChip = async (k) => { await dS.p.locator(`.chip[data-key="${k}"]`).click(); await dS.p.waitForTimeout(150); };
+  const q0 = await sigRow();
+  await clickChip('sig'); const q1 = await sigRow();
+  await clickChip('sig:二买'); const q2 = await sigRow();
+  await clickChip('sig'); const q3 = await sigRow();
+  await clickChip('sig'); const q4 = await sigRow();
+  const all = (row, want, ks = SK.slice(0, 6)) => ks.every((k) => row[k] === want);
+  ck('51a 缺省（买卖点关着）：6 类＋待确认 7 颗都是「没按下＋按灰」（不许亮着却按灰）', all(q0, '灭灰', SK), JSON.stringify(q0));
+  ck('51b 打开买卖点 ⇒ 6 类都亮、能点；待确认照它自己的勾（缺省不勾）＝灭、能点', all(q1, '亮') && q1.sigPend === '灭', JSON.stringify(q1));
+  ck('51c 关掉二买 ⇒ 只有它灭', q2['sig:二买'] === '灭' && all(q2, '亮', SK.slice(0, 6).filter((k) => k !== 'sig:二买')), JSON.stringify(q2));
+  ck('51d 总开关关了再开 ⇒ 关着时 7 颗全「没按下＋按灰」；再开以后二买还是灭、其余 5 类亮（子项的勾没被冲掉）',
+     all(q3, '灭灰', SK) && q4['sig:二买'] === '灭' && all(q4, '亮', SK.slice(0, 6).filter((k) => k !== 'sig:二买')),
+     `关：${JSON.stringify(q3)}　再开：${JSON.stringify(q4)}`);
+  await dS.c.close();
 
   await b.close();
   console.log(`\n${n - bad}/${n} 过${bad ? `，${bad} 条红` : ''}　截图：${OUT}`);

@@ -293,6 +293,8 @@ body.fs-fake main { position: fixed; inset: 0; z-index: 50; height: 100dvh; back
   border: 1px solid var(--line); border-radius: 999px; padding: 4px 8px; cursor: pointer;
 }
 .wolftf[hidden] { display: none; }
+/* 同级别正式版里「高一级」「级别对照」两颗用 hidden 藏起来；.chip 的 display:inline-flex 会盖过 [hidden]，得在这里补一句（跟上面 wolftf 同一个坑） */
+.chip[hidden] { display: none; }
 /* 实心用 --tx（墨色）当底、--bg 当字：**不借信号色**（--am 是「未收盘/旧数据」、--rd 是「出错」，
    借来当选中色，那两个色就不只一个意思了）。 */
 .mchip[aria-checked="true"] { background: var(--tx); border-color: var(--tx); color: var(--bg); }
