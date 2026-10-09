@@ -479,6 +479,20 @@ export function makeAnnotPrimitive(state) {
                 }
               }
 
+              // ①b D-3 C：标准化线段的**最后一条**（app.js 画成短虚线）在它的终点旁写「终点还可能挪」（Nova 10-09 13:08）。
+              //    短虚线（可能挪）跟未完成段的长虚线挨在一起，光靠虚线疏密分不出来 —— 照 D-3 示意图写一个字。
+              //    字放在圈外、离开线段那一侧（终点是顶往上、是底往下），登记 placed，价签会避开它（跟「暂定」同一条）。
+              state.segStdLabel = null;
+              if (sh.seg && Array.isArray(data.segs_std) && data.segs_std.length) {
+                const L = data.segs_std[data.segs_std.length - 1], x = vp.xOfBar(L.i1), y = vp.yOfPrice(L.p1);
+                if (onScreen(x, W, 20) && y !== null) {
+                  const top = L.dir === 'up';
+                  const box = haloText(ctx, x, top ? y - 12 : y + 22, '终点还可能挪', CHART.seg, 'center');
+                  placed.push(box.slice(0, 4));
+                  state.segStdLabel = { x: Math.round(x), y: Math.round(y), box: box.slice(0, 4).map(Math.round), text: box[4] };
+                }
+              }
+
               // ② 买卖点：**这一步只画三角**，文字留到 ④（判据在 core/signals.py，前端只画）
               //    ★ 次序是 2026-10-03 改的，改的就是次序：
               //      Python 在 chart_full_smooth.py:68 先 `draw_signals()` 画三角，然后把文字标签请求
