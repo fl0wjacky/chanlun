@@ -8,6 +8,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('--root', required=True); ap.add_argument('--file', required=True)
 ap.add_argument('--at', required=True); ap.add_argument('--from-bar', type=int, required=True); ap.add_argument('--out', required=True)
 ap.add_argument('--title', default='最后一条算没定（A）还是最后两条算没定（C）'); ap.add_argument('--note', default='')
+ap.add_argument('--plain', action='store_true', help='给小栋看的版本：表头不放文件名、K 线根数（引擎号由 --note 自己决定写不写）')
 a = ap.parse_args()
 out = os.path.abspath(a.out)
 sys.path[:0] = [a.root]; os.chdir(a.root)
@@ -39,7 +40,8 @@ im = Image.new('RGB', (W, 70 + 2 * (PH + 26) + NOTE_H), BG); d = ImageDraw.Draw(
 win = bars[b0:b1 + 1]; lo = min(x['l'] for x in win) * 0.97; hi = max(x['h'] for x in win) * 1.015
 LL, LH = math.log(lo), math.log(hi)
 d.text((ML, 14), a.title, fill=TX, font=F)
-d.text((ML, 42), f'{a.file} · 线段画标准化那一套 · 两格都是第 {N1} 根（{utc(N1 - 1):%m-%d %H:%M}）这一刻；前一刻是第 {N0} 根（{utc(N0 - 1):%m-%d %H:%M}）', fill=MU, font=Fs)
+d.text((ML, 42), (f'线段画标准化那一套 · 两格都是 {utc(N1 - 1):%m-%d %H:%M} 这一刻；前一刻是 {utc(N0 - 1):%m-%d %H:%M}' if a.plain else
+                 f'{a.file} · 线段画标准化那一套 · 两格都是第 {N1} 根（{utc(N1 - 1):%m-%d %H:%M}）这一刻；前一刻是第 {N0} 根（{utc(N0 - 1):%m-%d %H:%M}）'), fill=MU, font=Fs)
 GOLD, RED, AMB = (196, 137, 1), (255, 96, 96), (255, 190, 60)
 
 def dashed(q, x0, y0, x1, y1, col, width, on=12, off=8):
@@ -83,7 +85,10 @@ def panel(k, nopen, tag):
     q.rectangle([0, 0, ML - 1, PH], fill=BG); q.rectangle([0, 0, W, top - 1], fill=BG); q.rectangle([0, bot + 1, W, PH], fill=BG)
     q.rectangle([ML, top, W - MR, bot], outline=(60, 66, 80))
     q.text((ML + 6, 4), tag, fill=TX, font=F)
-    for i in range(b0, b1 + 1, max(1, (b1 - b0) // 10)): q.text((min(W - MR - 48, X(i) - 24), bot + 4), f'{utc(i):%m-%d}', fill=MU, font=Fs)
+    # 刻度：每天的第一根 K 线标一次日期（原来按「窗口十等分」打，十分之一不到一天时同一个日期会出现两次 —— Nova 15:13 看出来的）
+    days = [i for i in range(b0, b1 + 1) if i == b0 or utc(i).date() != utc(i - 1).date()]
+    step = max(1, math.ceil(len(days) / 12))
+    for i in days[::step]: q.text((min(W - MR - 48, X(i) - 24), bot + 4), f'{utc(i):%m-%d}', fill=MU, font=Fs)
     for v in sorted({float(f'{lo * (hi / lo) ** (j / 6):.3g}') for j in range(1, 6)}):
         q.text((6, Y(v) - 8), f'{v:g}', fill=MU, font=Fs); q.line([ML - 5, Y(v), ML, Y(v)], fill=MU)
     im.paste(p, (0, y0))
