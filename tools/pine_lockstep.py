@@ -107,12 +107,11 @@ for f in sorted(os.listdir(os.path.join(tree, "data"))):
         try:
             sg = core.signals(r, lv, "macd", ratio=(0.0 if perturb else 1.0))
             # weak 10-09 下线（第六批）：引擎不再出这个字段，Pine 的 type Sig 还有（Pine 自己算）。没有 weak 的树，照同一条规则
-            #   从 why 推出来（＝ core.signals.newx；这里抄一遍，因为基线那棵旧树里没有 newx）。要在下面「拧 why」之前推，
-            #   不然 why 一拧，推出来的 weak 跟着变，「只改 why 必须不红」那条自检就不成立了。
+            #   用那棵树自己的 core.signals.newx 从 why 推出来（旧树里没有 newx，但旧树的点都带 weak，走不到这一支）。
+            #   要在下面「拧 why」之前推，不然 why 一拧，推出来的 weak 跟着变，「只改 why 必须不红」那条自检就不成立了。
             for x in sg:
                 if "weak" not in x:
-                    w = x.get("why") or ""
-                    x["weak"] = ("创新低" in w or "创新高" in w) and "不创新" not in w
+                    x["weak"] = sys.modules["core.signals"].newx(x)
             if mode == "why":
                 sg = [dict(x, why="拧坏的说明文字") for x in sg]
             out[k] = H([{f: x.get(f) for f in fields} for x in sg])   # 只哈希 Pine 移植了的字段（PINE_SIG_FIELDS）
