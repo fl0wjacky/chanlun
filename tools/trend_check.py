@@ -353,7 +353,7 @@ def main():
     for fn in files:
         sl += ["%s %s" % (fn, x) for x in sl_check(sl_run(fn))]
     cell("⑨ G6 同级别正式口径（%d 份）：中间段有中枢、S5 落在接缝、D2 高低交替、每刀有死因、state 两值且 S5 守 D-4′；"
-         "T1 三段不共用、T2 不升级、T3 [ZD,ZG]、T4 甲／豁免／退回、T5 已确认 D2 窗口里有中枢" % len(files), sl)
+         "T1 三段不共用、T2 不升级、T3 [ZD,ZG]、T3′ 相邻中枢按 [ZD,ZG] 判叠／方向、T4 甲／豁免／退回、T5 已确认 D2 窗口里有中枢" % len(files), sl)
     print("全部通过" if not bad else "%d 处不过" % len(bad))
     return 1 if bad else 0
 
@@ -409,6 +409,24 @@ def sl_check(v):
     for x, y in zip(segs, segs[1:]):
         if y[0] <= x[1]:
             bad.append("T1 中枢共用线段 %s／%s" % (x, y))
+    # T3′（S3／S4，Atlas 10:28 变异＋Nova 10:33）：相邻中枢的上／下／叠一律按 [ZD,ZG] 重算 ——
+    #   同一段走势里相邻两中枢必须不叠、而且同方向；跨 S5 接缝的那一对必须「叠」或者跟前一段的方向相反（不然不该切）
+    zr = lambda z: (None, None, None, None, z["ZD"], z["ZG"])
+    byseg = {}
+    for z in sorted(zz, key=lambda z: z["X0"]):
+        byseg.setdefault(z["seg"], []).append(z)
+    s5bars = {b["bar"] for b in v["bounds"] if b["rule"] == "S5"}
+    for g, cs in byseg.items():
+        rels = [_rel(zr(x), zr(y)) for x, y in zip(cs, cs[1:])]
+        if "叠" in rels or len(set(rels)) > 1:
+            bad.append("T3′ 第 %d 段走势里相邻中枢按 [ZD,ZG] 是 %s，不该同在一段" % (g, rels))
+    ordered = sorted(zz, key=lambda z: z["X0"])
+    for x, y in zip(ordered, ordered[1:]):
+        if x["X1"] in s5bars and x["seg"] != y["seg"]:
+            way = [_rel(zr(p), zr(q)) for p, q in zip(byseg[x["seg"]], byseg[x["seg"]][1:])]
+            r = _rel(zr(x), zr(y))
+            if r != "叠" and way and r == way[0]:
+                bad.append("T3′ S5 刀 %d 两边中枢按 [ZD,ZG] 是「%s」、跟前段同向，不该切" % (x["X1"], r))
     # T2（S6）：同级别不升级
     if v.get("units"):
         bad.append("T2 同级别下 units 不空（%d 个）" % len(v["units"]))
@@ -804,6 +822,14 @@ def self_test():
         v = copy.deepcopy(v0); f(v); hit = [x for x in sl_check(v) if tag in x]
         print("%s G6 拧坏「%s」⇒ 报出 %d 处（例 %s）" % ("✓" if hit else "✗", name, len(hit), hit[:1]))
         miss += not hit
+    _ov = T.SAME_LEVEL_OVERLAP
+    try:
+        T.SAME_LEVEL_OVERLAP = "DDGG"
+        hit = [x for fn in kline_files() for x in sl_check(sl_run(fn)) if x.startswith("T3′")]
+    finally:
+        T.SAME_LEVEL_OVERLAP = _ov
+    print("%s G6 拧坏「判重叠换成 DDGG」⇒ T3′ 自己报出 %d 处（例 %s）" % ("✓" if hit else "✗", len(hit), hit[:1]))
+    miss += not hit
     ok0 = not sl_check(v0)
     print("%s G6 没拧的原样 ⇒ 0 处" % ("✓" if ok0 else "✗"))
     miss += not ok0
