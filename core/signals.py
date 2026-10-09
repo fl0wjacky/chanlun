@@ -18,10 +18,20 @@
     确认 vs 待确认：点所在的那一段已经走完（后面又出了一段）才算确认；还在走的记为待确认
     （confirmed=False），之后可能被改掉或消失。线段层只用已完成线段算中枢，所以待确认只来自最后那条未完成线段。
 
-返回 [dict(kind="一买"…, bar=原始K线下标, price, confirmed, weak, level, center=中枢序号), ...]，按 bar 排序。
+返回 [dict(kind="一买"…, bar=原始K线下标, price, confirmed, level, center=中枢序号[, why]), ...]，按 bar 排序。
+★ 10-09 起不再出 `weak`（第六批，card-bb93e074-3c6 第 2 条；Nova 定的「先两个都给」，前端已经改读 why）。
+  原来的 weak ≡ 「这颗二类创新低／创新高了」，现在从 why 读：`newx(sig)`。
 """
 from .center import find_centers
 from .extend import build_hierarchy
+
+
+def newx(sig):
+    """这颗点是不是「创新低／创新高」的那一种（＝ 原来的 weak）。只看 why：「创新低＋盘整背驰」「小转大·创新低＋盘整背驰」
+    「创新低（未查盘整背驰）」都算；「不创新低」「小转大」不算；没有 why 的（一类、三类）一律不算 —— 跟原来 weak 的取值逐颗相同
+    （10-09 在 25 张上对过，见 card-bb93e074-3c6）。"""
+    w = sig.get("why") or ""
+    return ("创新低" in w or "创新高" in w) and "不创新" not in w
 
 
 def macd_lines(bars, fast=12, slow=26, sig=9):
@@ -319,9 +329,9 @@ def signals(r, level="seg", measure="macd", ratio=1.0, fast=12, slow=26, sig=9,
     done_idx = lambda q: q < len(AU) - (1 if last_live else 0)   # 这一段已经走完（后面又出了一段）
     out = []
 
-    def add(kind, q, k, weak=False):
+    def add(kind, q, k):
         u = AU[q]
-        out.append(dict(kind=kind, bar=u["i1"], price=u["p1"], confirmed=done_idx(q), weak=weak,
+        out.append(dict(kind=kind, bar=u["i1"], price=u["p1"], confirmed=done_idx(q),
                         level=level, center=k + 1, unit=q))
 
     # ---- 第三类：与中枢终结同一口径 ----
@@ -350,23 +360,23 @@ def signals(r, level="seg", measure="macd", ratio=1.0, fast=12, slow=26, sig=9,
                 continue
             C, c = AU[blk["c"]], blk["c"]
             confirmed = bool(blk["ok"]) and done_idx(c)
-            pt = dict(kind=k1, bar=C["i1"], price=C["p1"], confirmed=confirmed, weak=False,
+            pt = dict(kind=k1, bar=C["i1"], price=C["p1"], confirmed=confirmed,
                       level=level, center=k + 1, unit=c)
             if measure == "macd_or_lines":                                # 「更标准」只打标记，不另出点（六.3(b)）
                 pt["std"] = all(_diverges(blk["A"], C, want_down, hist[m], m, ratio) for m in OR_PARTS)
             out.append(pt)
             if confirmed and c + 2 < len(AU):                             # 第二类：一买后第二段次级别走势的终点
                 s2 = AU[c + 2]
-                weak = (s2["p1"] < C["p1"]) if want_down else (s2["p1"] > C["p1"])
+                nx = (s2["p1"] < C["p1"]) if want_down else (s2["p1"] > C["p1"])
                 # M29（买卖点.md:109，L53／L57 正文；第四批）：次级别下、次级别上，不创新低，或者创新低但有盘整背驰，才是二类。
                 #   盘整背驰拿二类三段里的第一段（一买那段 C）跟第三段 s2 比（L27「把第一、第三段看成两个走势类型之间的比较」）。
-                #   创新低又没有盘整背驰 ⇒ 不是二类，不出（原来留着标「弱」）。weak 字段先留着给前端，前端换成读 why 以后再删。
-                if not _M29:
-                    add(k2, c + 2, k, weak)
-                elif not weak:
-                    add(k2, c + 2, k, weak); out[-1]["why"] = "不创新低" if want_down else "不创新高"
+                #   创新低又没有盘整背驰 ⇒ 不是二类，不出（原来留着标「弱」）。weak 字段 10-09 下线（第六批），创新低与否从 why 读（newx）。
+                if not nx:
+                    add(k2, c + 2, k); out[-1]["why"] = "不创新低" if want_down else "不创新高"
+                elif not _M29:                                            # 探针：关掉 M29 ⇒ 创新低的照旧出（原来的「弱」），why 写明没查
+                    add(k2, c + 2, k); out[-1]["why"] = "创新低（未查盘整背驰）" if want_down else "创新高（未查盘整背驰）"
                 elif _panzheng(C, s2, want_down, hist, measure, ratio):
-                    add(k2, c + 2, k, weak); out[-1]["why"] = "创新低＋盘整背驰" if want_down else "创新高＋盘整背驰"
+                    add(k2, c + 2, k); out[-1]["why"] = "创新低＋盘整背驰" if want_down else "创新高＋盘整背驰"
     out.sort(key=lambda s: (s["bar"], s["kind"]))
     return out
 
