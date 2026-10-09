@@ -370,7 +370,7 @@ def main():
     for fn in files:
         sl += ["%s %s" % (fn, x) for x in sl_check(sl_run(fn, lock=True))]
     cell("⑨′ 附加一档：同一套 G6 检查在笔锁开下（%d 份）" % len(files), sl)
-    cell("⑨″ ⑨ 量的就是线上口径：sl_run 的刀和段跟 core.pen 默认锁值（%s）跑出来的逐份一样" % _PEN_LOCK_DEFAULT, prod_same(files))
+    cell("⑨″ ⑨ 量的就是线上口径：sl_run 的刀、段、中枢跟 core.pen 默认锁值（%s）跑出来的逐份一样" % _PEN_LOCK_DEFAULT, prod_same(files))
     print("全部通过" if not bad else "%d 处不过" % len(bad))
     return 1 if bad else 0
 
@@ -399,7 +399,8 @@ def sl_run(fn, lock=None):
         PEN.PEN_FINAL_LOCK = lk
 def prod_same(files):
     """⑨″：sl_run（⑨ 主跑用的那套）对 线上口径（SL_FLAGS＋core.pen 默认锁值）逐份比刀和段。不一样 ⇒ ⑨ 量的不是线上那套。"""
-    key = lambda v: ([(b["bar"], b["kind"], b["rule"], b.get("state")) for b in v["bounds"]], [(g["i0"], g["type"]) for g in v["segments"]])
+    key = lambda v: ([(b["bar"], b["kind"], b["rule"], b.get("state")) for b in v["bounds"]], [(g["i0"], g["type"]) for g in v["segments"]],
+                     [(z["X0"], z["X1"], round(z["ZD"], 8), round(z["ZG"], 8)) for z in v["seg_centers"]])   # 中枢也比（Nova 21:1x：漏比中枢会放过只差中枢的那种）
     bad = []
     for fn in files:
         if key(sl_run(fn)) != key(sl_run(fn, lock=_PEN_LOCK_DEFAULT)):
