@@ -148,15 +148,15 @@ done
 # 一格可以带开关：「文件 开关…」用空格隔开（下面跑的时候按空格拆）。`web_more_e2e.js --selftest` 是 ㉑ 那条竞态的牙：
 #   故意把最后几档扣住，旧写法（死等 3 秒）必须红、现写法必须绿，两条都对才 rc=0（card-c5a625b8-a14，Nova 10-08 23:52 定接进来）。
 SUITES=(tools/web_ghost_e2e.js tools/web_more_e2e.js "tools/web_more_e2e.js --selftest" tools/web_readout_e2e.js tools/web_measure_e2e.js tools/web_fs_drag_e2e.js)
-# ★ web_decisions_e2e（card-fe3aebd3-819）：决策树页读 ?mock=1，不靠临时后台有没有数据文件；口令和回码那半归 web/check_decisions.py。
-#   单起一行追加：上面那行同级别前端支也要加一格，同一行两边都改就会冲突。
-SUITES+=(tools/web_decisions_e2e.js)
 # ★ web_fs_drag_e2e（card-c90f0f08-3ac）：拖过再进/出全屏，视口不许跳回最初那一屏。web_measure_e2e 的全屏格是**没拖过**就进，量不到这个。
 # ★ subhead_slot_probe 挂在 --all 档、**不进默认档**（Nova 2026-10-05 16:04）：它要真后台连点十二次开关、
 #   跑将近一分钟，只有上线前那一趟值这个时间。它钉的是「副图页头拿格高 0 摆位置」（card-9b0fe913-758）。
 # ★★ 它跟 68decdd 是**一对**：改前那一棵树（`e494d90`）上它 5/12 红。所以这支**必须在 68decdd 之后并**
 #   —— 先并它再并 68decdd，中间的 main 上 `--all` 就是红的（那不是它报错，是它说的实话）。
 [ $ALL = 1 ] && SUITES+=(tools/web_macd_axis.js tools/web_mobile_share.js tools/web_readout_swap_probe.js tools/web_subhead_slot_probe.js)
+# ★ web_decisions_e2e（card-fe3aebd3-819）：决策树页读 ?mock=1，不靠临时后台有没有数据文件；口令和回码那半归 web/check_decisions.py。
+#   单起一行追加：SUITES=(…) 那行同级别前端支也要加一格，同一行两边都改就会冲突。
+SUITES+=(tools/web_decisions_e2e.js)
 
 frontend_skip() {  # 原因 —— 浏览器 / 后台起不来：每一套都记「未执行」，不许当绿
   for s in "${SUITES[@]}"; do record "$s" 未执行 "前端未执行：$1"; done
