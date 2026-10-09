@@ -415,6 +415,8 @@ def _layer(done, ks, bounds_, reading, n):
             k, up = classify(cz, reading, done)
             if k == want and not (_D6_BASE_ONLY and up):
                 pick = cz
+        if pick is None and R6_YI_PRIME and g and bks.get(a) in ("L", "H"):
+            pick = classify_relations(_group_centers(done, a + 1, b, g, last))
         if pick is None:
             pick = [dict(z, seg=g) for z in free]
         grouped += pick
@@ -585,6 +587,8 @@ SAME_LEVEL = False                                # 决策树 R-1 还没定：�
 SAME_LEVEL_OVERLAP = "ZDZG"                       # S3「判重叠用哪个区间」小栋还没认：ZDZG（拟）或 DDGG，两个都量
 SAME_LEVEL_D6 = None                              # R-6 甲在同级别下：None＝不限方向（乙粗版）；"strict"＝分界之后的组，中枢首段须跟走势反向（上涨里下上下）；
                                                   #   "fallback"＝同 strict，但这样判不出同方向趋势就退回不限方向（照 D6-4）
+R6_YI_PRIME = False                               # R-6 乙′（读法-R3R6 一·5，Atlas c11fe60）：分界之后每段，从分界极值出发的第一条线段 a 不进第一个中枢；
+                                                  #   第一个中枢从跟 a 反向的那条起找（找不到就整体往后挪两条，照 L39 把 a 并成 a′）。中枢形状不限。
 SAME_LEVEL_D2 = False                             # S9：D2 的参照中枢也换成同级别三段中枢（R-1＝A 以后的「完整同级别」）
 SAME_LEVEL_C8 = None                              # S10 丙8 在同级别下：None＝照现行；"filter"＝甲（只有趋势背驰／盘整背驰的死点才确立）；
                                                   #   "direct"＝乙（背驰点直接切，不等反向三类点；后面再出新极值就挪刀，记 moved）
@@ -620,6 +624,21 @@ def _sl_rel(z1, z2):
     if z2[hi] < z1[lo]:
         return "下"
     return "叠"
+
+
+def _yi_prime_centers(done, a, b):
+    """乙′（同级别）：a＝done[a] 不进第一个中枢。第一个中枢的首段要跟 a 反向，从 a+1 起找，三段不重叠就往后挪两条（a 并成 a′）；
+    第一个找到以后，后面的照 S1／S2 接着找、不限形状。"""
+    first, k = None, a + 1
+    while k + 2 < b:
+        lo = max(done[q]["lo"] for q in range(k, k + 3)); hi = min(done[q]["hi"] for q in range(k, k + 3))
+        if lo <= hi:
+            first = k
+            break
+        k += 2
+    if first is None:
+        return []
+    return _sl_centers(done, first, b)
 
 
 def _sl_centers_with_cuts(done, ks):
@@ -663,6 +682,8 @@ def _sl_layer(done, ks, bounds_, n):
             ok = len(zr) >= 2 and _sl_rel(zr[0], zr[1]) == ("上" if want_up else "下")
             if SAME_LEVEL_D6 == "strict" or ok:
                 zz = zr
+        if R6_YI_PRIME and g and bk.get(a) in ("L", "H"):
+            zz = _yi_prime_centers(done, a, b)
         start, cur, way = a, [], None
         for z in zz:
             if cur:
