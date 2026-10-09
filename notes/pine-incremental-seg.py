@@ -77,10 +77,12 @@ def _mk_live(pens, i, n, seg_dir):
 #   另认 S7 的 case 3（暂定）：不进只增的缓存、扫描位置不动、之后不再往下切（Pine zSegTent）。
 BORN_CASE1_ONLY = True        # 只给 --self-test 的臂关：born 退回旧写法（第二种情况的 at 也当 born）
 KNOW_TENTATIVE = True         # 只给 --self-test 的臂关：不认 case 3（暂定当成已确认段缓存起来）
+MIRROR_L77 = True             # 只给 --self-test 的臂关：镜像里不做 L77 第二支（Pine zSegStep 那段 e77），引擎照做 ⇒ 必须对不上
 
 
-def _scan(pens, i, born, have_segs, mode, memo):
-    """从 (i, born) 起往后扫，照 Pine 的内层循环。→ (新确认的段, i, born, 暂定 (PI0, PI1) 或 None)。"""
+def _scan(pens, i, born, have_segs, mode, memo, last=None, prevA=None):
+    """从 (i, born) 起往后扫，照 Pine 的内层循环。→ (新确认的段, i, born, 暂定 (PI0, PI1) 或 None, prevA)。
+    last：上一次已确认的最后一段（增量时在缓存里）；prevA：它由 ② 坐实时那个反向线段 A（Pine zSegA，跨根留着）。"""
     n, out, tent = len(pens), [], None
     while i + 2 < n:
         if not _opening_overlaps(pens, i):
@@ -100,11 +102,19 @@ def _scan(pens, i, born, have_segs, mode, memo):
             if res is not None:
                 while k < res:
                     k += 2
+        # L77 第二支（Pine：zSegStep 里 e77 那一段）：N 收了（照常或合段）才清 prevA；N 还在等，留到下一根再问
+        prev_seg = out[-1] if out else last
+        if SG.L77_MERGE and MIRROR_L77 and prevA is not None and prev_seg is not None and prev_seg["PI1"] == i - 1:
+            e77 = SG._l77_end(pens, i, dict(prev_seg, _A=prevA), mode, memo, found[0] if found else None, born)
+            if e77 is not None:
+                out.append(_mk_seg(pens, i, e77, 4, d))
+                i, born, prevA = e77 + 1, 0, None
+                continue
         if found is None:
             break
         e, case, at = found
         first = not have_segs and not out
-        if first and SG.HEAD_DIR_FIX and ((d == "down" and pens[e]["p1"] >= pens[i]["p0"]) or
+        if first and SG.HEAD_DIR_FIX and not (SG.HEAD_DIR_NO_TENT and case == 3) and ((d == "down" and pens[e]["p1"] >= pens[i]["p0"]) or
                                           (d == "up" and pens[e]["p1"] <= pens[i]["p0"])):
             i, born = i + 1, 0
             continue
@@ -120,8 +130,9 @@ def _scan(pens, i, born, have_segs, mode, memo):
             break
         born = (at or 0) if (case in (1, 3) or not BORN_CASE1_ONLY) else 0
         out.append(_mk_seg(pens, i, e, case, d))
+        prevA = memo.get(("A", i, e)) if case == 1 else None
         i = e + 1
-    return out, i, born, tent
+    return out, i, born, tent, prevA
 
 
 def _assemble(pens, segs, i, tent):
@@ -139,18 +150,19 @@ def _assemble(pens, segs, i, tent):
 
 def whole(pens, mode):
     """Pine buildSegments 的镜像（B 模式在 Pine 里只走这条）。"""
-    segs, i, _, tent = _scan(pens, 0, 0, False, mode, {})
+    segs, i, _, tent, _ = _scan(pens, 0, 0, False, mode, {})
     return _assemble(pens, segs, i, tent)
 
 
 class IncSegments:
     """Pine zSegStep 的镜像（A 模式）：只存 (i, born) 和只增的已确认段；暂定每次续扫重算、不进缓存。"""
     def __init__(self, mode=FEAT_STD_A):
-        self.mode, self.pens, self.segs, self.i, self.born, self.tent = mode, [], [], 0, 0, None
+        self.mode, self.pens, self.segs, self.i, self.born, self.tent, self.prevA = mode, [], [], 0, 0, None, None
 
     def feed(self, pen):
         self.pens.append(pen)
-        new, self.i, self.born, self.tent = _scan(self.pens, self.i, self.born, bool(self.segs), self.mode, {})
+        new, self.i, self.born, self.tent, self.prevA = _scan(self.pens, self.i, self.born, bool(self.segs), self.mode, {},
+                                                              self.segs[-1] if self.segs else None, self.prevA)
         self.segs += new
         return self
 
@@ -233,7 +245,8 @@ def rand_pens(rng, n, tick):
 def self_test():
     """正臂（Nova 10-08 16:06 定的牙）：
       ① born 退回旧写法（第二种情况的 at 也当 born）⇒ A 模式必须红；
-      ② 不认 case 3（暂定当成已确认段缓存）⇒ 有暂定的那张（data/aaplusdt_2h.json）必须红。"""
+      ② 不认 case 3（暂定当成已确认段缓存）⇒ 有暂定的那张（data/aaplusdt_2h.json）必须红；
+      ③ 镜像不做 L77 第二支（引擎照做）⇒ 夹具 1300 整段镜像跟引擎必须对不上。"""
     global BORN_CASE1_ONLY, KNOW_TENTATIVE
     data = dict(load_real())
     ok = True
@@ -252,6 +265,18 @@ def self_test():
         KNOW_TENTATIVE = True
     print("  %s 臂 ② 不认暂定（case 3）⇒ %s %s" % ("✓" if red2 else "✗", fn, "红" if red2 else "没红"))
     ok &= red2
+    # ③ 镜像不做 L77 第二支（引擎照做）⇒ 夹具 1300 的整段镜像必须跟引擎对不上（第五批，card-c784a101-791）
+    global MIRROR_L77
+    P = json.load(open(os.path.join(ROOT, "tools", "fixtures", "l77_pens.json")))["seeds"]["1300"]
+    eng = [(x["PI0"], x["PI1"]) for x in SG.build_segments(P)]
+    MIRROR_L77 = False
+    try:
+        mir = [(x["PI0"], x["PI1"]) for x in whole(P, FEAT_STD_A)]
+    finally:
+        MIRROR_L77 = True
+    red3 = mir != eng
+    print("  %s 臂 ③ 镜像不做 L77 第二支 ⇒ 1300 整段镜像跟引擎 %s" % ("✓" if red3 else "✗", "对不上（红）" if red3 else "一样（没红）"))
+    ok &= red3
     if not ok:
         print("★ 正臂没红 ⇒ 这把尺不算数（exit=3）")
     return ok
