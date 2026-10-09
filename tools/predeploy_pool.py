@@ -26,6 +26,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # 10-08 逐条计时（串着跑、机器空）里最长的几条，长的先发（秒数只是排序用的参考，不判）
 LONG_FIRST = [
+    "tools/seg_prefix_check.py --bars",   # 173（4 路，10-09 机器上有别的在跑）
     "tools/seg_prefix_check.py",          # 306（切片前）
     "tools/selfcheck.py",                 # 119
     "web/check_parity.py --self-test",    # 60
