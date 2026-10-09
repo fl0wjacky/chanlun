@@ -46,7 +46,7 @@ def guess(fn):
     raise SystemExit("认不出标的（文件名要以 %s 开头）：%s" % ("/".join(SYMBOL), fn))
 
 
-def shape(bars, tick, symbol, tf, now_ms=None, min_gap=None):
+def shape(bars, tick, symbol, tf, now_ms=None, min_gap=None, pen="old"):
     """K 线 → 前端吃的那一份 JSON（dict）。**后台 web/server.py 也调这一个**：形状只在这里定义一处。
 
     now_ms：判「最后一根收没收盘」用的当前时间（毫秒）；None = 现在。
@@ -54,7 +54,7 @@ def shape(bars, tick, symbol, tf, now_ms=None, min_gap=None):
     """
     if tf not in STEP_MS:
         raise SystemExit("周期要在 %s 里：%s" % ("/".join(STEP_MS), tf))
-    r = analyze(bars, tick=tick, min_gap=min_gap)
+    r = analyze(bars, tick=tick, pen=pen, min_gap=min_gap)
     nd = len(r["bars"])
     closed = r["bars"][-1]["t"] + STEP_MS[tf] <= (now_ms or datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000)
     big = []
@@ -79,7 +79,7 @@ def shape(bars, tick, symbol, tf, now_ms=None, min_gap=None):
         # 两层各一份：前端只按 tier 取，不自己判（判据在 core/signals.py 一处）
         signals={"seg": signals(r, "seg", "macd"), "pen": signals(r, "pen", "macd")},
         # 口径只读展示：这两项是**这次分析用的参数**，前端不做成开关（改了它就得整段重算，那是后台的事）
-        meta=dict(tick=r["tick"], pen_rule=r["pen_rule"], min_gap=r["min_gap"]),
+        meta=dict(tick=r["tick"], pen_rule=r["pen_rule"], min_gap=r["min_gap"] if pen == "old" else None),
     )
 
 

@@ -26,7 +26,8 @@
   GET /api/tick?symbol=&tf=  → 最后一根（未收盘）K 线 {t,o,h,l,c,v} ＋ fetched_at / stale / engine。同一格 2.5 秒内只碰
         一次币安（单飞，多人同看不放大）；失败回上次成功的值、stale=true；从没成功过 503。**不碰结构**（小栋 10-05 A：
         最后一根实时跳价，笔段中枢买卖点仍收盘才由 /api/chart 整份重算）。
-  GET /api/chart …&pen_min=6|7  → 笔最少几根 K 线（C3，小栋 10-08 定：默认 6、可切 7）。白名单外 400；回显 pen_min；
+  GET /api/chart …&pen_min=6|7|new  → 笔最少几根 K 线（C3，小栋 10-08 定：默认 6、可切 7）；new＝新笔（B-10＝C，小栋 10-09 定，
+        L81 附帖，三选一：新笔不读最少根数）。白名单外 400；回显 pen_min（new 时回 null，meta.pen_rule＝"new"）；
         /api/meta 回 pen_min_options、pen_min_default。只换笔这一层（往上线段、中枢、走势、买卖点跟着整段重算），不碰币安。
   GET /api/chart …&cut=extend|trend  → 线段中枢的切法。**默认 trend**（docs/spec/走势分段.md v3，card-51571a5f-dc2）：
         在本级别确立的走势分界处切开，seg_centers 回切开重算的那套（D4），顶层多 trend:{bounds, retracted, pending,
@@ -127,7 +128,7 @@ def _clean(v):
 
 # 笔最少几根 K 线（C3，小栋 10-08 12:42 拍 ①B：默认 6、可切回 7）。跟 core/pen.MIN_GAP_DEFAULT 一致（selfcheck 不查这一条，改一处记得改另一处）。
 #   6 根 ＝ 顶分型和底分型之间可以没有独立 K 线（L106:4）＝ 标准化序列上 k 相差 ≥ 3；7 根 ＝ 之间至少一根独立 K 线（L62:17、L77:37）＝ ≥ 4。
-PEN_MIN_OPTIONS = (6, 7)
+PEN_MIN_OPTIONS = (6, 7, "new")                 # "new"＝新笔（B-10＝C）：跟 6／7 三选一，不是叠加的开关
 DEFAULT_PEN_MIN = 6
 
 
@@ -135,9 +136,14 @@ def gap_of(pen_min):
     return pen_min - 3
 
 
+def pen_kw(pen_min):
+    """pen_min（6／7／"new"）→ analyze 的笔参数。新笔走 core/pen 的 rule="new"，far() 自带判据、不读 min_gap。"""
+    return dict(pen="new") if pen_min == "new" else dict(min_gap=gap_of(pen_min))
+
+
 def build_payload(bars, symbol, tf, pen_min=DEFAULT_PEN_MIN):
     """bars（fetch_klines 的格式）→ 前端那一份。形状 = make_web_fixture.shape，这里只补精度。"""
-    return _clean(shape(bars, tick_of(SYMBOLS[symbol] + "_.json"), symbol, tf, min_gap=gap_of(pen_min)))
+    return _clean(shape(bars, tick_of(SYMBOLS[symbol] + "_.json"), symbol, tf, **pen_kw(pen_min)))
 
 
 # ───────────────────────── 缓存：每个（品种, 周期）一格 ─────────────────────────
@@ -392,7 +398,7 @@ def _base_body(slot, symbol, tf, pen_min):
     if b is None:
         head = json.loads(slot.body)
         d = {k: head[k] for k in ("fetched_at", "stale", "refreshing", "span", "earliest", "span_max", "measure", "cut", "engine")}
-        d["pen_min"] = pen_min
+        d["pen_min"] = None if pen_min == "new" else pen_min     # 新笔没有「最少几根」可回显（跟 Iris 10-09 06:34 定的）
         d.update(build_payload(slot.bars, symbol, tf, pen_min))
         b = slot.mbodies[key] = json.dumps(d, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
     return b
@@ -407,7 +413,7 @@ def _cut_cc(slot, symbol, pen_min=DEFAULT_PEN_MIN):
     """在 slot.lock 里调用 → (seg_centers, trend, reading)：v3 只用线段 ⇒ 跟看法无关，一格（每档笔根数）算一次（数据一刷新随 mbodies 清掉）。"""
     cc = slot.mbodies.get((CUT_KEY, pen_min))
     if cc is None:
-        r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"), min_gap=gap_of(pen_min))
+        r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"), **pen_kw(pen_min))
         v = trend_v3(r, reading=TREND_READING)
         cc = slot.mbodies[(CUT_KEY, pen_min)] = (v["seg_centers"], {k: v[k] for k in TREND_KEYS}, v["reading"])
     return cc
@@ -472,7 +478,7 @@ def _measure_body(slot, symbol, tf, measure, cut=DEFAULT_CUT, pen_min=DEFAULT_PE
     b = slot.mbodies.get((measure, pen_min))
     if b is None:
         d = json.loads(_base_body(slot, symbol, tf, pen_min))
-        r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"), min_gap=gap_of(pen_min))
+        r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"), **pen_kw(pen_min))
         d["signals"] = _clean({"seg": engine_signals(r, "seg", measure), "pen": engine_signals(r, "pen", measure)})
         d["measure"] = measure
         b = slot.mbodies[(measure, pen_min)] = json.dumps(d, ensure_ascii=False, separators=(",", ":"),
@@ -709,8 +715,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._err(400)                     # 切法只认 extend / trend（turn 当 trend 收）
             pm_raw = q.get("pen_min", [str(DEFAULT_PEN_MIN)])[0]
             if pm_raw not in {str(v) for v in PEN_MIN_OPTIONS}:
-                return self._err(400)                     # 笔最少根数只认 "6" "7"（C3）
-            got = get_chart(symbol, tf, span, measure=measure, cut=cut, pen_min=int(pm_raw))
+                return self._err(400)                     # 笔只认 "6" "7" "new"（C3、B-10）
+            got = get_chart(symbol, tf, span, measure=measure, cut=cut, pen_min=pm_raw if pm_raw == "new" else int(pm_raw))
             if got is None:
                 return self._err(503)
             return self._send(200, got[0], gz=got[1])

@@ -59,8 +59,8 @@ def norm(v):
     return v
 
 
-def reference(bars, fn, min_gap=None):
-    r = analyze(bars, tick=tick_of(fn), min_gap=min_gap)
+def reference(bars, fn, min_gap=None, pen="old"):
+    r = analyze(bars, tick=tick_of(fn), pen=pen, min_gap=min_gap)
     big = []
     for b in r["big"]:
         b = dict(b)
@@ -356,7 +356,8 @@ def run_wolf(quiet=False):
 
 
 def run_pen_min(quiet=False):
-    """C3 笔最少根数（小栋 10-08）：① 每份数据 pen_min=6／7 两档，服务吐的结构 ≡ 引擎 analyze(min_gap=根数−3) 原样那份；
+    """C3 笔最少根数（小栋 10-08）＋ B-10 新笔（小栋 10-09 C）：① 每份数据 pen_min=6／7／new 三档，服务吐的结构 ≡ 引擎
+    analyze(min_gap=根数−3)／analyze(pen="new") 原样那份，new 那档回显 pen_min=null、meta.pen_rule="new"；
     ② 不带 pen_min ＝ 默认档、回显 pen_min；③ 名单外的值 400；④ /api/meta 的 pen_min_options／pen_min_default 跟进程一致。"""
     files = sorted(os.path.basename(p) for p in glob.glob(data("*.json")))
     cases = [(fn, k) for fn, k in ((fn, dataset(fn)) for fn in files) if k]
@@ -366,20 +367,23 @@ def run_pen_min(quiet=False):
         for fn, (sym, tf) in cases:
             diffs = []
             for pm in server.PEN_MIN_OPTIONS:
-                got = get_path(port, "/api/chart?symbol=%s&tf=%s&cut=extend&pen_min=%d" % (sym, tf, pm))
-                d = compare(reference(bars_by_key[(sym, tf)], fn, min_gap=pm - 3), flat(got))
+                got = get_path(port, "/api/chart?symbol=%s&tf=%s&cut=extend&pen_min=%s" % (sym, tf, pm))
+                ref = reference(bars_by_key[(sym, tf)], fn, pen="new") if pm == "new" else \
+                    reference(bars_by_key[(sym, tf)], fn, min_gap=pm - 3)
+                d = compare(ref, flat(got))
                 if d:
-                    diffs.append("pen_min=%d：%s" % (pm, " ｜ ".join(d[:2])))
-                if got.get("pen_min") != pm:
-                    diffs.append("pen_min=%d 回显成 %r" % (pm, got.get("pen_min")))
+                    diffs.append("pen_min=%s：%s" % (pm, " ｜ ".join(d[:2])))
+                want = None if pm == "new" else pm
+                if got.get("pen_min") != want:
+                    diffs.append("pen_min=%s 回显成 %r（该是 %r）" % (pm, got.get("pen_min"), want))
             dflt = get(port, sym, tf)
             if dflt.get("pen_min") != server.DEFAULT_PEN_MIN:
                 diffs.append("不带 pen_min 回显 %r ≠ 默认 %r" % (dflt.get("pen_min"), server.DEFAULT_PEN_MIN))
             bad += bool(diffs)
             if not quiet:
-                print("%s %-18s %s %-3s 笔根数两档%s" % ("✗" if diffs else "✓", fn, sym, tf, "  ← " + " ｜ ".join(diffs) if diffs else ""))
+                print("%s %-18s %s %-3s 笔三档%s" % ("✗" if diffs else "✓", fn, sym, tf, "  ← " + " ｜ ".join(diffs) if diffs else ""))
         sym, tf = cases[0][1]
-        for v in ("5", "8", "06", "6.0", ""):
+        for v in ("5", "8", "06", "6.0", "", "NEW", "old", "new7"):
             try:
                 get_path(port, "/api/chart?symbol=%s&tf=%s&pen_min=%s" % (sym, tf, v))
                 bad += 1
@@ -393,7 +397,7 @@ def run_pen_min(quiet=False):
             if not quiet:
                 print("✗ /api/meta pen_min_options／pen_min_default 不对：%r %r" % (m.get("pen_min_options"), m.get("pen_min_default")))
     if not quiet:
-        print("笔根数 %d 份 × 两档：不一致 %d" % (len(cases), bad))
+        print("笔 %d 份 × 三档（6／7／new）：不一致 %d" % (len(cases), bad))
     return bad
 
 
@@ -662,6 +666,16 @@ def self_test():
         finally:
             server.gap_of = real
     arms.append(("笔根数参数收了不用", arm_pen_min_ignored))
+
+    def arm_pen_new_ignored():
+        """后台收了 pen_min=new 却照老笔 6 根算（新笔没接上）⇒ new 那档必须对不上。"""
+        real = server.pen_kw
+        server.pen_kw = lambda pm: dict(min_gap=3) if pm == "new" else real(pm)
+        try:
+            return run_pen_min(quiet=True)
+        finally:
+            server.pen_kw = real
+    arms.append(("新笔参数收了不用", arm_pen_new_ignored))
 
     def arm_engine_stale():
         """副图那份头部的引擎版本不跟着进程（比如缓存里留着旧值）⇒ 前端分不出换没换引擎，必须红。"""
