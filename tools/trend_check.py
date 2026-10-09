@@ -316,7 +316,19 @@ def no_future_xzd(fn):
     return bad
 
 
+# ①～⑧ 和 --self-test 的 P／D 臂守的是**非同级别**那条老路（spec §三 的基线就是它量的）。同级别成了正式版默认以后，
+#   这些格要显式钉回老路，不然基线、不变量都会对着同级别去比；同级别那条路由 ⑨（sl_run）自己开开关量。
+LEGACY = dict(SAME_LEVEL=False, SAME_LEVEL_D2=False, SAME_LEVEL_D6=None, SL_FIRST_EXEMPT=False, SAME_LEVEL_DEATH=False, D25_FILL=0)
+
+
+def _pin_legacy():
+    for k, v in LEGACY.items():
+        setattr(T, k, v)
+    _R.clear()                                        # run() 的缓存是 analyze 的结果，跟走势层开关无关；清一下图个干净
+
+
 def main():
+    _pin_legacy()
     bad = []
 
     def cell(name, items):
@@ -560,6 +572,7 @@ def retract_once():
 
 def self_test():
     """spec §四：P1 不重算 ⇒ zec15 3 个；P2 不交替 ⇒ 撤回 20；P5 不查空段 ⇒ 7 个。各自必须变。"""
+    _pin_legacy()
     _, base = run("zec15.json")
     # P1：R6＝B 以后「不重算」少掉的 H 之后的中枢被读法 B 补上了，10 份样本、线上 15 张的分界列表都不变 ⇒ 比刀数没牙。
     #   改比 (高低, bar, 回抽段终点)：zec15 的 L 250（bar 9043）回抽段终点 9352 → 10283（参照中枢 [336.22, 399.98] → [413.61, 446.74]）
