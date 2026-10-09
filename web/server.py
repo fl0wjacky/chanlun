@@ -67,6 +67,8 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 from config import tick_of                              # noqa: E402
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import decisions                                        # noqa: E402  决策树网页的数据和存选择（web/decisions.py）
+import withdrawn                                        # noqa: E402  「已撤回」账本（web/withdrawn.py，Q-6 A）
+import core.trend as _T                                 # noqa: E402  只读 SAME_LEVEL：同级别没开就不记、不送 withdrawn
 from fetch_klines import BASE as BINANCE_KLINES, UA, fetch as binance_fetch   # noqa: E402
 from make_web_fixture import iso, shape                 # noqa: E402
 from core.analyze import analyze                        # noqa: E402
@@ -411,13 +413,23 @@ def _base_body(slot, symbol, tf, pen_min):
 TREND_KEYS = ("bounds", "retracted", "pending", "segments", "units", "xzd_seconds")
 
 
-def _cut_cc(slot, symbol, pen_min=DEFAULT_PEN_MIN):
+WD_KEY = "__withdrawn__"                 # mbodies 里「已撤回」那一份的键（随 _cut_cc 一起算、随数据刷新清掉）
+
+
+def _cut_cc(slot, symbol, pen_min=DEFAULT_PEN_MIN, tf=None):
     """在 slot.lock 里调用 → (seg_centers, trend, reading)：v3 只用线段 ⇒ 跟看法无关，一格（每档笔根数）算一次（数据一刷新随 mbodies 清掉）。"""
     cc = slot.mbodies.get((CUT_KEY, pen_min))
     if cc is None:
         r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"), **pen_kw(pen_min))
         v = trend_v3(r, reading=TREND_READING)
         cc = slot.mbodies[(CUT_KEY, pen_min)] = (v["seg_centers"], {k: v[k] for k in TREND_KEYS}, v["reading"])
+        if _T.SAME_LEVEL and tf is not None and withdrawn.ENABLED:
+            # 「已撤回」（Q-6 A）：一份数据一个笔档只在这里算一次 ⇒ 每次重算比一次上次。账本出错不许拖垮出图：记日志、这一格不带 withdrawn
+            try:
+                withdrawn.observe((symbol, tf, slot.span, pen_min), slot.bars, v, r["segs"])
+                slot.mbodies[(WD_KEY, pen_min)] = withdrawn.view(symbol, tf, pen_min, spans_of(tf), slot.bars, v, r["segs"])
+            except Exception:
+                log("withdrawn failed", symbol, tf, slot.span, pen_min, traceback.format_exc().replace("\n", " | "))
     return cc
 
 
@@ -467,9 +479,11 @@ def _measure_body(slot, symbol, tf, measure, cut=DEFAULT_CUT, pen_min=DEFAULT_PE
         b = slot.mbodies.get((measure, cut, pen_min))
         if b is None:
             d = json.loads(_measure_body(slot, symbol, tf, measure, "extend", pen_min))   # 从不切的那份派生
-            cc = _cut_cc(slot, symbol, pen_min)
+            cc = _cut_cc(slot, symbol, pen_min, tf)
             d["seg_centers"], d["trend"], d["cut"] = _clean(cc[0]), _clean(cc[1]), cut
             d["trend_reading"] = cc[2]                    # D3 读法回显：前端据此决定字母挂哪一级（Nova 10-05 16:4x）
+            if (WD_KEY, pen_min) in slot.mbodies:         # 同级别开着才有；顶层，跟 trend.retracted（D2-7 图内撤刀）是两回事
+                d["withdrawn"] = _clean(slot.mbodies[(WD_KEY, pen_min)])
             b = slot.mbodies[(measure, cut, pen_min)] = json.dumps(d, ensure_ascii=False, separators=(",", ":"),
                                                           allow_nan=False).encode("utf-8")
         return b
@@ -878,6 +892,7 @@ if __name__ == "__main__":
     ap.add_argument("--host", default=HOST, help="回环地址，默认 %(default)s；非回环直接拒绝")
     ap.add_argument("--no-prewarm", action="store_true", help="起服务时不预热（默认按顺序把每格拉一遍）")
     a = ap.parse_args()
+    withdrawn.ENABLED = True                     # 只有真起服务才记「已撤回」账本（见 web/withdrawn.py）
     srv = make_server(a.port, a.host)
     log("listening on %s:%d" % srv.server_address[:2])
     if not a.no_prewarm:                         # 先 listen 再预热：预热期间页面照常能开
