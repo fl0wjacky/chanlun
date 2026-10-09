@@ -118,7 +118,7 @@ fi
 #   独立复核 case 4 的牙（终点前后挪、反弹一笔、A 一笔、R 三笔没重叠）；自检关掉 L77_MERGE 必红。约 15 秒。
 # ★ render_smoke（card-bb93e074-3c6，Nova 10-09 00:39）：weak 下线时 render/full_common.py 还读 s["weak"]，整门没走到出图这条路。
 #   拿 zec15 跑一次 chart_full_smooth.render，不炸、出得了图就绿；自检让买卖点少一个出图要读的字段必红。约 3 秒，要 PIL。
-CHECKS=(tools/selfcheck.py web/check_parity.py "web/check_parity.py --self-test" web/check_abuse.py "web/check_abuse.py --self-test" web/check_closedue.py "web/check_closedue.py --self-test" web/check_assets.py "tools/pine_lockstep.py --head HEAD" "notes/pine-incremental-seg.py --self-test" "notes/pine-incremental-seg.py --tail 60" "tools/trend_check.py --self-test" tools/speed_gate.py "tools/speed_gate.py --self-test" tools/seg_prefix_check.py "tools/seg_prefix_check.py --self-test" tools/l77_check.py "tools/l77_check.py --self-test" tools/render_smoke.py "tools/render_smoke.py --self-test" tools/live_seg_check.py tools/levels_check.py "tools/levels_check.py --self-test" "tools/j18_check.py --self-test" "tools/j19_check.py --self-test" "tools/j17_check.py --self-test" tools/web_theme_sync.py "tools/web_theme_sync.py --selftest" tools/web_footer_check.py "tools/web_footer_check.py --selftest" tools/web_fmt_check.py "tools/web_fmt_check.py --selftest" tools/web_fitbox_check.py "tools/web_fitbox_check.py --selftest" tools/web_more_check.py "tools/web_more_check.py --selftest")
+CHECKS=(tools/selfcheck.py web/check_parity.py "web/check_parity.py --self-test" web/check_abuse.py "web/check_abuse.py --self-test" web/check_closedue.py "web/check_closedue.py --self-test" web/check_decisions.py "web/check_decisions.py --self-test" web/check_assets.py "tools/pine_lockstep.py --head HEAD" "notes/pine-incremental-seg.py --self-test" "notes/pine-incremental-seg.py --tail 60" "tools/trend_check.py --self-test" tools/speed_gate.py "tools/speed_gate.py --self-test" tools/seg_prefix_check.py "tools/seg_prefix_check.py --self-test" tools/l77_check.py "tools/l77_check.py --self-test" tools/render_smoke.py "tools/render_smoke.py --self-test" tools/live_seg_check.py tools/levels_check.py "tools/levels_check.py --self-test" "tools/j18_check.py --self-test" "tools/j19_check.py --self-test" "tools/j17_check.py --self-test" tools/web_theme_sync.py "tools/web_theme_sync.py --selftest" tools/web_footer_check.py "tools/web_footer_check.py --selftest" tools/web_fmt_check.py "tools/web_fmt_check.py --selftest" tools/web_fitbox_check.py "tools/web_fitbox_check.py --selftest" tools/web_more_check.py "tools/web_more_check.py --selftest")
 POOLDIR=$(mktemp -d)
 POOL_T0=$(date +%s)
 "$PY" tools/predeploy_pool.py --dir "$POOLDIR" --jobs "${PREDEPLOY_JOBS:-1}" --python "$PY" -- "${CHECKS[@]}"
@@ -154,6 +154,9 @@ SUITES=(tools/web_ghost_e2e.js tools/web_more_e2e.js "tools/web_more_e2e.js --se
 # ★★ 它跟 68decdd 是**一对**：改前那一棵树（`e494d90`）上它 5/12 红。所以这支**必须在 68decdd 之后并**
 #   —— 先并它再并 68decdd，中间的 main 上 `--all` 就是红的（那不是它报错，是它说的实话）。
 [ $ALL = 1 ] && SUITES+=(tools/web_macd_axis.js tools/web_mobile_share.js tools/web_readout_swap_probe.js tools/web_subhead_slot_probe.js)
+# ★ web_decisions_e2e（card-fe3aebd3-819）：决策树页读 ?mock=1，不靠临时后台有没有数据文件；口令和回码那半归 web/check_decisions.py。
+#   单起一行追加：SUITES=(…) 那行同级别前端支也要加一格，同一行两边都改就会冲突。
+SUITES+=(tools/web_decisions_e2e.js)
 
 frontend_skip() {  # 原因 —— 浏览器 / 后台起不来：每一套都记「未执行」，不许当绿
   for s in "${SUITES[@]}"; do record "$s" 未执行 "前端未执行：$1"; done

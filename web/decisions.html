@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>冲浪者 · 缠论 · 决策树</title>
+<link rel="stylesheet" href="decisions.css">
+</head>
+<body>
+<!-- 决策树页（卡 card-fe3aebd3-819，小栋 10-09 11:10）：一条一条看、点选项。
+     数据：GET /api/decisions（Atlas 那份结构化数据，原样）；选择：GET/POST /api/decisions/choices（存服务器本地，不进仓）。
+     ?mock=1 只读 decisions/mock.json，**不保存**（样例，骨架自测用）。 -->
+<header class="bar">
+  <a class="back" href="./">← 回走图</a>
+  <h1>决策树</h1>
+  <label class="only"><input type="checkbox" id="onlyOpen"> 只看待定</label>
+  <span id="mode" class="mode" hidden></span>
+</header>
+<div class="wrap">
+  <nav id="tree" aria-label="决策条目"></nav>
+  <select id="treeSel" aria-label="决策条目（手机）"></select>
+  <main id="detail" aria-live="polite"><p class="hint">左边点一条看详情。</p></main>
+</div>
+<dialog id="impact">
+  <form method="dialog">
+    <h2>改这一条会牵连到这些</h2>
+    <p class="mu" id="impactWhy"></p>
+    <ul id="impactList"></ul>
+    <div class="row"><button value="cancel" class="ghost">先不改</button><button value="ok" id="impactOk">知道了，确认</button></div>
+  </form>
+</dialog>
+<dialog id="zoom"><form method="dialog"><img id="zoomImg" alt=""><p id="zoomCap" class="mu"></p><button>关闭</button></form></dialog>
+<script type="module" src="decisions.js"></script>
+</body>
+</html>
