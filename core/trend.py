@@ -504,16 +504,17 @@ def _xzd_seconds(done, bounds, r=None):
 
 
 
-# ---------------------------------------------------------------- R-1 同级别分解（试验开关，默认关；docs/spec/读法-R1-分解方式.md S1～S6）
-SAME_LEVEL = False                                # 决策树 R-1 还没定：开了就照同级别切（只给量数、出前后图），默认关＝现行非同级别，输出逐字节不变
-SAME_LEVEL_OVERLAP = "ZDZG"                       # S3「判重叠用哪个区间」小栋还没认：ZDZG（拟）或 DDGG，两个都量
-SAME_LEVEL_D6 = None                              # R-6 甲在同级别下：None＝不限方向（乙粗版）；"strict"＝分界之后的组，中枢首段须跟走势反向（上涨里下上下）；
-                                                  #   "fallback"＝同 strict，但这样判不出同方向趋势就退回不限方向（照 D6-4）
+# ---------------------------------------------------------------- R-1 同级别分解（正式版开关，合并前最后一笔才翻默认；上线清单 docs/spec/同级别正式版-上线清单.md；docs/spec/读法-R1-分解方式.md S1～S6）
+SAME_LEVEL = False                                # R-1 同级别分解：小栋 10-09 定 A→B（正式版，跟 ①D、S-13 一起上）。正式版取值 True；
+                                                  #   现在默认关只为合并前 G1(a)「关掉跟 main 逐份同」，翻默认放合并前最后一笔
+SAME_LEVEL_OVERLAP = "ZDZG"                       # S3 相邻中枢判重叠用 [ZD,ZG]（编者口径，上线清单 #2：只剩这一个可行）；DDGG 只留作量数对照
+SAME_LEVEL_D6 = None                              # R-6 ③ 甲在同级别下（小栋 10-09 06:17 定）：正式版取值 "fallback"＝分界之后的组中枢首段须跟走势反向，
+                                                  #   判不出同方向趋势就退回不限方向（D6-4）；"strict" 只留作量数对照；None＝不限方向（旧量数口径）
 SL_FIRST_EXEMPT = False                           # 甲S-2（读法-R3R6 一·6，Atlas f3fac3c）：前一个走势段是本级别反向趋势 ⇒ 这一段第一个中枢不受限
-                                                  #   （首中枢可以从同向那条起）。乙′（R6_YI_PRIME／R6_YI_FALLBACK）R-6 定甲以后删了，代码见 450b2ae 之前
-D2_ALTERNATE = True                               # D-0 分界一高一低交替（D2-3）；只给出图／量数关：等同 trend_v3(alternate=False)
-SAME_LEVEL_DEATH = False                          # 正式版待办（Atlas 05:19:53）：同级别下也标死点类型、出小转大的二类；原型阶段默认不标
-SAME_LEVEL_D2 = False                             # S9：D2 的参照中枢也换成同级别三段中枢（R-1＝A 以后的「完整同级别」）
+                                                  #   （首中枢可以从同向那条起）。正式版取值 True。乙′（R6_YI_PRIME／R6_YI_FALLBACK）R-6 定甲以后删了，见 2ba3fbd
+D2_ALTERNATE = True                               # D-0 分界一高一低交替（D2-3，小栋 10-09 06:36 定 A 保留）；只给出图／量数关：等同 trend_v3(alternate=False)
+SAME_LEVEL_DEATH = False                          # 同级别下照标死点类型（D2-5 按三段中枢）、出小转大的二类（S11）、S5 标「盘整相连」（S12）。正式版取值 True
+SAME_LEVEL_D2 = False                             # S9：D2 的参照中枢也换成同级别三段中枢（R-1＝B「完整同级别」）。正式版取值 True
 
 
 def _sl_centers(done, a, b, first_up=None, first_free=False):
