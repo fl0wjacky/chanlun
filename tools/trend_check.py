@@ -352,7 +352,8 @@ def main():
     sl = []
     for fn in files:
         sl += ["%s %s" % (fn, x) for x in sl_check(sl_run(fn))]
-    cell("⑨ G6 同级别正式口径（%d 份）：中间段有中枢、S5 落在接缝、D2 高低交替、每刀有死因、state 两值且 S5 守 D-4′" % len(files), sl)
+    cell("⑨ G6 同级别正式口径（%d 份）：中间段有中枢、S5 落在接缝、D2 高低交替、每刀有死因、state 两值且 S5 守 D-4′；"
+         "T1 三段不共用、T2 不升级、T3 [ZD,ZG]、T4 甲／豁免／退回、T5 已确认 D2 窗口里有中枢" % len(files), sl)
     print("全部通过" if not bad else "%d 处不过" % len(bad))
     return 1 if bad else 0
 
@@ -368,12 +369,90 @@ def sl_run(fn):
         for k, x in SL_FLAGS.items(): setattr(T, k, x)
         PEN.PEN_FINAL_LOCK = True
         r = analyze(load(os.path.join(ROOT, "data", fn)), tick=tick_of(fn))
-        return T.trend_v3(r)
+        v = T.trend_v3(r)
+        v["_done"] = T.find_bounds(r)["done"]          # T3／T4／T5 要拿线段自己重算（只给检查用，不进载荷）
+        v["_bars"] = r["bars"]
+        return v
     finally:
         for k, x in old.items(): setattr(T, k, x)
         PEN.PEN_FINAL_LOCK = lk
+def _scan(done, a, b, first_up=None, first_free=False):
+    """检查自己写的一份同级别三段中枢找法（S1／S2／S3：满三段即收、段不共用、[max lo, min hi] 判重叠），**不调引擎**，
+    免得尺子读自己要量的东西。first_up 给了＝限形状（中枢首段方向必须是它），first_free＝首中枢不限（甲S-2 豁免）。"""
+    out, k = [], a
+    while k + 2 < b:
+        if first_up is not None and (done[k]["dir"] == "up") != first_up and not (first_free and not out):
+            k += 1
+            continue
+        lo = max(done[q]["lo"] for q in range(k, k + 3)); hi = min(done[q]["hi"] for q in range(k, k + 3))
+        if lo <= hi:
+            out.append((k, k + 2, done[k]["i0"], done[k + 2]["i1"], lo, hi))
+            k += 3
+        else:
+            k += 1
+    return out
+
+
+def _rel(z1, z2):
+    return "上" if z2[4] > z1[5] else "下" if z2[5] < z1[4] else "叠"
+
+
 def sl_check(v):
     bad = []
+    done = v.get("_done")
+    zz = v["seg_centers"]
+    # T1（S1／S2）：同级别中枢正好三段、段不共用
+    for z in zz:
+        if z["PI1"] - z["PI0"] != 2:
+            bad.append("T1 中枢 %d–%d 不是正好三段（%d 段）" % (z["X0"], z["X1"], z["PI1"] - z["PI0"] + 1))
+    segs = sorted((z["PI0"], z["PI1"]) for z in zz)
+    for x, y in zip(segs, segs[1:]):
+        if y[0] <= x[1]:
+            bad.append("T1 中枢共用线段 %s／%s" % (x, y))
+    # T2（S6）：同级别不升级
+    if v.get("units"):
+        bad.append("T2 同级别下 units 不空（%d 个）" % len(v["units"]))
+    if done is not None:
+        # T3（S3）：中枢的 [ZD, ZG] 就是三段的 [max lo, min hi]，而且 ZD ≤ ZG
+        for z in zz:
+            lo = max(done[q]["lo"] for q in range(z["PI0"], z["PI1"] + 1)); hi = min(done[q]["hi"] for q in range(z["PI0"], z["PI1"] + 1))
+            if (z["ZD"], z["ZG"]) != (lo, hi) or lo > hi:
+                bad.append("T3 中枢 %d–%d 的 [ZD,ZG]=[%s,%s]，三段算出来是 [%s,%s]" % (z["X0"], z["X1"], z["ZD"], z["ZG"], lo, hi))
+        d2 = [b for b in v["bounds"] if b["rule"] == "D2-2"]
+        edges = [0] + [b["line_seg"] + 1 for b in d2] + [len(done)]
+        prev_type = {s["i1"]: s["type"] for s in v["segments"]}
+        alt = {}                                       # 每组 (限形状, 不限形状) 两套，给 T5 用
+        for gi, (a, b) in enumerate(zip(edges, edges[1:])):
+            free = _scan(done, a, b)
+            if gi == 0:
+                alt[gi] = (free, free)
+                continue
+            cut = d2[gi - 1]
+            want_up = cut["kind"] == "L"
+            exempt = prev_type.get(cut["bar"]) == ("下跌" if want_up else "上涨")
+            lim = _scan(done, a, b, first_up=not want_up, first_free=exempt)
+            alt[gi] = (lim, free)
+            got = [(z["PI0"], z["PI1"]) for z in zz if a <= z["PI0"] < b]
+            ok = len(lim) >= 2 and _rel(lim[0], lim[1]) == ("上" if want_up else "下")
+            want = [(x[0], x[1]) for x in (lim if ok else free)]
+            # T4（甲＋豁免＋退回）：限形状判得出同向趋势就用它，判不出就退回不限形状
+            if got != want:
+                bad.append("T4 刀 %d 之后那组：中枢 %s，按甲（%s）该是 %s" % (cut["bar"], got[:3], "限形状" if ok else "退回", want[:3]))
+        # T5（D-2⁗／D-2‴ 静态条件）：已确认的 D2，对应那套里真有一个中枢整个落在 [b, min(极值, 下一把 D2)]
+        bars = v.get("_bars")
+        for i, c in enumerate(d2):
+            if c.get("state") != "confirmed" or bars is None:
+                continue
+            gi = i + 1
+            hi = d2[i + 1]["bar"] if i + 1 < len(d2) else len(bars)
+            key = (lambda q: bars[q]["h"]) if c["kind"] == "L" else (lambda q: -bars[q]["l"])
+            e = max(range(c["bar"] + 1, len(bars)), key=lambda q: (key(q), -q))
+            top = min(hi, e)
+            inside = lambda zs: any(z[2] >= c["bar"] and z[3] <= top for z in zs)
+            sealed = i + 1 < len(d2) and d2[i + 1].get("state") == "confirmed"
+            ok = any(z["X0"] >= c["bar"] and z["X1"] <= top for z in zz) if sealed else all(inside(zs) for zs in alt.get(gi, ([], [])))
+            if not ok:
+                bad.append("T5 D2 刀 %d 标了确认，可%s里没有中枢落在 [%d, %d]" % (c["bar"], "实际那套" if sealed else "两套", c["bar"], top))
     for g, s in enumerate(v["segments"]):
         if not s["head"] and not s["live"] and s["n_centers_level"] < 1:
             bad.append("中间段 %d（%d–%d）没有本级别中枢" % (g, s["i0"], s["i1"]))
@@ -701,9 +780,28 @@ def self_test():
         d2 = [x for x in v["bounds"] if x["rule"] == "D2-2"]
         s5 = next(x for x in v["bounds"] if x["rule"] == "S5" and x["state"] == "confirmed")
         next(x for x in d2 if x["bar"] > s5["bar"])["state"] = "pending"
-    for name, f in (("中间段没中枢", brk_mid), ("S5 挪一根", brk_s5), ("D2 同向", brk_alt), ("S5 丢死因", brk_death),
-                    ("state 第三个值", brk_state), ("S5 确认但右边 D2 待确认", brk_d4)):
-        v = copy.deepcopy(v0); f(v); hit = sl_check(v)
+    def brk_t1(v):
+        v["seg_centers"][0]["PI1"] += 3
+    def brk_t2(v):
+        v["units"] = [dict(X0=0, X1=1)]
+    def brk_t3(v):
+        v["seg_centers"][0]["ZD"] -= 1
+    def brk_t4(v):
+        d2 = [x for x in v["bounds"] if x["rule"] == "D2-2"]
+        a = d2[0]["line_seg"] + 1
+        z = next(z for z in v["seg_centers"] if z["PI0"] >= a)
+        v["seg_centers"].remove(z)
+    def brk_t5(v):
+        d2 = [x for x in v["bounds"] if x["rule"] == "D2-2"]
+        i = next(i for i in range(len(d2) - 1) if d2[i]["state"] == "confirmed" and d2[i + 1]["state"] == "confirmed")
+        lo, hi = d2[i]["bar"], d2[i + 1]["bar"]
+        v["seg_centers"] = [z for z in v["seg_centers"] if not (z["X0"] >= lo and z["X1"] <= hi)]
+    for name, f, tag in (("中间段没中枢", brk_mid, "中间段"), ("S5 挪一根", brk_s5, "S5 刀"), ("D2 同向", brk_alt, "同向"),
+                         ("S5 丢死因", brk_death, "死因"), ("state 第三个值", brk_state, "state="),
+                         ("S5 确认但右边 D2 待确认", brk_d4, "D-4′"), ("T1 中枢不是三段", brk_t1, "T1"),
+                         ("T2 同级别冒出 units", brk_t2, "T2"), ("T3 ZD 不等三段 max lo", brk_t3, "T3"),
+                         ("T4 甲那组少一个中枢", brk_t4, "T4"), ("T5 已确认 D2 窗口里中枢全拿掉", brk_t5, "T5")):
+        v = copy.deepcopy(v0); f(v); hit = [x for x in sl_check(v) if tag in x]
         print("%s G6 拧坏「%s」⇒ 报出 %d 处（例 %s）" % ("✓" if hit else "✗", name, len(hit), hit[:1]))
         miss += not hit
     ok0 = not sl_check(v0)
