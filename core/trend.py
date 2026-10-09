@@ -508,6 +508,9 @@ def _death_types(r, done, bounds, segments, centers):
         if b.get("rule") == "D2-8":
             b["death"], b["death_why"] = "D2-8 补刀", "不分类（中枢排布切出来的）"
             continue
+        if b.get("rule") == "S5":                      # 同级别：盘整接盘整的接缝（L38:19-20），不是背驰、也不是三类点确立的，不分类
+            b["death"], b["death_why"] = "盘整接盘整", "不分类（同级别相邻中枢重叠的接缝）"
+            continue
         up = b["kind"] == "H"
         kind1 = "一卖" if up else "一买"
         if (b["bar"], kind1) in first:
@@ -593,6 +596,7 @@ R6_YI_PRIME = False                               # R-6 乙′（读法-R3R6 一
 SL_FIRST_EXEMPT = False                           # 甲S-2／乙′-5（读法-R3R6 一·6，Atlas f3fac3c）：前一个走势段是本级别反向趋势 ⇒ 这一段第一个中枢不受限
                                                   #   （甲：首中枢可以从同向那条起；乙′：a 可以进第一个中枢）
 D2_ALTERNATE = True                               # D-0 分界一高一低交替（D2-3）；只给出图／量数关：等同 trend_v3(alternate=False)
+SAME_LEVEL_DEATH = False                          # 正式版待办（Atlas 05:19:53）：同级别下也标死点类型、出小转大的二类；原型阶段默认不标
 SAME_LEVEL_D2 = False                             # S9：D2 的参照中枢也换成同级别三段中枢（R-1＝A 以后的「完整同级别」）
 SAME_LEVEL_C8 = None                              # S10 丙8 在同级别下：None＝照现行；"filter"＝甲（只有趋势背驰／盘整背驰的死点才确立）；
                                                   #   "direct"＝乙（背驰点直接切，不等反向三类点；后面再出新极值就挪刀，记 moved）
@@ -752,9 +756,12 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
     if SAME_LEVEL:                               # R-1 试验：同级别分解（默认关）。不升级、不补 D2-8、不标死点类型
         segments, centers_out, extra = _sl_layer(done, ks, bounds, n)
         bounds = sorted(bounds + extra, key=lambda x: x["bar"])
+        if _DEATH and SAME_LEVEL_DEATH:                  # 正式版：同级别下照标死点类型（D2-5 按三段中枢）、小转大的二类（S11）
+            _death_types(r, done, bounds, segments, centers_out)
         return dict(seg_centers=centers_out, bounds=bounds, retracted=res["retracted"],
                     pending=pending(done, ks, res["want"]), segments=segments, units=[], reading="same_level",
-                    xzd_seconds=[], moved=res.get("moved", []))
+                    xzd_seconds=_xzd_seconds(done, bounds, r) if (_DEATH and SAME_LEVEL_DEATH and _XZD_SECOND) else [],
+                    moved=res.get("moved", []))
     segments, units_out, centers_out = _layer(done, ks, bounds, reading, n)
     if _D28:
         cuts = _d28_cuts(done, ks, segments, units_out, centers_out)
