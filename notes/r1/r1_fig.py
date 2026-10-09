@@ -6,6 +6,7 @@ import sys, os, json, argparse, importlib, math, datetime as DT
 ap = argparse.ArgumentParser()
 ap.add_argument('--root', required=True); ap.add_argument('--flag', action='append', default=[])
 ap.add_argument('--kw-b', action='append', default=[], help='下格给 trend_v3 的关键字参数，比如 alternate=False（D-0 交替开关不是模块常量）')
+ap.add_argument('--mark', action='append', default=[], help='下格圈一个点："MM-DD HH:MM|价|说明"（S-13 非极值端点那张用来圈笔内真正的极值）')
 ap.add_argument('--base', action='append', default=[], help='上下两格都翻的开关（比如上格要 S9 当底座）')
 ap.add_argument('--file'); ap.add_argument('--out'); ap.add_argument('--rank', action='store_true')
 ap.add_argument('--from', dest='frm'); ap.add_argument('--to')
@@ -140,6 +141,16 @@ def panel(k, R, other, tag):
         lx, ly = (x - 60 if x - 60 > ML + 2 else x + 12), min(bot - 22, max(top + 2, y + (30 if kind == 'H' else -48)))
         q.rectangle(q.textbbox((lx, ly), f'撤回×{n}', font=Fs), fill=BG + (230,))   # 垫一块底色：红字压在框边、刀点上会糊
         q.text((lx, ly), f'撤回×{n}', fill=(255, 110, 110), font=Fs)
+    if k == 1:                                                    # --mark：只圈下格（翻了开关之后那一格）
+        for mk in a.mark:
+            ts, pv, lab = mk.split('|', 2); pv = float(pv)
+            y = utc(0).year; t = DT.datetime.strptime(f'{y}-{ts}', '%Y-%m-%d %H:%M').replace(tzinfo=DT.timezone.utc).timestamp() * 1e3
+            i = next((j for j, b in enumerate(bars) if b['t'] >= t), None)
+            if i is None or i < b0 or i > b1: continue
+            x, yv = X(i), Y(pv)
+            q.ellipse([x - 13, yv - 13, x + 13, yv + 13], outline=(255, 150, 40), width=3)
+            lx, ly = x + 18, min(bot - 24, max(top + 2, yv + 6))
+            q.rectangle(q.textbbox((lx, ly), lab, font=Fs), fill=BG + (230,)); q.text((lx, ly), lab, fill=(255, 170, 70), font=Fs)
     # 画框外的一律刷回底色：框和线都不许越出画框（左右上下四边，ZD 低于窗口时框边会一路画到格外）
     q.rectangle([0, 0, ML - 1, PH], fill=BG); q.rectangle([W - MR + 1, 0, W, PH], fill=BG)
     q.rectangle([0, 0, W, top - 1], fill=BG); q.rectangle([0, bot + 1, W, PH], fill=BG)
