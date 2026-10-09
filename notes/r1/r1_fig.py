@@ -135,7 +135,7 @@ def panel(k, R, other, tag):
     q.rectangle([0, 0, W, top - 1], fill=BG); q.rectangle([0, bot + 1, W, PH], fill=BG)
     q.rectangle([ML, top, W - MR, bot], outline=(60, 66, 80))
     q.text((ML + 6, 4), tag, fill=TX, font=F)
-    short = (bars[b1]['t'] - bars[b0]['t']) < 8 * 86400e3          # 窗口不到 4 天就带上时分，免得一排同一个日期
+    short = (bars[b1]['t'] - bars[b0]['t']) / 10 < 86400e3 * 1.5   # 刻度间隔不到一天半就带上时分（10 格），免得一排两个同样的日期（8 天窗口出过 05-07 05-07）
     for i in range(b0, b1 + 1, max(1, (b1 - b0) // 10)): q.text((X(i) - (40 if short else 24), bot + 4), f'{utc(i):%m-%d %H:%M}' if short else f'{utc(i):%m-%d}', fill=MU, font=Fs)
     for v in sorted({float(f'{lo * (hi / lo) ** (j / 6):.3g}') for j in range(1, 6)}):
         q.text((6, Y(v) - 8), f'{v:g}', fill=MU, font=Fs); q.line([ML - 5, Y(v), ML, Y(v)], fill=MU)
