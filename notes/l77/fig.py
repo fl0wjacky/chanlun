@@ -50,7 +50,10 @@ def panel(k, R, tag, other):
         q.line([X(i0), Y(p0), X(i1), Y(p1)], fill=col, width=4 if changed else 2)
         if changed:
             lab = "%s→%s%s" % (p0, p1, "（L77 合段）" if case == 4 else "")
-            q.text((max(ML + 4, X(i0) + 4), clampy(Y(p1) - 18)), lab, fill=col, font=fsm)
+            ly = clampy(Y(p1) - 18)
+            if abs(ly + 7 - Y(205.6)) < 12:               # 别压在 V 的红线上（Iris 00:24）：往上挪开
+                ly = Y(205.6) - 28
+            q.text((max(ML + 4, X(i0) + 4), ly), lab, fill=col, font=fsm)
     q.line([ML, Y(205.6), W - MR, Y(205.6)], fill="#d22", width=2)
     # 画框外的一律刷白（笔、段的线不许越出框：左边 y 轴、顶上，Iris 00:22）
     top, bot = MT - 8, PH - 18
