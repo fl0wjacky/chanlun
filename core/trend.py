@@ -583,16 +583,22 @@ def _xzd_seconds(done, bounds, r=None):
 # ---------------------------------------------------------------- R-1 同级别分解（试验开关，默认关；docs/spec/读法-R1-分解方式.md S1～S6）
 SAME_LEVEL = False                                # 决策树 R-1 还没定：开了就照同级别切（只给量数、出前后图），默认关＝现行非同级别，输出逐字节不变
 SAME_LEVEL_OVERLAP = "ZDZG"                       # S3「判重叠用哪个区间」小栋还没认：ZDZG（拟）或 DDGG，两个都量
+SAME_LEVEL_D6 = None                              # R-6 甲在同级别下：None＝不限方向（乙粗版）；"strict"＝分界之后的组，中枢首段须跟走势反向（上涨里下上下）；
+                                                  #   "fallback"＝同 strict，但这样判不出同方向趋势就退回不限方向（照 D6-4）
 SAME_LEVEL_D2 = False                             # S9：D2 的参照中枢也换成同级别三段中枢（R-1＝A 以后的「完整同级别」）
 SAME_LEVEL_C8 = None                              # S10 丙8 在同级别下：None＝照现行；"filter"＝甲（只有趋势背驰／盘整背驰的死点才确立）；
                                                   #   "direct"＝乙（背驰点直接切，不等反向三类点；后面再出新极值就挪刀，记 moved）
                                                   #   "plus"＝丙（D2 照旧，每组 D2 段里再加背驰刀；同方向再出新极值就挪刀，记 moved）
 
 
-def _sl_centers(done, a, b):
-    """S1＋S2：done[a..b) 里从左往右找三段重叠，满三段即收、不延伸；下一个从这三段之后起，段不共用。"""
+def _sl_centers(done, a, b, first_up=None):
+    """S1＋S2：done[a..b) 里从左往右找三段重叠，满三段即收、不延伸；下一个从这三段之后起，段不共用。
+    first_up 给了（R-6 甲，D6）：中枢首段的方向必须是它（上涨段里 first_up=False，即下上下）。"""
     out, k = [], a
     while k + 2 < b:
+        if first_up is not None and _is_up(done[k]) != first_up:
+            k += 1
+            continue
         lo = max(done[q]["lo"] for q in range(k, k + 3))
         hi = min(done[q]["hi"] for q in range(k, k + 3))
         if lo <= hi:
@@ -648,8 +654,15 @@ def _sl_layer(done, ks, bounds_, n):
     edges = [0] + list(ks) + [len(done)]
     pieces = []                                    # (起 done 下标, 止 done 下标（不含）, [中枢])
     extra = []
+    bk = {x["line_seg"] + 1: x["kind"] for x in bounds_}
     for g, (a, b) in enumerate(zip(edges, edges[1:])):
         zz = _sl_centers(done, a, b)
+        if SAME_LEVEL_D6 and g and bk.get(a) in ("L", "H"):
+            want_up = bk[a] == "L"                       # 从低点起 ⇒ 上涨 ⇒ 中枢首段向下（下上下）
+            zr = _sl_centers(done, a, b, first_up=not want_up)
+            ok = len(zr) >= 2 and _sl_rel(zr[0], zr[1]) == ("上" if want_up else "下")
+            if SAME_LEVEL_D6 == "strict" or ok:
+                zz = zr
         start, cur, way = a, [], None
         for z in zz:
             if cur:
