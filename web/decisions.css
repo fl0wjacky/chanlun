@@ -117,3 +117,8 @@ dialog .row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 1
 .node.void span:last-child, .node.void .id { color: var(--dim); text-decoration: line-through; text-decoration-color: var(--line); }
 .opts.void { opacity: .5; }
 .orphan .tagme { font-size: 11px; color: var(--bg); background: var(--ok); border-radius: 3px; padding: 0 6px; margin-right: 4px; }
+.node.child { padding-left: 34px; }                                    /* 子问题：缩进一格，跟在母条目后面 */
+.node.child { position: relative; }
+.node.child::before { content: ""; position: absolute; left: 20px; top: 0; bottom: 50%; width: 8px; border-left: 1px solid var(--line); border-bottom: 1px solid var(--line); }   /* 细折线连回母条目，不往 id 里塞字（塞了会把 id 挤成两行） */
+.rel { color: var(--mu); font-size: 13px; margin: 2px 0 0; }
+.rel a { color: var(--tx); text-decoration: none; border-bottom: 1px dotted var(--mu); }

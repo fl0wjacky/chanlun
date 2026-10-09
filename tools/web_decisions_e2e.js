@@ -10,6 +10,7 @@
 //   ⑤ 样例模式点「选这个 → 确认」：不发 POST（样例不保存），标签换到新的那一项
 //   ⑥ 手机 390：树收成下拉、页面不横向溢出；下拉换条目 ⇒ 详情跟着换
 //   ⑧ 原文定／不再适用：状态圈是自己那一档、没有「选这个」（10-09 这 9 条都还没选项，按钮那半要等带选项的出现才真咬得到）
+//   ⑨ 子问题（parent）在树上紧跟母条目、缩进，详情里能点回母条目
 //   ⑦ 主站顶栏有入口，点了到决策树页；手机上入口不另占一行（顶栏不变高）
 // 用法：E2E_URL=<地址> node tools/web_decisions_e2e.js <输出目录>   退出码：0 全过，1 有红，2 跑不了
 const { chromium } = require('playwright');
@@ -91,6 +92,19 @@ const chk = (name, ok, got) => { res.push(ok); console.log(`${ok ? '✓' : '✗'
       if (n || !dot.includes(want) || !tree.includes(want)) roBad.push([x.id, n, dot, tree]);
     }
     chk(`⑧ 原文定／不再适用 ${ro.length} 条：状态圈对、没有「选这个」`, roBad.length === 0, roBad);
+
+    // ⑨ 子问题（parent）：树上紧跟母条目、缩进；详情里有回母条目的链接
+    const kidsD = items.filter((x) => x.parent && items.some((y) => y.id === x.parent && y.layer_order === x.layer_order));
+    const kidBad = [];
+    const order = await p.$$eval('.node', (a) => a.map((n) => [n.dataset.id, n.classList.contains('child')]));
+    for (const x of kidsD) {
+      const i = order.findIndex(([id]) => id === x.id), j = order.findIndex(([id]) => id === x.parent);
+      const between = order.slice(j + 1, i).every(([id]) => items.find((y) => y.id === id)?.parent === x.parent);
+      await open(x.id);
+      const link = await p.$eval('#detail', (d) => d.querySelector('.rel a')?.dataset.go || '');
+      if (!(j >= 0 && i > j && between && order[i][1] && link === x.parent)) kidBad.push([x.id, i, j, between, link]);
+    }
+    chk(`⑨ 子问题 ${kidsD.length} 条：紧跟母条目、缩进、能点回母条目`, kidsD.length > 0 && kidBad.length === 0, kidBad);
 
     // ⑤
     const x5 = his[0];

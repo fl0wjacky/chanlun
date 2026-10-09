@@ -50,9 +50,13 @@ function renderTree() {
     if (!its.length) continue;
     const h = document.createElement('div'); h.className = 'layer'; h.textContent = `第 ${order} 层 · ${name}`; nav.appendChild(h);
     const og = document.createElement('optgroup'); og.label = `第 ${order} 层 · ${name}`;
-    for (const d of its) {
+    // 子问题（parent，比如 Q-6b、R-1b）紧跟在母条目后面、缩进一格；母条目不在这一层／被筛掉时照原位置放
+    const kids = (pid) => its.filter((x) => x.parent === pid);
+    const ordered = [];
+    for (const d of its) if (!d.parent || !its.some((x) => x.id === d.parent)) { ordered.push(d); ordered.push(...kids(d.id)); }
+    for (const d of ordered) {
       const b = document.createElement('button');
-      b.className = 'node' + (d.skeleton ? ' skel' : '') + (dotCls(d.status) === 'void' ? ' void' : ''); b.type = 'button'; b.dataset.id = d.id;
+      b.className = 'node' + (d.parent && its.some((x) => x.id === d.parent) ? ' child' : '') + (d.skeleton ? ' skel' : '') + (dotCls(d.status) === 'void' ? ' void' : ''); b.type = 'button'; b.dataset.id = d.id;
       b.innerHTML = `<span class="dot ${dotCls(d.status)}" title="${esc(kindTxt(d.status))}"></span><span class="id">${esc(d.id)}</span><span>${esc(d.title)}</span>`;
       b.onclick = () => show(d.id);
       nav.appendChild(b);
@@ -69,9 +73,11 @@ function markCurrent() {
 }
 
 // 状态那一行（Nova 11:17 ③：放标题下面，写全）
+// 原话调不出来、只有 Nova 回执的（Nova 11:38）：照实显示，不套『』装成原话
+const quoteTxt = (q) => /^原话未能调出/.test(q) ? `<span class="mu">${esc(q)}</span>` : `『${esc(q)}』`;
 function statusLine(s) {
   if (!s || !s.verified) return '<span class="dot unver"></span>状态待核<span class="mu">（还没逐条核过，先别当真）</span>';
-  if (s.kind === '小栋定') return `<span class="dot xiaodong"></span>小栋定${s.date ? ' · ' + esc(day(s.date)) : ''}${s.quote ? ` · 『${esc(s.quote)}』` : ''}${s.via ? `<span class="mu">（${esc(s.via)}）</span>` : ''}`;
+  if (s.kind === '小栋定') return `<span class="dot xiaodong"></span>小栋定${s.date ? ' · ' + esc(day(s.date)) : ''}${s.quote ? ' · ' + quoteTxt(s.quote) : ''}${s.via ? `<span class="mu">（${esc(s.via)}）</span>` : ''}`;
   if (s.kind === '我们定') return `<span class="dot ours"></span>我们定${s.by ? ' · ' + esc(s.by) : ''}${s.date ? ' · ' + esc(day(s.date)) : ''}<span class="mu"> — 这是我们替你定的，你可以推翻</span>`;
   if (s.kind === '原文定') return `<span class="dot fixed"></span>原文定<span class="mu"> — 原文写死了，不是选择，这里只给你看</span>`;
   if (s.kind === '不再适用') return `<span class="dot void"></span>不再适用<span class="mu"> — ${s.note ? esc(s.note) : '前面别的条目选完以后，这条不用定了'}</span>`;
@@ -114,7 +120,7 @@ function show(id) {
     const isHis = mine ? mine.option === o.key : his === o.key;   // 页面上存过的比数据里记的新，以它为准
     const cls = ['opt', o.key === rec.choice ? 'rec' : '', isHis ? 'chosen' : '', pend === o.key ? 'pending' : ''].join(' ');
     const nums = o.numbers && Object.keys(o.numbers).length ? `<table class="nums">${Object.entries(o.numbers).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}</table>` : '';
-    const hisTag = isHis ? `<span class="tagme">你选的${!mine ? `（${esc(day(s.date))}，原话『${esc(s.quote || '')}』）` : `（${esc(stamp(mine.at))}，页面上存的${mine.prev ? `，之前是 ${esc(mine.prev)}` : ''}）`}</span>` : '';
+    const hisTag = isHis ? `<span class="tagme">你选的${!mine ? `（${esc(day(s.date))}，${/^原话未能调出/.test(s.quote || '') ? '原话调不出，按 Nova 回执' : `原话『${esc(s.quote || '')}』`}）` : `（${esc(stamp(mine.at))}，页面上存的${mine.prev ? `，之前是 ${esc(mine.prev)}` : ''}）`}</span>` : '';
     return `<article class="${cls}" data-key="${esc(o.key)}">
       <header><b>${esc(o.key)}　${esc(o.label)}</b>${o.key === rec.choice ? '<span class="tagrec">推荐</span>' : ''}${hisTag}</header>
       <p>${o.effect ? esc(o.effect) : todo}</p>${nums}${figBlock(o.figures)}
@@ -127,6 +133,7 @@ function show(id) {
   $('detail').innerHTML = `
     <h2>${esc(d.id)}${(d.also || []).length ? `<span class="also">（也是 ${d.also.map(esc).join('、')}）</span>` : ''}　${esc(d.title)}</h2>
     <div class="status">${statusLine(s)}</div>
+    ${d.parent && st.byId[d.parent] ? `<p class="rel">这是 <a href="#${esc(d.parent)}" data-go="${esc(d.parent)}">${esc(d.parent)}</a> 的子问题：${esc(st.byId[d.parent].title)}</p>` : ''}${(() => { const k = st.items.filter((x) => x.parent === d.id); return k.length ? `<p class="rel">子问题：${k.map((x) => `<a href="#${esc(x.id)}" data-go="${esc(x.id)}">${esc(x.id)}</a> ${esc(x.title)}`).join('；')}</p>` : ''; })()}
     ${s.verified && s.note && s.kind !== '不再适用' ? `<p class="snote">${esc(s.note)}</p>` : ''}
     ${d.skeleton ? '<p class="mu">这一条只有标题，详情还在填。</p>' : ''}
     <section class="blk what"><h3>① 管什么</h3>${d.what && d.what.plain ? `<p>${esc(d.what.plain)}</p>` : `<p>${todo}</p>`}${d.what && d.what.analogy ? `<p class="analogy">打个比方：${esc(d.what.analogy)}</p>` : ''}</section>
