@@ -6,8 +6,8 @@
       "also": [
         "B-9"
       ],
-      "layer": "笔",
-      "layer_order": 1,
+      "layer": "线段",
+      "layer_order": 3,
       "title": "笔画好以后，还能不能回头改",
       "status": {
         "kind": "小栋定",
@@ -150,6 +150,1436 @@
         "#19 甲还要不要",
         "上线那天「不收回」在 B 下做不做得到"
       ]
+    },
+    {
+      "id": "R-1",
+      "layer": "读法选择",
+      "layer_order": 0,
+      "title": "同级别分解还是非同级别分解",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-09 05:1x"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "R-2",
+      "layer": "读法选择",
+      "layer_order": 0,
+      "title": "正文里没点名、但起定义作用的句子算不算定义（升格）",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "R-3",
+      "layer": "读法选择",
+      "layer_order": 0,
+      "title": "上涨／下跌／盘整按 L15（高低点）还是 L17（中枢）定",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-09 06:17"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "R-4",
+      "layer": "读法选择",
+      "layer_order": 0,
+      "title": "第三类买卖点按 L15 还是 T9（L20）",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "R-5",
+      "layer": "读法选择",
+      "layer_order": 0,
+      "title": "T11 里的『线段』是泛指走势还是 D10 的线段",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "R-6",
+      "layer": "读法选择",
+      "layer_order": 0,
+      "title": "趋势定义里『该方向』是谁的方向；同级别下第一段 a 进不进第一个中枢、后面中枢限不限形状",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-09 06:17"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "R-7",
+      "layer": "读法选择",
+      "layer_order": 0,
+      "title": "『买卖点都源自背驰』对『三类＝中枢破坏点』",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Q-1",
+      "layer": "六条整体要求（每条规矩都得过）",
+      "layer_order": 1,
+      "title": "每根 K 线每层只属一个单位",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Q-2",
+      "layer": "六条整体要求（每条规矩都得过）",
+      "layer_order": 1,
+      "title": "只有三类走势，每段至少三段次级别",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Q-3",
+      "layer": "六条整体要求（每条规矩都得过）",
+      "layer_order": 1,
+      "title": "每段至少一个中枢；趋势至少两个不重叠",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Q-4",
+      "layer": "六条整体要求（每条规矩都得过）",
+      "layer_order": 1,
+      "title": "（已并入 Q-6）",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Q-5",
+      "layer": "六条整体要求（每条规矩都得过）",
+      "layer_order": 1,
+      "title": "每条规矩有原文出处或写明编者口径",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Q-6",
+      "layer": "六条整体要求（每条规矩都得过）",
+      "layer_order": 1,
+      "title": "当下可用、出来不收回",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-09 03:41"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "B-10",
+      "layer": "K 线、分型、笔",
+      "layer_order": 2,
+      "title": "笔用老笔（L77）还是新笔（L81 附录）",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-09 06:32"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "B-11",
+      "layer": "K 线、分型、笔",
+      "layer_order": 2,
+      "title": "分析窗口取多长",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "B-12",
+      "layer": "K 线、分型、笔",
+      "layer_order": 2,
+      "title": "复权",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "B-1",
+      "layer": "K 线、分型、笔",
+      "layer_order": 2,
+      "title": "一笔最少几根 K 线",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-08 12:42"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "B-2",
+      "layer": "K 线、分型、笔",
+      "layer_order": 2,
+      "title": "当下的笔能不能改",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-07 22:48"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "B-3",
+      "layer": "K 线、分型、笔",
+      "layer_order": 2,
+      "title": "包含算不算端点相等",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "B-4",
+      "layer": "K 线、分型、笔",
+      "layer_order": 2,
+      "title": "顶底之间要不要『公共部分』",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "B-5",
+      "layer": "K 线、分型、笔",
+      "layer_order": 2,
+      "title": "序列开头一串互相包含、方向定不了",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "B-6",
+      "layer": "K 线、分型、笔",
+      "layer_order": 2,
+      "title": "分型在哪一刻算确认",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "B-7",
+      "layer": "K 线、分型、笔",
+      "layer_order": 2,
+      "title": "高点并列时顶记在哪一根",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "B-8",
+      "layer": "K 线、分型、笔",
+      "layer_order": 2,
+      "title": "『相等』的容差",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "S-1",
+      "layer": "线段",
+      "layer_order": 3,
+      "title": "第三笔落在第一笔范围内：等，还是当场合并判",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-07 23:51"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "S-2",
+      "layer": "线段",
+      "layer_order": 3,
+      "title": "判『破』时追平算不算",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-08 00:33"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "S-3",
+      "layer": "线段",
+      "layer_order": 3,
+      "title": "分界两边元素一端相同算不算分界",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "S-4",
+      "layer": "线段",
+      "layer_order": 3,
+      "title": "追平算不算『新高／新低』",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-09 00:26"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "S-5",
+      "layer": "线段",
+      "layer_order": 3,
+      "title": "第三笔破第一笔终点 ⇒ 新段",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "S-6",
+      "layer": "线段",
+      "layer_order": 3,
+      "title": "暂定什么时候摘、谁先被破定结局",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "S-7",
+      "layer": "线段",
+      "layer_order": 3,
+      "title": "缺口被之前同序列元素盖住算不算缺口",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-07 08:45"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "S-8",
+      "layer": "线段",
+      "layer_order": 3,
+      "title": "特征序列标准化 A／B（开头怎么定方向）",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-02 "
+      },
+      "skeleton": true
+    },
+    {
+      "id": "S-9",
+      "layer": "线段",
+      "layer_order": 3,
+      "title": "缺口的『逆』指什么",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-03"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "S-10",
+      "layer": "线段",
+      "layer_order": 3,
+      "title": "L77 第二支：X＋A＋反弹合成一段",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "S-11",
+      "layer": "线段",
+      "layer_order": 3,
+      "title": "L71 提前定和 L77 合段谁先",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "S-12",
+      "layer": "线段",
+      "layer_order": 3,
+      "title": "图头段：量不了怎么办／挪位踩暂定刀怎么办",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "S-14",
+      "layer": "线段",
+      "layer_order": 3,
+      "title": "线段终点必须是段内极值吗",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Z-1",
+      "layer": "中枢",
+      "layer_order": 4,
+      "title": "判『不重叠』用 DD～GG 还是 ZD～ZG",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Z-2",
+      "layer": "中枢",
+      "layer_order": 4,
+      "title": "升级出来的中枢怎么读",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-07 07:04"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Z-3",
+      "layer": "中枢",
+      "layer_order": 4,
+      "title": "合成框的区间怎么算",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-07"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Z-4",
+      "layer": "中枢",
+      "layer_order": 4,
+      "title": "不是正好 9 段时怎么划三组",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Z-5",
+      "layer": "中枢",
+      "layer_order": 4,
+      "title": "一段盘整里好几个中枢要不要合成升级（页上 ③）",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Z-6",
+      "layer": "中枢",
+      "layer_order": 4,
+      "title": "扩展链不足 9 段（4 段）",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Z-7",
+      "layer": "中枢",
+      "layer_order": 4,
+      "title": "高一级中枢从哪一段起划",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Z-8",
+      "layer": "中枢",
+      "layer_order": 4,
+      "title": "延伸在哪断开",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-08"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Z-9",
+      "layer": "中枢",
+      "layer_order": 4,
+      "title": "延伸里另取三段当中枢",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Z-10",
+      "layer": "中枢",
+      "layer_order": 4,
+      "title": "中枢结束后碰回原区间／升级后跟低一级比",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Z-11",
+      "layer": "中枢",
+      "layer_order": 4,
+      "title": "中枢方向：上涨里只认下上下",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-07 05:57"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Z-12",
+      "layer": "中枢",
+      "layer_order": 4,
+      "title": "D6 先后：段型先按方向判",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Z-13",
+      "layer": "中枢",
+      "layer_order": 4,
+      "title": "升级段 D6 不限方向",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Z-14",
+      "layer": "中枢",
+      "layer_order": 4,
+      "title": "中枢读法三条、什么时候算走完",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-02 01:47"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Z-15",
+      "layer": "中枢",
+      "layer_order": 4,
+      "title": "类中枢从哪一笔起算；类中枢关系只在同一线段内",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-03"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "Z-16",
+      "layer": "中枢",
+      "layer_order": 4,
+      "title": "引擎 `big` 层两条、`DD_all/GG_all`",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "D-0",
+      "layer": "走势分界",
+      "layer_order": 5,
+      "title": "分界一高一低交替（D2-3）",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-09 06:36"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "D-00",
+      "layer": "走势分界",
+      "layer_order": 5,
+      "title": "切法默认：走势分界还是延伸／扩展切",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "D-1",
+      "layer": "走势分界",
+      "layer_order": 5,
+      "title": "分解只出一种",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "D-2",
+      "layer": "走势分界",
+      "layer_order": 5,
+      "title": "走势层用标准化线段",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "D-3",
+      "layer": "走势分界",
+      "layer_order": 5,
+      "title": "图上画哪套线段（页上 ②）",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "D-4",
+      "layer": "走势分界",
+      "layer_order": 5,
+      "title": "确立＝死点之后第一个反方向三类点；参照中枢取哪个",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-08"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "D-5",
+      "layer": "走势分界",
+      "layer_order": 5,
+      "title": "分界的确认时机（页上 ①）",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "D-6",
+      "layer": "走势分界",
+      "layer_order": 5,
+      "title": "一段走势没中枢 ⇒ 两头的刀一起去",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "D-7",
+      "layer": "走势分界",
+      "layer_order": 5,
+      "title": "D2-8 大一级盘整里切出本级别趋势",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-07 08:45"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "D-8",
+      "layer": "走势分界",
+      "layer_order": 5,
+      "title": "死点类型怎么分（D2-5）；盘整背驰的 A 段怎么取",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "D-9",
+      "layer": "走势分界",
+      "layer_order": 5,
+      "title": "小转大切不切（丙6）",
+      "status": {
+        "kind": "小栋定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "D-10",
+      "layer": "走势分界",
+      "layer_order": 5,
+      "title": "背驰是不是分段依据（丙8）",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-08 14:04"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "D-11",
+      "layer": "走势分界",
+      "layer_order": 5,
+      "title": "框只在分界断、中阴不断、扩展不断、次级别转折不断（D4-1～D4-4）",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "D-12",
+      "layer": "走势分界",
+      "layer_order": 5,
+      "title": "确立以后从分界那一点起整段重算中枢（D2-4）",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "D-13",
+      "layer": "走势分界",
+      "layer_order": 5,
+      "title": "盘整接盘整",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-07 "
+      },
+      "skeleton": true
+    },
+    {
+      "id": "D-14",
+      "layer": "走势分界",
+      "layer_order": 5,
+      "title": "盘整组怎么分组",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "D-15",
+      "layer": "走势分界",
+      "layer_order": 5,
+      "title": "『会变的框』截到第几条分界",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-06"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "M-1",
+      "layer": "背驰、买卖点",
+      "layer_order": 6,
+      "title": "背驰的几种看法",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-04"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "M-2",
+      "layer": "背驰、买卖点",
+      "layer_order": 6,
+      "title": "面积和黄白线怎么组合",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-04"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "M-3",
+      "layer": "背驰、买卖点",
+      "layer_order": 6,
+      "title": "斜率这条看法",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-04"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "M-4",
+      "layer": "背驰、买卖点",
+      "layer_order": 6,
+      "title": "峰值单独用",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "M-5",
+      "layer": "背驰、买卖点",
+      "layer_order": 6,
+      "title": "1 分钟看黄白线回抽 0 轴（W48）",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "M-6",
+      "layer": "背驰、买卖点",
+      "layer_order": 6,
+      "title": "下上下第二下刚破前低不判背驰（W53）",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "M-7",
+      "layer": "背驰、买卖点",
+      "layer_order": 6,
+      "title": "二、三类之间的震荡买点要不要起名（M13）",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "M-8",
+      "layer": "背驰、买卖点",
+      "layer_order": 6,
+      "title": "走势起点终点自动算买卖点吗（J12）",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "M-9",
+      "layer": "背驰、买卖点",
+      "layer_order": 6,
+      "title": "突发跳空（M30）",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "M-10",
+      "layer": "背驰、买卖点",
+      "layer_order": 6,
+      "title": "MACD 0 轴防狼术（T13）",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "M-11",
+      "layer": "背驰、买卖点",
+      "layer_order": 6,
+      "title": "L107『只要』还是『除非』",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "M-12",
+      "layer": "背驰、买卖点",
+      "layer_order": 6,
+      "title": "买卖点定律一的『买点』",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "M-13",
+      "layer": "背驰、买卖点",
+      "layer_order": 6,
+      "title": "二类买点三种结果（不创新低／创新低＋盘整背驰／小转大）",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "M-14",
+      "layer": "背驰、买卖点",
+      "layer_order": 6,
+      "title": "背驰力度的参数：两段比的倍数、MACD 参数",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "M-15",
+      "layer": "背驰、买卖点",
+      "layer_order": 6,
+      "title": "零轴判据：多近算『回抽 0 轴』、什么算『在 0 轴下面』",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "L-1",
+      "layer": "级别联动",
+      "layer_order": 7,
+      "title": "三道题（合成中枢怎么读／叠图／以哪张为准）",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-06 01:29"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "L-2",
+      "layer": "级别联动",
+      "layer_order": 7,
+      "title": "第一刀随窗口跳",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-06 06:41"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "L-3",
+      "layer": "级别联动",
+      "layer_order": 7,
+      "title": "对照周期取本图 4 倍",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "L-4",
+      "layer": "级别联动",
+      "layer_order": 7,
+      "title": "合成框『对不上』的判据、状态四种",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "L-5",
+      "layer": "级别联动",
+      "layer_order": 7,
+      "title": "J18、J19 检查项的写法",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "L-6",
+      "layer": "级别联动",
+      "layer_order": 7,
+      "title": "图周期默认 4 小时",
+      "status": {
+        "kind": "小栋定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "L-7",
+      "layer": "级别联动",
+      "layer_order": 7,
+      "title": "合成框落在对照图『主要那个中枢』里的时间占比多少算对得上",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-A1",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "默认画哪几层",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-A2",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "走势分段层默认开不开",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-A3",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "成交量、MACD 副图",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-04 05:00"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-A4",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "买卖点『待确认』那档默认",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-A5",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "框编号 A、B、C 和小写",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-A6",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "级别对照默认",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-A7",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "防狼术窄带默认",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-A8",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "背驰看法默认",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-04"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-A9",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "笔最少几根 K 线",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-08"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-B1",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "背景按什么上色",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-08 12:35"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-B2",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "各档不透明度",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-B3",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "分界画法",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-B4",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "『等确认』条（原中阴）放哪、叫什么",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-05 23:46"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-B5",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "待定、撤回的样式",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-B6",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "相邻盘整段怎么标",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-07 07:34"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-B7",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "会变的框",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-06"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-B8",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "死点类型显示",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-C1",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "中枢框拆两截",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-02"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-C2",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "高一级的框怎么上色、归哪颗芯片",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-05 23:3x"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-C3",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "合成大框填不填",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-C4",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "暂定那一刀（S7）的记号",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-C5",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "未完成线段末端画不画圈",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-C6",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "最后一根没收盘的 K 线",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-D1",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "二类点的字",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-D2",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "『(弱)』",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-D3",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "待确认的点",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-D4",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "幽灵点（确认过、后来没了）",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-05"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-D5",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "线段层和笔层的点怎么分",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-E1",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "文字谁让谁",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-E2",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "价格怎么写",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-F1",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "分界悬停说什么",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-F2",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "页头时间用哪个时区",
+      "status": {
+        "kind": "小栋定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-F3",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "最后一根实时跳价",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-05"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-F4",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "手机底部芯片行",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "V-F5",
+      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer_order": 8,
+      "title": "全屏按钮位置",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "T-1",
+      "layer": "回测",
+      "layer_order": 9,
+      "title": "回测范围",
+      "status": {
+        "kind": "小栋定",
+        "date": "10-04"
+      },
+      "skeleton": true
+    },
+    {
+      "id": "T-2",
+      "layer": "回测",
+      "layer_order": 9,
+      "title": "只做多",
+      "status": {
+        "kind": "待定",
+        "date": null
+      },
+      "skeleton": true
+    },
+    {
+      "id": "T-3",
+      "layer": "回测",
+      "layer_order": 9,
+      "title": "费用默认 5bp／边、持有不动对照、成本敏感性 0/5/10",
+      "status": {
+        "kind": "我们定",
+        "date": null
+      },
+      "skeleton": true
     }
   ]
 }
