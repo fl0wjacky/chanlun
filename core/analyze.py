@@ -27,10 +27,10 @@ from .extend import build_hierarchy
 from .segment import build_segments
 
 
-# S-13 甲（#19，读法-S13；Q-6b 待小栋选）：线段只用定稿的笔来划——笔列表里只有最后一笔没定稿（P1，L77:51-52），
-#   所以划线段时把最后一笔去掉。锁关（小栋 10-09 ①B）下单开这个：25 张线段确认后撤 12→8，确认中位晚十几根。默认关。
+# S-13 甲（#19，读法-S13；小栋 10-09 12:49 决策页 Q-6b 选「留甲」）：线段只用定稿的笔来划——笔列表里只有最后一笔没定稿
+#   （P1，L77:51-52），所以划线段时把最后一笔去掉。锁关（小栋 10-09 ①B）下：25 张线段确认后撤 12→8，确认中位晚十几根。默认开。
 #   开了以后最后一笔不进任何线段（图尾本来就允许有不进线段的笔）。
-SEG_FINAL_PENS = False
+SEG_FINAL_PENS = True
 
 
 def analyze(bars, tick=None, pen="old", min_gap=None):
