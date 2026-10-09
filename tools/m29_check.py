@@ -2,11 +2,11 @@
 """M29 二类判据 ＋ 小转大的二类（第四批，买卖点.md:106／109）。
 
 主跑：data/ 10 份上，线段级、笔级的二类点各多少（照新判据），以及走势层 xzd_seconds（小转大的二类）各多少。
-  不变量：① 每颗二类都带 why，且是「不创新低」「创新低＋盘整背驰」之一；② weak 跟「创新低」一致（前端换读 why 之前先两个都给）；
+  不变量：① 每颗二类都带 why，且是「不创新低」「创新低＋盘整背驰」之一；② 不再出 weak 字段（10-09 第六批下线，创新低与否读 why：signals.newx）；
           ③ xzd_seconds 每颗都对着一把标了「小转大」的 D2-2 刀，位置是刀之后第二段的终点（L53「一个次级别向上、接着一个次级别向下」）。
 --self-test（造出来的，真数据里眼下没有「创新低」的二类）：
   ⑴ 把 zec15 笔级一颗二买那一段压到一买下面（造创新低），盘整背驰判成不成立 ⇒ 这颗二买必须没了；判成成立 ⇒ 必须在、why＝创新低＋盘整背驰；
-  ⑵ M29 开关关掉 ⇒ 那颗照旧出（只标弱），证明 ⑴ 拿掉它的确实是 M29；
+  ⑵ M29 开关关掉 ⇒ 那颗照旧出（why＝「创新低（未查盘整背驰）」，newx 为真，也就是原来的「弱」），证明 ⑴ 拿掉它的确实是 M29；
   ⑶ _panzheng 换成永远成立 ⇒ zec15 的 D2-5 死点类型必须变（证明 D2-5 和 M29 共用这一份判法）；
   ⑷ 小转大那一支关掉 ⇒ zec15 的 xzd_seconds 必须空；
   ⑸ 丙6 读法 B（拿掉 451.54 那一刀，照 agent/bram/c6-figs 的做法在 find_bounds 结果里拿掉）⇒ 没有小转大的二类、不报错。
@@ -36,8 +36,8 @@ def main():
                 tot[lv] += 1
                 if s.get("why") not in (WHY_BUY if s["kind"] == "二买" else WHY_SELL):
                     bad.append("%s %s %s bar %d 没有 why 或 why 不认识：%r" % (f, lv, s["kind"], s["bar"], s.get("why")))
-                if bool(s.get("weak")) != (s.get("why") in ("创新低＋盘整背驰", "创新高＋盘整背驰")):
-                    bad.append("%s %s %s bar %d 的 weak 跟 why 对不上" % (f, lv, s["kind"], s["bar"]))
+                if "weak" in s:
+                    bad.append("%s %s %s bar %d 还带着 weak（10-09 已下线）" % (f, lv, s["kind"], s["bar"]))
         v = T.trend_v3(r)
         bs = {b["bar"]: b for b in v["bounds"]}
         for x in v["xzd_seconds"]:
@@ -81,10 +81,12 @@ def self_test():
             S._panzheng, S._M29 = real, real_m
 
     gone, kept, off = probe(False), probe(True), probe(False, m29=False)
-    ok = not gone and kept and kept[0].get("why") == "创新低＋盘整背驰" and off and off[0].get("weak")
-    print("%s M29 造创新低（笔 %d）：无盘整背驰 ⇒ %s；有 ⇒ %s；关掉 M29 ⇒ %s" % (
+    ok = (not gone and kept and kept[0].get("why") == "创新低＋盘整背驰" and S.newx(kept[0])
+          and off and S.newx(off[0]) and "weak" not in off[0])
+    print("%s M29 造创新低（笔 %d）：无盘整背驰 ⇒ %s；有 ⇒ %s（newx %s）；关掉 M29 ⇒ %s" % (
         "✓" if ok else "✗", q, "不出" if not gone else "还在（牙没咬到）",
-        (kept[0].get("why") if kept else "没了（误删）"), "照旧出、标弱" if off and off[0].get("weak") else "不对"))
+        (kept[0].get("why") if kept else "没了（误删）"), bool(kept and S.newx(kept[0])),
+        ("照旧出、why＝%s、newx 真" % off[0].get("why")) if off and S.newx(off[0]) else "不对"))
     miss += not ok
 
     base = [b["death"] for b in T.trend_v3(r0)["bounds"]]

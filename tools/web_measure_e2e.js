@@ -1781,6 +1781,87 @@ const shotChart = async (p, tag) => {
      `芯片 aria-pressed=${pzOff.on}　画了 ${pzOff.g} 组　悬停 ${tipOff ? '「' + tipOff.slice(0, 20) + '…」' : '无'}`);
   await pPZ.context().close();
 
+  // ---------------------------------------------------------------- 死点记号（第六批 ②，spec 走势分段.md D2-5）
+  // 分界上照后台 `death` 标类型：图上短名、悬停第一行用原值；真判出来的三种白、编者口径三种灰；不压别的字，三格都压就不写。
+  const pDM = await (await b.newContext({ viewport: { width: 1600, height: 900 } })).newPage();
+  await pDM.goto(PAGE + QS, { waitUntil: 'domcontentloaded' });
+  await waitData(pDM);
+  await pDM.waitForTimeout(1500);
+  // 期望值**另写一份**（不读 layers.js 那张表）：名字表抄错了这里才红得出来
+  const DM_SHORT = { '趋势背驰': '趋势背驰', '盘整背驰': '盘整背驰', '小转大': '小转大', '盘整·未见背驰': '未见背驰', '比不了': '比不了', 'D2-8 补刀': '补刀' };
+  const DM_REAL = ['趋势背驰', '盘整背驰', '小转大'];
+  const dmRead = () => pDM.evaluate(async ([SHORT, REAL]) => {
+    const { TREND } = await import('/theme.js');
+    const app = window.__app, D = app.state.trendDrawn, lb = app.state.labelBoxes;
+    const recs = D.deaths || [];
+    const hit = (a, q) => a[0] < q[2] && q[0] < a[2] && a[1] < q[3] && q[1] < a[3];
+    const others = (r) => [...D.labels.filter((q) => q[4] !== r.txt), ...lb];
+    return {
+      n: recs.length,
+      wrongTxt: recs.filter((r) => r.mode && r.txt.replace(/^· | ·$/g, '') !== SHORT[r.death]).map((r) => [r.death, r.txt]),
+      wrongCol: recs.filter((r) => r.col !== (REAL.includes(r.death) ? TREND.edge : TREND.mut)).map((r) => [r.death, r.col]),
+      overlap: recs.filter((r) => r.box && others(r).some((q) => hit(r.box, q))).map((r) => r.death),
+      modes: recs.map((r) => [r.death, r.mode]),
+      kinds: [...new Set(recs.map((r) => r.death))],
+    };
+  }, [DM_SHORT, DM_REAL]);
+  // 视口挑一扇**刀最多**的窗：宽度照默认视口（一屏最多约 2700 根），在所有刀的位置上滑一遍取最多的那扇。
+  //   ★ 不能用 `setVisibleLogicalRange({0, 1e7})` 偷懒：LWC 会把它夹到**最右边、数据之后的空白**上，屏上一刀都没有（我第一版就这样，5 格里 4 格红、1 格假绿）。
+  await pDM.evaluate(async () => {
+    const ts = window.__app.chart.timeScale(), v = ts.getVisibleLogicalRange(), w = Math.max(200, v.to - v.from);
+    const bars = window.__app.state.data.trend.bounds.map((q) => q.bar);
+    let best = [v.from, v.to], most = -1;
+    for (const b0 of bars) { const k = bars.filter((x) => x >= b0 - 20 && x <= b0 - 20 + w).length; if (k > most) { most = k; best = [b0 - 20, b0 - 20 + w]; } }
+    ts.setVisibleLogicalRange({ from: best[0], to: best[1] }); await new Promise((r) => setTimeout(r, 900));
+  });
+  const dm1 = await dmRead();
+  ck('㊿ 死点记号：屏上每一刀都记了；写出来的字＝后台 death 对应的短名（期望表另写一份）',
+     dm1.n > 0 && dm1.wrongTxt.length === 0,
+     `屏上 ${dm1.n} 刀　类型 ${JSON.stringify(dm1.kinds)}　落位 ${JSON.stringify(dm1.modes.map((m) => m[1]))}${dm1.wrongTxt.length ? '　✗ 字不对 ' + JSON.stringify(dm1.wrongTxt) : ''}`);
+  ck('㊿b 死点记号配色：趋势背驰／盘整背驰／小转大＝TREND.edge，其余三类＝TREND.mut（色号从 /theme.js 现读）',
+     dm1.n > 0 && dm1.wrongCol.length === 0, dm1.wrongCol.length ? JSON.stringify(dm1.wrongCol) : `${dm1.n} 刀都对`);
+  ck('㊿c 死点记号不压字：跟走势层其它字、价签、买卖点文字、盘整组 chip 像素都不交叠',
+     dm1.overlap.length === 0, dm1.overlap.length ? '✗ 压了：' + JSON.stringify(dm1.overlap) : `${dm1.n} 刀都没压`);
+  // 悬停：每一类挑屏上第一刀，指针压到那根分界上 ⇒ 第一行「死点：<原值>」，带出处一行
+  const dmTips = await pDM.evaluate(() => {
+    const app = window.__app, ts = app.chart.timeScale(), T = app.state.data.trend, seen = {};
+    for (const bd of T.bounds) { const x = ts.logicalToCoordinate(bd.bar); if (bd.death && x !== null && x > 20 && x < 1300 && !seen[bd.death]) seen[bd.death] = Math.round(x); }
+    const c = document.querySelector('#chart canvas').getBoundingClientRect();
+    return { at: Object.entries(seen), cx: c.left, cy: c.top };
+  });
+  const tipBad = [];
+  for (const [death, x] of dmTips.at) {
+    await pDM.mouse.move(dmTips.cx + x, dmTips.cy + 300);
+    await pDM.waitForTimeout(250);
+    const t = await pDM.evaluate(() => { const e = document.getElementById('ghosttip'); return e && e.classList.contains('on') ? e.textContent : ''; });
+    const lines = t.split('\n');
+    const first = lines.find((l) => l.startsWith('死点：')) || '';
+    if (!first.startsWith('死点：' + death) || !lines.some((l) => l.startsWith('出处：'))) tipBad.push([death, t.slice(0, 40)]);
+  }
+  ck('㊿d 悬停分界 ⇒ 「死点：<后台原值>」＋「出处：…」（图上缩写、悬停不缩）',
+     dmTips.at.length > 0 && tipBad.length === 0, `挑了 ${dmTips.at.length} 类　${tipBad.length ? '✗ ' + JSON.stringify(tipBad) : '都对'}`);
+  // ㊿e 牙：把屏上一刀的价挪到「往外那一行放不下」的位置（H 顶到格顶、L 压到格底）⇒ 必须换格（right／left）或不写，而且不压字
+  //   ★ 两个落点是照 layers.js 的式子算出来的，别「改成贴边更稳」（Bram 10-09 01:42 问过，算一遍就知道会假红）：
+  //     L 刀 y=H−30 ⇒ 价字 ly=y+20=H−10（不翻）⇒ 外一行 dy=H+4，框底出画布，一定放不下；
+  //       换成 y=H−8 ⇒ ly=H+12>H−6 翻到 y−10=H−18 ⇒ 外一行 dy=H−4、框 H−15..H−1 **放得下** ⇒ mode=out，假红。
+  //     H 刀 y=8 ⇒ ly=−2<14 翻到 y+20=28 ⇒ 外一行 dy=14、框顶 3，压进「等确认」带（带底 15），放不下。
+  const dmBump = await pDM.evaluate(async () => {
+    const app = window.__app, ts = app.chart.timeScale(), s = app.state.candleSeries, T = app.state.data.trend;
+    const H = app.chart.panes()[0].getHeight();
+    const bd = T.bounds.find((q) => { const x = ts.logicalToCoordinate(q.bar); return q.death && x !== null && x > 200 && x < 1100; });
+    if (!bd) return { err: '屏上没有刀' };
+    bd.price = s.coordinateToPrice(bd.kind === 'H' ? 8 : H - 30);
+    const v = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: v.from + 0.01, to: v.to + 0.01 });
+    await new Promise((r) => setTimeout(r, 700));
+    const r = (app.state.trendDrawn.deaths || []).find((q) => q.bar === bd.bar);
+    return { kind: bd.kind, death: bd.death, mode: r ? r.mode : 'missing' };
+  });
+  const dm2 = await dmRead();
+  ck('㊿e （牙）刀价挪到「往外那一行放不下」⇒ 记号换格或不写（不许硬放在外面那行），全图仍不压字',
+     !dmBump.err && dmBump.mode !== 'out' && dmBump.mode !== 'missing' && dm2.overlap.length === 0,
+     `${JSON.stringify(dmBump)}　压字 ${JSON.stringify(dm2.overlap)}`);
+  await pDM.context().close();
+
   await b.close();
   console.log(`\n${n - bad}/${n} 过${bad ? `，${bad} 条红` : ''}　截图：${OUT}`);
   process.exit(bad ? 1 : 0);

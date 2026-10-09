@@ -58,7 +58,7 @@ def structures(d):
     # 键带 confirmed：同一个点一档「已确认」一档「待确认」，画出来实心 / 空心不同，也算画面变了。
     for lv, sigs in (d.get("signals") or {}).items():
         for g in sigs:
-            out["买卖点"][(t[g["bar"]], lv, g["kind"], bool(g["confirmed"]), bool(g.get("weak")))] = t[g["bar"]]
+            out["买卖点"][(t[g["bar"]], lv, g["kind"], bool(g["confirmed"]), g.get("why"))] = t[g["bar"]]   # weak 10-09 下线：键里改放 why（信息只多不少）
     return out
 
 

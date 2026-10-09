@@ -116,7 +116,7 @@ KNOWN.update({
  'M11':(f'{CT}:114 `find_centers`：`ZG >= ZD` 就成立（重叠成一个价位也算）','已实现'),
  'M13':('—','**未实现（开关）**（Nova 10-08 06:47 定命名开关；10-08 14:4x 量：段级 25 份只 4 颗，全在线上 ZEC 15m 一颗二卖后，Nova 14:48 定放着，默认档不动）'),
  'M28':(f'{CT}:114 `find_centers` 三买三卖终结 ＋ {SI}:297 `signals` 第三类','已实现'),
- 'M29':('core/signals.py:361 `signals` 第二类：不创新低（高）⇒ 出；创新了但对一类那段有盘整背驰（:297 `_panzheng`，跟 D2-5 共用）⇒ 出；都不是 ⇒ 不出；why 按方向写，weak 先留着给前端','已实现（第四批 land-b4b：agent/atlas/m29-code，含 Bram 的 Pine；25 份段级 0 删 0 加；tools/m29_check.py 主跑＋自检）'),
+ 'M29':('core/signals.py:361 `signals` 第二类：不创新低（高）⇒ 出；创新了但对一类那段有盘整背驰（:297 `_panzheng`，跟 D2-5 共用）⇒ 出；都不是 ⇒ 不出；why 按方向写；weak 字段 10-09 下线（第六批 weak-off），创新低改从 why 判（`newx`）','已实现（第四批 land-b4b：agent/atlas/m29-code，含 Bram 的 Pine；25 份段级 0 删 0 加；tools/m29_check.py 主跑＋自检）'),
  'W24':(f'{SI}:297 `signals`：一买一卖只从第二个中枢起判（`range(1, len(Z))`）','已实现'),
  'W46':(f'{SI}:243 `beichi`（一买＝背驰点）＋ core/trend.py `_death_types`（小转大标注）','已实现（行为一直对；第四批起刀上标「小转大」，小转大的二类见 D2-5）'),
  'W49':(f'{SI}:243 `beichi` 取 A／C 段','已实现'),

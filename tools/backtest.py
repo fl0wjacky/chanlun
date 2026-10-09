@@ -13,7 +13,7 @@
      键 = (kind, level, 极值那根的时间戳)；漂一根也算新点（严格），另报近邻对（同 kind、相距 ≤2 根）。
   ④ 只用已收盘 —— data/ 下都是历史收盘线；第 t 步只看得见 bars[:t+1]。
 
-交易模型（spec 第三节）：只做多；一二三类买点（含 weak）空仓开多，一二三类卖点持仓平仓；重复信号忽略；
+交易模型（spec 第三节）：只做多；一二三类买点（含创新低的二类，原来的 weak）空仓开多，一二三类卖点持仓平仓；重复信号忽略；
 走完还持仓 ⇒ 最后一根收盘盯市，单列「未平」，不计入笔数和胜率。
 """
 import argparse
@@ -55,7 +55,8 @@ def engine_commit():
 
 # ---------------------------------------------------------------- 信号来源
 def replay(bars, level, measure, warm=50):
-    """逐根重放 → (确认事件 [dict(kind, t_extreme, bar, confirm_i, weak, gone)] 按确认先后, 重放统计)。"""
+    """逐根重放 → (确认事件 [dict(kind, t_extreme, bar, confirm_i, newx, gone)] 按确认先后, 重放统计)。
+    newx：创新低／创新高的那一种二类（原来的 weak；weak 字段 10-09 下线，从 why 读：core.signals.newx）。"""
     first, events = {}, []
     for t in range(warm, len(bars)):
         for g in ENG.signals(analyze(bars[:t + 1]), level, measure):
@@ -65,7 +66,7 @@ def replay(bars, level, measure, warm=50):
             if key not in first:
                 first[key] = t
                 events.append(dict(kind=g["kind"], t_extreme=key[2], bar=g["bar"], confirm_i=t,
-                                   weak=bool(g.get("weak"))))
+                                   newx=ENG.newx(g)))
     final = {(g["kind"], level, bars[g["bar"]]["t"])
              for g in ENG.signals(analyze(bars), level, measure) if g["confirmed"]}
     for e in events:
@@ -90,7 +91,7 @@ def merge_near(events, bars):
 def final_events(bars, level, measure):
     """终版信号（全量数据跑一遍），当作在极值那根就知道了 —— 只给探针 A / B 用。"""
     return sorted((dict(kind=g["kind"], t_extreme=bars[g["bar"]]["t"], bar=g["bar"], confirm_i=g["bar"],
-                        weak=bool(g.get("weak")), gone=False)
+                        newx=ENG.newx(g), gone=False)
                    for g in ENG.signals(analyze(bars), level, measure) if g["confirmed"]),
                   key=lambda e: e["confirm_i"])
 
@@ -115,7 +116,7 @@ def trade(bars, events, fee_bps, slip_bps, fill="next_open"):
             if pos is None and e["kind"] in BUY:
                 pos = dict(open_confirm_i=e["confirm_i"], open_i=i, open_t=b["t"], open_raw=px,
                            open_px=px * (1 + slip), open_kind=e["kind"], open_extreme_t=e["t_extreme"],
-                           weak=e["weak"])
+                           newx=e["newx"])
                 gone_hit += e["gone"]
             elif pos is not None and e["kind"] in SELL:
                 out_px = px * (1 - slip)
@@ -147,14 +148,14 @@ def summary(trades, open_pos, curve):
     for v in curve:
         peak = max(peak, v)
         mdd = max(mdd, 1 - v / peak)
-    weak = [x for x in trades if x["weak"]]
+    nx = [x for x in trades if x["newx"]]
     wcomp = 1.0
-    for x in weak:
+    for x in nx:
         wcomp *= 1 + x["net"]
     n = len(trades)
     return dict(n=n, win_rate=round(sum(x["net"] > 0 for x in trades) / n, 4) if n else None,
                 pnl_comp=round(comp - 1, 6), pnl_sum=round(sum(x["net"] for x in trades), 6),
-                max_dd=round(mdd, 6), weak_n=len(weak), weak_pnl_comp=round(wcomp - 1, 6),
+                max_dd=round(mdd, 6), newx_n=len(nx), newx_pnl_comp=round(wcomp - 1, 6),
                 open_net=round(open_pos["net"], 6) if open_pos else None, small=n < SMALL,
                 total=round(comp * (1 + (open_pos["net"] if open_pos else 0)) - 1, 6))   # 已平复利 × 未平盯市
 
@@ -210,9 +211,9 @@ def print_report(r, fee, slip, commit, show_trades):
           % (r["data"], r["sha1"][:12], commit, r["level"], r["measure"], fee, slip, r["bars"]))
     if s["small"]:
         print("  ⚠ %s（笔数 %d < %d）" % (WARN, s["n"], SMALL))
-    print("  笔数 %d  胜率 %s  盈亏 复利 %s / 加总 %s  最大回撤 %.2f%%  weak 开的 %d 笔 %s  未平 %s"
+    print("  笔数 %d  胜率 %s  盈亏 复利 %s / 加总 %s  最大回撤 %.2f%%  创新低二类开的 %d 笔 %s  未平 %s"
           % (s["n"], "-" if s["win_rate"] is None else "%.0f%%" % (100 * s["win_rate"]), pct(s["pnl_comp"]),
-             pct(s["pnl_sum"]), 100 * s["max_dd"], s["weak_n"], pct(s["weak_pnl_comp"]), pct(s["open_net"])))
+             pct(s["pnl_sum"]), 100 * s["max_dd"], s["newx_n"], pct(s["newx_pnl_comp"]), pct(s["open_net"])))
     print("  已平＋未平盯市 %s ｜ 同期持有不动 %s ｜ 差 %s" % (pct(s["total"]), pct(r["hold"]), pct(r["vs_hold"])))
     print("  成本敏感性（fee=slip，每边）：" + "；".join(
         "%dbp 笔数 %d 胜率 %s 复利 %s 回撤 %.2f%% 持有不动 %s" % (
@@ -226,7 +227,7 @@ def print_report(r, fee, slip, commit, show_trades):
     if show_trades:
         for x in r["trades"] + ([r["open"]] if r["open"] else []):
             print("    确认 %5d → 开 %5d @%.6g  %s%s(%d)  ‖ 确认 %s → 平 %5d @%.6g %s  毛 %s 净 %s"
-                  % (x["open_confirm_i"], x["open_i"], x["open_px"], x["open_kind"], "·weak" if x["weak"] else "",
+                  % (x["open_confirm_i"], x["open_i"], x["open_px"], x["open_kind"], "·创新低" if x["newx"] else "",
                      x["open_extreme_t"], x.get("close_confirm_i", "-"), x["close_i"], x["close_raw"],
                      x["close_kind"], pct(x["gross"]), pct(x["net"])))
 

@@ -13,7 +13,7 @@
   D2-7  新刀 b' 让 b→b' 那一段一个中枢都没有 ⇒ b' 不立、b 撤回，回到 b 之前那段走势接着走（图头那一段不查）。
   D4    线段中枢的框只在确立的分界处断开（同一套中枢既画框又判分界）。
   D3    同一段走势里连续扩展的中枢合成一个高一级中枢（DD 取小、GG 取大）。读法 A：有合成中枢就整段升一级、
-        只数合成出来的；读法 B：合成中枢留在本级别跟别的一起数（L17:255 后半句）。等小栋定，默认 A（spec 现写法）。
+        只数合成出来的；读法 B：合成中枢留在本级别跟别的一起数（L17:255 后半句）。小栋 10-07 定 A（card-0374e640-127；走势分段.md 六之三）。
 
 D2-5 死点类型（趋势背驰／盘整背驰／小转大／盘整·未见背驰／比不了；D2-8 补刀单列）：确立的分界上标 death＋death_why，只标注、不决定刀（_death_types，第四批 ①）。
 """
@@ -481,7 +481,7 @@ def _xzd_seconds(done, bounds, r=None):
         else:
             continue
         out.append(dict(kind="二买" if down else "二卖", bar=s2["i1"], price=s2["p1"], confirmed=True,
-                        weak=bool(newx), level="seg", why=why, from_bar=b["bar"]))
+                        level="seg", why=why, from_bar=b["bar"]))   # weak 10-09 下线：创新低与否从 why 读（signals.newx）
     # ★ 不带 known_bar（Nova 10-08 16:41 指出 pullback_end_bar 也是事后才认出来的，实时还要晚一截）：
     #   这颗点「哪一根才知道」只能逐根截断重放才量得准（trend_check ④′），每次请求都重放太贵；回放／回测本来就是逐根截断，
     #   点会在刀实时确立的那一根自然出现，不需要这个字段。

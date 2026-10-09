@@ -43,7 +43,7 @@ URL 参数（都可分享 / 可截图复现同一段）：
 | `pens[]` | `{i0,p0,i1,p1}`（K 线下标 + 价） |
 | `segs[]` | `{i0,p0,i1,p1,dir,PI0,PI1,hi,lo,live?}`；`live` 的那条画到迄今的极值 |
 | `centers[]` / `seg_centers[]` | `{PI0,PI1,ZD,ZG,live,up[{ZD,ZG,up}]}`；横跨区要靠 `PI0/PI1` 回查宿主（笔 / **已完成**线段） |
-| `signals` | `{seg[], pen[]}`，元素 `{kind,bar,price,confirmed,weak}` —— **引擎算好送过来** |
+| `signals` | `{seg[], pen[]}`，元素 `{kind,bar,price,confirmed[,why]}` —— **引擎算好送过来**（`weak` 10-09 下线：创新低与否读 `why`） |
 | `big[]` | 相邻两中枢「扩展」合出来的高一级类中枢（`core/extend.py` `build_hierarchy`，`nmerge>1` 才是真合成）。`members` 是成员在 `centers[]` 里的 `PI0`。**前端现在不画这一层**（Python 出图 `chart_full_smooth.py` 也只画 `up`、不画 `big`），带上是为了把数据给全；要画是产品决定 |
 | `meta` | `{tick, pen_rule, min_gap}` 口径，只读展示 |
 

@@ -33,8 +33,8 @@ def main():
             bad = check_signals(sig, r, lv, "macd")
             print("== %s|%s  点 %d  自检 %d" % (fn.replace(".json", ""), lv, len(sig), len(bad)))
             for s in sig:
-                print("   %-4s bar=%-7d price=%-12.4f confirmed=%-5s weak=%s"
-                      % (s["kind"], s["bar"], s["price"], s["confirmed"], s["weak"]))
+                print("   %-4s bar=%-7d price=%-12.4f confirmed=%-5s why=%s"
+                      % (s["kind"], s["bar"], s["price"], s["confirmed"], s.get("why")))
                 tot[s["kind"]] = tot.get(s["kind"], 0) + 1
             for b in bad:
                 print("   !! 自检 %s" % (b,))

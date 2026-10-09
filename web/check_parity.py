@@ -13,6 +13,7 @@
 tuple 当 list 比、浮点逐位相等，big 的 members 按 PI0 列表比。
 """
 import contextlib
+import io
 import glob
 import time
 import gzip
@@ -408,7 +409,7 @@ def run_default(quiet=False):
     cases = [(fn, dataset(fn)) for fn in files if dataset(fn)]
     bars_by_key = {key: json.load(open(data(fn), encoding="utf-8")) for fn, key in cases}
     bad = 0
-    keys = ("bounds", "retracted", "pending", "segments", "units", "xzd_seconds")   # 跟 web/server.py _cut_cc 交出去的那几个键同一份（M29 加了 xzd_seconds）
+    keys = server.TREND_KEYS   # 跟 _cut_cc 读**同一份**（card-7c66115d-023）：两边各写一份，加键时 parity 那份会漏
     with running(bars_by_key) as port:
         m = get_path(port, "/api/meta")
         if m.get("cut_default") != "trend" or sorted(m.get("cut_modes") or []) != ["extend", "trend"]:
@@ -438,9 +439,15 @@ def run_default(quiet=False):
                 diffs.append("trend_reading %r ≠ 引擎 %r" % (dflt.get("trend_reading"), v["reading"]))
             if any("seg" not in z for z in dflt.get("seg_centers") or []):
                 diffs.append("seg_centers 有中枢不带 seg")
+            # ★ 先比**键集**：载荷 trend 多交／少交的键要**点名**报出来。原来只按名单逐键比值，名单外多出来的键
+            #   只会让整体「不等」，逐键清单却是空的 —— 红了也说不出是哪个键（land-b4b 上 9 份全红、名单空，Nova 10-08 17:30）。
+            got = dflt.get("trend") or {}
+            extra, miss = sorted(set(got) - set(keys)), [k for k in keys if k not in got]
+            if extra or miss:
+                diffs.append("trend 键对不上：载荷多 %s、少 %s" % (extra, miss))
             want = json.loads(json.dumps(server._clean({k: v[k] for k in keys})))
-            if want != dflt.get("trend"):
-                diffs.append("trend ≠ 引擎 trend_v3：%s" % [k for k in keys if want[k] != (dflt.get("trend") or {}).get(k)])
+            if want != {k: got.get(k) for k in keys}:
+                diffs.append("trend ≠ 引擎 trend_v3：%s" % [k for k in keys if want[k] != got.get(k)])
             for ms in eng.MEASURES:                      # v3 只用线段 ⇒ 任何看法下框和 trend 都一样
                 if ms == "macd":
                     continue
@@ -572,6 +579,28 @@ def self_test():
         finally:
             eng.macd_hist, server._hist = real_mh, real_h
     arms.append(("副图自己减柱子、引擎柱子 ×2", arm_hist_not_engine))
+
+    def trend_key_arm(mut, name):
+        """server 交出去的 trend 被改了键（只动载荷、不动 TREND_KEYS）⇒ 默认切法那格必须红，**而且红里点名那个键**。"""
+        def arm():
+            real = server._cut_cc
+
+            def cc(*a, **k):
+                sc, tr, rd = real(*a, **k)
+                return sc, mut(dict(tr)), rd
+            server._cut_cc = cc
+            buf = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(buf):
+                    n = run_default(quiet=False)
+            finally:
+                server._cut_cc = real
+            # 红了还不够：得有一行「trend 键对不上」**并且点出那个键名** —— 只红不点名正是这张卡要治的病
+            named = any("trend 键对不上" in ln and repr(name) in ln for ln in buf.getvalue().splitlines())
+            return n if named else 0
+        return arm
+    arms.append(("载荷 trend 多交一个键（名单外）且点名", trend_key_arm(lambda t: {**t, "zz_new": []}, "zz_new")))
+    arms.append(("载荷 trend 少交一个键且点名", trend_key_arm(lambda t: {k: v for k, v in t.items() if k != "units"}, "units")))
 
     def arm_meta_missing():
         real = server.MEASURES

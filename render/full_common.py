@@ -190,7 +190,9 @@ def draw_signals(g, r, X, Y, keep=lambda a, b: True):
                 g.polygon(tri, fill=col + (a,), outline=BG)
             else:
                 g.polygon(tri, outline=col + (a,), width=2)
-            txt = s["kind"] + ("(弱)" if s["weak"] else "") + tag + ("" if s["confirmed"] else "?")
+            # weak 10-09 下线（第六批）：跟网页 layers.js sigLabel 同一条 —— why 里有「盘整背驰」就加「·盘背」，别的 why 不加后缀。
+            #   原来的「(弱)」只出在创新低的二类上，M29 以后那种二类的 why 一定是「创新低＋盘整背驰」，所以标在同一批点上。
+            txt = s["kind"] + ("·盘背" if "盘整背驰" in (s.get("why") or "") else "") + tag + ("" if s["confirmed"] else "?")
             out.append(((x - sz, y0 + (8 if buy else -40 - sz)), txt, col if s["confirmed"] else tuple(int(v * .7) for v in col)))
     return out
 

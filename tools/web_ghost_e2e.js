@@ -136,7 +136,7 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   // ⑫ 用的那个**待确认**的点：真数据里那一段不一定有待确认的点，自己造一个（真后台也会吐这种点）。
   const PEND_BAR = 3200;
   const PEND_PT = { kind: '三买', bar: PEND_BAR, price: base.bars[PEND_BAR].l, confirmed: false,
-                    weak: false, level: 'pen', center: 1, unit: 3, _pend: true };
+                    level: 'pen', center: 1, unit: 3, _pend: true };
 
   const clone = (x) => JSON.parse(JSON.stringify(x));
   /** 模子 → 这一趟要吐的 payload。drop 里是 "tier|kind|bar"；EDGE 那个点每次都注入（它量守卫）。
@@ -150,7 +150,7 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
     if (Number.isFinite(span)) d.span = span;
     if (shift) for (const b of d.bars) b.t += shift;
     d.signals.pen.push({ kind: '三买', bar: EDGE_BAR, price: base.bars[EDGE_BAR].l, confirmed: true,
-                         weak: false, level: 'pen', center: 1, unit: 3 });
+                         level: 'pen', center: 1, unit: 3 });
     // ⑤ 三根情形：`grow` ＝ 这一份**真的把新那根带回来了**（末尾接一根）；
     //    `refreshing` ＝ 后台还在去币安拿（SWR），这份还是旧的 —— 真后台就是这么回的。
     if (opt.grow) {
