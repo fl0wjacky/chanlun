@@ -10,6 +10,7 @@ ap.add_argument('--base-label', default=None, help='表头里底座那一截的�
 ap.add_argument('--mark', action='append', default=[], help='下格圈一个点："MM-DD HH:MM|价|说明"（S-13 非极值端点那张用来圈笔内真正的极值）')
 ap.add_argument('--base', action='append', default=[], help='上下两格都翻的开关（比如上格要 S9 当底座）')
 ap.add_argument('--file'); ap.add_argument('--out'); ap.add_argument('--rank', action='store_true')
+ap.add_argument('--same', action='store_true', help='上下两格同一份结果（不翻任何开关），只给下格加 --mark —— 「只加显示标记」那种前后图用')
 ap.add_argument('--from', dest='frm'); ap.add_argument('--to')
 ap.add_argument('--label-a', default='现行：非同级别分解'); ap.add_argument('--label-b', default='同级别分解（开关）')
 ap.add_argument('--title', default='前后图'); ap.add_argument('--note', default='', help='图注再加一行（写在画法说明下面）'); ap.add_argument('--pen', default='old'); ap.add_argument('--pen-b', default=None, help='下格换一种笔（old/new），B-10 老笔新笔用')
@@ -25,7 +26,7 @@ def parse(f):
 FLAGS = [parse(f) for f in a.flag]
 BASE = [parse(f) for f in a.base]
 KWB = {k: {'True': True, 'False': False}.get(v, v) for k, v in (x.split('=', 1) for x in a.kw_b)}
-if not FLAGS and not a.pen_b and not KWB: sys.exit('至少给一个 --flag 或 --pen-b')
+if not FLAGS and not a.pen_b and not KWB and not a.same: sys.exit('至少给一个 --flag 或 --pen-b（只加标记用 --same）')
 
 def run(fn, flipped):
     saved = [(m, at, getattr(m, at)) for m, at, _ in BASE + FLAGS]
@@ -85,10 +86,12 @@ font = lambda s: ImageFont.truetype(config._pick_font(), s)
 F, Fs = font(20), font(15)
 W, PH, ML, MR = 2000, 560, 80, 20
 im = Image.new('RGB', (W, 90 + 2 * (PH + 30) + (70 if a.note else 40)), BG); d = ImageDraw.Draw(im)
-win = bars[b0:b1 + 1]; lo = min(x['l'] for x in win) * 0.985; hi = max(x['h'] for x in win) * 1.015
+win = bars[b0:b1 + 1]; lo = min(x['l'] for x in win) * (0.95 if a.mark else 0.985); hi = max(x['h'] for x in win) * 1.015   # 有 --mark 时底下多留一截：圈常常就圈在窗口最低点上，0.985 会把圈切掉半个
 LL, LH = math.log(lo), math.log(hi)
 nm = lambda fs: ' '.join(f.rsplit('.', 1)[-1] if '=True' in f else f.split('.')[-1] for f in fs)   # 只留常量名：上下两格的名字已经写在格子左上角，表头再写一遍会冲出右边
-d.text((ML, 14), f'{a.file} · {a.title}' + (f' · 底座 {a.base_label or nm(a.base)}' if a.base else '') + f' · 下格加 {" ".join([nm(a.flag)] + [f"{k}={v}" for k, v in KWB.items()]).strip() or ("笔 " + a.pen + " → " + a.pen_b)}', fill=TX, font=F)
+head = f'{a.file} · {a.title}' + (f' · 底座 {a.base_label or nm(a.base)}' if a.base else '')
+if a.same: d.text((ML, 14), head + ' · 上下同一份结果，下格只加标记', fill=TX, font=F)
+else: d.text((ML, 14), f'{a.file} · {a.title}' + (f' · 底座 {a.base_label or nm(a.base)}' if a.base else '') + f' · 下格加 {" ".join([nm(a.flag)] + [f"{k}={v}" for k, v in KWB.items()]).strip() or ("笔 " + a.pen + " → " + a.pen_b)}', fill=TX, font=F)
 dd = diff(A, B)
 d.text((ML, 48), f'窗口 {utc(b0):%Y-%m-%d} → {utc(b1):%Y-%m-%d}（UTC）｜整张：笔 上独有 {dd["pen_only_a"]} / 下独有 {dd["pen_only_b"]}，线段 上独有 {dd["seg_only_a"]} / 下独有 {dd["seg_only_b"]}，分界刀 上独有 {dd["bnd_only_a"]} / 下独有 {dd["bnd_only_b"]}，段型变 {dd["type_changed"]}｜加粗＝只在这一格有',
        fill=MU, font=Fs)
