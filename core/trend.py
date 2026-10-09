@@ -674,12 +674,14 @@ def _sl_beichi(r, done, j, typ, centers, first, hist):
     return "盘整背驰" if _panzheng(A, C, not up, hist) else None
 
 
-def _sl_state(bars, bounds, centers):
+def _sl_state(bars, bounds, two_sets):
     """①D（读法-①D，Nova 10-09 定）：同级别下每把刀标 state ＝ "pending"／"confirmed"，只看当前这一份 K 线，不记历史。
-    D-2′：D2 刀 b（低点刀为例）——b 之后到当前最后一根的最高点 e（持平取最早那根），有同级别中枢整个落在 [b, e] 里
-          （X0 ≥ b 且 X1 ≤ e），b 就确认；高点刀对称取最低点。b′ 只会落在 e 或更晚更极端的点上，所以这个中枢一定在 b、b′ 之间，
-          D2-7 撤不了 b（25 张前缀回放：确认后撤只剩 S-13 那 1 次，锁上 PEN_FINAL_LOCK 后为 0）。
-    D-4：S5 刀确认 ⇔ 左边最近那把 D2 刀已确认，并且右边已经有下一把 D2 刀（回放：S5 确认后变 0）。"""
+    D-2‴：D2 刀 b（低点刀为例）——b 之后到当前最后一根的最高点 e（持平取最早那根）；甲的两套中枢（限形状、不限形状，
+          two_sets）里**各有**一个整个落在 [b, min(e, 下一把 D2)] 里（X0 ≥ b 且 X1 ≤ 上界，两套可以不是同一个），b 就确认；
+          高点刀对称取最低点。b′ 只会落在 e 或更晚更极端的点上 ⇒ D2-7 撤不了 b；两套都有 ⇒ D6-4 fallback 往哪边翻都还在，不回翻。
+    D-4′：S5 刀确认 ⇔ 左右两把 D2 刀都已确认（右边那把待确认时会被撤，撤了 S5 就翻回去）。
+    25 张前缀回放（定稿口径＋PEN_FINAL_LOCK）：确认后消失 D2 0／S5 0，确认回翻 D2 0／S5 0；D2 确认 78、S5 70，延迟中位 0、最大 1159。
+    （试过作废的：只用 D-2′ 回翻 2／3；等最后一组 fallback 定、要求两套同一个中枢、F1 头 4 条定 a——见读法-①D 四之七。）"""
     n = len(bars)
     d2 = [b for b in bounds if b.get("rule") == "D2-2"]
     for i, b in enumerate(d2):
@@ -690,13 +692,15 @@ def _sl_state(bars, bounds, centers):
             continue
         key = (lambda q: bars[q]["h"]) if b["kind"] == "L" else (lambda q: -bars[q]["l"])
         e = max(range(lo, n), key=lambda q: (key(q), -q))
-        b["state"] = "confirmed" if any(z["X0"] >= b["bar"] and z["X1"] <= min(hi, e) for z in centers) else "pending"
+        ok = all(any(z["X0"] >= b["bar"] and z["X1"] <= min(hi, e) for z in zs) for zs in two_sets)
+        b["state"] = "confirmed" if ok else "pending"
     for b in bounds:
         if b.get("rule") != "S5":
             continue
         left = [x for x in d2 if x["bar"] < b["bar"]]
         right = [x for x in d2 if x["bar"] > b["bar"]]
-        b["state"] = "confirmed" if left and right and left[-1]["state"] == "confirmed" else "pending"
+        b["state"] = "confirmed" if left and right and left[-1]["state"] == "confirmed" and right[0]["state"] == "confirmed" \
+            else "pending"
 
 
 def _sl_layer(done, ks, bounds_, n):
@@ -707,6 +711,7 @@ def _sl_layer(done, ks, bounds_, n):
     pieces = []                                    # (起 done 下标, 止 done 下标（不含）, [中枢])
     extra = []
     bk = {x["line_seg"] + 1: x["kind"] for x in bounds_}
+    two_sets = ([], [])                            # D-2‴：(限形状那套, 不限形状那套) 的中枢，没走 D6 的组两边都放同一份
     def kind_of(zz):
         return "无中枢" if not zz else "盘整" if len(zz) == 1 else ("上涨" if _sl_rel(zz[0], zz[1]) == "上" else "下跌")
     for g, (a, b) in enumerate(zip(edges, edges[1:])):
@@ -718,8 +723,11 @@ def _sl_layer(done, ks, bounds_, n):
             want_up = bk[a] == "L"                       # 从低点起 ⇒ 上涨 ⇒ 中枢首段向下（下上下）
             zr = _sl_centers(done, a, b, first_up=not want_up, first_free=exempt)
             ok = len(zr) >= 2 and _sl_rel(zr[0], zr[1]) == ("上" if want_up else "下")
+            two_sets[0].extend(zr); two_sets[1].extend(zz)
             if SAME_LEVEL_D6 == "strict" or ok:
                 zz = zr
+        else:
+            two_sets[0].extend(zz); two_sets[1].extend(zz)
         if R6_YI_PRIME and g and bk.get(a) in ("L", "H") and not exempt:
             zz = _yi_prime_centers(done, a, b)
         start, cur, way = a, [], None
@@ -749,7 +757,7 @@ def _sl_layer(done, ks, bounds_, n):
         centers_out += [dict(z, seg=g) for z in zz]
         segments.append(dict(i0=0 if a == 0 else done[a - 1]["i1"], i1=n - 1 if last else done[b - 1]["i1"],
                              type=kind, upgraded=False, head=a == 0, live=last, n_centers_level=len(zz)))
-    return segments, centers_out, extra
+    return segments, centers_out, extra, two_sets
 
 
 def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_exceed=True, standardize=True):
@@ -779,11 +787,11 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
     bounds = list(res["bounds"])
     ks = list(ks)
     if SAME_LEVEL:                               # R-1 试验：同级别分解（默认关）。不升级、不补 D2-8、不标死点类型
-        segments, centers_out, extra = _sl_layer(done, ks, bounds, n)
+        segments, centers_out, extra, two_sets = _sl_layer(done, ks, bounds, n)
         bounds = sorted(bounds + extra, key=lambda x: x["bar"])
         if _DEATH and SAME_LEVEL_DEATH:                  # 正式版：同级别下照标死点类型（D2-5 按三段中枢）、小转大的二类（S11）
             _death_types(r, done, bounds, segments, centers_out)
-        _sl_state(r["bars"], bounds, centers_out)
+        _sl_state(r["bars"], bounds, two_sets)
         return dict(seg_centers=centers_out, bounds=bounds, retracted=res["retracted"],
                     pending=pending(done, ks, res["want"]), segments=segments, units=[], reading="same_level",
                     xzd_seconds=_xzd_seconds(done, bounds, r) if (_DEATH and SAME_LEVEL_DEATH and _XZD_SECOND) else [],
