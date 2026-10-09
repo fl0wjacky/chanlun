@@ -96,6 +96,10 @@ MIN_GAP_DEFAULT = 3
 #   所以只许动 seq[-1]；会改到 seq[-2] 及更早的两条回头修正——「作废上一笔」（pend）和 fix_start——整条不走。
 #   关掉以后笔的端点可能不是这一笔的极值，nonextreme_pens 照报（P3：正文优先，极值规矩只报诊断）。
 PEN_FINAL_LOCK = False
+#   P2′（Nova 10-09 定）唯一的例外：最后一个端点延伸以后，最后一笔违反了 L77:37-40 正文的成笔条件
+#   （顶分型最高那根没有一部分高于底分型最低那根），才准许照原来的 fix_start 回头修一次。
+#   诊断钩子：设成一个 list，每触发一次记 (修之前的端点数, 修之后第一处不同的下标)，量「例外触发几次、改多深」用。
+PEN_LOCK_EXCEPTION_LOG = None
 
 def check_range_ext(cls=None, seeds=range(40)):
     """RangeExt 跟切片 max/min 在所有 (k0, k1) 上逐个比 → 不一致处数（0 才对）。
@@ -150,12 +154,28 @@ def build_pens(fx, std, rule="old", min_gap=None):
     def pen_ok(a, b):
         return far(a, b) and extreme(a, a["k"], b["k"]) and extreme(b, a["k"], b["k"])
 
+    def l77_breaks(a, b):                    # a→b 这一笔违反 L77:37-40：顶分型最高那根没有一部分高于底分型最低那根
+        top, bot = (a, b) if a["type"] == "top" else (b, a)
+        return not std[top["k"]]["h"] > std[bot["k"]]["h"]
+
+    def l77_broken():
+        return l77_breaks(seq[-2], seq[-1])
+
     def fix_start():
         """最后一笔 a→g 的起点若不是极值（笔内有个更极端的同类点 P），往回修，两种修法取保留端点多的：
         · 让 P 自己当端点：找更早的、与 g 同类的端点 e，使 e→P、P→g 都成笔；
         · 合并：找更早的、与 a 同类的端点 e，使 e→g 一笔两头都包得住。"""
-        if len(seq) < 2 or PEN_FINAL_LOCK:
+        if len(seq) < 2 or (PEN_FINAL_LOCK and not l77_broken()):
             return
+        if PEN_FINAL_LOCK and PEN_LOCK_EXCEPTION_LOG is not None:
+            before = list(seq)
+            _fix_start()
+            k = next((i for i, (x, y) in enumerate(zip(before, seq)) if x is not y), min(len(before), len(seq)))
+            PEN_LOCK_EXCEPTION_LOG.append(("fix_start", len(before), k))
+            return
+        _fix_start()
+
+    def _fix_start():
         a, g = seq[-2], seq[-1]
         if extreme(a, a["k"], g["k"]):
             return
@@ -184,7 +204,10 @@ def build_pens(fx, std, rule="old", min_gap=None):
         if f["type"] == last["type"]:        # 步骤二：同类取更极端的
             if not beyond(f, last):
                 return
-            if pend is not None and not PEN_FINAL_LOCK and (len(seq) < 3 or not beyond(last, seq[-3])):
+            brk = PEN_FINAL_LOCK and len(seq) >= 2 and l77_breaks(seq[-2], f)   # P2′：延伸会破正文成笔条件 ⇒ 这一步照不锁走
+            if brk and PEN_LOCK_EXCEPTION_LOG is not None:
+                PEN_LOCK_EXCEPTION_LOG.append(("延伸破 L77", len(seq)))
+            if pend is not None and (not PEN_FINAL_LOCK or brk) and (len(seq) < 3 or not beyond(last, seq[-3])):
                 P, pend = pend, None         # 上一笔包不住待定分型 → 作废上一笔
                 seq.pop()
                 seq[-1] = P
