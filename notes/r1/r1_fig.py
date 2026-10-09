@@ -5,6 +5,7 @@
 import sys, os, json, argparse, importlib, math, datetime as DT
 ap = argparse.ArgumentParser()
 ap.add_argument('--root', required=True); ap.add_argument('--flag', action='append', default=[])
+ap.add_argument('--base', action='append', default=[], help='上下两格都翻的开关（比如上格要 S9 当底座）')
 ap.add_argument('--file'); ap.add_argument('--out'); ap.add_argument('--rank', action='store_true')
 ap.add_argument('--from', dest='frm'); ap.add_argument('--to')
 ap.add_argument('--label-a', default='现行：非同级别分解'); ap.add_argument('--label-b', default='同级别分解（开关）')
@@ -19,11 +20,13 @@ def parse(f):
     k, v = f.split('=', 1); mod, attr = k.rsplit('.', 1)
     return importlib.import_module(mod), attr, {'True': True, 'False': False}.get(v, v if not v.replace('.', '').lstrip('-').isdigit() else float(v) if '.' in v else int(v))
 FLAGS = [parse(f) for f in a.flag]
+BASE = [parse(f) for f in a.base]
 if not FLAGS and not a.pen_b: sys.exit('至少给一个 --flag 或 --pen-b')
 
 def run(fn, flipped):
-    saved = [(m, at, getattr(m, at)) for m, at, _ in FLAGS]
+    saved = [(m, at, getattr(m, at)) for m, at, _ in BASE + FLAGS]
     try:
+        for m, at, v in BASE: setattr(m, at, v)
         if flipped:
             for m, at, v in FLAGS: setattr(m, at, v)
         r = analyze_file(fn, pen=(a.pen_b or a.pen) if flipped else a.pen); t = TR.trend_v3(r)
@@ -34,6 +37,7 @@ def run(fn, flipped):
                 segs=[(s['i0'], s['i1'], s['p0'], s['p1']) for s in r['segs'] if not s.get('live')],
                 live=[(s['i0'], s['i1'], s['p0'], s['p1']) for s in r['segs'] if s.get('live')],
                 bounds=[(b['bar'], b['kind'], b['price'], b.get('death')) for b in t['bounds']],
+                moved=[(m['from_bar'], m['to_bar'], m['kind']) for m in t.get('moved', [])],
                 tsegs=[(s['i0'], s['i1'], s['type'], bool(s.get('head')), bool(s.get('upgraded'))) for s in t['segments']],
                 zs=[(z.get('X0', z.get('x0')), z.get('X1', z.get('x1')), z['ZD'], z['ZG']) for z in t['seg_centers'] if 'ZD' in z])
 
@@ -117,6 +121,14 @@ def panel(k, R, other, tag):
         for yy in range(top, bot, 10): q.line([x, yy, x, yy + 5], fill=(234, 238, 246, 255 if mine else 150), width=3 if mine else 1)
         q.ellipse([x - 5, Y(price) - 5, x + 5, Y(price) + 5], fill=TX)
         q.text((x + 6, Y(price) + (-26 if kind == 'H' else 8)), f'{price:g}' + (f' · {death}' if death else ''), fill=TX if mine else MU, font=Fs)
+    for (fb, tb, kind) in R.get('moved', []):                  # 挪刀：橙色空心圈＝刀原来立的地方，箭头指到挪过去的地方
+        if max(fb, tb) < b0 or min(fb, tb) > b1: continue
+        px = lambda i: bars[i]['h'] if kind == 'H' else bars[i]['l']
+        x0, y0_, x1, y1 = X(fb), Y(px(fb)), X(tb), Y(px(tb))
+        q.line([x0, y0_, x1, y1], fill=(255, 150, 40, 230), width=2)
+        q.ellipse([x0 - 8, y0_ - 8, x0 + 8, y0_ + 8], outline=(255, 150, 40), width=3)
+        q.polygon([(x1, y1), (x1 - 9 if x1 > x0 else x1 + 9, y1 - 5), (x1 - 9 if x1 > x0 else x1 + 9, y1 + 5)], fill=(255, 150, 40))
+        q.text((x0 - 14, y0_ + (14 if kind == 'L' else -34)), f'挪刀 {px(fb):g}', fill=(255, 150, 40), font=Fs)
     # 画框外的一律刷回底色：框和线都不许越出画框（左右上下四边，ZD 低于窗口时框边会一路画到格外）
     q.rectangle([0, 0, ML - 1, PH], fill=BG); q.rectangle([W - MR + 1, 0, W, PH], fill=BG)
     q.rectangle([0, 0, W, top - 1], fill=BG); q.rectangle([0, bot + 1, W, PH], fill=BG)
@@ -128,7 +140,7 @@ def panel(k, R, other, tag):
         q.text((6, Y(v) - 8), f'{v:g}', fill=MU, font=Fs); q.line([ML - 5, Y(v), ML, Y(v)], fill=MU)
     im.paste(p, (0, y0))
 panel(0, A, B, '上：' + a.label_a); panel(1, B, A, '下：' + a.label_b)
-d.text((ML, 90 + 2 * (PH + 30) + 6), '画法：背景按段型（上涨绿／下跌红／盘整灰）；笔灰，只在这一格有的笔加粗粉；线段金，只在这一格有的线段加粗青；分界白虚线，只在这一格有的加粗；价格旁写死点类型。对数价格轴，两格同一把尺。',
+d.text((ML, 90 + 2 * (PH + 30) + 6), '画法：背景按段型（上涨绿／下跌红／盘整灰）；笔灰，只在这一格有的笔加粗粉；线段金，只在这一格有的线段加粗青；分界白虚线，只在这一格有的加粗；橙圈＋箭头＝挪刀（刀原来在圈处，后来挪到箭头处）；价格旁写死点类型。对数价格轴，两格同一把尺。',
        fill=MU, font=Fs)
 if a.note: d.text((ML, 90 + 2 * (PH + 30) + 34), '注：' + a.note, fill=TX, font=Fs)
 im.save(a.out); print('saved', a.out, im.size, dd)
