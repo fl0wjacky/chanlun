@@ -1011,6 +1011,33 @@ const shotChart = async (p, tag) => {
   await dN0.c.close(); await dNT.c.close(); await dN.c.close();
   await dA.c.close();
 
+  // ㊷b 芯片色块：**关着＝空心框、开着＝填实**（card-8aa5c9de-0c2）。原来关着是同一个实心块降透明度，看着像「半开」。
+  //   量的是算出来的样式（不是看 class）：开着的 `<i>` 底色＝那一层的色、没有描边；关着的底色透明、内描边＝那一层的色。
+  //   挑两颗缺省就定的：「线段」缺省开、「类中枢」缺省关（两颗都不按灰，跟按灰那条账分开）。
+  const dC = await open(TQ);
+  const swc = await dC.p.evaluate(() => Object.fromEntries(['seg', 'pc'].map((k) => {
+    const c = document.querySelector(`.chip[data-key="${k}"]`), i = c.querySelector('i'), cs = getComputedStyle(i);
+    return [k, { pressed: c.getAttribute('aria-pressed'), disabled: c.disabled, bg: cs.backgroundColor, shadow: cs.boxShadow, c: i.style.getPropertyValue('--c').trim() }];
+  })));
+  const hexRgb = (h) => { const n = parseInt(h.slice(1), 16); return `rgb(${n >> 16}, ${(n >> 8) & 255}, ${n & 255})`; };
+  ck('㊷b 芯片色块：开着的填实（底色＝那一层的色、没有描边）；关着的空心（底透明、描边＝那一层的色）',
+     swc.seg.pressed === 'true' && swc.seg.bg === hexRgb(swc.seg.c) && swc.seg.shadow === 'none'
+       && swc.pc.pressed === 'false' && !swc.pc.disabled && swc.pc.bg === 'rgba(0, 0, 0, 0)' && swc.pc.shadow.includes(hexRgb(swc.pc.c)),
+     JSON.stringify(swc));
+  // ㊷c 成交量：没有成交量数据的那一刻（首屏副图还没到）⇒ 没按下＋按灰、色块空心；有了 ⇒ 按下、填实。
+  //   在页面里把 `sub.hasVol` 拨成 false，再点一下别的芯片逼 applyToggles 重排（量的是判据，不是网速）。
+  const volS = await dC.p.evaluate(async () => {
+    const a = window.__app, c = document.querySelector('.chip[data-key="vol"]'), i = c.querySelector('i');
+    const read = () => ({ pressed: c.getAttribute('aria-pressed'), disabled: c.disabled, bg: getComputedStyle(i).backgroundColor });
+    const kick = async () => { const pc = document.querySelector('.chip[data-key="pc"]'); pc.click(); pc.click(); await new Promise((r) => setTimeout(r, 200)); };
+    const was = a.sub.hasVol; a.sub.hasVol = false; await kick(); const off = read();
+    a.sub.hasVol = was; await kick(); return { off, on: read(), optsVol: a.opts.vol };
+  });
+  ck('㊷c 成交量：数据里还没有成交量 ⇒ 没按下＋按灰、色块空心（不许亮着又按灰）；有了 ⇒ 按下、填实；用户的开关（opts.vol）不动',
+     volS.off.pressed === 'false' && volS.off.disabled && volS.off.bg === 'rgba(0, 0, 0, 0)' && volS.on.pressed === 'true' && !volS.on.disabled
+       && volS.on.bg !== 'rgba(0, 0, 0, 0)' && volS.optsVol === true, JSON.stringify(volS));
+  await dC.c.close();
+
   // ───────────────────────────────────────────────────────────────────────────
   // ㊸–㊽ **合成出来的高一级框**归哪颗开关、按级别上什么色、「升级」二字钉在哪
   //        （v3 §八 5，卡 card-113a3b16-026，小栋 10-05 23:3xZ 定）

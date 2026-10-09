@@ -313,9 +313,13 @@ body.fs-fake main { position: fixed; inset: 0; z-index: 50; height: 100dvh; back
    窄屏：app.js 把它挪进 #chart，浮在图上（见下面 @media 那一档）。 */
 .mgroup .mnote { flex: 1 0 100%; font-size: 11px; line-height: 1.5; color: var(--mu); }
 
-.chip i { width: 9px; height: 9px; border-radius: 2px; opacity: .45; }
+/* 色块：**关着＝空心框、开着＝填实**（card-8aa5c9de-0c2，Nova 10-09 13:24 派）。原来是同一个实心块、关着降到 45% 透明 ——
+   颜色还在，暗底上看着像「半开」，跟旁边按灰的（整颗 35%）一比反倒显得亮（买卖点那颗就被看成开着）。
+   改成**靠形状分**：空心／实心一眼就分得开，不用比亮度；空心框照样是那一层的颜色，图例的作用不丢。
+   颜色从 app.js 以 `--c` 传进来（关着要描边、开着要填底，两处都要这个色）。 */
+.chip i { width: 9px; height: 9px; border-radius: 2px; background: transparent; box-shadow: inset 0 0 0 1.5px var(--c); }
 .chip[aria-pressed="true"] { color: var(--tx); border-color: var(--mu); background: var(--panel-hi); }
-.chip[aria-pressed="true"] i { opacity: 1; }
+.chip[aria-pressed="true"] i { background: var(--c); box-shadow: none; }
 .chip:hover { border-color: var(--mu); }
 .chip:disabled { opacity: .35; cursor: default; }
 
