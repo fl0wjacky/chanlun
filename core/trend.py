@@ -587,6 +587,7 @@ SAME_LEVEL = False                                # 决策树 R-1 还没定：�
 SAME_LEVEL_OVERLAP = "ZDZG"                       # S3「判重叠用哪个区间」小栋还没认：ZDZG（拟）或 DDGG，两个都量
 SAME_LEVEL_D6 = None                              # R-6 甲在同级别下：None＝不限方向（乙粗版）；"strict"＝分界之后的组，中枢首段须跟走势反向（上涨里下上下）；
                                                   #   "fallback"＝同 strict，但这样判不出同方向趋势就退回不限方向（照 D6-4）
+R6_YI_FALLBACK = False                            # 乙′-6（Atlas 7f997d3，Nova 10-09 定）：排掉 a 以后这一组找不到三段重叠 ⇒ 退回让 a 进第一个中枢（S9 底座找法）
 R6_YI_PRIME = False                               # R-6 乙′（读法-R3R6 一·5，Atlas c11fe60）：分界之后每段，从分界极值出发的第一条线段 a 不进第一个中枢；
                                                   #   第一个中枢从跟 a 反向的那条起找（找不到就整体往后挪两条，照 L39 把 a 并成 a′）。中枢形状不限。
 SL_FIRST_EXEMPT = False                           # 甲S-2／乙′-5（读法-R3R6 一·6，Atlas f3fac3c）：前一个走势段是本级别反向趋势 ⇒ 这一段第一个中枢不受限
@@ -639,7 +640,7 @@ def _yi_prime_centers(done, a, b):
             break
         k += 2
     if first is None:
-        return []
+        return _sl_centers(done, a, b) if R6_YI_FALLBACK else []
     return _sl_centers(done, first, b)
 
 
