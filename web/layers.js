@@ -122,10 +122,15 @@ const LOWER_LET = 'abcdefgh';
  * ★ 买卖点**不止一个大开关**：下面还有六个 kind 的 chip（一买…三卖）和「显示待确认」
  *   （未确认的点默认不画）—— 高一级那层同理，跟着自己那个开关。
  */
-export function shownOf(opts) {
+export function shownOf(opts, data) {
   const o = opts || {}, kinds = o.sigKinds || {};
+  // 同级别正式版（载荷 `trend_reading === 'same_level'`）：**「以上级别根本不考虑」**（L38 规则 C）——
+  //   不升级、不合成（S6），第 33 课「满 9 段」那种升级框也属于「以上级别」⇒ `up`、`lv` 一律不画，芯片也藏起来
+  //   （Nova 10-09 09:07 定：不留半个入口）。地址栏里带着 `up=1` 也一样不画 —— 意愿留着，换回现行口径照常。
+  //   ★ 第二个参数**可以不给**（老调用点）：不给就当现行口径，跟改之前一个字不差。
+  const sl = !!(data && data.trend_reading === 'same_level');
   return {
-    pen: !!o.pen, seg: !!o.seg, pc: !!o.pc, sc: !!o.sc, up: !!o.up,
+    pen: !!o.pen, seg: !!o.seg, pc: !!o.pc, sc: !!o.sc, up: !!o.up && !sl,
     // 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）：背景带／分界／中阴／待定／撤回／升级框，
     // **一个大开关**管全部 —— 它们是一件事（"这一段怎么走的"）的六个面，拆成六个芯片没人找得齐。
     // ★ 它跟 `cut`（中枢切法）不是一回事，别混：切法决定**中枢**切在哪儿，这一层画的是**走势段**。
@@ -136,7 +141,7 @@ export function shownOf(opts) {
     // 级别对照（卡 card-01961644-68f，接口规则 L-9）：合成框跟**对照图**（后台 `ref_tf` 那一档）
     // 中枢对不上的那些，在框右沿标一句。★ 它标的是**合成框**（`T.units`），那一层归 `up` —— 框不画就没有地方挂字
     // ⇒ `lv` 跟 `up` **与**一下（跟 `trendNum` 跟 `trend` 与一下是同一条写法）。默认开。
-    lv: !!o.lv && !!o.up,
+    lv: !!o.lv && !!o.up && !sl,
     // 单个买卖点画不画：跟下面画三角那一段用的是**同一条**（大开关 ＋ kind chip ＋ 待确认）
     sigAt: (s) => !!o.sig && !!kinds[s.kind] && (!!s.confirmed || !!(o.sigPend && CHART.sig_pending)),
   };
@@ -320,7 +325,7 @@ export function makeBoxPrimitive(state) {
             state.boxesDrawn = [];
             const { data, opts } = state;
             if (!data || !this._chart) return;
-            const sh = shownOf(opts);        // 开关只在这里读一次（判据那半边走的是同一个函数）
+            const sh = shownOf(opts, data);        // 开关只在这里读一次（判据那半边走的是同一个函数）
             target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
               const W = mediaSize.width;
               const vp = viewport(this._chart, state.candleSeries || this._series, data);
@@ -428,7 +433,7 @@ export function makeAnnotPrimitive(state) {
           draw: (target) => {
             const { data, opts } = state;
             if (!data || !this._chart) return;
-            const sh = shownOf(opts);        // 开关只在这里读一次（判据那半边走的是同一个函数）
+            const sh = shownOf(opts, data);        // 开关只在这里读一次（判据那半边走的是同一个函数）
             target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
               const W = mediaSize.width;
               const H = mediaSize.height;   // 视口下沿 —— 夹框/避让要两头都不出画布（见 fitBox）
@@ -687,7 +692,7 @@ export function makeTrendPrimitive(state) {
 function trendBandView(target, state, prim) {
   const { data, opts } = state;
   const T = trendOf(data);
-  const sh = shownOf(opts);
+  const sh = shownOf(opts, data);
   if (!T || (!sh.trend && !sh.up)) return;
   target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
     const W = mediaSize.width, H = mediaSize.height;
@@ -822,7 +827,7 @@ function hatchFill(ctx) {
 function trendMarkView(target, state, prim) {
   const { data, opts } = state;
   const T = trendOf(data);
-  const sh = shownOf(opts);
+  const sh = shownOf(opts, data);
   // ★ 命中带**每帧先清空**，而且清在早退**之前**：这一层没数据、或者两颗芯片都关着的时候也得清。
   //   留着上一帧的带子就是"层关了、指针压上去还有字"—— 那条比画错更难被发现：**图上什么都没画**。
   //   （这跟「关着的层不算看得见」不是同一条账：那条管**画**，这条管**命中**。）
@@ -1011,7 +1016,7 @@ function trendMarkView(target, state, prim) {
     //      （一团暗红里几个更暗的红点）。理由写在 `FONT_LET` 上面那一段。**唯一的例外**：
     //      **还在长的那一段用灰** —— 它中枢数还会变、字母将来要重排，不该跟定下来的字母一样亮；
     //      那是"未定"的记号，"这一段往哪儿去"已经由背景带说了。
-    if (shownOf(opts).trendNum) {
+    if (shownOf(opts, data).trendNum) {
       // 缺字段按 A —— 后台的缺省就是 A（core/trend.py），而"猜不出来就画 B"会静默换掉一套口径
       const reading = data.trend_reading === 'B' ? 'B' : 'A';
       const lv = data.seg_centers || [], uni = T.units || [];

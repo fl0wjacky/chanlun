@@ -343,7 +343,7 @@ function renderLevelsHead() {
   if (!e) return;
   const lv = state.levels;
   let txt = '';
-  if (shownOf(opts).lv && lv) {
+  if (shownOf(opts, state.data).lv && lv) {
     const a = levelsStartText(lv), b = levelsCoverageText(lv);
     txt = [a, b].filter(Boolean).join(' ｜ ');
     // ★★ `。` 归**整行**，不归某一段（Nova 2026-10-06 定，见 `levelsStartText` 末尾那段账）：
@@ -1100,7 +1100,7 @@ async function loadEarlier(span) {
     const win = windowOf(own.bars, range0);
     // ★ 判据只比**用户当前打开的那几层**，开关照 layers.js 实际画图用的那份（shownOf）取；
     //   前后两次用**同一个** sh：要是两次之间开关自己变了，那跟换档没关系，别算进去。
-    const sh = shownOf(state.opts);
+    const sh = shownOf(state.opts, state.data);
     // ★★ 补数据**一换档，手上那份 levels 当场作废**（card-01961644-68f）：它是对着**旧那一档**的
     //   `trend.units` 逐框数出来的（`levels.units` 跟框只有"同下标"这一条契约），档位一变，
     //   同一个下标在新图上指的就不是同一个框了 —— 标会整批错位，而屏上照样是"有字的"。
@@ -1553,10 +1553,14 @@ function applyToggles() {
     //       （载荷里有没有这一层），两处各自拿它去回答自己的问题（"有没有用"←`opts`；"画没画"←`opts && 事实`）。
     const hasTrend = !!(state.data && state.data.trend);
     const on = k === 'sigPend' ? opts.sigPend : k.startsWith('sig:') ? opts.sigKinds[k.slice(4)]
-      : k === 'lv' ? shownOf(opts).lv
+      : k === 'lv' ? shownOf(opts, state.data).lv
         : k === 'trend' ? opts.trend && hasTrend
           : opts[k];
-    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    // 同级别正式版：「高一级」「级别对照」两颗**藏起来**（不是按灰 —— 按灰是"此刻没用、换一下就有用"，这里是"这一套口径里根本没有这一层"）。
+    //   判据跟画图同一个 `shownOf`：它那边 `up`／`lv` 已经与上了 `!sameLevel`。
+    const sameLevel = !!(state.data && state.data.trend_reading === 'same_level');
+    if (k === 'up' || k === 'lv') b.hidden = sameLevel;
+    b.setAttribute('aria-pressed', (k === 'up' ? on && !sameLevel : on) ? 'true' : 'false');
     const sigChip = k.startsWith('sig:') || k === 'sigPend';
     // 成交量那颗在**没有 v 的数据上**按灰（仓里的样本就是）：能点却画不出东西的开关是骗人的。
     // 走势分段那颗同理：`cut=extend` 那份载荷没有 `trend` 这个键 ⇒ 开着也画不出东西 ⇒ 按灰。

@@ -72,6 +72,22 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
        `屏上 ${real.states.length} 刀（pending ${nPend}）${badDot.length ? '　✗ 点不对 ' + JSON.stringify(badDot) : ''}${badTxt.length ? '　✗ 字不对 ' + JSON.stringify(badTxt) : ''}`);
   } else console.log('－ ④ 跳过：这个后台还不给 state');
 
+  // ⑤ 「高一级」「级别对照」两颗芯片（Nova 10-09 09:07）：同级别正式版（trend_reading=same_level）⇒ 两颗**藏起来**，
+  //   而且就算 opts 里 up／lv 是开的（地址栏带着 up=1 进来的那种），画图那张判据 `shownOf` 也给 false；
+  //   现行口径 ⇒ 两颗照常露着（牙：别把现行口径也藏了）。
+  const chipsLv = await p.evaluate(async () => {
+    const app = window.__app, { shownOf } = await import('/layers.js');
+    const sl = (app.state.data || {}).trend_reading === 'same_level';
+    const vis = (k) => { const e = document.querySelector(`.chip[data-key="${k}"]`); return e ? getComputedStyle(e).display !== 'none' : null; };
+    const forced = shownOf({ ...app.state.opts, up: true, lv: true }, app.state.data);
+    return { sl, up: vis('up'), lv: vis('lv'), forcedUp: forced.up, forcedLv: forced.lv };
+  });
+  ck(chipsLv.sl ? '⑤ 同级别正式版：「高一级」「级别对照」两颗藏起来；opts 里开着也不画（shownOf.up／lv＝false）'
+                : '⑤ 现行口径：「高一级」「级别对照」两颗照常露着（牙）',
+     chipsLv.sl ? (chipsLv.up === false && chipsLv.lv === false && !chipsLv.forcedUp && !chipsLv.forcedLv)
+                : (chipsLv.up === true && chipsLv.lv === true && chipsLv.forcedUp === true),
+     JSON.stringify(chipsLv));
+
   // ③ 牙：把载荷里的 state 全拿掉（现行后台本来就没有）⇒ 0 个空心点、0 个「待确认」
   await p.evaluate(() => { for (const q of window.__app.state.data.trend.bounds) delete q.state; });
   await nudge();

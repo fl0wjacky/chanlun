@@ -1071,6 +1071,10 @@ const shotChart = async (p, tag) => {
     const u = us[us.length - 1];
     return { X0: u.X0, X1: u.X1, seg: u.seg, n: u.n };
   });
+  // 同级别正式版（载荷 trend_reading=same_level）：不升级、不合成，「高一级」芯片藏起来（Nova 10-09 09:07）⇒
+  //   下面「勾上高一级」那四格的前提根本不存在，**照实印「跳过」**，不拿空表去算过（也不算红）。现行后台照旧全量。
+  const sameLevelU = await dU.p.evaluate(() => (window.__app.state.data || {}).trend_reading === 'same_level');
+  const ckU = (name, ok, extra) => (sameLevelU ? ck(name, true, '－ 跳过：同级别正式版没有合成框这一层（Nova 10-09 09:07）') : ck(name, ok, extra));
   await dU.c.close();
 
   ck('合成大框**默认不画**（「高一级」没勾 ⇒ 一个框、一个「升级」字都没有），但走势那一层照常画',
@@ -1099,14 +1103,14 @@ const shotChart = async (p, tag) => {
   const anyUnit = onP.find((s) => s.got.length);
   const offStill = pages.every((p) => p.off.got.length === 0 && p.off.upLabels.length === 0);
 
-  ck('勾上「高一级」⇒ 合成框**才**画，且画了几个 == 载荷里落在这一屏的几个（逐个对，不是"大于零"）',
+  ckU('勾上「高一级」⇒ 合成框**才**画，且画了几个 == 载荷里落在这一屏的几个（逐个对，不是"大于零"）',
      !!clicked && !!anyUnit && onP.every((s) => s.got.length === s.want)
        && pages.filter((p) => p.clickErr).length === 0,
      (clicked ? '' : '★ 那颗芯片点不动：' + (pages.map((p) => p.clickErr).filter(Boolean)[0] || '(没报错)') + '　')
        + pages.map((p, i) => `at+${SWEEP[i].at - (pick ? pick.X0 : 0)}：载荷 ${p.on.want} / 画了 ${p.on.got.length}`
          + `（关着时 ${p.off.got.length}）`).join('　'));
 
-  ck('框**按级别上色**：画上去的那个色 == `/theme.js` 的级别色（这一层的合成框都是**线段中枢升的** ⇒ `up_seg`）',
+  ckU('框**按级别上色**：画上去的那个色 == `/theme.js` 的级别色（这一层的合成框都是**线段中枢升的** ⇒ `up_seg`）',
      !!anyUnit && onP.every((s) => s.got.every((u) => u.col === UCHART.up_seg)),
      `画上去的色 ${JSON.stringify([...new Set(onP.flatMap((s) => s.got.map((u) => u.col)))])}`
        + `　theme 的 up_seg=${UCHART.up_seg}　up_pen=${UCHART.up_pen}（两个色相同时这格就成死闸：印出来）`);
@@ -1117,7 +1121,7 @@ const shotChart = async (p, tag) => {
     return { L, u };
   }));
   const dxs = owned.filter((o) => o.u).map((o) => Math.round((o.L.x - o.u.x0) * 10) / 10);
-  ck('「升级」二字的 x **在它那个框里**，且贴左沿 6 px（不是段的左上角、更不是视口的左上角）',
+  ckU('「升级」二字的 x **在它那个框里**，且贴左沿 6 px（不是段的左上角、更不是视口的左上角）',
      !!anyUnit && owned.length > 0 && owned.every((o) => !!o.u) && dxs.every((d) => Math.abs(d - 6) <= 1.5),
      `${owned.length} 个字：` + owned.map((o, i) => o.u
        ? `x=${o.L.x} ∈ 框[${o.u.x0}, ${o.u.x1}]（差 ${dxs[i]}）`
@@ -1129,7 +1133,7 @@ const shotChart = async (p, tag) => {
   const sawOffLeft = onP.some((s) => s.got.some((u) => u.x0 !== null && u.x0 < 0));
   const orphans = onP.flatMap((s) => s.upLabels.filter((L) =>
     !s.got.some((u) => u.x0 !== null && u.x0 >= 0 && L.x >= u.x0 - 1 && L.x <= u.x1 + 1)));
-  ck('框左沿滚出屏幕 ⇒ 那个「升级」**一个字都不画**（老毛病：夹在 `Math.max(x,4)` 上钉死在视口左上角）',
+  ckU('框左沿滚出屏幕 ⇒ 那个「升级」**一个字都不画**（老毛病：夹在 `Math.max(x,4)` 上钉死在视口左上角）',
      !!anyUnit && sawOffLeft && orphans.length === 0,
      `这一趟里左沿出屏的框：` + onP.map((s, i) => `${s.got.filter((u) => u.x0 < 0).length} 个`).join('／')
        + `　没人认领的字：${orphans.length}${orphans.length ? '　★ ' + orphans.map((L) => `x=${L.x}`).join(',') : ''}`
