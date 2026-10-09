@@ -46,21 +46,22 @@ def panel(k, D, tag):
         if z['i1'] < b0 or z['i0'] > b1: continue
         c = TC[segs[z['seg']]['type']]
         q.rectangle([X(max(z['i0'], b0)), Y(z['ZG']), X(min(z['i1'], b1)), Y(z['ZD'])], fill=c + (40,), outline=c + (170,), width=2)
+    late = []                                              # 代价那两种框的字，最后画，免得被 K 线和线段压住
     cz = [[z for z in D['centers'] if z['seg'] == j] for j in range(len(segs))]
     for j, kk in D.get('l20', []):                           # P 的代价：同一段趋势里叠着的那对中枢，红粗框＋字
         z1, z2 = cz[j][kk - 1], cz[j][kk]
         if z2['i1'] < b0 or z1['i0'] > b1: continue
         xa, xb = X(max(z1['i0'], b0)), X(min(z2['i1'], b1)); ya, yb = Y(max(z1['ZG'], z2['ZG'])), Y(min(z1['ZD'], z2['ZD']))
         q.rectangle([xa - 4, ya - 4, xb + 4, yb + 4], outline=WARN + (230,), width=3)
-        t = f'同一段{segs[j]["type"]}里两个中枢叠着 —— L20 不允许'
-        bb = q.textbbox((xa, ya - 30), t, font=Fb); q.rectangle(bb, fill=BG + (230,)); q.text((xa, ya - 30), t, fill=WARN, font=Fb)
-    for j in D.get('pp', []):                                 # Z 的代价：相邻两段盘整、中枢不叠（原文没讲），琥珀
+        t = f'同一段{segs[j]["type"]}里两个中枢叠着 —— 第 20 课原文不允许'
+        late.append(((xa, ya - 30), t, WARN))
+    for j in D.get('s4', []):                                 # Z 的代价：S4′（单中枢那截后面的 S5 接缝不叠），琥珀 —— 犯的是我们对 L38 的窄读，不是原文明令（Atlas 18:54）
         z1, z2 = cz[j - 1][-1], cz[j][0]
         if z2['i1'] < b0 or z1['i0'] > b1: continue
         xa, xb = X(max(z1['i0'], b0)), X(min(z2['i1'], b1)); ya, yb = Y(max(z1['ZG'], z2['ZG'])), Y(min(z1['ZD'], z2['ZD']))
         q.rectangle([xa - 4, ya - 4, xb + 4, yb + 4], outline=AMB + (230,), width=3)
-        t = '两段盘整、中枢不叠 —— 原文没讲（编者口径）'
-        bb = q.textbbox((xa, ya - 30), t, font=Fb); q.rectangle(bb, fill=BG + (230,)); q.text((xa, ya - 30), t, fill=AMB, font=Fb)
+        t = f'{segs[j - 1]["type"]}接{segs[j]["type"]}、中枢不叠 —— 违背我们自己的一条规矩（第 38 课读窄了），原文没禁'
+        late.append(((xa, ya - 30), t, AMB))
     for i in range(b0, b1 + 1):
         b = bars[i]; q.line([X(i), Y(b['h']), X(i), Y(b['l'])], fill=(120, 126, 140, 140))
     for s in D['std']:
@@ -83,7 +84,7 @@ def panel(k, D, tag):
         ty = min(bot - 56, max(64, Y(bd['price']) + (14 if bd['kind'] == 'L' else -40)))
         st = '待确认' if bd['state'] == 'pending' else '已确认' if bd['state'] == 'confirmed' else ''
         t = f"{bd['rule']} {bd['price']:g} · {utc(i):%m-%d %H:%M} {st}"
-        if bad: t += f"\n{segs[j - 1]['type']}接{segs[j]['type']} —— L43 不允许"
+        if bad: t += f"\n{segs[j - 1]['type']}接{segs[j]['type']} —— 第 43 课原文不允许"
         tw = q.multiline_textbbox((0, 0), t, font=Fb)[2]
         tx = X(i) + 8 if X(i) + 8 + tw < W - MR else X(i) - 8 - tw     # 靠右边出框 ⇒ 字放到线左边
         bb = q.multiline_textbbox((tx, ty), t, font=Fb)
@@ -91,6 +92,8 @@ def panel(k, D, tag):
             ty -= bb[3] - bb[1] + 6; bb = q.multiline_textbbox((tx, ty), t, font=Fb)
         placed.append(bb); q.rectangle(bb, fill=BG + (230,))
         q.multiline_text((tx, ty), t, fill=WARN if bad else TX, font=Fb)
+    for xy, t, c in late:
+        bb = q.textbbox(xy, t, font=Fb); q.rectangle(bb, fill=BG + (240,)); q.text(xy, t, fill=c, font=Fb)
     q.rectangle([0, 0, ML - 1, PH], fill=BG); q.rectangle([W - MR + 1, 0, W, PH], fill=BG); q.rectangle([0, bot + 1, W, PH], fill=BG)
     q.rectangle([ML, 34, W - MR, bot], outline=(60, 66, 80))
     q.text((ML + 2, 4), tag, fill=TX, font=F)
@@ -104,6 +107,6 @@ def panel(k, D, tag):
 panel(0, A, a.ta)
 if B: panel(1, B, a.tb)
 yb = 74 + len(panels) * (PH + 26) + 4
-d.text((ML, yb), '画法：顶上色带＝走势段（红＝上涨，绿＝下跌，灰＝盘整），框＝同级别中枢，颜色跟所在那段；金线＝标准化线段；竖虚线＝分界（红粗＝两边同向趋势的接缝）；红框＝同一段趋势里叠着的中枢；琥珀框＝不叠的盘整＋盘整。', fill=MU, font=Fs)
+d.text((ML, yb), '画法：顶上色带＝走势段（红＝上涨，绿＝下跌，灰＝盘整），框＝同级别中枢，颜色跟所在那段；金线＝标准化线段；竖虚线＝分界（红粗＝两边同向趋势相连）；红框＝同一段趋势里叠着的中枢；琥珀框＝违背我们自己规矩的地方（只有一个中枢的盘整，跟后面的中枢不叠）。', fill=MU, font=Fs)
 if a.note: d.multiline_text((ML, yb + 28), a.note, fill=TX, font=Fs)
 im.save(out); print('saved', out, im.size)

@@ -25,11 +25,16 @@ l20 = [[j, k] for j, s in enumerate(segs) if s['type'] in ('上涨', '下跌') f
        if TR._sl_rel(zs[j][k - 1], zs[j][k]) != ('上' if s['type'] == '上涨' else '下')]
 pp = [j for j in range(1, len(segs)) if segs[j]['type'] == segs[j - 1]['type'] == '盘整' and zs[j] and zs[j - 1]
       and TR._sl_rel(zs[j - 1][-1], zs[j][0]) != '叠']
+# s4＝S4′（trend_check T3′ 同一判法）：S5 接缝、前段只有一个中枢、跨缝那一对按 [ZD,ZG] 不是「叠」
+s5b = {b['bar'] for b in t['bounds'] if b.get('rule') == 'S5'}
+s4 = [j for j in range(1, len(segs)) if segs[j]['i0'] in s5b and len(zs[j - 1]) == 1 and zs[j]
+      and TR._sl_rel(zs[j - 1][-1], zs[j][0]) != '叠']
 bad = [j for j in range(1, len(segs)) if segs[j]['type'] in ('上涨', '下跌') and segs[j]['type'] == segs[j - 1]['type']]
 for j, s in enumerate(segs):
     b = next((x for x in bounds if x['bar'] == s['i0']), None)
     print(j, u(s['i0']), '→', u(s['i1']), s['type'], s['n'], (f"[{b['rule']} {b['kind']} {b['price']:g} {b['state']}]" if b else ''), '<<< L43' if j in bad else '')
-print('L43 接缝', len(bad), '· L20 趋势内中枢叠', len(l20), '· 不叠的盘整＋盘整', len(pp))
+print('L43 接缝', len(bad), '· L20 趋势内中枢叠', len(l20), '· 不叠的盘整＋盘整', len(pp), '· S4′', len(s4))
+for j in s4: print('  S4′', j - 1, j, u(segs[j]['i0']), segs[j - 1]['type'], '→', segs[j]['type'], '中枢 X1', zs[j - 1][-1]['X1'])
 for j, k in l20: print('  L20', j, u(zs[j][k - 1]['X0']), '→', u(zs[j][k]['X1']))
 for j in pp: print('  盘整＋盘整不叠', j - 1, j, u(segs[j]['i0']))
-json.dump(dict(file=a.file, segs=segs, bounds=bounds, centers=cz, std=std, bad=bad, l20=l20, pp=pp), open(out, 'w'), ensure_ascii=False)
+json.dump(dict(file=a.file, segs=segs, bounds=bounds, centers=cz, std=std, bad=bad, l20=l20, pp=pp, s4=s4), open(out, 'w'), ensure_ascii=False)
