@@ -164,7 +164,10 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
        !!g0 && g0.cap === '笔最少几根 K 线' && !g0.chips.some((c) => c[0] === 'new'), JSON.stringify(g0));
   } else {
     const reqs = []; p.on('request', (r) => { if (r.url().includes('/api/chart')) reqs.push(r.url()); });
-    await p.locator('.mchip[data-pen="new"]').click(); await sleep(2500);
+    // ★ 等回显，不睡死：新笔那档后台第一次是冷算，8bf2941 上实测 2.5 s 左右才回，固定睡 2.5 s 会量在回来之前（假红过一次）
+    await p.locator('.mchip[data-pen="new"]').click();
+    await p.waitForFunction(() => (window.__app.state.data.meta || {}).pen_rule === 'new', null, { timeout: 20000 }).catch(() => {});
+    await sleep(600);
     const after = await p.evaluate(() => ({ url: location.search, rule: (window.__app.state.data.meta || {}).pen_rule,
       foot: (document.getElementById('meta') || document.body).textContent }));
     const g1 = await grp();
@@ -178,7 +181,8 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
     const p2 = await (await b.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
     await p2.goto(PAGE + '?symbol=ZECUSDT&tf=15m&pen=new', { waitUntil: 'domcontentloaded' });
     await p2.waitForFunction(() => window.__app && window.__app.state.data && document.getElementById('pgroup'), null, { timeout: 60000 }).catch(() => {});
-    await sleep(2500);
+    await p2.waitForFunction(() => (window.__app.state.data.meta || {}).pen_rule === 'new', null, { timeout: 20000 }).catch(() => {});
+    await sleep(600);
     const re = await p2.evaluate(() => ({ rule: (window.__app.state.data.meta || {}).pen_rule, url: location.search,
       on: (document.querySelector('.mchip[data-pen="new"]') || {}).getAttribute?.('aria-checked') }));
     ck('⑥b 带着 ?pen=new 打开 ⇒ 还是新笔（回显 pen_rule=new、那颗亮、地址栏不被抹掉）',
