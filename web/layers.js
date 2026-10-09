@@ -832,6 +832,8 @@ function trendMarkView(target, state, prim) {
   //   留着上一帧的带子就是"层关了、指针压上去还有字"—— 那条比画错更难被发现：**图上什么都没画**。
   //   （这跟「关着的层不算看得见」不是同一条账：那条管**画**，这条管**命中**。）
   boundHits.bands = [];
+  // 已撤回的只读清单同理：层关着也得清，不然工装读到的是上一帧画过的叉（⑦c 第一版就是这么红的）
+  if (state.trendDrawn) state.trendDrawn.withdrawn = [];
   if (!T || (!sh.trend && !sh.up)) return;
   // ★ 这一层的字**一律不登记 `placed`**（价签那张避让表），理由两条，都说破：
   //   ① 它们钉在**一条竖线和一个价**上（分界价格、待定、撤回）—— 挪开它就不是那个价了，避让没有意义；
@@ -849,6 +851,7 @@ function trendMarkView(target, state, prim) {
     D.labels = [];
     D.deaths = [];
     D.states = [];
+    D.withdrawn = [];
     // 命中带的画布：跟 `ghostHits` 同一条账 —— `ctx.canvas` 就是这个窗格的画布，
     // `useMediaCoordinateSpace` 给的坐标就是它的 CSS 像素，所以「客户端坐标 − getBoundingClientRect」
     // 正好落在同一个系里。每帧重设：窗格重建过之后旧的 canvas 是个死元素，量出来的坐标全是错的。
@@ -959,6 +962,26 @@ function trendMarkView(target, state, prim) {
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
         ctx.setLineDash([]);
         D.labels.push(haloText(ctx, x + 8, y + 4, `${fmtG(r.price)} 撤回`, TREND.mut, 'left', mine));
+      }
+
+      // ③b 已撤回（Q-6 选 A，小栋 10-09 12:47；卡 card-fe3aebd3-819）：服务端记下的「送出去过、后来整个不见了」的刀和线段
+      //    （载荷顶层 `withdrawn`，Bram 12:22 方案：`{kind: d2|s5|seg, t, dir, price, at}`，`t` 是那根 K 线的开盘时间）。
+      //    跟上面 ③ `T.retracted` 是**两件事**：那是引擎一趟算里 D2-7 自己撤的；这是笔回头改了、上一趟确认的东西这一趟没了。
+      //    画法照 Q-6 示意图：原位置一个**淡红叉**＋一条很淡的红虚线＋「已撤回：笔回头改了」。用 `t` 找位置不用下标 ——
+      //    往左加载会让下标整体平移，开盘时间不会。`t` 不在这一窗的 K 线里 ⇒ 不画（不夹回画布）。
+      for (const w of (Array.isArray(data.withdrawn) ? data.withdrawn : [])) {
+        const tt = w.t > 1e12 ? w.t / 1000 : w.t;
+        const x = prim._chart.timeScale().timeToCoordinate(tt), y = vp.yOfPrice(w.price);
+        if (x === null || y === null || !onScreen(x, W, 8)) continue;
+        ctx.setLineDash(DASH.trendBack);
+        ctx.strokeStyle = rgba(CHART.sell, 70); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.strokeStyle = rgba(CHART.sell, 160); ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(x - 7, y - 7); ctx.lineTo(x + 7, y + 7); ctx.moveTo(x - 7, y + 7); ctx.lineTo(x + 7, y - 7); ctx.stroke();
+        const what = w.kind === 'seg' ? '线段已撤回' : '已撤回';
+        D.labels.push(haloText(ctx, x + 12, y + (w.dir === 'H' ? -14 : 16), `${what}：笔回头改了（${fmtG(w.price)}）`, CHART.sell, 'left', mine));
+        D.withdrawn.push({ kind: w.kind, t: w.t, price: w.price, x: Math.round(x), y: Math.round(y) });
       }
 
       // ③.5「等确认」三个字（§八 3，卡 card-60678062-8c2）：那条斜线带的**名字写在带子自己头上**。

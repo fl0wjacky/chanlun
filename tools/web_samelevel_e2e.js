@@ -190,6 +190,40 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
     await p2.context().close();
   }
 
+  // ⑦ 已撤回（Q-6 选 A，小栋 10-09 12:47）：载荷顶层 `withdrawn`（Bram 12:22 方案，后台还没上 ⇒ **在页面里塞假数据**）。
+  //   取屏上两根 K 线当「撤掉的」那一刀、那一条线段（开盘时间＋低点／高点），再塞一条 t 不在这一窗 K 线里的：
+  //   ⇒ 屏上画 2 个叉（刀那条、线段那条），t 对不上的那条不画；叉的位置＝那根 K 线的 x、那个价的 y；
+  //   字是「已撤回：笔回头改了（价）」／「线段已撤回：…」；「走势分段」关掉 ⇒ 一个都不画；载荷没有 withdrawn ⇒ 0 个（牙）。
+  const WD = await p.evaluate(async () => {
+    const app = window.__app, st = app.state, d = st.data, ts = app.chart.timeScale(), s = st.candleSeries;
+    const W = document.querySelector('#chart canvas').getBoundingClientRect().width;
+    // 叉只要一根 K 线的开盘时间和一个价，不必是真刀：取可视窗口 30%、60% 处那两根（一根拿低点、一根拿高点）
+    const v = ts.getVisibleLogicalRange(), i1 = Math.round(v.from + (v.to - v.from) * 0.3), i2 = Math.round(v.from + (v.to - v.from) * 0.6);
+    if (!d.bars[i1] || !d.bars[i2]) return { err: '可视窗口里没有 K 线' };
+    const a = { bar: i1, kind: 'L', price: d.bars[i1].l }, z = { bar: i2, kind: 'H', price: d.bars[i2].h };
+    const fake = [
+      { kind: 'd2', t: d.bars[a.bar].t, dir: a.kind, price: a.price, at: d.bars[d.bars.length - 1].t },
+      { kind: 'seg', t: d.bars[z.bar].t, dir: z.kind, price: z.price, at: d.bars[d.bars.length - 1].t },
+      { kind: 's5', t: d.bars[0].t - 86400000 * 30, dir: 'L', price: a.price, at: d.bars[d.bars.length - 1].t },   // 不在这一窗 ⇒ 不画
+    ];
+    const redraw = async () => { const v = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: v.from + 0.01, to: v.to + 0.01 }); await new Promise((r) => setTimeout(r, 700)); };
+    const want = (q) => ({ x: Math.round(ts.timeToCoordinate(d.bars[q.bar].t / 1000)), y: Math.round(s.priceToCoordinate(q.price)) });
+    const noWd = (st.trendDrawn.withdrawn || []).length;
+    d.withdrawn = fake; await redraw();
+    const got = (st.trendDrawn.withdrawn || []).map((w) => ({ kind: w.kind, x: w.x, y: w.y }));
+    const labels = (st.trendDrawn.labels || []).map((L) => L[4]).filter((t) => /已撤回/.test(t || ''));
+    const chip = document.querySelector('.chip[data-key="trend"]'); chip.click(); await redraw();
+    const off = (st.trendDrawn.withdrawn || []).length; chip.click(); await redraw();
+    return { noWd, got, labels, want: [want(a), want(z)], off };
+  });
+  if (WD.err) { console.error(WD.err); await b.close(); process.exit(2); }
+  const near = (g, w) => g && Math.abs(g.x - w.x) <= 1 && Math.abs(g.y - w.y) <= 1;
+  ck('⑦ 已撤回：屏上那两条画了淡红叉、位置＝那根 K 线的开盘时间和那个价；t 不在这一窗的那条不画',
+     WD.got.length === 2 && near(WD.got[0], WD.want[0]) && near(WD.got[1], WD.want[1]), JSON.stringify({ got: WD.got, want: WD.want }));
+  ck('⑦b 字：刀写「已撤回：笔回头改了（价）」、线段写「线段已撤回：笔回头改了（价）」',
+     WD.labels.length === 2 && /^已撤回：笔回头改了（/.test(WD.labels[0]) && /^线段已撤回：笔回头改了（/.test(WD.labels[1]), JSON.stringify(WD.labels));
+  ck('⑦c 「走势分段」关掉 ⇒ 一个叉都不画；载荷没有 withdrawn（现行后台）⇒ 0 个（牙）', WD.off === 0 && WD.noWd === 0, `关掉 ${WD.off}　改前 ${WD.noWd}`);
+
   if (SHOTS) await p.screenshot({ path: require('path').join(SHOTS, 'samelevel-fe.png') });
   await b.close();
   console.log(red ? `✗ ${red} 格红（${n - red}/${n} 过）` : `${n}/${n} 过`);   // predeploy 认「N/N 过」这一行
