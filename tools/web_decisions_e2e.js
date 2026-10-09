@@ -3,11 +3,15 @@
 // 量的是**页面接线**，读 ?mock=1（decisions/mock.json，Atlas 那份数据的快照）：
 //   predeploy 起的临时后台不一定有数据文件，后台那半（口令、回码、存取）归 web/check_decisions.py，这里不重复。
 //   ① 左边树的条数 = 数据里的条数，层名照 layer_order，没有一条丢
-//   ② 每条数据里写了「小栋定」且 verified 的，页上都挂「你选的」，挂在 status.choice 那一项上，而且只挂一项
+//   ② 每条数据里写了「小栋定」且 verified 的，页上都挂「你选的」，挂在 status.choice 那一项上，而且只挂一项；
+//      那一项还没填成卡片的（骨架条目），要有一行「你选的 X（详情还在填）」—— 10-09 S-4 就是这样，第一版这里什么都不挂
 //   ③ 没核过的条目画虚圈（.dot.unver），不许亮绿
 //   ④ 选项里写了的图**真的载进来了**（naturalWidth > 0）：路径写错时页面不报错、只是一张碎图
 //   ⑤ 样例模式点「选这个 → 确认」：不发 POST（样例不保存），标签换到新的那一项
 //   ⑥ 手机 390：树收成下拉、页面不横向溢出；下拉换条目 ⇒ 详情跟着换
+//   ⑧ 原文定／不再适用：状态圈是自己那一档、没有「选这个」（10-09 这 9 条都还没选项，按钮那半要等带选项的出现才真咬得到）
+//   ⑨ 子问题（parent）在树上紧跟母条目、缩进，详情里能点回母条目
+//   ⑩ 原话调不出、只有 Nova 回执的（quote 以「原话未能调出」开头）：页面上不许套『』装成原话
 //   ⑦ 主站顶栏有入口，点了到决策树页；手机上入口不另占一行（顶栏不变高）
 // 用法：E2E_URL=<地址> node tools/web_decisions_e2e.js <输出目录>   退出码：0 全过，1 有红，2 跑不了
 const { chromium } = require('playwright');
@@ -15,7 +19,8 @@ const fs = require('fs');
 const path = require('path');
 
 const BASE = (process.env.E2E_URL || process.argv[2] || '').replace(/\/?$/, '/');
-const OUT = process.argv[process.env.E2E_URL ? 2 : 3] || fs.mkdtempSync('/tmp/dec-e2e-');
+// 不给目录就写仓里的 out/（已 gitignore）——同机几家，不往 /tmp 写（Nova 11:35）
+const OUT = process.argv[process.env.E2E_URL ? 2 : 3] || path.join(__dirname, '..', 'out', 'e2e-decisions');
 if (!/^https?:/.test(BASE)) { console.log('✗ 没给地址（E2E_URL）'); process.exit(2); }
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -52,7 +57,11 @@ const chk = (name, ok, got) => { res.push(ok); console.log(`${ok ? '✓' : '✗'
     for (const x of his) {
       await open(x.id);
       const me = await p.$$eval('.opt', (a) => a.filter((o) => o.querySelector('.tagme')).map((o) => o.dataset.key));
-      if (me.length !== 1 || me[0] !== x.status.choice) bad2.push([x.id, x.status.choice, me]);
+      // 选项还没填的（骨架）：卡片上挂不了，就得有那一行「你选的 X（详情还在填）」
+      const hasOpt = (x.options || []).some((o) => o.key === x.status.choice);
+      const orphan = await p.$eval('#detail', (d) => d.querySelector('.orphan')?.textContent || '');
+      const ok = hasOpt ? me.length === 1 && me[0] === x.status.choice : me.length === 0 && orphan.includes(x.status.choice);
+      if (!ok) bad2.push([x.id, x.status.choice, me, orphan]);
     }
     chk(`② 小栋定的 ${his.length} 条都挂「你选的」、挂在 status.choice 上、只挂一项`, his.length > 0 && bad2.length === 0, bad2);
 
@@ -71,6 +80,42 @@ const chk = (name, ok, got) => { res.push(ok); console.log(`${ok ? '✓' : '✗'
     const dots = await p.$$eval('.node', (a) => Object.fromEntries(a.map((n) => [n.querySelector('.id').textContent.trim(), n.querySelector('.dot')?.className || ''])));
     const lit = unver.filter((x) => !/\bunver\b/.test(dots[x] || ''));
     chk(`③ 没核过的 ${unver.length} 条都是虚圈`, lit.length === 0, lit.slice(0, 5));
+
+    // ⑧ 原文定／不再适用：只给看，不许有「选这个」
+    const ro = items.filter((x) => x.status && x.status.verified && ['原文定', '不再适用'].includes(x.status.kind));
+    const roBad = [];
+    for (const x of ro) {
+      await open(x.id);
+      const n = await p.locator('[data-pick]').count();
+      const dot = await p.$eval('.status .dot', (d) => d.className);
+      const tree = await p.$eval(`.node[data-id="${x.id}"] .dot`, (d) => d.className);   // 树上那颗走 KIND 表，状态行是另一条路，两处都要对
+      const want = x.status.kind === '原文定' ? 'fixed' : 'void';
+      if (n || !dot.includes(want) || !tree.includes(want)) roBad.push([x.id, n, dot, tree]);
+    }
+    chk(`⑧ 原文定／不再适用 ${ro.length} 条：状态圈对、没有「选这个」`, roBad.length === 0, roBad);
+
+    // ⑨ 子问题（parent）：树上紧跟母条目、缩进；详情里有回母条目的链接
+    const kidsD = items.filter((x) => x.parent && items.some((y) => y.id === x.parent && y.layer_order === x.layer_order));
+    const kidBad = [];
+    const order = await p.$$eval('.node', (a) => a.map((n) => [n.dataset.id, n.classList.contains('child')]));
+    for (const x of kidsD) {
+      const i = order.findIndex(([id]) => id === x.id), j = order.findIndex(([id]) => id === x.parent);
+      const between = order.slice(j + 1, i).every(([id]) => items.find((y) => y.id === id)?.parent === x.parent);
+      await open(x.id);
+      const link = await p.$eval('#detail', (d) => d.querySelector('.rel a')?.dataset.go || '');
+      if (!(j >= 0 && i > j && between && order[i][1] && link === x.parent)) kidBad.push([x.id, i, j, between, link]);
+    }
+    chk(`⑨ 子问题 ${kidsD.length} 条：紧跟母条目、缩进、能点回母条目`, kidsD.length > 0 && kidBad.length === 0, kidBad);
+
+    // ⑩ 原话调不出、只有回执的：状态行和「你选的」标签都不许出现『原话未能调出…』（不装成原话）
+    const rcpt = items.filter((x) => x.status && x.status.verified && /^原话未能调出/.test(x.status.quote || ''));
+    const rcBad = [];
+    for (const x of rcpt) {
+      await open(x.id);
+      const t = await p.$eval('#detail', (d) => d.textContent);
+      if (t.includes('『原话未能调出') || t.includes('原话『原话未能调出')) rcBad.push(x.id);
+    }
+    chk(`⑩ 只有回执的 ${rcpt.length} 条：没有一处把回执套成『原话』`, rcpt.length > 0 && rcBad.length === 0, rcBad);
 
     // ⑤
     const x5 = his[0];
