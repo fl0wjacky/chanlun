@@ -398,14 +398,18 @@ def _base_body(slot, symbol, tf, pen_min):
     return b
 
 
+# 载荷里 `trend` 那个对象交出去哪几个键 —— **只写这一处**：web/check_parity.py 直接 import 它去对账
+#   （card-7c66115d-023：M29 加 xzd_seconds 时两边各写一份，parity 那份没跟上，9 份全红、差异名单却是空的）。
+TREND_KEYS = ("bounds", "retracted", "pending", "segments", "units", "xzd_seconds")
+
+
 def _cut_cc(slot, symbol, pen_min=DEFAULT_PEN_MIN):
     """在 slot.lock 里调用 → (seg_centers, trend, reading)：v3 只用线段 ⇒ 跟看法无关，一格（每档笔根数）算一次（数据一刷新随 mbodies 清掉）。"""
     cc = slot.mbodies.get((CUT_KEY, pen_min))
     if cc is None:
         r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"), min_gap=gap_of(pen_min))
         v = trend_v3(r, reading=TREND_READING)
-        cc = slot.mbodies[(CUT_KEY, pen_min)] = (v["seg_centers"], {k: v[k] for k in
-                                      ("bounds", "retracted", "pending", "segments", "units", "xzd_seconds")}, v["reading"])
+        cc = slot.mbodies[(CUT_KEY, pen_min)] = (v["seg_centers"], {k: v[k] for k in TREND_KEYS}, v["reading"])
     return cc
 
 
