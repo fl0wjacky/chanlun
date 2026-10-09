@@ -62,6 +62,8 @@ body {
 .badge.live { color: var(--am); border-color: var(--am-line); }   /* 未收盘：琥珀（style.py AM） */
 .badge.warn { color: var(--am); border-color: var(--am-line); }   /* 后台这轮没拉到：同一个琥珀 */
 .badge.bad  { color: var(--rd); border-color: var(--rd-line); }   /* style.py CHART.sell */
+.badge.link { color: var(--tx); text-decoration: none; }   /* 决策树入口：徽章的样子，字用正文色、表示能点 */
+.badge.link:hover { border-color: var(--mu); }
 
 /* ---- 主区 ---- */
 /* main 是 relative：#more 那句提示贴在图的左上（绝对定位的锚点得有个定位祖先） */
@@ -379,6 +381,8 @@ body.fs-fake main { position: fixed; inset: 0; z-index: 50; height: 100dvh; back
      时不会折、只会冲出屏幕 —— 那是**看不见**地丢字，比多占一行坏得多。超长价（位数多的品种）或者
      「旧数据」那一句顶到边时，这颗长成两行：顶栏高一点，但一个字不丢，也不会把旁边的挤没。 */
   .badge { max-width: 100%; white-space: normal; }
+  /* 决策树入口在手机上排到「本根＋数据」那颗前面：挤进第二行的空当，不为它多开一行（多一行＝图矮 30px） */
+  #updated { order: 2; }
   main { grid-template-columns: minmax(0, 1fr); }
   .panel {
     border-left: none; border-top: 1px solid var(--line);
