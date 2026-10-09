@@ -1546,10 +1546,7 @@ function applyToggles() {
     const on = k === 'sigPend' ? opts.sigPend : k.startsWith('sig:') ? opts.sigKinds[k.slice(4)]
       : k === 'lv' ? shownOf(opts).lv
         : k === 'trend' ? opts.trend && hasTrend
-          // 成交量：亮＝开着并且这份数据真有成交量（`sub.hasVol`，跟 volSeries 的 visible 同一个式子）。缺了这半，
-          //   首屏那一秒多（副图数据还没到）它是「亮着又按灰」—— 跟 trend、买卖点子芯片同一种骗人（card-8aa5c9de-0c2，Nova 13:34 看出来的）。
-          : k === 'vol' ? opts.vol && sub.hasVol
-            : opts[k];
+          : opts[k];
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
     const sigChip = k.startsWith('sig:') || k === 'sigPend';
     // 成交量那颗在**没有 v 的数据上**按灰（仓里的样本就是）：能点却画不出东西的开关是骗人的。
@@ -1565,6 +1562,11 @@ function applyToggles() {
           //   拿 `shownOf(opts).lv` 来判"有没有用"会绕远（那个式子里的 `opts.lv` 跟"能不能用"无关）。
           : k === 'lv' ? !opts.up : false;
   }
+  // 成交量那颗：亮＝开着**并且**这份数据真有成交量（`sub.hasVol`，跟 volSeries 的 visible 同一个式子）。缺了这半，
+  //   首屏那一秒多（副图数据还没到）它是「亮着又按灰」—— 跟 trend、买卖点子芯片同一种骗人（card-8aa5c9de-0c2，Nova 13:34 看出来的）。
+  //   ★ 写在循环外面单独一句，不塞进上面 `on` 那串三元：那几行同级别那支也在改，挨着改就冲突。
+  const volChip = document.querySelector('.chip[data-key="vol"]');
+  if (volChip && !sub.hasVol) volChip.setAttribute('aria-pressed', 'false');
   // 「关着的层不许有能点的开关」这条账，看法那组也算：买卖点一关，它就得跟着灰（或反过来亮回来）。
   renderMeasures();
   // 切法那组同理：中枢两层都关着时它得跟灰（判据在 renderCuts 一处，别在这儿再写一遍）。
