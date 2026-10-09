@@ -398,7 +398,7 @@
         "choice": "乙′",
         "by": "Nova",
         "basis": "原文",
-        "reason": "②（a 进不进）推荐不进：「第 39 课讲的正好是同级别分解，你选的就是同级别。」③（后面限不限形状）推荐乙：「正文是最高依据，答疑那句是对一个读者具体问题的回答；但这等于改你 10-07 的决定，你说了算。」②小栋照推荐选了不进；③**小栋选甲，没照推荐**。"
+        "reason": "②（a 进不进）推荐不进：「第 39 课讲的正好是同级别分解，你选的就是同级别。」③（后面限不限形状）推荐乙：「正文是最高依据，答疑那句是对一个读者具体问题的回答；但这等于改你 10-07 的决定，你说了算。」②小栋照推荐选了不进；③小栋选甲，没照推荐。"
       },
       "affects": [
         "Z-11",
@@ -962,7 +962,7 @@
       "layer_order": 0,
       "title": "「买卖点都来自背驰」和「第三类买卖点就是中枢被破坏的点」，两句怎么摆",
       "what": {
-        "plain": "作者一处说「任一级别的买卖点都必然来自某级别走势的背驰」，另一处说「第三类买卖点就是中枢破坏点」。第三类买卖点看起来不是背驰造出来的，两句像在打架。现在是两句原样并排放着，没下结论。",
+        "plain": "作者一处说「任一级别的买卖点都必然来自某级别走势的背驰」（背驰＝一段走势越走越没力气）；另一处说「第三类买卖点就是中枢破坏点」（中枢＝价格来回震荡的那片区域，第三类买卖点＝价格离开这片区域、回头也没再回来的那一下）。第三类买卖点看起来跟「没力气」无关，两句像在打架。现在是两句原样并排放着，没下结论。",
         "analogy": "像说「所有河水都来自下雨」和「这条河的水来自泉眼」：泉眼的水往上追，也是雨水渗下去的。看你追到哪一层。"
       },
       "sources": [
@@ -1018,8 +1018,8 @@
         },
         {
           "key": "B",
-          "label": "写明调和：本级是中枢破坏点，往小级别追是背驰点",
-          "effect": "说明文字改成一句话讲清两者关系，依据 L38、L52；不影响图和代码。三类点照旧按中枢判，不去查背驰。",
+          "label": "写明作者自己的说法：在这张图上看是「离开震荡区」，放到更短周期的图上看，就是一次「没力气」",
+          "effect": "说明文字改成一句话讲清两者关系（依据是作者在第 38 课正文、第 52 课答疑里自己说的）；不影响图和程序，第三类买卖点照旧按「离开震荡区」判。",
           "numbers": {},
           "figures": []
         }
@@ -1028,7 +1028,7 @@
         "choice": "B",
         "by": "Nova",
         "basis": "原文",
-        "reason": "作者在 L38 正文和 L52 答疑里自己说过「归根结底都是某级别的第一类买卖点」，调和是他给的，不是我们编的。"
+        "reason": "作者在第 38 课正文和第 52 课答疑里自己说过：所有买卖点「归根结底都是某级别的第一类买卖点」，第一类就是「没力气」那一下。两句怎么接是他给的，不是我们编的。"
       },
       "affects": [
         "买卖点.md 第三类买卖点",
@@ -1088,9 +1088,9 @@
         {
           "key": "B",
           "label": "按「除非」读",
-          "effect": "写说明时按「非有不可」理解：没有第一中枢后的三买＋非背驰向上，就不算稳。有 4 处旧文档按这个推过结论，要重看。",
+          "effect": "写说明时按「非有不可」理解：没有第一中枢后的三买＋非背驰向上，就不算稳。我们早先的整理笔记里有 4 处是按「除非」推的结论，要重看。",
           "numbers": {
-            "受影响的旧文档段落": "4 处"
+            "要重看的旧笔记": "4 处（不影响图）"
           },
           "figures": []
         }
@@ -1153,7 +1153,7 @@
         {
           "key": "B",
           "label": "按「买卖点」读",
-          "effect": "说明里按「第二类卖点也由次级别第一类卖点构成」理解；引擎现在本来就是买卖对称判的，代码不动。",
+          "effect": "说明里按「卖点也是同样的道理」理解；程序本来就是买、卖一样判的，图不变。",
           "numbers": {},
           "figures": []
         }
@@ -1162,7 +1162,7 @@
         "choice": "A",
         "by": "Nova",
         "basis": "原文",
-        "reason": "原字照留、标疑；引擎本来就买卖对称，不管选哪个图都不变。"
+        "reason": "原字照留、标疑；程序本来就是买、卖一样判的，选哪个图都不变。"
       },
       "affects": [
         "买卖点.md 定律一"
@@ -1500,7 +1500,7 @@
       },
       "title": "笔会回头改（你 S-13 选的 B），所以确认过的线段、分界偶尔会被撤。上线时怎么办",
       "what": {
-        "plain": "你要求过「画出来的东西不收回」。S-13 你选了「笔端点必须是最高最低，可以回头改笔」以后，量下来：25 张图里，确认过的分界被撤了 1 次（连带旁边 3 把回到待确认），确认过的线段被撤了 12 次。根子是笔回头改了，带着上面的线段、分界一起变。锁住笔这条路被 S-13 否了，现在没有别的现成办法把它压到 0。",
+        "plain": "你要求过「画出来的东西不收回」。S-13 你选了「笔端点必须是最高最低，可以回头改笔」以后，量下来：25 张图里，确认过的分界被撤了 1 把（157 把里），连带旁边 3 把回到待确认，确认过的线段被撤了 12 次。根子是笔回头改了，带着上面的线段、分界一起变。锁住笔这条路被 S-13 否了，现在没有别的现成办法把它压到 0。",
         "analogy": "像报纸：大多数新闻登了就不改，偶尔有一条事后发现错了。是照常出报、错的那条登更正（A），还是这一版先不出，等找到不出错的办法（B）？"
       },
       "sources": [
@@ -1516,9 +1516,9 @@
           "label": "照样上线，撤的时候在图上老实标出来",
           "effect": "确认过的线段、分界要是被撤，原位置留一个淡色叉，写「已撤回：笔回头改了」，不藏。",
           "numbers": {
-            "分界确认后又撤（25 张）": "1 次（AAPL 15 分钟 L@7739，连带旁边 3 把回到待确认）",
-            "线段确认后又撤": "12 次（加「甲」8 次，见 Q-6b）",
-            "其余分界确认后撤、回翻": "0"
+            "确认过的分界被撤（25 张图，确认过的一共 157 把）": "1 把（AAPL 15 分钟 06-26 那一刀），连带旁边 3 把回到待确认",
+            "确认过的线段被撤": "12 次（加「甲」是 8 次，见 Q-6b）",
+            "其余确认过的分界": "一次都没撤、没变回待确认"
           },
           "figures": [
             {
@@ -1588,8 +1588,8 @@
           "label": "只用定下来的笔确认线段",
           "effect": "线段确认后又撤少一些；确认晚一点。",
           "numbers": {
-            "线段确认后又撤（25 张）": "8",
-            "确认要晚多少": "中位多十几根 K 线"
+            "确认过的线段被撤（25 张）": "8 次（比不留少 4 次）",
+            "确认要晚多少": "一般晚十几根 K 线（15 分钟图上约 3 小时）"
           },
           "figures": []
         },
@@ -1598,7 +1598,7 @@
           "label": "最后一笔也用上",
           "effect": "确认早一点；撤得多一些。",
           "numbers": {
-            "线段确认后又撤（25 张）": "12"
+            "确认过的线段被撤（25 张）": "12 次"
           },
           "figures": []
         }
@@ -1633,8 +1633,8 @@
       },
       "title": "图上画的线段，用原始的，还是「标准化」过的（跟分界用的那套一不一致）",
       "what": {
-        "plain": "切走势分界时，我们用的是「标准化」过的线段：把每段的端点挪到真正的最高、最低点上，首尾接起来。可图上画的线段是原始的。两套不完全一样，所以图上有些线段端点跟分界用的那套对不上。选 A：图上照画原始线段（分界照用标准化）；选 B：走势层也改用原始线段。",
-        "analogy": "像施工图和效果图：施工按一套尺寸，墙上挂的是另一套。是两张都挂（A），还是施工也改用效果图的尺寸（B）？"
+        "plain": "算分界时，我们用的是「标准化」过的线段：把每段的头尾挪到真正的最高、最低点上，一段接一段连起来。可图上画的是原始线段。两套不完全一样，所以有些地方图上的线段跟算分界用的对不上。A：照现在，算分界用标准化、图上画原始；B：算分界也改用原始；C：图上也改画标准化，两边用同一套。",
+        "analogy": "像施工图和效果图：施工按一套尺寸，墙上挂的是另一套。是照现在两张各用各的（A），施工改按效果图（B），还是墙上也改挂施工图（C）？"
       },
       "sources": [
         {
@@ -1649,20 +1649,20 @@
           "label": "分界用标准化线段；图上照画原始线段（现在这样）",
           "effect": "分界不动；图上只跳 12 次，但约 358 处端点跟分界用的那套对不上，分界线可能落在图上一条线段的中间。",
           "numbers": {
-            "图上线段跟分界那套对不上的（25 张）": "约 358 条（两套增删 716）",
-            "图上确认过的线段又撤／挪": "12 次"
+            "图上线段跟算分界那套对不上的（25 张）": "约 358 条",
+            "图上确认过的线段又被撤或挪": "12 次"
           },
           "figures": []
         },
         {
           "key": "B",
-          "label": "走势层也改用原始线段",
-          "effect": "图上看到的就是分界用的那套；但分界跟着大换。",
+          "label": "算分界也改用原始线段",
+          "effect": "图上看到的就是算分界用的那套；但分界跟着大换，量级比换 7 根笔还大。",
           "numbers": {
-            "变的图（25 张）": "16",
-            "分界刀": "±103",
-            "走势段增删": "153",
-            "图上确认过的线段又撤／挪": "12 次"
+            "会变的图（25 张里）": "16 张",
+            "分界（一共 194 刀）": "增减 103 刀",
+            "走势段": "增减 153 段",
+            "图上确认过的线段又被撤或挪": "12 次"
           },
           "figures": []
         },
@@ -1672,8 +1672,8 @@
           "effect": "图上看到的线段跟分界用的永远是同一套，分界不动；代价是图上的线段跟按原始 K 线手画的、在别的软件上看惯的样子不完全一样。",
           "numbers": {
             "跟原始线段端点不同的（25 张）": "约 358 处",
-            "分界刀": "不变",
-            "图上确认过的线段又撤／挪": "30 次（其中 18 次只有标准化那套动、原始那套没动；都是终点往后挪、起点不动；落在 10 张图上，15、30 分钟居多）"
+            "分界": "一刀不动",
+            "图上确认过的线段又被撤或挪": "30 次（其中 18 次只有标准化那套动、原始那套没动；都是终点往后挪、起点不动；落在 10 张图上，15、30 分钟居多）"
           },
           "figures": []
         }
@@ -1707,8 +1707,10 @@
       "title": "第三类买卖点按 L15 还是 T9（L20）",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "编者口径",
+        "date": null,
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：编者建议）"
       },
       "skeleton": true
     },
@@ -1719,8 +1721,10 @@
       "title": "T11 里的『线段』是泛指走势还是 D10 的线段",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "编者口径",
+        "date": null,
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：编者建议）"
       },
       "skeleton": true
     },
@@ -1730,9 +1734,11 @@
       "layer_order": 1,
       "title": "每根 K 线每层只属一个单位",
       "status": {
+        "verified": true,
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "by": "Nova",
+        "date": "2026-10-09 02:51",
+        "note": "方向是你 10-07 在总纲里定的；细则（只动输出）是 Nova 定的，代码还没做。你可以推翻。"
       },
       "skeleton": true
     },
@@ -1743,8 +1749,10 @@
       "title": "只有三类走势，每段至少三段次级别",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-09 02:51",
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：Nova 10-09 02:51，代码还没做）"
       },
       "skeleton": true
     },
@@ -1766,9 +1774,11 @@
       "layer_order": 1,
       "title": "每条规矩有原文出处或写明编者口径",
       "status": {
+        "verified": true,
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "by": "Nova",
+        "date": "2026-10-09 02:56",
+        "note": "方向是你 10-07 在总纲里定的；落法是 Nova 定的。你可以推翻。"
       },
       "skeleton": true
     },
@@ -1779,8 +1789,10 @@
       "title": "分析窗口取多长",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "程序（引擎原来就这么写，没人单独定过）",
+        "date": null,
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：程序）"
       },
       "skeleton": true
     },
@@ -1822,8 +1834,10 @@
       "title": "包含算不算端点相等",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-07 07:14",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -1846,8 +1860,10 @@
       "title": "序列开头一串互相包含、方向定不了",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "程序（引擎原来就这么写，没人单独定过）",
+        "date": null,
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：程序自定，维持）"
       },
       "skeleton": true
     },
@@ -1858,8 +1874,10 @@
       "title": "分型在哪一刻算确认",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "程序（引擎原来就这么写，没人单独定过）",
+        "date": null,
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：程序）"
       },
       "skeleton": true
     },
@@ -1870,8 +1888,10 @@
       "title": "高点并列时顶记在哪一根",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-08 12:56",
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：Nova 10-08 12:56 不改）"
       },
       "skeleton": true
     },
@@ -1882,8 +1902,10 @@
       "title": "『相等』的容差",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "程序（引擎原来就这么写，没人单独定过）",
+        "date": null,
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：程序）"
       },
       "skeleton": true
     },
@@ -1952,8 +1974,10 @@
       "title": "第三笔破第一笔终点 ⇒ 新段",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-08 00:22",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -1964,8 +1988,10 @@
       "title": "暂定什么时候摘、谁先被破定结局",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-08 00:19",
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：Nova 10-08 00:19 核定）"
       },
       "skeleton": true
     },
@@ -2035,8 +2061,10 @@
       "title": "L71 提前定和 L77 合段谁先",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-08 17:38",
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：Nova 10-08 17:38，编者口径）"
       },
       "skeleton": true
     },
@@ -2047,8 +2075,10 @@
       "title": "图头段：量不了怎么办／挪位踩暂定刀怎么办",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-08 13:21",
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：Nova 10-08 13:21／23:07）"
       },
       "skeleton": true
     },
@@ -2115,8 +2145,10 @@
       "title": "不是正好 9 段时怎么划三组",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-07 07:12",
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：Nova 10-07 07:12Z，(iii) 编者口径）"
       },
       "skeleton": true
     },
@@ -2179,8 +2211,10 @@
       "title": "延伸里另取三段当中枢",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-08 14:44",
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：Nova 10-08 14:44，先不做）"
       },
       "skeleton": true
     },
@@ -2191,8 +2225,10 @@
       "title": "中枢结束后碰回原区间／升级后跟低一级比",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-09 00:31",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2218,8 +2254,10 @@
       "title": "D6 先后：段型先按方向判",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-07 09:16",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2230,8 +2268,10 @@
       "title": "升级段 D6 不限方向",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-07 08:00",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2273,8 +2313,10 @@
       "title": "引擎 `big` 层两条、`DD_all/GG_all`",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "程序（引擎原来就这么写，没人单独定过）",
+        "date": null,
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：程序自定）"
       },
       "skeleton": true
     },
@@ -2285,8 +2327,10 @@
       "title": "切法默认：走势分界还是延伸／扩展切",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-05",
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：Nova 10-05，产品选择）"
       },
       "skeleton": true
     },
@@ -2297,8 +2341,10 @@
       "title": "分解只出一种",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "编者口径",
+        "date": null,
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：编者）"
       },
       "skeleton": true
     },
@@ -2309,8 +2355,10 @@
       "title": "走势层用标准化线段",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-06 06:15",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2335,9 +2383,9 @@
       "layer_order": 5,
       "title": "一段走势没中枢 ⇒ 两头的刀一起去",
       "status": {
-        "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "kind": "原文定",
+        "note": "原文写死了（一段走势没中枢就不成立），我们照做（Nova 10-06 落成「两头的刀一起去」）。"
       },
       "skeleton": true
     },
@@ -2395,8 +2443,10 @@
       "title": "框只在分界断、中阴不断、扩展不断、次级别转折不断（D4-1～D4-4）",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Atlas",
+        "date": "2026-10-06",
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：Atlas 10-06 起草，没人单独定）"
       },
       "skeleton": true
     },
@@ -2508,8 +2558,10 @@
       "title": "峰值单独用",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-08",
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：Nova 10-08，T16）"
       },
       "skeleton": true
     },
@@ -2520,8 +2572,10 @@
       "title": "1 分钟看黄白线回抽 0 轴（W48）",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-09 00:31",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2532,8 +2586,10 @@
       "title": "下上下第二下刚破前低不判背驰（W53）",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-08 11:34",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2543,9 +2599,11 @@
       "layer_order": 6,
       "title": "二、三类之间的震荡买点要不要起名（M13）",
       "status": {
+        "verified": true,
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "by": "Nova",
+        "date": "2026-10-08",
+        "note": "暂缓：先不起名。这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2556,8 +2614,10 @@
       "title": "走势起点终点自动算买卖点吗（J12）",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-08 07:12",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2568,8 +2628,10 @@
       "title": "突发跳空（M30）",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": null,
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2580,8 +2642,10 @@
       "title": "MACD 0 轴防狼术（T13）",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-08",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2591,9 +2655,9 @@
       "layer_order": 6,
       "title": "二类买点三种结果（不创新低／创新低＋盘整背驰／小转大）",
       "status": {
-        "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "kind": "原文定",
+        "note": "三种结果原文写了，我们照做（Nova 10-08）。"
       },
       "skeleton": true
     },
@@ -2604,8 +2668,10 @@
       "title": "零轴判据：多近算『回抽 0 轴』、什么算『在 0 轴下面』",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "编者口径",
+        "date": null,
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：编者口径）"
       },
       "skeleton": true
     },
@@ -2647,8 +2713,10 @@
       "title": "对照周期取本图 4 倍",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "编者口径",
+        "date": null,
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：编者口径 10-06）"
       },
       "skeleton": true
     },
@@ -2659,8 +2727,10 @@
       "title": "合成框『对不上』的判据、状态四种",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-06",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2671,8 +2741,10 @@
       "title": "J18、J19 检查项的写法",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-08",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2699,8 +2771,10 @@
       "title": "合成框落在对照图『主要那个中枢』里的时间占比多少算对得上",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "编者口径",
+        "date": null,
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：编者口径）"
       },
       "skeleton": true
     },
@@ -2711,8 +2785,10 @@
       "title": "默认画哪几层",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-03 14:00",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2723,8 +2799,10 @@
       "title": "走势分段层默认开不开",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-05 17:09",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2764,9 +2842,11 @@
       "layer_order": 8,
       "title": "框编号 A、B、C 和小写",
       "status": {
+        "verified": true,
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "by": "Nova",
+        "date": "2026-10-05 16:33",
+        "note": "你 10-06 01:55 说过要标编号；A、B、C 和小写的写法是 Nova 定的。你可以推翻。"
       },
       "skeleton": true
     },
@@ -2777,8 +2857,10 @@
       "title": "级别对照默认",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-06 19:2",
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：Nova 10-06 19:2xZ）"
       },
       "skeleton": true
     },
@@ -2789,8 +2871,10 @@
       "title": "防狼术窄带默认",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-08",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2862,8 +2946,10 @@
       "title": "分界画法",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Iris",
+        "date": "2026-10-05",
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：Iris、Atlas 10-05 量）"
       },
       "skeleton": true
     },
@@ -2888,8 +2974,10 @@
       "title": "待定、撤回的样式",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "我们（没记是谁）",
+        "date": null,
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2930,8 +3018,10 @@
       "title": "死点类型显示",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-09 00:38",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2986,8 +3076,10 @@
       "title": "暂定那一刀（S7）的记号",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "我们（没记是谁）",
+        "date": null,
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：第四批）"
       },
       "skeleton": true
     },
@@ -2998,8 +3090,10 @@
       "title": "未完成线段末端画不画圈",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-08 16:06",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -3024,8 +3118,10 @@
       "title": "二类点的字",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-08 16:44",
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：Nova 10-08 16:44–16:46）"
       },
       "skeleton": true
     },
@@ -3036,8 +3132,10 @@
       "title": "『(弱)』",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-09 00:31",
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：Nova 10-09 00:31／00:42）"
       },
       "skeleton": true
     },
@@ -3091,8 +3189,10 @@
       "title": "文字谁让谁",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-07 07:55",
+        "note": "这是我们替你定的，你可以推翻。（总纲原注：Nova 10-07 07:55，Bram 10-08 22:02 认）"
       },
       "skeleton": true
     },
@@ -3117,8 +3217,10 @@
       "title": "分界悬停说什么",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-06",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -3159,8 +3261,10 @@
       "title": "手机底部芯片行",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-08",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -3201,8 +3305,10 @@
       "title": "费用默认 5bp／边、持有不动对照、成本敏感性 0/5/10",
       "status": {
         "kind": "我们定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "by": "Nova",
+        "date": "2026-10-04",
+        "note": "这是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     }
