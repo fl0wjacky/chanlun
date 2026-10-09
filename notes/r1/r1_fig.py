@@ -5,6 +5,7 @@
 import sys, os, json, argparse, importlib, math, datetime as DT
 ap = argparse.ArgumentParser()
 ap.add_argument('--root', required=True); ap.add_argument('--flag', action='append', default=[])
+ap.add_argument('--kw-b', action='append', default=[], help='下格给 trend_v3 的关键字参数，比如 alternate=False（D-0 交替开关不是模块常量）')
 ap.add_argument('--base', action='append', default=[], help='上下两格都翻的开关（比如上格要 S9 当底座）')
 ap.add_argument('--file'); ap.add_argument('--out'); ap.add_argument('--rank', action='store_true')
 ap.add_argument('--from', dest='frm'); ap.add_argument('--to')
@@ -21,7 +22,8 @@ def parse(f):
     return importlib.import_module(mod), attr, {'True': True, 'False': False}.get(v, v if not v.replace('.', '').lstrip('-').isdigit() else float(v) if '.' in v else int(v))
 FLAGS = [parse(f) for f in a.flag]
 BASE = [parse(f) for f in a.base]
-if not FLAGS and not a.pen_b: sys.exit('至少给一个 --flag 或 --pen-b')
+KWB = {k: {'True': True, 'False': False}.get(v, v) for k, v in (x.split('=', 1) for x in a.kw_b)}
+if not FLAGS and not a.pen_b and not KWB: sys.exit('至少给一个 --flag 或 --pen-b')
 
 def run(fn, flipped):
     saved = [(m, at, getattr(m, at)) for m, at, _ in BASE + FLAGS]
@@ -29,7 +31,7 @@ def run(fn, flipped):
         for m, at, v in BASE: setattr(m, at, v)
         if flipped:
             for m, at, v in FLAGS: setattr(m, at, v)
-        r = analyze_file(fn, pen=(a.pen_b or a.pen) if flipped else a.pen); t = TR.trend_v3(r)
+        r = analyze_file(fn, pen=(a.pen_b or a.pen) if flipped else a.pen); t = TR.trend_v3(r, **(KWB if flipped else {}))
     finally:
         for m, at, v in saved: setattr(m, at, v)
     return dict(bars=r['bars'] if 'bars' in r else None, r=r,
@@ -83,7 +85,7 @@ im = Image.new('RGB', (W, 90 + 2 * (PH + 30) + (70 if a.note else 40)), BG); d =
 win = bars[b0:b1 + 1]; lo = min(x['l'] for x in win) * 0.985; hi = max(x['h'] for x in win) * 1.015
 LL, LH = math.log(lo), math.log(hi)
 nm = lambda fs: ' '.join(f.rsplit('.', 1)[-1] if '=True' in f else f.split('.')[-1] for f in fs)   # 只留常量名：上下两格的名字已经写在格子左上角，表头再写一遍会冲出右边
-d.text((ML, 14), f'{a.file} · {a.title}' + (f' · 底座 {nm(a.base)}' if a.base else '') + f' · 下格加 {nm(a.flag) or ("笔 " + a.pen + " → " + a.pen_b)}', fill=TX, font=F)
+d.text((ML, 14), f'{a.file} · {a.title}' + (f' · 底座 {nm(a.base)}' if a.base else '') + f' · 下格加 {" ".join([nm(a.flag)] + [f"{k}={v}" for k, v in KWB.items()]).strip() or ("笔 " + a.pen + " → " + a.pen_b)}', fill=TX, font=F)
 dd = diff(A, B)
 d.text((ML, 48), f'窗口 {utc(b0):%Y-%m-%d} → {utc(b1):%Y-%m-%d}（UTC）｜整张：笔 上独有 {dd["pen_only_a"]} / 下独有 {dd["pen_only_b"]}，线段 上独有 {dd["seg_only_a"]} / 下独有 {dd["seg_only_b"]}，分界刀 上独有 {dd["bnd_only_a"]} / 下独有 {dd["bnd_only_b"]}，段型变 {dd["type_changed"]}｜加粗＝只在这一格有',
        fill=MU, font=Fs)
