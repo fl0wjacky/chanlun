@@ -9,7 +9,7 @@ ap.add_argument('--root', required=True); ap.add_argument('--file', required=Tru
 ap.add_argument('--a', required=True); ap.add_argument('--b', required=True)
 ap.add_argument('--ta', required=True); ap.add_argument('--tb', required=True)
 ap.add_argument('--from', dest='frm', required=True); ap.add_argument('--to', required=True)
-ap.add_argument('--box-b', default=''); ap.add_argument('--mark-b', default='')
+ap.add_argument('--box-b', default=''); ap.add_argument('--legend2', default=''); ap.add_argument('--mark-b', default='')
 ap.add_argument('--title', default=''); ap.add_argument('--note', default=''); ap.add_argument('--out', required=True)
 a = ap.parse_args(); out = os.path.abspath(a.out)
 A = json.load(open(a.a)); B = json.load(open(a.b))
@@ -62,7 +62,7 @@ def panel(k, D, tag, box=None, mark=None):
         xa, xb = X(max(pick(f0), b0)), X(min(pick(f1), b1))
         q.rectangle([xa, Y(zg), xb, Y(zd)], outline=AMB + (240,), width=3)
         q.line([xa, Y(zd), X(b1), Y(zd)], fill=AMB + (150,), width=1)          # ZD 往右延一条细线：离开段要收在它下面才算确认
-        late.append(((xa, Y(zg) - 26), f'{lab} [{zd:g}, {zg:g}]（ZD 往右的细线）', AMB))
+        late.append(((xa, Y(zg) - 26), f'{lab} [{zd:g}, {zg:g}]，框底 {zd:g} 往右延长', AMB))
     for bd in D['bounds']:
         i = bd['bar']
         if i < b0 or i > b1: continue
@@ -80,7 +80,7 @@ def panel(k, D, tag, box=None, mark=None):
         i = min(range(pick(md), pick(md) + 24), key=lambda i: abs(bars[i]['l'] - mp))
         x, y = X(i), Y(bars[i]['l'])
         q.line([x, y + 8, x, y + 40], fill=AMB, width=2); q.polygon([(x - 6, y + 14), (x + 6, y + 14), (x, y + 6)], fill=AMB)
-        late.append(((x + 10, y + 22), f"{bars[i]['l']:g} · {utc(i):%Y-%m-%d %H:%M}　{lab}", AMB))
+        late.append(((x + 10, y + 22), lab, AMB))
     placed = []
     for (xx, yy), t, c in late:
         bb = q.textbbox((xx, yy), t, font=Fb)
@@ -91,6 +91,9 @@ def panel(k, D, tag, box=None, mark=None):
     q.rectangle([0, 0, ML - 1, PH], fill=BG); q.rectangle([W - MR + 1, 0, W, PH], fill=BG); q.rectangle([0, bot + 1, W, PH], fill=BG)
     q.rectangle([ML, 34, W - MR, bot], outline=(60, 66, 80))
     q.text((ML + 2, 4), tag, fill=TX, font=F)
+    nseg = sum(1 for s in segs if b0 <= s['i0'] <= b1); nd2 = sum(1 for bd in D['bounds'] if b0 <= bd['bar'] <= b1 and bd['rule'] != 'S5')
+    t = f'这一年：分界 {nd2} 把、走势 {nseg} 段'; tw = q.textbbox((0, 0), t, font=F)[2]
+    q.text((W - MR - tw, 4), t, fill=TX, font=F)
     months = [i for i in range(b0, b1 + 1) if i == b0 or utc(i).month != utc(i - 1).month]
     for i in months: q.text((min(W - MR - 60, X(i) - 4), bot + 4), f'{utc(i):%Y-%m}', fill=MU, font=Fs)
     for v in sorted({float(f'{lo * (hi / lo) ** (j / 6):.3g}') for j in range(1, 6)}):
@@ -108,5 +111,6 @@ panel(0, A, a.ta)
 panel(1, B, a.tb, box=parse_box(a.box_b), mark=parse_mark(a.mark_b))
 yb = 74 + 2 * (PH + 26) + 4
 d.text((ML, yb), '画法：顶上色带＝走势段（红＝上涨，绿＝下跌，灰＝盘整）；框＝同级别中枢；金线＝线段；实心点＝分界（写价和日期）；空心圈＝盘整相连（红圈＝两边同向趋势相连）。', fill=MU, font=Fs)
-if a.note: d.multiline_text((ML, yb + 28), a.note, fill=TX, font=Fs)
+if a.legend2: d.text((ML, yb + 24), a.legend2, fill=MU, font=Fs)
+if a.note: d.multiline_text((ML, yb + 52), a.note, fill=TX, font=Fs)
 im.save(out); print('saved', out, im.size)
