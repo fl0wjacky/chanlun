@@ -11,6 +11,7 @@
 ★★ 量的是**两层**，键名分得开：
     `<数据>.json`        结构层 —— `core.analyze()` 的整份输出（分型 / 笔 / 线段 / 中枢）
     `<数据>.json|seg|pen` 信号层 —— `core.signals()` 的输出（买卖点）
+    `<数据>.json|new`     结构层·新笔 —— `core.analyze(pen="new")`（B-10＝C，新笔是正式选项）
   原先**只量结构层**。后果实测过：第二轮把 `signals()`（背驰判据 + 前提③）改了、买卖点从 156
   变 154，这个程序照样印 `rc=0 引擎输出逐位相同 ⇒ pine 不用动` —— 而 pine 确实移植了买卖点
   （`signalsOf`），于是**引擎与 pine 在信号层已经不同步，尺子却看不见**。信号层的键补上以后，
@@ -82,10 +83,20 @@ tree, outp, mode, fields = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4].sp
 perturb = mode == "1"
 sys.path.insert(0, tree)
 import core
+if mode == "new":                                  # 臂⑤：只拧新笔那条路（rule="new" 时丢掉最后一笔）—— 老笔的结构键必须不动
+    import core.pen as _P
+    _A = sys.modules["core.analyze"]               # ★ 不能写 import core.analyze as _A：core 把函数 analyze 导出到包上，拿到的是函数不是模块
+    _bp = _P.build_pens
+    def _bp_new(fx, std, rule="old", min_gap=None):
+        pens, seq = _bp(fx, std, rule, min_gap)
+        return (pens[:-1], seq[:-1]) if rule == "new" and pens else (pens, seq)
+    _A.build_pens = _bp_new
 
 def H(o):
     return hashlib.sha256(json.dumps(o, sort_keys=True, ensure_ascii=False,
                                      default=str).encode()).hexdigest()[:16]
+import inspect
+HAS_PEN = "pen" in inspect.signature(core.analyze).parameters
 out = {}
 for f in sorted(os.listdir(os.path.join(tree, "data"))):
     if not f.endswith(".json"): continue
@@ -102,6 +113,11 @@ for f in sorted(os.listdir(os.path.join(tree, "data"))):
         out[f] = "analyze 跑不动:%s" % type(e).__name__
         continue
     out[f] = H(r)
+    if HAS_PEN:                                    # 结构层·新笔（B-10＝C，小栋 10-09：新笔是正式选项，Pine 有 penRule="新笔"）：
+        try:                                       #   只动新笔路径的改动也要红。老树的 analyze 没有 pen 参数 ⇒ 不出这个键
+            out[f + "|new"] = H(core.analyze(bars, pen="new"))   # （按签名判，不靠接 TypeError：新笔路径真抛 TypeError 得报出来）
+        except Exception as e:
+            out[f + "|new"] = "analyze(new) 跑不动:%s" % type(e).__name__
     for lv in ("seg", "pen"):                      # 信号层：买卖点
         k = "%s|%s" % (f, lv)
         try:
@@ -120,7 +136,7 @@ for f in sorted(os.listdir(os.path.join(tree, "data"))):
 json.dump(out, open(outp, "w"))
 '''
     fd, tmp = tempfile.mkstemp(suffix=".json"); os.close(fd)
-    mode = perturb if perturb == "why" else ("1" if perturb else "0")
+    mode = perturb if perturb in ("why", "new") else ("1" if perturb else "0")
     p = subprocess.run([sys.executable, "-c", code, tree, tmp, mode, ",".join(PINE_SIG_FIELDS)],
                        capture_output=True, text=True)
     if p.returncode:
@@ -139,9 +155,9 @@ def ref_tree(sha, perturb=False):
 
 
 def split_keys(keys):
-    """把键分成结构层 / 信号层两拨（信号键形如 `zec_1h.json|pen`）。"""
-    struct = sorted(k for k in keys if "|" not in k)
-    sigs = sorted(k for k in keys if "|" in k)
+    """把键分成结构层 / 信号层两拨（信号键形如 `zec_1h.json|pen`；`zec_1h.json|new` 是结构层·新笔）。"""
+    struct = sorted(k for k in keys if "|" not in k or k.endswith("|new"))
+    sigs = sorted(k for k in keys if "|" in k and not k.endswith("|new"))
     return struct, sigs
 
 
@@ -217,6 +233,20 @@ def main():
             print("★ 臂③ 只改 why 却有 %d 个信号键变了（例 %s）⇒ 名单外的字段混进了哈希（exit=3）。" % (len(drift), drift[:2]))
             return 3
         print("⇒ 臂③ 只改 why（Pine 不输出的字段）⇒ %d 个信号键一个没变 ✓" % len(sig_keys))
+
+        # ── 臂⑤：只拧新笔那条路 ⇒ `|new` 键必须变，老笔结构键必须一个不变（B-10＝C 加的那一层，证它接上了、也没串到老笔）
+        N = ref_tree(tree, perturb="new")
+        new_keys = [k for k in A if k.endswith("|new")]
+        old_keys = [k for k in A if "|" not in k]
+        if not new_keys or not [k for k in new_keys if A[k] != N.get(k)]:
+            print("★ 臂⑤ 拧了新笔，%d 个新笔键一个没变（或者根本没有）⇒ 新笔这一层没接上（exit=3）。" % len(new_keys))
+            return 3
+        leak = [k for k in old_keys if A[k] != N.get(k)]
+        if leak:
+            print("★ 臂⑤ 只拧新笔，老笔结构键却变了 %d 个（例 %s）⇒ 两条路串了（exit=3）。" % (len(leak), leak[:2]))
+            return 3
+        print("⇒ 臂⑤ 只拧新笔 ⇒ %d/%d 个新笔键变了、%d 个老笔结构键一个没变 ✓"
+              % (len([k for k in new_keys if A[k] != N.get(k)]), len(new_keys), len(old_keys)))
 
         # ── 臂④：名单跟检出树里 chanlun.pine 的 `type Sig` 逐个对，多一个、少一个都报
         d = materialize(tree)

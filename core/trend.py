@@ -135,7 +135,7 @@ def _try_confirm(done, t, ks, typ, lo, no_exceed=True):
     if no_exceed and after and (max(a["hi"] for a in after) > done[j]["p1"] if typ == "H"
                                 else min(a["lo"] for a in after) < done[j]["p1"]):
         return None
-    zs = _centers_with_cuts(done[:t + 1], ks)
+    zs = (_sl_centers_with_cuts if (SAME_LEVEL and SAME_LEVEL_D2) else _centers_with_cuts)(done[:t + 1], ks)
     # D2-2 第 1 步（R6＝B，小栋 10-08）：两类候选取最后一个 —— ① 起点不晚于 H；② 起点在 H 之后、最后一条线段不晚于 S[t-2]（离开段之前已走完）
     ref = [z for z in zs if z["PI0"] >= lo and (z["X0"] <= done[j]["i1"] or (_R6_B and z["PI1"] <= t - 2))]
     if not ref:
@@ -178,7 +178,7 @@ def find_bounds(r, regroup=True, alternate=True, check_empty=True, no_exceed=Tru
                 if k2 == blocked[(typ, j)]:
                     continue
             if ks and check_empty:               # D2-7：上一刀 → 这一刀之间得有中枢
-                zz = _centers_with_cuts(done[:t + 1], ks + [j + 1])
+                zz = (_sl_centers_with_cuts if (SAME_LEVEL and SAME_LEVEL_D2) else _centers_with_cuts)(done[:t + 1], ks + [j + 1])
                 if not [q for q in zz if q["PI0"] >= lo and q["PI1"] <= j]:
                     ks.pop()
                     prev = bounds.pop()
@@ -415,6 +415,9 @@ def _death_types(r, done, bounds, segments, centers):
         if b.get("rule") == "D2-8":
             b["death"], b["death_why"] = "D2-8 补刀", "不分类（中枢排布切出来的）"
             continue
+        if b.get("rule") == "S5":                      # 同级别：盘整接盘整的接缝（L38:19-20），不是背驰、也不是三类点确立的，不分类
+            b["death"], b["death_why"] = "盘整相连", "不分类（同级别两个盘整的连接，L38:20；S12）"
+            continue
         up = b["kind"] == "H"
         kind1 = "一卖" if up else "一买"
         if (b["bar"], kind1) in first:
@@ -429,27 +432,39 @@ def _death_types(r, done, bounds, segments, centers):
             if near:
                 b["death_warn"] = "%s 在 bar %d，落在刀所在线段里，跟刀 bar %d 对不上" % (kind1, near[0]["bar"], b["bar"])
         zs = [z for z in centers if z["PI1"] < j]
+        fill = ""                                      # D2-5 补位（读法-D2-5，Nova 06:43 定优先级 -1→-2→-3→-4）
         if not zs:
-            b["death"], b["death_why"] = "比不了", "找不到 Z"
-            continue
-        k0 = zs[-1]["PI0"]
-        if k0 == 0:
-            b["death"], b["death_why"] = "比不了", "找不到 A"
-            continue
-        A = done[k0 - 1]
-        if _is_up(A) != up:
-            b["death"], b["death_why"] = "比不了", "进入段反向"
-            continue
+            # -3：找不到 Z，但 C 跟往前两条三段重叠 ⇒ 拿 C 跟往前第二条比
+            if D25_FILL >= 3 and j >= 2 and max(done[q]["lo"] for q in (j - 2, j - 1, j)) <= min(done[q]["hi"] for q in (j - 2, j - 1, j)):
+                A, fill = done[j - 2], "（-3 补位：无 Z，C 与前两条重叠，比 C 往前第二条）"
+            else:
+                b["death"], b["death_why"] = "比不了", "找不到 Z"
+                continue
+        else:
+            z = zs[-1]
+            k0 = z["PI0"]
+            A = done[k0 - 1] if k0 > 0 else None
+            if A is None or _is_up(A) != up:
+                # -2：进入段反向或找不到 ⇒ C 往前第二条（必跟 C 同向），条件是它属于 Z
+                if D25_FILL >= 2 and j >= 2 and z["PI0"] <= j - 2 <= z["PI1"]:
+                    A, fill = done[j - 2], "（-2 补位：进入段%s，比 C 往前第二条 Ai／Ai+2）" % ("反向" if A is not None else "找不到")
+                else:
+                    b["death"], b["death_why"] = "比不了", ("进入段反向" if A is not None else "找不到 A")
+                    continue
         newx = (C["p1"] > A["p1"]) if up else (C["p1"] < A["p1"])
         if _panzheng(A, C, not up, hist):              # 盘整背驰的判法跟 M29 共用一份（signals._panzheng）
-            b["death"], b["death_why"] = "盘整背驰", "C 创新%s、面积小于 A" % ("高" if up else "低")
+            b["death"], b["death_why"] = "盘整背驰", "C 创新%s、面积小于 A" % ("高" if up else "低") + fill
             continue
-        why = "C 没创新%s" % ("高" if up else "低") if not newx else "C 面积不小于 A"
+        why = ("C 没创新%s" % ("高" if up else "低") if not newx else "C 面积不小于 A") + fill
         sg = pre.get(b["bar"])
         trend = sg is not None and sg["type"] in ("上涨", "下跌") and not sg["upgraded"]
         b["death"], b["death_why"] = ("小转大" if trend else "盘整·未见背驰"), why + ("" if trend else "；前一段是%s" % (
             (sg["type"] + ("·升" if sg["upgraded"] else "")) if sg else "？"))
     return bounds
+
+
+D25_FILL = 3                                      # D2-5 补位（读法-D2-5，Atlas 27e714a，Nova 06:43 定优先级）：0＝现行（进入段反向即「比不了」）；
+                                                  #   2＝加 -2（进入段反向／找不到 ⇒ 比 C 往前第二条，须属于 Z）；3＝再加 -3（找不到 Z 但 C 与前两条重叠）。只改标注
 
 
 _XZD_SECOND = True                                # 只给自检反向臂关：小转大的刀不出二类
@@ -488,6 +503,184 @@ def _xzd_seconds(done, bounds, r=None):
     return out
 
 
+
+# ---------------------------------------------------------------- R-1 同级别分解（正式版开关，合并前最后一笔才翻默认；上线清单 docs/spec/同级别正式版-上线清单.md；docs/spec/读法-R1-分解方式.md S1～S6）
+SAME_LEVEL = True                                # R-1 同级别分解：小栋 10-09 定 A→B（正式版，跟 ①D、S-13 一起上）。正式版取值 True；
+                                                  #   现在默认关只为合并前 G1(a)「关掉跟 main 逐份同」，翻默认放合并前最后一笔
+SAME_LEVEL_OVERLAP = "ZDZG"                       # S3 相邻中枢判重叠用 [ZD,ZG]（编者口径，上线清单 #2：只剩这一个可行）；DDGG 只留作量数对照
+SAME_LEVEL_D6 = "fallback"                              # R-6 ③ 甲在同级别下（小栋 10-09 06:17 定）：正式版取值 "fallback"＝分界之后的组中枢首段须跟走势反向，
+                                                  #   判不出同方向趋势就退回不限方向（D6-4）；"strict" 只留作量数对照；None＝不限方向（旧量数口径）
+SL_FIRST_EXEMPT = True                           # 甲S-2（读法-R3R6 一·6，Atlas f3fac3c）：前一个走势段是本级别反向趋势 ⇒ 这一段第一个中枢不受限
+                                                  #   （首中枢可以从同向那条起）。正式版取值 True。乙′（R6_YI_PRIME／R6_YI_FALLBACK）R-6 定甲以后删了，见 2ba3fbd
+D2_ALTERNATE = True                               # D-0 分界一高一低交替（D2-3，小栋 10-09 06:36 定 A 保留）；只给出图／量数关：等同 trend_v3(alternate=False)
+SAME_LEVEL_DEATH = True                          # 同级别下照标死点类型（D2-5 按三段中枢）、出小转大的二类（S11）、S5 标「盘整相连」（S12）。正式版取值 True
+SAME_LEVEL_D2 = True                             # S9：D2 的参照中枢也换成同级别三段中枢（R-1＝B「完整同级别」）。正式版取值 True
+
+
+def _sl_centers(done, a, b, first_up=None, first_free=False):
+    """S1＋S2：done[a..b) 里从左往右找三段重叠，满三段即收、不延伸；下一个从这三段之后起，段不共用。
+    first_up 给了（R-6 甲，D6）：中枢首段的方向必须是它（上涨段里 first_up=False，即下上下）。"""
+    out, k = [], a
+    while k + 2 < b:
+        if first_up is not None and _is_up(done[k]) != first_up and not (first_free and not out):
+            k += 1
+            continue
+        lo = max(done[q]["lo"] for q in range(k, k + 3))
+        hi = min(done[q]["hi"] for q in range(k, k + 3))
+        if lo <= hi:
+            out.append(dict(PI0=k, PI1=k + 2, X0=done[k]["i0"], X1=done[k + 2]["i1"], ZD=lo, ZG=hi,
+                            DD=min(done[q]["lo"] for q in range(k, k + 3)), GG=max(done[q]["hi"] for q in range(k, k + 3)),
+                            nZ=3, live=False, kind="—", rel="—", status="已确认", status_note="—", term="—",
+                            npens=None, F1=done[k + 1]["i1"]))
+            k += 3
+        else:
+            k += 1
+    return out
+
+
+def _sl_rel(z1, z2):
+    """S3：两个本级别中枢 → "叠"／"上"／"下"。区间照 SAME_LEVEL_OVERLAP。"""
+    lo, hi = ("ZD", "ZG") if SAME_LEVEL_OVERLAP == "ZDZG" else ("DD", "GG")
+    if z2[lo] > z1[hi]:
+        return "上"
+    if z2[hi] < z1[lo]:
+        return "下"
+    return "叠"
+
+
+def _sl_centers_with_cuts(done, ks):
+    """S9：同 _centers_with_cuts，但每组里找的是同级别三段中枢（S1＋S2）。"""
+    edges = [0] + list(ks) + [len(done)]
+    out = []
+    for a, b in zip(edges, edges[1:]):
+        out += _sl_centers(done, a, b)
+    return out
+def _sl_state(bars, bounds, two_sets, chosen):
+    """①D（读法-①D，Nova 10-09 定）：同级别下每把刀标 state ＝ "pending"／"confirmed"，只看当前这一份 K 线，不记历史。
+    D-2‴／D-2⁗：D2 刀 b（低点刀为例）——b 之后到当前最后一根的最高点 e（持平取最早那根），上界 ＝ min(e, 下一把 D2)。
+          下一把 D2 **已确认** ⇒ 这一组封死（它不撤、线段层有锁＋甲不变），甲 fallback 不会再翻 ⇒ 实际选中那套（chosen）里
+          有一个中枢整个落在 [b, 上界] 就确认（D-2⁗）；否则甲的两套中枢（限形状、不限形状，two_sets）里**各有**一个才确认（D-2‴），
+          D6-4 往哪边翻都还在，不回翻。高点刀对称取最低点。b′ 只会落在 e 或更晚更极端的点上 ⇒ D2-7 撤不了 b。
+          从右往左算：先定下一把的 state。
+    D-4′：S5 刀确认 ⇔ 左右两把 D2 刀都已确认（右边那把待确认时会被撤，撤了 S5 就翻回去）。
+    25 张前缀回放（定稿口径＋PEN_FINAL_LOCK）：确认后消失 D2 0／S5 0，确认回翻 D2 0／S5 0；D2 确认 84、S5 78（跟不防回翻时一样多），
+    图尾待确认 0，延迟中位 0、最大 1564（只有 D-2‴ 时 78／70／图尾 6／最大 1159）。
+    （试过作废的：只用 D-2′ 回翻 2／3；等最后一组 fallback 定、要求两套同一个中枢、F1 头 4 条定 a——见读法-①D 四之七。）"""
+    n = len(bars)
+    d2 = [b for b in bounds if b.get("rule") == "D2-2"]
+    for i in range(len(d2) - 1, -1, -1):                    # 从右往左：D-2⁗ 要先知道下一把 D2 确认没有
+        b = d2[i]
+        hi = d2[i + 1]["bar"] if i + 1 < len(d2) else n      # 跟回放 dreplay3 同一判据：中枢也不越过下一把 D2 刀
+        lo = b["bar"] + 1
+        if lo >= n:
+            b["state"] = "pending"
+            continue
+        key = (lambda q: bars[q]["h"]) if b["kind"] == "L" else (lambda q: -bars[q]["l"])
+        e = max(range(lo, n), key=lambda q: (key(q), -q))
+        sets = [chosen] if (i + 1 < len(d2) and d2[i + 1]["state"] == "confirmed") else two_sets   # D-2⁗
+        ok = all(any(z["X0"] >= b["bar"] and z["X1"] <= min(hi, e) for z in zs) for zs in sets)
+        b["state"] = "confirmed" if ok else "pending"
+    for b in bounds:
+        if b.get("rule") != "S5":
+            continue
+        left = [x for x in d2 if x["bar"] < b["bar"]]
+        right = [x for x in d2 if x["bar"] > b["bar"]]
+        b["state"] = "confirmed" if left and right and left[-1]["state"] == "confirmed" and right[0]["state"] == "confirmed" \
+            else "pending"
+
+
+# S5 切出同向趋势相连（上涨+上涨／下跌+下跌，L43:9 原文不允许）怎么办 —— 两个编者口径，待小栋在合并页选（Nova 10-09 18:33）：
+#   None：现行（落地支 60c72a4），照切，会有 L43 违反。
+#   "P"：去掉这把 S5，两截并成一段（不犯 L43，但并出来的趋势里有叠着的相邻中枢，犯 L20:6）。
+#   "Z"：右边那截的第一个中枢单列成一段盘整，在它第三段终点补一刀 S5（L20、L43、L38 规则 A 都不犯；代价是可能出现中枢不叠的盘整＋盘整）。
+#   只处理同一个 D2 组里、S5 接缝两边；D2 分界两边不动（那是 D2-T1，另一件）。处理完再查，直到组里没有相邻的同向趋势。
+S5_FIX = "Z"                                     # land-z：小栋 10-09 合并页第三题选 B（合加 Z）才合
+
+
+def _sl_layer(done, ks, bounds_, n):
+    """S3～S6：分界照 D2 定的组，每组里按同级别中枢再切：相邻两个中枢重叠，或者不重叠但方向跟这一截的趋势相反
+    ⇒ 前一个中枢第三段的终点再切一刀（S5，盘整＋盘整）。每一截：0 个中枢＝无中枢，1 个＝盘整，≥2 个依次同向不重叠＝上涨／下跌。
+    不升级、不合成（S6）。→ (segments, centers_out, extra_bounds)"""
+    edges = [0] + list(ks) + [len(done)]
+    pieces = []                                    # (起 done 下标, 止 done 下标（不含）, [中枢])
+    extra = []
+    bk = {x["line_seg"] + 1: x["kind"] for x in bounds_}
+    two_sets = ([], [])                            # D-2‴：(限形状那套, 不限形状那套) 的中枢，没走 D6 的组两边都放同一份
+    def kind_of(zz):
+        return "无中枢" if not zz else "盘整" if len(zz) == 1 else ("上涨" if _sl_rel(zz[0], zz[1]) == "上" else "下跌")
+    for g, (a, b) in enumerate(zip(edges, edges[1:])):
+        zz = _sl_centers(done, a, b)
+        exempt = False
+        if SL_FIRST_EXEMPT and g and bk.get(a) in ("L", "H") and pieces:
+            exempt = kind_of(pieces[-1][2]) == ("下跌" if bk[a] == "L" else "上涨")
+        if SAME_LEVEL_D6 and g and bk.get(a) in ("L", "H"):
+            want_up = bk[a] == "L"                       # 从低点起 ⇒ 上涨 ⇒ 中枢首段向下（下上下）
+            zr = _sl_centers(done, a, b, first_up=not want_up, first_free=exempt)
+            ok = len(zr) >= 2 and _sl_rel(zr[0], zr[1]) == ("上" if want_up else "下")
+            two_sets[0].extend(zr); two_sets[1].extend(zz)
+            if SAME_LEVEL_D6 == "strict" or ok:
+                zz = zr
+        else:
+            two_sets[0].extend(zz); two_sets[1].extend(zz)
+        start, cur, way = a, [], None
+        for z in zz:
+            if cur:
+                r = _sl_rel(cur[-1], z)
+                if r == "叠" or (way and r != way):
+                    cut = cur[-1]["PI1"] + 1
+                    pieces.append((start, cut, cur, g))
+                    e = done[cut - 1]
+                    extra.append(dict(rule="S5", line_seg=cut - 1, bar=e["i1"], kind="H" if e["p1"] >= e["p0"] else "L",
+                                      price=e["p1"]))
+                    start, cur, way = cut, [], None
+                elif way is None:
+                    way = r
+            cur.append(z)
+        pieces.append((start, b, cur, g))
+    if S5_FIX:
+        pieces, extra = _fix_same_trend(pieces, extra, kind_of, done, S5_FIX)
+    segments, centers_out = [], []
+    for g, (a, b, zz, _grp) in enumerate(pieces):
+        last = g == len(pieces) - 1
+        if not zz:
+            kind = "无中枢"
+        elif len(zz) == 1:
+            kind = "盘整"
+        else:
+            kind = "上涨" if _sl_rel(zz[0], zz[1]) == "上" else "下跌"
+        centers_out += [dict(z, seg=g) for z in zz]
+        segments.append(dict(i0=0 if a == 0 else done[a - 1]["i1"], i1=n - 1 if last else done[b - 1]["i1"],
+                             type=kind, upgraded=False, head=a == 0, live=last, n_centers_level=len(zz)))
+    return segments, centers_out, extra, two_sets
+
+
+def _fix_same_trend(pieces, extra, kind_of, done, mode):
+    """S5_FIX：同一个 D2 组里，S5 接缝两边都是同向趋势（上涨+上涨／下跌+下跌）时——
+    P：去掉这一刀，两截并成一段；Z：右边那截的第一个中枢单列成一截（盘整），在它第三段终点补一刀 S5，其余中枢成下一截。
+    处理完从头再查，直到没有。pieces：[(起, 止, 中枢, 组号)]；extra：S5 刀（line_seg = 接缝前那条线段 = 前一截的止 − 1）。"""
+    out = list(pieces)
+    gone, added = set(), []
+    changed = True
+    while changed:
+        changed = False
+        for k in range(len(out) - 1):
+            (a0, b0, z0, g0), (a1, b1, z1, g1) = out[k], out[k + 1]
+            t0, t1 = kind_of(z0), kind_of(z1)
+            if not (g0 == g1 and t0 == t1 and t0 in ("上涨", "下跌")):
+                continue
+            if mode == "P":
+                gone.add(b0 - 1)
+                out[k:k + 2] = [(a0, b1, z0 + z1, g0)]
+            else:                                     # Z
+                cut = z1[0]["PI1"] + 1
+                e = done[cut - 1]
+                added.append(dict(rule="S5", line_seg=cut - 1, bar=e["i1"], kind="H" if e["p1"] >= e["p0"] else "L", price=e["p1"]))
+                out[k + 1:k + 2] = [(a1, cut, z1[:1], g1), (cut, b1, z1[1:], g1)]
+            changed = True
+            break
+    return out, [x for x in extra if x["line_seg"] not in gone] + added
+
+
 def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_exceed=True, standardize=True):
     """→ dict(seg_centers, bounds, retracted, pending, segments, units, reading)。
     seg_centers：按确立的分界切开重算的线段中枢（D4，前端画框就用它），每个带 seg（属于第几段走势，跟 segments 下标对齐）；
@@ -495,6 +688,7 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
       ★ n_centers_level 是**本级别**中枢个数，跟读法无关；读法 A 的升级段，字母挂在 units 上，个数不是它；
     units：D3 合成出来的高一级中枢（只列 n>1 的），带 seg，给前端画升级框；
     reading：这一跑用的 D3 读法（A／B），前端据此决定字母挂哪一级（spec §八 第 6 条）。"""
+    alternate = alternate and D2_ALTERNATE
     res = find_bounds(r, regroup=regroup, alternate=alternate, check_empty=check_empty, no_exceed=no_exceed,
                       standardize=standardize)
     done, ks = res["done"], res["ks"]
@@ -506,6 +700,16 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
                                    n_centers_level=0)])
     bounds = list(res["bounds"])
     ks = list(ks)
+    if SAME_LEVEL:                               # R-1 试验：同级别分解（默认关）。不升级、不补 D2-8、不标死点类型
+        segments, centers_out, extra, two_sets = _sl_layer(done, ks, bounds, n)
+        bounds = sorted(bounds + extra, key=lambda x: x["bar"])
+        if _DEATH and SAME_LEVEL_DEATH:                  # 正式版：同级别下照标死点类型（D2-5 按三段中枢）、小转大的二类（S11）
+            _death_types(r, done, bounds, segments, centers_out)
+        _sl_state(r["bars"], bounds, two_sets, centers_out)
+        return dict(seg_centers=centers_out, bounds=bounds, retracted=res["retracted"],
+                    pending=pending(done, ks, res["want"]), segments=segments, units=[], reading="same_level",
+                    xzd_seconds=_xzd_seconds(done, bounds, r) if (_DEATH and SAME_LEVEL_DEATH and _XZD_SECOND) else [],
+                    moved=res.get("moved", []))
     segments, units_out, centers_out = _layer(done, ks, bounds, reading, n)
     if _D28:
         cuts = _d28_cuts(done, ks, segments, units_out, centers_out)

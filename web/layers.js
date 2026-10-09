@@ -122,10 +122,15 @@ const LOWER_LET = 'abcdefgh';
  * ★ 买卖点**不止一个大开关**：下面还有六个 kind 的 chip（一买…三卖）和「显示待确认」
  *   （未确认的点默认不画）—— 高一级那层同理，跟着自己那个开关。
  */
-export function shownOf(opts) {
+export function shownOf(opts, data) {
   const o = opts || {}, kinds = o.sigKinds || {};
+  // 同级别正式版（载荷 `trend_reading === 'same_level'`）：**「以上级别根本不考虑」**（L38 规则 C）——
+  //   不升级、不合成（S6），第 33 课「满 9 段」那种升级框也属于「以上级别」⇒ `up`、`lv` 一律不画，芯片也藏起来
+  //   （Nova 10-09 09:07 定：不留半个入口）。地址栏里带着 `up=1` 也一样不画 —— 意愿留着，换回现行口径照常。
+  //   ★ 第二个参数**可以不给**（老调用点）：不给就当现行口径，跟改之前一个字不差。
+  const sl = !!(data && data.trend_reading === 'same_level');
   return {
-    pen: !!o.pen, seg: !!o.seg, pc: !!o.pc, sc: !!o.sc, up: !!o.up,
+    pen: !!o.pen, seg: !!o.seg, pc: !!o.pc, sc: !!o.sc, up: !!o.up && !sl,
     // 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）：背景带／分界／中阴／待定／撤回／升级框，
     // **一个大开关**管全部 —— 它们是一件事（"这一段怎么走的"）的六个面，拆成六个芯片没人找得齐。
     // ★ 它跟 `cut`（中枢切法）不是一回事，别混：切法决定**中枢**切在哪儿，这一层画的是**走势段**。
@@ -136,7 +141,7 @@ export function shownOf(opts) {
     // 级别对照（卡 card-01961644-68f，接口规则 L-9）：合成框跟**对照图**（后台 `ref_tf` 那一档）
     // 中枢对不上的那些，在框右沿标一句。★ 它标的是**合成框**（`T.units`），那一层归 `up` —— 框不画就没有地方挂字
     // ⇒ `lv` 跟 `up` **与**一下（跟 `trendNum` 跟 `trend` 与一下是同一条写法）。默认开。
-    lv: !!o.lv && !!o.up,
+    lv: !!o.lv && !!o.up && !sl,
     // 单个买卖点画不画：跟下面画三角那一段用的是**同一条**（大开关 ＋ kind chip ＋ 待确认）
     sigAt: (s) => !!o.sig && !!kinds[s.kind] && (!!s.confirmed || !!(o.sigPend && CHART.sig_pending)),
   };
@@ -320,7 +325,7 @@ export function makeBoxPrimitive(state) {
             state.boxesDrawn = [];
             const { data, opts } = state;
             if (!data || !this._chart) return;
-            const sh = shownOf(opts);        // 开关只在这里读一次（判据那半边走的是同一个函数）
+            const sh = shownOf(opts, data);        // 开关只在这里读一次（判据那半边走的是同一个函数）
             target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
               const W = mediaSize.width;
               const vp = viewport(this._chart, state.candleSeries || this._series, data);
@@ -428,7 +433,7 @@ export function makeAnnotPrimitive(state) {
           draw: (target) => {
             const { data, opts } = state;
             if (!data || !this._chart) return;
-            const sh = shownOf(opts);        // 开关只在这里读一次（判据那半边走的是同一个函数）
+            const sh = shownOf(opts, data);        // 开关只在这里读一次（判据那半边走的是同一个函数）
             target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
               const W = mediaSize.width;
               const H = mediaSize.height;   // 视口下沿 —— 夹框/避让要两头都不出画布（见 fitBox）
@@ -440,7 +445,9 @@ export function makeAnnotPrimitive(state) {
                 // 暂定那一刀 V 同时是暂定段的终点和后面那一截的起点 ⇒ 只画一个圈（虚线那个）；
                 // 两个都画，实线小圈套在虚线圈里，看着像齿轮（实测截图）。
                 const tentEnds = new Set(data.segs.filter((s) => s.tentative).map((s) => `${s.i1}|${s.p1}`));
-                for (const s of data.segs) {
+                // D-3 C：有 `segs_std` 时端点圈跟着标准化那一套走（图上的线段是哪套，圈就画在哪套的端点上），未完成段照旧取原始的
+                const segsDrawn = Array.isArray(data.segs_std) && data.segs_std.length ? data.segs_std.concat(data.segs.filter((s) => s.live)) : data.segs;
+                for (const s of segsDrawn) {
                   const end = segEnd(data, s);
                   const pts = [[s.i0, s.p0], [end.i, end.p]];
                   const up = s.dir === 'up';
@@ -469,6 +476,23 @@ export function makeAnnotPrimitive(state) {
                       placed.push(haloText(ctx, x, top ? y - 12 : y + 22, '暂定', col, 'center').slice(0, 4));
                     }
                   }
+                }
+              }
+
+              // ①b D-3 C：标准化线段的**最后一条**（app.js 画成短虚线）在它的终点旁写「终点还可能挪」（Nova 10-09 13:08）。
+              //    短虚线（可能挪）跟未完成段的长虚线挨在一起，光靠虚线疏密分不出来 —— 照 D-3 示意图写一个字。
+              //    字放在圈外、离开线段那一侧（终点是顶往上、是底往下），登记 placed，价签会避开它（跟「暂定」同一条）。
+              state.segStdLabel = null;
+              const stdL = Array.isArray(data.segs_std) && data.segs_std.length ? data.segs_std[data.segs_std.length - 1] : null;
+              // 带了 state 而最后一条已确认 ⇒ 没有「还可能挪」的，不写字（没带 state 的老载荷照旧：最后一条就是）
+              if (sh.seg && stdL && (!data.segs_std.some((q) => q.state) || stdL.state === 'pending')) {
+                // 字只写一次，写在**最靠右**那条待确认的终点上（两条都待确认时不写两行同样的话）—— 就是最后一条
+                const L = data.segs_std[data.segs_std.length - 1], x = vp.xOfBar(L.i1), y = vp.yOfPrice(L.p1);
+                if (onScreen(x, W, 20) && y !== null) {
+                  const top = L.dir === 'up';
+                  const box = haloText(ctx, x, top ? y - 12 : y + 22, '终点还可能挪', CHART.seg, 'center');
+                  placed.push(box.slice(0, 4));
+                  state.segStdLabel = { x: Math.round(x), y: Math.round(y), box: box.slice(0, 4).map(Math.round), text: box[4] };
                 }
               }
 
@@ -687,14 +711,14 @@ export function makeTrendPrimitive(state) {
 function trendBandView(target, state, prim) {
   const { data, opts } = state;
   const T = trendOf(data);
-  const sh = shownOf(opts);
+  const sh = shownOf(opts, data);
   if (!T || (!sh.trend && !sh.up)) return;
   target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
     const W = mediaSize.width, H = mediaSize.height;
     const vp = viewport(prim._chart, state.candleSeries || prim._series, data);
     // 只读出口（跟 `state.boxesDrawn` 同性质：**这一帧**交给这一层的清单，每帧开头重写）——
     // 「这一层到底画了哪几段、铺的什么色」要**量**，不能靠眼睛。
-    state.trendDrawn = { bands: [], bounds: [], pending: [], retracted: [], units: [], num: [] };
+    state.trendDrawn = { bands: [], bounds: [], pending: [], retracted: [], units: [], num: [], states: [] };
 
     // ① 走势背景（§八 1）。★★ 10-08 起颜色**跟段型走**（小栋 12:35 选 B，卡 card-fedf32aa-59d）：
     //    上涨＝绿、下跌＝红，**盘整一律灰**（升级·盘整灰深一档）。原文：「盘整哪里有什么方向，只有趋势才有方向」
@@ -744,6 +768,10 @@ function trendBandView(target, state, prim) {
       //        （撤回不在这一支：它是 `trendMarkView` 里的灰点线，本来就没铺带子。）
       const hatch = hatchFill(ctx);
       const strip = (i0, i1, key) => {
+        // ★ 同级别正式版的 S5 刀（盘整相连）**没有** `pullback_end_bar`：它是两个已经走完的中枢之间的接缝，
+        //   没有「极值已出、还没立住」那一截，也就没有中阴。缺这个键就不铺 —— 不缺省、不猜。
+        //   （不挡的话 `xOfBar(undefined)` 一路传进 LWC，抛 `reading 'year'`，整层分界都画不出来；4d09f3b 真载荷实测踩到。）
+        if (i0 == null || i1 == null) return;
         const x0 = vp.xOfBar(i0), x1 = vp.xOfBar(i1);
         if (x0 === null || x1 === null || x1 < 0 || x0 > W) return;
         if (x1 - x0 < 1) return;
@@ -818,11 +846,13 @@ function hatchFill(ctx) {
 function trendMarkView(target, state, prim) {
   const { data, opts } = state;
   const T = trendOf(data);
-  const sh = shownOf(opts);
+  const sh = shownOf(opts, data);
   // ★ 命中带**每帧先清空**，而且清在早退**之前**：这一层没数据、或者两颗芯片都关着的时候也得清。
   //   留着上一帧的带子就是"层关了、指针压上去还有字"—— 那条比画错更难被发现：**图上什么都没画**。
   //   （这跟「关着的层不算看得见」不是同一条账：那条管**画**，这条管**命中**。）
   boundHits.bands = [];
+  // 已撤回的只读清单同理：层关着也得清，不然工装读到的是上一帧画过的叉（⑦c 第一版就是这么红的）
+  if (state.trendDrawn) state.trendDrawn.withdrawn = [];
   if (!T || (!sh.trend && !sh.up)) return;
   // ★ 这一层的字**一律不登记 `placed`**（价签那张避让表），理由两条，都说破：
   //   ① 它们钉在**一条竖线和一个价**上（分界价格、待定、撤回）—— 挪开它就不是那个价了，避让没有意义；
@@ -836,9 +866,11 @@ function trendMarkView(target, state, prim) {
   target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
     const W = mediaSize.width, H = mediaSize.height;
     const vp = viewport(prim._chart, state.candleSeries || prim._series, data);
-    const D = state.trendDrawn || (state.trendDrawn = { bands: [], bounds: [], pending: [], retracted: [], units: [], num: [] });
+    const D = state.trendDrawn || (state.trendDrawn = { bands: [], bounds: [], pending: [], retracted: [], units: [], num: [], states: [] });
     D.labels = [];
     D.deaths = [];
+    D.states = [];
+    D.withdrawn = [];
     // 命中带的画布：跟 `ghostHits` 同一条账 —— `ctx.canvas` 就是这个窗格的画布，
     // `useMediaCoordinateSpace` 给的坐标就是它的 CSS 像素，所以「客户端坐标 − getBoundingClientRect」
     // 正好落在同一个系里。每帧重设：窗格重建过之后旧的 canvas 是个死元素，量出来的坐标全是错的。
@@ -868,9 +900,14 @@ function trendMarkView(target, state, prim) {
         boundHits.bands.push({ x0: x - 4, x1: x + 4, bound: b });
         // 那个点：填结构色、外面描一圈**页面底色** —— 参考图那边是"深点 ＋ 白圈"，这边正好反过来，
         // 干的是同一件事：把点从背后的带子里"抠"出来，别糊成一片。
+        // ①D 待确认（D-5，Nova 10-09 06:42 定）：点画**空心**（里面填页面底色、外圈结构色），确认了才填实。
+        //   ★ 不借「待定」那套灰点线：那是 D2-6 的**候选极值**（`trend.pending`），这里是**已经立了、还没坐稳的刀**，
+        //     两件事要一眼分得开。分界竖虚线照画 —— 这把刀确实切开了段，只是还可能被撤。
+        //   ★ 只认后台给的 `b.state`（S5 刀的也由后台按 D-4 派生好），前端一律不自己推（Bram／Nova 06:43 定）。
+        const pending = b.state === 'pending';
         ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2);
-        ctx.fillStyle = TREND.edge; ctx.fill();
-        ctx.strokeStyle = TREND.halo; ctx.lineWidth = 2; ctx.stroke();
+        ctx.fillStyle = pending ? TREND.halo : TREND.edge; ctx.fill();
+        ctx.strokeStyle = pending ? TREND.edge : TREND.halo; ctx.lineWidth = pending ? 1.8 : 2; ctx.stroke();
         // 价格跟着极值走：极值在上面就往上写、在下面就往下写（参考图的 dy -10 / +20），免得字压在带子上。
         // ★ 多一条**翻边**：极值本来就贴着格顶（ZEC 15m 那个 1699 就是）⇒ 往上写会顶出画布、
         //   只剩半行字。翻到下面去写 —— 位置仍然钉在那一根上，只是站到点的另一侧。
@@ -883,9 +920,14 @@ function trendMarkView(target, state, prim) {
         //   ★ 只标不改刀（spec D2-5：类型不决定刀落在哪）。全名放悬停（app.js `boundShow`），图上只写短名。
         //   ★ 深浅分两档：真判出来的三种（趋势背驰／盘整背驰／小转大）用结构色，编者口径那三种（盘整·未见背驰／比不了／D2-8 补刀）
         //     用静音灰 —— 「比不了」占了线上 15 张的六成，跟真死点一个颜色的话图上满眼都是它，读的人分不出哪几刀是真背驰。
-        const dt = DEATH_SHORT[b.death];
+        // ★ 「盘整相连」（S5 刀，S12）**故意不在 DEATH_SHORT 里**：图上不挂字，只在悬停里有（Nova 10-09 06:42 定）——
+        //   S5 刀占正式口径一半多（194 把里 106），每把都挂字会把真背驰那几把淹掉。
+        const dt0 = DEATH_SHORT[b.death];
+        // ★ 连写用全角括号「趋势背驰（待确认）」，不用「 · 」：左格本来就在尾巴上接一个「 ·」，用点连会变成「趋势背驰 · 待确认 ·」（实截踩过）
+        const dt = dt0 ? (pending ? dt0 + '（待确认）' : dt0) : (pending ? '待确认' : null);
+        D.states.push({ bar: b.bar, state: b.state || null, hollow: pending });
         if (dt) {
-          const col = DEATH_REAL.has(b.death) ? TREND.edge : TREND.mut;
+          const col = dt0 && DEATH_REAL.has(b.death) ? TREND.edge : TREND.mut;
           // 候选格按顺序取第一个**不压字**的：价格字往外一行 → 同一行接在右边 → 同一行接在左边；都不行就不写
           //   （悬停里照样有全名，见 app.js `boundText`）。要躲的字有两张表：这一层自己的 `mine`，和标注层那张
           //   `placed`（价签／买卖点文字／盘整组 chip，`state.labelBoxes`，标注层先画，这一帧已经齐了）。
@@ -901,7 +943,7 @@ function trendMarkView(target, state, prim) {
           ];
           const others = [...mine, ...(state.labelBoxes || [])];
           // 只读出口：每一刀记号落在哪一格（out＝往外一行／right／left／null＝三格都压、不写），工装拿它量「不压字」和配色
-          const rec = { bar: b.bar, death: b.death, txt: null, mode: null, box: null, col };
+          const rec = { bar: b.bar, death: b.death, state: b.state || null, txt: null, mode: null, box: null, col };
           D.deaths.push(rec);
           for (const [yy, al, ax, txt] of cand) {
             ctx.font = FONT_SM;
@@ -939,6 +981,38 @@ function trendMarkView(target, state, prim) {
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
         ctx.setLineDash([]);
         D.labels.push(haloText(ctx, x + 8, y + 4, `${fmtG(r.price)} 撤回`, TREND.mut, 'left', mine));
+      }
+
+      // ③b 已撤回（Q-6 选 A，小栋 10-09 12:47；卡 card-fe3aebd3-819）：服务端记下的「送出去过、后来整个不见了」的刀和线段
+      //    （载荷顶层 `withdrawn`，Bram 12:22 方案：`{kind: d2|s5|seg, t, dir, price, at}`，`t` 是那根 K 线的开盘时间）。
+      //    跟上面 ③ `T.retracted` 是**两件事**：那是引擎一趟算里 D2-7 自己撤的；这是笔回头改了、上一趟确认的东西这一趟没了。
+      //    画法照 Q-6 示意图：原位置一个**淡红叉**＋一条很淡的红虚线＋「已撤回：笔回头改了」。用 `t` 找位置不用下标 ——
+      //    往左加载会让下标整体平移，开盘时间不会。`t` 不在这一窗的 K 线里 ⇒ 不画（不夹回画布）。
+      const ts = prim._chart.timeScale(), sec = (t) => (t > 1e12 ? t / 1000 : t);
+      for (const w of (Array.isArray(data.withdrawn) ? data.withdrawn : [])) {
+        // 线段那条（Bram 9a9ba34）：`{kind:'seg', t, t1, dir:'up'|'down', p0, p1}` —— 没有 `price`，叉打在**终点**（t1, p1）上，
+        //   整条原位置再描一道很淡的红虚线（「这条线段被撤了」）。刀那两类：`{t, dir:'H'|'L', price}`，叉打在刀上。
+        const isSeg = w.kind === 'seg';
+        const tt = sec(isSeg ? w.t1 : w.t), pp = isSeg ? w.p1 : w.price;
+        const x = ts.timeToCoordinate(tt), y = vp.yOfPrice(pp);
+        if (x === null || y === null || !onScreen(x, W, 8)) continue;
+        if (isSeg) {
+          const x0 = ts.timeToCoordinate(sec(w.t)), y0 = vp.yOfPrice(w.p0);
+          if (x0 !== null && y0 !== null) {
+            ctx.setLineDash(DASH.trendBack); ctx.strokeStyle = rgba(CHART.sell, 110); ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x, y); ctx.stroke(); ctx.setLineDash([]);
+          }
+        }
+        ctx.setLineDash(DASH.trendBack);
+        ctx.strokeStyle = rgba(CHART.sell, 70); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.strokeStyle = rgba(CHART.sell, 160); ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.moveTo(x - 7, y - 7); ctx.lineTo(x + 7, y + 7); ctx.moveTo(x - 7, y + 7); ctx.lineTo(x + 7, y - 7); ctx.stroke();
+        const what = isSeg ? '线段已撤回' : '已撤回';
+        const top = isSeg ? w.dir === 'up' : w.dir === 'H';      // 叉在顶上 ⇒ 字往上写，在底下 ⇒ 往下写
+        D.labels.push(haloText(ctx, x + 12, y + (top ? -14 : 16), `${what}：笔回头改了（${fmtG(pp)}）`, CHART.sell, 'left', mine));
+        D.withdrawn.push({ kind: w.kind, t: w.t, price: pp, x: Math.round(x), y: Math.round(y) });
       }
 
       // ③.5「等确认」三个字（§八 3，卡 card-60678062-8c2）：那条斜线带的**名字写在带子自己头上**。
@@ -996,7 +1070,7 @@ function trendMarkView(target, state, prim) {
     //      （一团暗红里几个更暗的红点）。理由写在 `FONT_LET` 上面那一段。**唯一的例外**：
     //      **还在长的那一段用灰** —— 它中枢数还会变、字母将来要重排，不该跟定下来的字母一样亮；
     //      那是"未定"的记号，"这一段往哪儿去"已经由背景带说了。
-    if (shownOf(opts).trendNum) {
+    if (shownOf(opts, data).trendNum) {
       // 缺字段按 A —— 后台的缺省就是 A（core/trend.py），而"猜不出来就画 B"会静默换掉一套口径
       const reading = data.trend_reading === 'B' ? 'B' : 'A';
       const lv = data.seg_centers || [], uni = T.units || [];

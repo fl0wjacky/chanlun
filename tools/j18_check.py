@@ -58,7 +58,16 @@ def _trend(bars, fn):
     return trend_v3(analyze([dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"]) for b in bars], tick=tick_of(fn)), reading="A")
 
 
+def _sl():
+    import core.trend as T
+    return bool(T.SAME_LEVEL)
+
+
 def _has(v, kind, bar):
+    """老路：这一刀出现了。同级别（Nova 10-09 13:09 选 (a)，spec 级别联动 J18 Atlas 14d231b）：这把 D2 **已确认**
+    （①D 的确认条件，小栋认过）——同级别的刀一画出来就在，只是 state=pending，拿「出现」当确立时刻会早得没意义。"""
+    if _sl():
+        return any(b["kind"] == kind and b["bar"] == bar and b["rule"] == "D2-2" and b.get("state") == "confirmed" for b in v["bounds"])
     return any(b["kind"] == kind and b["bar"] == bar for b in v["bounds"])
 
 
@@ -87,17 +96,27 @@ def check_pair(fn, fstep, bstep, small=None):
     if big and big[-1]["n"] * fstep < bstep:
         big = big[:-1]
     vb = _trend(big, fn)
+    sl = _sl()
+    # 同级别：大周期只看 D2（J18 说的是走势转折；S5 是 D2 之间的接缝），而且只看全图里已确认的（待确认的还没「确立」）。
+    #   确立时刻从刀所在那根往后找（同级别的刀没有老路的 pullback_end_bar）
+    big_cuts = [b for b in vb["bounds"] if b["rule"] == "D2-2" and b.get("state") == "confirmed"] if sl else vb["bounds"]
     out = []
-    for k, bd in enumerate(vb["bounds"]):
-        c = confirm_at(big, fn, bd["kind"], bd["bar"], bd["pullback_end_bar"], len(big))
+    for k, bd in enumerate(big_cuts):
+        c = confirm_at(big, fn, bd["kind"], bd["bar"], bd["bar"] if sl else bd["pullback_end_bar"], len(big))
         t_end = big[c]["t"] + bstep                          # c 那根大 K 线收盘
         t0 = big[bd["bar"]]["t"]
         t1 = t0 + bstep                                      # E ＝ 极值那根大 K 线覆盖的时间
         sm = [b for b in small if b["t"] + fstep <= t_end]
         vs = _trend(sm, fn)
         inE = lambda x: t0 <= sm[x["bar"]]["t"] < t1
-        conf = [b for b in vs["bounds"] if b["kind"] == bd["kind"] and inE(b)]
-        pend = [p for p in vs["pending"] if p["kind"] == bd["kind"] and inE(p)]
+        if sl:
+            # 小周期：E 里有已确认的同向 D2 ⇒ 通过；只有待确认的 D2、或同向的 S5 ⇒ 『中阴』（转折在，只是还没定）
+            conf = [b for b in vs["bounds"] if b["kind"] == bd["kind"] and inE(b) and b["rule"] == "D2-2" and b.get("state") == "confirmed"]
+            pend = [b for b in vs["bounds"] if b["kind"] == bd["kind"] and inE(b) and b not in conf] + \
+                   [p for p in vs["pending"] if p["kind"] == bd["kind"] and inE(p)]   # 末尾候选（trend.pending）照老路也算
+        else:
+            conf = [b for b in vs["bounds"] if b["kind"] == bd["kind"] and inE(b)]
+            pend = [p for p in vs["pending"] if p["kind"] == bd["kind"] and inE(p)]
         if conf:
             verdict = "通过"
         elif pend:

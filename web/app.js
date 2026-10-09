@@ -129,7 +129,9 @@ const paging = { span: 1, spanMax: null, earliest: false, nogain: false, stop: n
                  cut: new URLSearchParams(location.search).get('cut') || DEFAULT_CUT,
                  // ★ 笔的根数：地址栏点名的那个（`?pen=7`），没点名就是 null ＝「听后台的缺省」。
                  //   名单到了以后 loadMeasures 会把 null／名单外的数摆回 `pens.def`。
-                 pen: Number(new URLSearchParams(location.search).get('pen')) || null };
+                 // ★ 新笔（B-10＝C，小栋 10-09 06:32）：`?pen=new`。名单成了混型 [6, 7, "new"]，**不许**一律 Number()：
+                 //   Number('new') 是 NaN ⇒ 当场掉回缺省，分享出去的 `?pen=new` 打开就变老笔（Bram 06:34 提醒过）。
+                 pen: penOf(new URLSearchParams(location.search).get('pen')) };
 
 // ---- 背驰看法（卡 card-84091d2d-c97：四选一、默认不动、图脚标明当前用的是哪种）----
 // 口径在 docs/spec/背驰.md 第六节，四个名字的出处是 core/signals.py 的 MEASURES 上面那一行。
@@ -205,6 +207,10 @@ const penSolid = line({ color: CHART.pen, lineWidth: WIDTH.pen });
 const penDash = line({ color: CHART.pen, lineWidth: WIDTH.pen, lineStyle: LWC.LineStyle.Dashed });
 const segSolid = line({ color: CHART.seg, lineWidth: WIDTH.seg });
 const segDash = line({ color: CHART.seg, lineWidth: WIDTH.seg, lineStyle: LWC.LineStyle.LargeDashed });
+// D-3 选 C（小栋 10-09 12:57）：载荷带 `segs_std`（标准化线段＝分界用的那一套）时，最后一条已完成的画**短虚线**、淡一档 ——
+//   它的终点还可能往后挪（后面一段走完，标准化会把端点挪到真极值、或者把相邻的并成一条）。未完成那一截照旧是 segDash 的长虚线。
+const fadeHex = (h, a) => `rgba(${parseInt(h.slice(1, 3), 16)},${parseInt(h.slice(3, 5), 16)},${parseInt(h.slice(5, 7), 16)},${a})`;   // 从主题色现算，不抄色号
+const segStdLast = line({ color: fadeHex(CHART.seg, 0.75), lineWidth: WIDTH.seg, lineStyle: LWC.LineStyle.Dashed });
 
 // 标注层要挂在一个**永远可见**的系列上：挂在「线段」系列上的话，一关线段开关，
 // 系列不可见 ⇒ 它的 primitive 也不再被画，价签和买卖点会跟着一起消失（那不是开关的语义）。
@@ -343,7 +349,7 @@ function renderLevelsHead() {
   if (!e) return;
   const lv = state.levels;
   let txt = '';
-  if (shownOf(opts).lv && lv) {
+  if (shownOf(opts, state.data).lv && lv) {
     const a = levelsStartText(lv), b = levelsCoverageText(lv);
     txt = [a, b].filter(Boolean).join(' ｜ ');
     // ★★ `。` 归**整行**，不归某一段（Nova 2026-10-06 定，见 `levelsStartText` 末尾那段账）：
@@ -483,12 +489,19 @@ function ladderSpan(v) {
 //   首屏不认 ⇒ 一开始就 earliest 的品种（AAPL 那种）会白发一次请求；?load=16 在 15m 上被钳到 4 之后，
 //   页面还以为自己是 16 档，停法就印错（Atlas 2026-10-04 读代码挑出来的）。
 // 纯函数：给「现在手上那份的状态 cur」和「后台回的一份 d」，算出手上该变成什么；调用方 Object.assign 回去。
+// 笔的档：6／7 是数，新笔是字符串 'new'。外面进来的（地址栏、/api/meta）一律过这一道，里头就只有这两种形状。
+function penOf(x) {
+  if (x === 'new') return 'new';
+  const n = Number(x);
+  return x != null && x !== '' && Number.isInteger(n) ? n : null;
+}
 function adopt(cur, d, prevLen) {
   const s = { measure: typeof d.measure === 'string' && d.measure ? d.measure : cur.measure,
               // 切法也认回显（跟 measure 同一格）：点的那颗可能失败，屏幕上画的到底是哪种只有后台那份说了算
               cut: typeof d.cut === 'string' && d.cut ? d.cut : cur.cut,
               // 笔的根数也认回显：屏上画的到底是几根的笔，只有后台那份说了算
-              pen: Number.isFinite(d.pen_min) ? d.pen_min : cur.pen,
+              //   新笔那档回显 `pen_min: null`（「最少几根」对新笔不成立），认 `meta.pen_rule === 'new'`（Bram 47838ce）
+              pen: d.meta?.pen_rule === 'new' ? 'new' : Number.isFinite(d.pen_min) ? d.pen_min : cur.pen,
               span: Number.isFinite(d.span) ? d.span : cur.span,          // 回显的档位就是真档位
               spanMax: Number.isFinite(d.span_max) ? d.span_max : cur.spanMax,
               // 三个字段同一条规矩：**回了就听回显的，没回就维持现状**。
@@ -802,11 +815,20 @@ const DEATH_INFO = {
   '盘整·未见背驰': ['跟「小转大」一样都比过、都不成立，但前一段是盘整，不叫小转大。', '编者口径'],
   '比不了': ['没法比力度：找不到它离开的中枢，或者找不到进入段，或者进入段方向跟 C 相反。不算小转大。', '编者口径'],
   'D2-8 补刀': ['这一刀是大一级盘整里按中枢排布切出来的，不是背驰，也不是反方向三类点确立的，不分类。', '编者口径'],
+  // S5 刀（同级别正式版，S12，Atlas 定名）。原文 L38:20「那么就当成两个 30 分钟盘整类型的连接」（语料硬折行，这半句整在第 20 行）。
+  //   图上不挂字（layers.js 故意不收进 DEATH_SHORT），只在这里讲。
+  '盘整相连': ['两个同级别盘整首尾相接的接缝：前一个中枢的第三段走完，后一个中枢就从这里起。不是背驰，也不是三类点确立的，不分类。', 'L38:20 正文「当成两个 30 分钟盘整类型的连接」；编者口径 S12'],
+};
+// ①D（同级别正式版，D-1／D-3／D-5）：刀上 `state`。只读后台给的值，前端不推（S5 的也由后台按 D-4 派生）。
+const STATE_TIP = {
+  pending: '状态：待确认 —— 确认条件还没满足，这把刀还可能被撤回（图上空心点）。确认以后就不再撤。',
+  confirmed: '状态：已确认 —— 以后不再撤。',
 };
 function boundText(b) {
-  if (!b.death) return b.rule === 'D2-8' ? BOUND_TIP : '';
+  const st = STATE_TIP[b.state] || '';        // 没有 state（老后台／现行口径）⇒ 不写这一行，跟改之前一个字不差
+  if (!b.death) return [b.rule === 'D2-8' ? BOUND_TIP : '', st].filter(Boolean).join('\n');
   const [say, src] = DEATH_INFO[b.death] || ['', ''];
-  const d = [`死点：${b.death}${say ? ' —— ' + say : ''}`, b.death_why ? `这一刀：${b.death_why}` : '', src ? `出处：${src}` : '']
+  const d = [`死点：${b.death}${say ? ' —— ' + say : ''}`, b.death_why ? `这一刀：${b.death_why}` : '', src ? `出处：${src}` : '', st]
     .filter(Boolean).join('\n');
   // ★ 刀的位置不归类型管（spec D2-5：类型只影响「中阴从哪一刻开始」和图上标什么字），所以这里一句都不提刀为什么落在这儿
   return b.rule === 'D2-8' ? BOUND_TIP + '\n' + d : d;
@@ -908,7 +930,14 @@ function paint(d) {
   // ★ S7「暂定」（card-d5a92ea2-3b2）：暂定段也带 live ⇒ 未完成的可能有**两条**首尾相接：暂定段（起点 → 判出来的那一刀 V）
   //   ＋ 它后面真正还在走的那一截（V → 迄今的极值）。原来只取 `find` 第一条 ⇒ 后面那一截**整条不画**。
   //   两条都是虚线、在 V 处拐弯，V 上那个虚线圈和「暂定」两个字在 layers.js 端点那一层画。
-  const segs = d.segs, done = segs.filter((s) => !s.live), lives = segs.filter((s) => s.live);
+  // D-3 C：有 `segs_std` ⇒ 已完成的线段画标准化那一套（跟分界同一套），最后一条单拎出来画短虚线；没有 ⇒ 照旧画原始段。
+  const std = Array.isArray(d.segs_std) && d.segs_std.length ? d.segs_std : null;
+  // 哪几条画虚线：载荷里每条带 `state`（"pending"／"confirmed"）就**照它**（后台 snapshot 那一行说了算，跟撤回账本同一把尺）；
+  //   没带 `state`（老载荷）⇒ 退回「只有最后一条」。待确认的一定是尾巴上连着的几条 ⇒ 一条折线就画得下。
+  const nOpen = std ? (std.some((s) => s.state) ? std.length - std.findIndex((s) => s.state === 'pending') : 1) : 0;
+  const open = std && nOpen > 0 && nOpen <= std.length ? std.slice(-nOpen) : [];
+  const segs = d.segs, lives = segs.filter((s) => s.live), done = std ? std.slice(0, std.length - open.length) : segs.filter((s) => !s.live);
+  segStdLast.setData(open.length ? [{ time: T(open[0].i0), value: open[0].p0 }].concat(open.map((s) => ({ time: T(s.i1), value: s.p1 }))) : []);
   const segA = done.length ? [{ time: T(done[0].i0), value: done[0].p0 }] : [];
   for (const s of done) segA.push({ time: T(s.i1), value: s.p1 });
   segSolid.setData(segA);
@@ -1091,7 +1120,7 @@ async function loadEarlier(span) {
     const win = windowOf(own.bars, range0);
     // ★ 判据只比**用户当前打开的那几层**，开关照 layers.js 实际画图用的那份（shownOf）取；
     //   前后两次用**同一个** sh：要是两次之间开关自己变了，那跟换档没关系，别算进去。
-    const sh = shownOf(state.opts);
+    const sh = shownOf(state.opts, state.data);
     // ★★ 补数据**一换档，手上那份 levels 当场作废**（card-01961644-68f）：它是对着**旧那一档**的
     //   `trend.units` 逐框数出来的（`levels.units` 跟框只有"同下标"这一条契约），档位一变，
     //   同一个下标在新图上指的就不是同一个框了 —— 标会整批错位，而屏上照样是"有字的"。
@@ -1514,6 +1543,7 @@ function applyToggles() {
   penDash.applyOptions({ visible: opts.pen });
   segSolid.applyOptions({ visible: opts.seg });
   segDash.applyOptions({ visible: opts.seg });
+  segStdLast.applyOptions({ visible: opts.seg });
   // 成交量：开关说着开、数据里也确实有 v —— 两条都成立才画（样本没有 v ⇒ 开着也画不出来，
   // 那就把开关按灰并说出来，别让用户点了没反应还不知道为什么）。
   volSeries.applyOptions({ visible: !!opts.vol && sub.hasVol });
@@ -1543,11 +1573,19 @@ function applyToggles() {
     //     ★ 这两半现在共用下面那个 `hasTrend` —— 这**不是**把两条判据合成一条：`hasTrend` 是一个**事实**
     //       （载荷里有没有这一层），两处各自拿它去回答自己的问题（"有没有用"←`opts`；"画没画"←`opts && 事实`）。
     const hasTrend = !!(state.data && state.data.trend);
-    const on = k === 'sigPend' ? opts.sigPend : k.startsWith('sig:') ? opts.sigKinds[k.slice(4)]
-      : k === 'lv' ? shownOf(opts).lv
+    // 买卖点那 7 颗子芯片（6 类＋待确认）：亮＝「买卖点」总开关开着 **并且** 这一类勾着（card-963457e4-e31，Nova 10-09 12:08 定）。
+    //   第一版只看子项自己的勾 ⇒ 总开关关着（缺省）时 6 颗亮着又按灰、图上一个点都没有 —— 跟 trend／lv 修过的是同一种骗人。
+    //   子项的勾（`opts.sigKinds`／`opts.sigPend`）一个字不动：总开关一开，用户原来勾的原样回来。
+    const on = k === 'sigPend' ? opts.sig && opts.sigPend : k.startsWith('sig:') ? opts.sig && opts.sigKinds[k.slice(4)]
+      : k === 'lv' ? shownOf(opts, state.data).lv
         : k === 'trend' ? opts.trend && hasTrend
           : opts[k];
-    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    // 同级别正式版：「高一级」**藏起来**（这一套口径里根本没有这一层）。「级别对照」**不藏、按灰、悬停写原因**（Nova 10-09 13:14 选 ①）：
+    //   级别联动第 3 项在同级别下不适用（spec §四），藏起来等于把「不适用」也藏了；按灰＋说明为什么，跟「按灰＝此刻用不了」同一条规矩。
+    //   判据跟画图同一个 `shownOf`：它那边 `up`／`lv` 已经与上了 `!sameLevel`。
+    const sameLevel = !!(state.data && state.data.trend_reading === 'same_level');
+    if (k === 'up') b.hidden = sameLevel;
+    b.setAttribute('aria-pressed', (k === 'up' ? on && !sameLevel : on) ? 'true' : 'false');
     const sigChip = k.startsWith('sig:') || k === 'sigPend';
     // 成交量那颗在**没有 v 的数据上**按灰（仓里的样本就是）：能点却画不出东西的开关是骗人的。
     // 走势分段那颗同理：`cut=extend` 那份载荷没有 `trend` 这个键 ⇒ 开着也画不出东西 ⇒ 按灰。
@@ -1560,8 +1598,17 @@ function applyToggles() {
           // ★ 按灰判的是**"这颗此刻有没有用"**（`!opts.up`），跟上面那个 `on` 判的**"这一层画没画"**
           //   （`shownOf(opts).lv`）是**两个问题、两条判据** —— 别合并。两个都从 `opts.up` 这同一个根上长出来：
           //   拿 `shownOf(opts).lv` 来判"有没有用"会绕远（那个式子里的 `opts.lv` 跟"能不能用"无关）。
-          : k === 'lv' ? !opts.up : false;
+          : k === 'lv' ? !opts.up || sameLevel : false;
+    if (k === 'lv') {
+      if (sameLevel) b.title = LV_NA;
+      else b.removeAttribute('title');
+    }
   }
+  // 成交量那颗：亮＝开着**并且**这份数据真有成交量（`sub.hasVol`，跟 volSeries 的 visible 同一个式子）。缺了这半，
+  //   首屏那一秒多（副图数据还没到）它是「亮着又按灰」—— 跟 trend、买卖点子芯片同一种骗人（card-8aa5c9de-0c2，Nova 13:34 看出来的）。
+  //   ★ 写在循环外面单独一句，不塞进上面 `on` 那串三元：那几行同级别那支也在改，挨着改就冲突。
+  const volChip = document.querySelector('.chip[data-key="vol"]');
+  if (volChip && !sub.hasVol) volChip.setAttribute('aria-pressed', 'false');
   // 「关着的层不许有能点的开关」这条账，看法那组也算：买卖点一关，它就得跟着灰（或反过来亮回来）。
   renderMeasures();
   // 切法那组同理：中枢两层都关着时它得跟灰（判据在 renderCuts 一处，别在这儿再写一遍）。
@@ -1569,12 +1616,16 @@ function applyToggles() {
   renderPens();
 }
 
+// 「级别对照」在同级别下按灰时的悬停说明（spec 级别联动.md §四 第 3 项；Atlas 14d231b）
+const LV_NA = '同级别下不适用：本级不合成框；L38:35「该级别以上级别，根本不考虑」';
+
 function buildChips() {
   const box = el('panel');
   const add = (label, key, dot) => {
     const b = document.createElement('button');
     b.className = 'chip'; b.type = 'button'; b.dataset.key = key;
-    b.innerHTML = (dot ? `<i style="background:${dot}"></i>` : '') + label;
+    // 色块的颜色走 CSS 变量 `--c`（不是直接写 background）：关着画**空心框**、开着才**填实**，两种都得拿到这个色（style.css `.chip i`）
+    b.innerHTML = (dot ? `<i style="--c:${dot}"></i>` : '') + label;
     b.onclick = () => {
       if (key.startsWith('sig:')) opts.sigKinds[key.slice(4)] = !opts.sigKinds[key.slice(4)];
       else opts[key] = !opts[key];
@@ -1834,8 +1885,9 @@ async function loadMeasures() {
       if (shown.length >= 2) buildCuts();    // 只剩一档＝没什么可切的：不画这一组、也不发这个参数
     }
     // 笔的根数（C3）：两个字段**都**得在、都得是整数，才画这一组。缺省不在名单里 ⇒ 当没这回事（不编）。
-    const po = Array.isArray(m.pen_min_options) ? m.pen_min_options.filter((x) => Number.isInteger(x)) : [];
-    const pd = Number.isInteger(m.pen_min_default) ? m.pen_min_default : null;
+    //   ★ 名单是混型 [6, 7, "new"]：过 `penOf`，整数和 'new' 都收（原来 `filter(Number.isInteger)` 会把 new 静默滤掉）
+    const po = Array.isArray(m.pen_min_options) ? m.pen_min_options.map(penOf).filter((x) => x !== null) : [];
+    const pd = penOf(m.pen_min_default);
     if (po.length >= 2 && pd != null && po.includes(pd)) {
       pens.list = po; pens.def = pd;
       if (paging.pen == null || !po.includes(paging.pen)) paging.pen = pd;   // 没点名／点了名单外的 ⇒ 缺省
@@ -2049,20 +2101,27 @@ async function setCut(id) {
 const PEN_TITLE = {
   6: '笔最少 6 根 K 线：顶分型和底分型之间可以没有独立 K 线（第 106 课「至少延伸6个基本K线单位」）',
   7: '笔最少 7 根 K 线：顶和底之间至少隔一根独立 K 线（第 62、77 课；第 62 课说只差这一根的「一般来说，也最好不算一笔」）',
+  // 新笔（B-10＝C）。定义在镜像第 81 课**后附的帖子**里（Atlas b548e21 更正：不是第 81 课正文）；
+  //   「用意」那半句是同一文件里 2007-09-19 的**答疑**，L81:129 原文逐字：「那主要是为了不同软件间可以减少不同」（Iris 核过）。
+  new: '新笔：包含处理后顶、底分型不共用 K 线，且顶分型最高那根和底分型最低那根之间的原始 K 线至少 3 根；不按「最少几根」算（第 81 课后附帖子）。作者说用意是「那主要是为了不同软件间可以减少不同」（答疑，L81:129）',
 };
 function buildPens() {
   const box = el('panel');
   const g = document.createElement('div');
   g.className = 'mgroup'; g.id = 'pgroup';
-  g.setAttribute('role', 'radiogroup'); g.setAttribute('aria-label', '笔最少几根 K 线');
+  // 名单里有新笔 ⇒ 这一组就不只是「最少几根」了，组名改「笔」、老笔两颗带上「老笔」二字（新笔不读最少几根，三选一，
+  //   不另起一组：分两组会让人以为能选「新笔＋7 根」，Bram 06:34 核过 far() 不读 min_gap）。没有新笔 ⇒ 跟原来一个字不差。
+  const hasNew = pens.list.includes('new');
+  const capText = hasNew ? '笔' : '笔最少几根 K 线';
+  g.setAttribute('role', 'radiogroup'); g.setAttribute('aria-label', capText);
   const cap = document.createElement('span');
-  cap.className = 'mcap'; cap.textContent = '笔最少几根 K 线';
+  cap.className = 'mcap'; cap.textContent = capText;
   g.appendChild(cap);
   for (const n of pens.list) {
     const b = document.createElement('button');
     b.className = 'chip mchip'; b.type = 'button'; b.dataset.pen = String(n);
-    b.textContent = `${n} 根`;
-    b.title = (PEN_TITLE[n] || `笔最少 ${n} 根 K 线（后台新加的一档，前端还没有说明）`) + (n === pens.def ? '（默认）' : '');
+    b.textContent = n === 'new' ? '新笔' : hasNew ? `老笔 ${n} 根` : `${n} 根`;
+    b.title = (PEN_TITLE[n] || (n === 'new' ? '新笔' : `笔最少 ${n} 根 K 线（后台新加的一档，前端还没有说明）`)) + (n === pens.def ? '（默认）' : '');
     b.setAttribute('role', 'radio');
     b.onclick = () => setPen(n);
     g.appendChild(b);
@@ -2077,14 +2136,14 @@ function buildPens() {
 //   它不只换笔，往上线段、中枢、走势全跟着变，屏上看得见差别，所以不置灰。
 function renderPens() {
   const g = el('pgroup'); if (!g) return;
-  for (const b of g.querySelectorAll('.mchip')) b.setAttribute('aria-checked', Number(b.dataset.pen) === paging.pen ? 'true' : 'false');
+  for (const b of g.querySelectorAll('.mchip')) b.setAttribute('aria-checked', b.dataset.pen === String(paging.pen) ? 'true' : 'false');   // 按字符串比（混型名单）
 }
 async function setPen(n) {
   if (!pens.list.includes(n) || n === paging.pen || paging.loading) return;
   const own = state.data;
   const id0 = ++paging.reqId;
   paging.loading = true;
-  el('state').textContent = '换笔的根数…'; el('state').className = 'badge';
+  el('state').textContent = n === 'new' ? '换成新笔…' : '换笔的根数…'; el('state').className = 'badge';
   try {
     // 锚点按**时间**抓：笔一变，后面全都重画，但 K 线一根不多不少，按时间对回去视口就不动。
     const anchor = own ? anchorOf(own.bars, chart.timeScale().getVisibleLogicalRange()) : null;
@@ -2759,4 +2818,6 @@ const metaReady = loadMeasures();
 //   但口径是抄的，抄的那份迟早跟页面分家；而这两个函数正是"本地钟怎么念"的唯一一份）。
 //   ★ 它们**只是印**，不碰状态：跟下面那两条注释一样，工装拿到的是字，不是权限。
 window.__app = { chart, state, opts, paging, measures, cuts, sub, fmtPrice, autoReload,
-                 shortLocal, clockLocal, zoneTag };   // autoReload：工装 readout_swap_probe 的 F 场景直接触发自动重取
+                 shortLocal, clockLocal, zoneTag,
+                 // 工装只读出口（web_samelevel_e2e ⑧，D-3 C）：线段三条系列的数据，量「图上画的是哪一套」；repaint 只给塞假载荷后重画用
+                 segSeries: { solid: segSolid, dash: segDash, stdLast: segStdLast }, repaint: () => paint(state.data) };   // autoReload：工装 readout_swap_probe 的 F 场景直接触发自动重取

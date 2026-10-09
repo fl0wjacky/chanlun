@@ -182,6 +182,8 @@ var float zPrevH = na                       // 未定方向时扫到的最后一
 var float zPrevL = na
 var int   zPrevI = na
 var int   zN     = 0                        // 已推入的原始K线根数 = 原始下标的上界
+var array<float> zRH = array.new<float>()   // 原始K线：高（下标 = 原始下标）。只给 islast 的线段标准化（stdSegs）用：
+var array<float> zRL = array.new<float>()   //   原始K线：低   接点要挪到两邻之间的原始极值上；用 high[k] 回看会撞 max_bars_back
 
 // 重算最后一个分型格子。数组一律走参数（函数里不碰全局）。
 zRefx(array<float> H, array<float> L, array<int> IH, array<int> IL, array<Fx> FX) =>
@@ -275,6 +277,8 @@ else
         zIH.push(zN)
         zIL.push(zN)
 zRefx(zH, zL, zIH, zIL, zFx)
+zRH.push(high)
+zRL.push(low)
 zN += 1
 // ★ 本根的「喂笔」在下面笔那一节的末尾（`zPenStep` 定义之后）—— pine 要求先定义后调用。
 //   中间那一段全是函数定义，不执行，所以逐根顺序仍是：标准化 → 分型 → 喂笔。
@@ -875,6 +879,76 @@ l77AEndOf(int k, int at, bool up, array<int> mEnd, array<int> mConf, array<int> 
             a := mEnd.get(k + 2)
     a
 
+// ★ S-13 甲（core/analyze.py SEG_FINAL_PENS，小栋 10-09 12:49 决策页 Q-6b「留甲」）：线段只用定稿的笔来划 ——
+//   最后一笔还没定稿（L77:51-52），划线段时把它去掉；同 Python `pens[:-1] if SEG_FINAL_PENS and len(pens) > 1 else pens`。
+//   笔、类中枢照旧用全部笔（findCentersBySegment 读的是 pens，不是这个视图）。下标不变（只是少了最后一格）。
+SEG_FINAL_PENS = true
+segPens(array<Unit> P) =>
+    SEG_FINAL_PENS and P.size() > 1 ? array.slice(P, 0, P.size() - 1) : P
+
+// ★ D-3 C′（小栋 10-09 12:57 选 C；最后两条待小栋在合并页拍）：图上的已完成线段画**标准化**那一套，跟网页 segs_std 同一套
+//   （core/trend.py `_standardize`／`_done`，D2-0）。逐行同 Python：
+//   · 接点 k：0 是图头起点，k ＝ done[k-1] 终点 ＝ done[k] 起点；接点是顶 ⇔ 它前一段向上（图头起点反过来）；
+//   · 中间接点挪到左右两个接点之间（**不含**两邻）的原始极值上，顶取最高、底取最低，一样极取后一根；一轮挪完再来，直到不动
+//     （上限 n+2 轮，同 Python `range(len(piv) + 1)`）；
+//   · 图头起点只在 [第一段起点, 接点 1) 里挪，末段终点只在 (倒数第二个接点, 最后一段终点] 里挪，**中间定住以后**各挪一次；
+//   · 端点价：顶取 high、底取 low；hi／lo 按新区间重取。只改端点，不改线段怎么划（PI0／PI1 照旧）。
+STD_PENDING_SEGS = 2          // 最后几条标准化线段画虚线（终点还可能挪）。跟 web/withdrawn.py PENDING_SEGS 是同一个数；tools/pending_sync_check.py 在上线前检查里比这两处，不等就红
+
+stdBest(array<float> H, array<float> L, int a, int b, bool top) =>
+    int j = a
+    int i = a + 1
+    while i <= b
+        if top ? H.get(i) >= H.get(j) : L.get(i) <= L.get(j)
+            j := i
+        i += 1
+    j
+
+stdMove(array<int> piv, array<bool> top, array<float> H, array<float> L, int k, int a, int b) =>
+    bool moved = false
+    if a <= b
+        nb = stdBest(H, L, a, b, top.get(k))
+        if nb != piv.get(k)
+            piv.set(k, nb)
+            moved := true
+    moved
+
+stdSegs(array<Unit> done, array<Unit> P, array<float> H, array<float> L) =>
+    out = array.new<Unit>()
+    n = done.size()
+    if n > 0
+        piv = array.new<int>(n + 1, 0)
+        top = array.new<bool>(n + 1, false)
+        piv.set(0, done.get(0).i0)
+        top.set(0, not isUp(P.get(done.get(0).PI0)))   // 线段方向 ＝ 起笔方向（同 Python seg["dir"]）
+        for k = 0 to n - 1
+            piv.set(k + 1, done.get(k).i1)
+            top.set(k + 1, isUp(P.get(done.get(k).PI0)))
+        lo0 = done.get(0).i0
+        hiN = done.get(n - 1).i1
+        int nRound = 0
+        bool again = n >= 2
+        while again and nRound < n + 2
+            bool anyMoved = false
+            for k = 1 to n - 1
+                if stdMove(piv, top, H, L, k, piv.get(k - 1) + 1, piv.get(k + 1) - 1)
+                    anyMoved := true
+            again := anyMoved
+            nRound += 1
+        stdMove(piv, top, H, L, 0, lo0, piv.get(1) - 1)
+        stdMove(piv, top, H, L, n, piv.get(n - 1) + 1, hiN)
+        for k = 0 to n - 1
+            i0 = piv.get(k)
+            i1 = piv.get(k + 1)
+            float hi = H.get(i0)
+            float lo = L.get(i0)
+            for i = i0 to i1
+                hi := math.max(hi, H.get(i))
+                lo := math.min(lo, L.get(i))
+            s = done.get(k)
+            out.push(Unit.new(i0, i1, top.get(k) ? H.get(i0) : L.get(i0), top.get(k + 1) ? H.get(i1) : L.get(i1), hi, lo, s.PI0, s.PI1, false))
+    out
+
 buildSegments(array<Unit> P) =>
     segs = array.new<Unit>()
     n = P.size()
@@ -995,23 +1069,25 @@ zSegStep(array<Fx> fx, array<int> seq, array<Unit> pens, array<Unit> segs, array
         sig.set(0, e1)
         sig.set(1, e2)
         sig.set(2, e3)
-        // 续扫（镜像 buildSegments 内层）
-        n = pens.size()
+        // 续扫（镜像 buildSegments 内层）。扫的是 segPens 视图（甲：不含最后一笔）：pens 纯追加 ⇒ 视图也是纯追加
+        //   （多出来的那格是上一根的最后一笔，刚定稿），续扫照样安全；尾端点被换照旧整段重算（上面那支）。
+        sp = segPens(pens)
+        n = sp.size()
         i = segI.get(0)
         // memo 只需从续扫位置起（扫描不回头）；每根重填 —— 尾巴上未确认的反向线段会随新笔变成已确认
         mEnd = array.new<int>(n, -1)
         mConf = array.new<int>(n, -1)
         mDir = array.new<int>(n, 0)
-        firstSegFill(pens, i, mEnd, mConf, mDir)
+        firstSegFill(sp, i, mEnd, mConf, mDir)
         born = segBorn.get(0)
         prevAEnd = segA.get(0)                            // L77：跨根留着 —— N 还没收的时候不能丢（整段重算每次重推，增量要自己记）
         tent.set(0, -1)
         bool stop = false
         while i + 2 < n and not stop
-            if not openingOverlaps(pens, i)
+            if not openingOverlaps(sp, i)
                 i += 1
                 continue
-            up = isUp(pens.get(i))
+            up = isUp(sp.get(i))
             k = i + 2
             while k < born
                 k += 2
@@ -1021,7 +1097,7 @@ zSegStep(array<Fx> fx, array<int> seq, array<Unit> pens, array<Unit> segs, array
             int found = 0
             int atv = -1
             while k < n - 1 and endPen < 0
-                [cse, at] = caseAt(pens, i, k, up, mEnd, mConf, mDir)
+                [cse, at] = caseAt(sp, i, k, up, mEnd, mConf, mDir)
                 if cse > 0
                     endPen := k
                     found := cse
@@ -1037,20 +1113,20 @@ zSegStep(array<Fx> fx, array<int> seq, array<Unit> pens, array<Unit> segs, array
             int e77 = -1
             if prevAEnd >= 0 and segs.size() > 0 and segs.last().PI1 == i - 1
                 pv = segs.last()
-                e77 := l77End(pens, i, isUp(pens.get(pv.PI0)), pv.p1, prevAEnd, endPen, born, mEnd, mDir)
+                e77 := l77End(sp, i, isUp(sp.get(pv.PI0)), pv.p1, prevAEnd, endPen, born, mEnd, mDir)
             if e77 >= 0
-                segs.push(mkSeg(pens, i, e77, false))
+                segs.push(mkSeg(sp, i, e77, false))
                 i := e77 + 1
                 born := 0
                 prevAEnd := -1
             else if endPen < 0
                 stop := true
-            else if segs.size() == 0 and found != 3 and (up ? pens.get(endPen).p1 <= pens.get(i).p0 : pens.get(endPen).p1 >= pens.get(i).p0)
+            else if segs.size() == 0 and found != 3 and (up ? sp.get(endPen).p1 <= sp.get(i).p0 : sp.get(endPen).p1 >= sp.get(i).p0)
                 // ★ 图头那一段终点没越过起点 ⇒ 起点那一笔是图头外面上一段的尾巴，往后挪一笔重划（同 Python HEAD_DIR_FIX，card-24dd71cb-003）
                 //   S7 暂定那一刀（found 3）不触发挪位（同 Python HEAD_DIR_NO_TENT，card-6dd83a22-a76）
                 i += 1
                 born := 0
-            else if segs.size() == 0 and headStartBad(pens, i, endPen, up, mEnd, mConf, mDir, conf)
+            else if segs.size() == 0 and headStartBad(sp, i, endPen, up, mEnd, mConf, mDir, conf)
                 // ★ 图头那一段起点非段内极值、且不是 L78 ① 型 ⇒ 同样往后挪一笔（同 Python HEAD_EXT_FIX，card-2783fa1f-da8）
                 i += 1
                 born := 0
@@ -1059,7 +1135,7 @@ zSegStep(array<Fx> fx, array<int> seq, array<Unit> pens, array<Unit> segs, array
                 stop := true
             else
                 born := res
-                segs.push(mkSeg(pens, i, endPen, false))
+                segs.push(mkSeg(sp, i, endPen, false))
                 prevAEnd := found == 1 ? l77AEndOf(endPen, atv, up, mEnd, mConf, mDir, n) : -1
                 i := endPen + 1
         segI.set(0, i)
@@ -1482,13 +1558,14 @@ if barstate.islast
     pens = zPens                                      // ② 的产物：摊平笔（逐根增量维护，见 zSegStep）
     // ★ segs 必须在 if 外面声明：Pine 里 if 块内声明的变量出了块就不存在（小栋真机编译报「segs 未定义」）。
     //   B：全程按线段方向合并 ⇒ 前缀不稳定，整段重算；A：已确认段增量维护，这里补 live 尾巴（不落 var）。
-    segs = featModeB ? buildSegments(pens) : array.copy(zSegs)
+    sp = segPens(pens)                                // 甲：线段只看定稿的笔（见 segPens）
+    segs = featModeB ? buildSegments(sp) : array.copy(zSegs)
     int tailFrom = zSegI.get(0)
     if not featModeB and zSegTent.get(0) >= 0             // S7 暂定段：照未完成段画，后面的尾巴从它之后起
-        segs.push(mkSeg(pens, zSegI.get(0), zSegTent.get(0), true))
+        segs.push(mkSeg(sp, zSegI.get(0), zSegTent.get(0), true))
         tailFrom := zSegTent.get(0) + 1
-    if not featModeB and pens.size() - tailFrom >= 3
-        segs.push(mkSeg(pens, tailFrom, pens.size() - 1, true))
+    if not featModeB and sp.size() - tailFrom >= 3
+        segs.push(mkSeg(sp, tailFrom, sp.size() - 1, true))
     done = array.new<Unit>()
     for s in segs
         if not s.live
@@ -1499,7 +1576,7 @@ if barstate.islast
     if segCheck and not featModeB
         pensRef = zUnits(zFx, zSeq)
         bool okPens = pensSame(zPens, pensRef)
-        bool okSegs = okPens and segsSame(segs, buildSegments(pensRef))
+        bool okSegs = okPens and segsSame(segs, buildSegments(segPens(pensRef)))
         segOK  := okPens and okSegs
         segMsg := not okPens ? "摊平笔不一致" : not okSegs ? "确认段不一致" : ""
     x0Draw = n - 1 - drawBars - off                    // 相对下标：早于此的结构不画
@@ -1577,10 +1654,21 @@ if barstate.islast
                 nPenDrawn += 1
                 gLines.push(clipLine(base + p.i0, p.p0, base + p.i1, p.p1, penCol, penW,
                      t == np - 1 ? line.style_dashed : line.style_solid))
+    // D-3 C′：已完成的画标准化那一套（stdSegs，跟网页 segs_std 同一套），最后 STD_PENDING_SEGS 条短虚线；未完成的照旧画原始段（同网页）
+    std = stdSegs(done, sp, zRH, zRL)
+    if showSeg and std.size() > 0
+        for si = std.size() - 1 to 0
+            s = std.get(si)
+            if s.i1 >= x0Draw
+                if nSegDrawn >= SEG_LINE_CAP
+                    break
+                nSegDrawn += 1
+                gLines.push(clipLine(base + s.i0, s.p0, base + s.i1, s.p1, segCol, segW,
+                     si >= std.size() - STD_PENDING_SEGS ? line.style_dotted : line.style_solid))
     if showSeg and segs.size() > 0
         for si = segs.size() - 1 to 0
             s = segs.get(si)
-            if s.i1 >= x0Draw
+            if s.live and s.i1 >= x0Draw
                 if nSegDrawn >= SEG_LINE_CAP
                     break
                 nSegDrawn += 1

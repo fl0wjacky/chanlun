@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 """笔：把标准化序列切成一节一节。
 
-对应第 77 课（划笔三步骤、唯一性证明）、第 81 课正文（**新笔的定义**），以及第 66 / 70 / 71 课答疑的同一句话：
+对应第 77 课（划笔三步骤、唯一性证明）、镜像第 81 课文件后面附的那篇帖子（**新笔的定义**），以及第 66 / 70 / 71 课答疑的同一句话：
     「顶和底，当然一定是那一笔的最高最低，如果不是，那里面一定不只一笔。」
 
-新笔的定义**就在第 81 课正文里**（`archive/chanlun108/text/lesson-081.txt:106-111`）。
+新笔的定义在镜像第 81 课文件里，**但不是第 81 课正文**，是正文之后附的另一篇帖子（`archive/chanlun108/text/lesson-081.txt:106-111`；
+    Atlas b548e21 核：原博第 81 课页面上搜不到这段，出处写「L81 附帖」，答疑那半句写「答疑（L81:129）」）。
     ⚠️ **这段引文直接 grep 会 0 命中 —— 不是笔误，是语料噪声**：108 课里 105 课带
     『相邻同字重复一次』的噪声，第 81 课这 6 行几乎每个词都有；另有两处增字。噪声**来自源页**，
     不是我们抓取的锅（`archive/chanlun108/raw/lesson-081.html` 里就写着「笔的的成立条件」，
@@ -18,8 +19,8 @@
       2、在满足 1 的前提下，顶分型中最高 K 线和底分型的最低 K 线之间(不包括这两 K 线)，
          不考虑包含关系，至少有 3 根(包括 3 根)以上 K 线。」
     下面 "new" 那两条就是这两条的代码化。第 81 课同一篇的答疑（2007-09-19）里说
-    「**请去昨天晚上帖子里看**」「最新给了一个新的笔的定义」，那份"昨天晚上的帖子"**就是这个文件里的正文**；
-    ⚠️ 正文本身**没有日期戳**，所以别用日期串去找它（本文件早先一版正是这么找的，于是得出了
+    「**请去昨天晚上帖子里看**」「最新给了一个新的笔的定义」，那份"昨天晚上的帖子"**就是这个文件里附的那篇**（早先一版这里写成「正文」，是错的）；
+    ⚠️ 那篇附帖本身**没有日期戳**，所以别用日期串去找它（本文件早先一版正是这么找的，于是得出了
     "新笔的定义不在 108 课里"这个**错误**结论 —— 一份没有日期戳的帖子不会让日期串计数命中）。
     rule="old" 同样有原文支持：缠师在同一条答疑里说「**本 ID 自己一直用老标准**」；
     "new" 的用途也是他原话：「那主要是为了**不同软件间可以减少不同**」。
@@ -92,6 +93,14 @@ class RangeExt:
 # 顶分型和底分型之间可以没有独立 K 线）。开关切 7 根 ⇒ ≥ 4（L62:17、L77:37：顶底之间至少一根独立 K 线；L62 原文另说这种情况
 # 「一般来说，也最好不算一笔」）。各处默认值都读这一个常量，网站后台按请求的 pen_min 显式传。
 MIN_GAP_DEFAULT = 3
+# S-13 P2（Atlas 读法-S13，默认关）：定稿的笔不再改。笔列表里只有最后一笔没定稿（L77:51-52），
+#   所以只许动 seq[-1]；会改到 seq[-2] 及更早的两条回头修正——「作废上一笔」（pend）和 fix_start——整条不走。
+#   关掉以后笔的端点可能不是这一笔的极值，nonextreme_pens 照报（P3：正文优先，极值规矩只报诊断）。
+PEN_FINAL_LOCK = False
+#   这不是 P2 的例外，是 P1 本身（Atlas 10-09 11:04；原称「P2′」已作废）：最后一个端点延伸以后，最后一笔违反了 L77:37-40 正文的成笔条件
+#   （顶分型最高那根没有一部分高于底分型最低那根），才准许照原来的 fix_start 回头修一次。
+#   诊断钩子：设成一个 list，每触发一次记 (修之前的端点数, 修之后第一处不同的下标)，量「例外触发几次、改多深」用。
+PEN_LOCK_EXCEPTION_LOG = None
 
 def check_range_ext(cls=None, seeds=range(40)):
     """RangeExt 跟切片 max/min 在所有 (k0, k1) 上逐个比 → 不一致处数（0 才对）。
@@ -146,12 +155,28 @@ def build_pens(fx, std, rule="old", min_gap=None):
     def pen_ok(a, b):
         return far(a, b) and extreme(a, a["k"], b["k"]) and extreme(b, a["k"], b["k"])
 
+    def l77_breaks(a, b):                    # a→b 这一笔违反 L77:37-40：顶分型最高那根没有一部分高于底分型最低那根
+        top, bot = (a, b) if a["type"] == "top" else (b, a)
+        return not std[top["k"]]["h"] > std[bot["k"]]["h"]
+
+    def l77_broken():
+        return l77_breaks(seq[-2], seq[-1])
+
     def fix_start():
         """最后一笔 a→g 的起点若不是极值（笔内有个更极端的同类点 P），往回修，两种修法取保留端点多的：
         · 让 P 自己当端点：找更早的、与 g 同类的端点 e，使 e→P、P→g 都成笔；
         · 合并：找更早的、与 a 同类的端点 e，使 e→g 一笔两头都包得住。"""
-        if len(seq) < 2:
+        if len(seq) < 2 or (PEN_FINAL_LOCK and not l77_broken()):
             return
+        if PEN_FINAL_LOCK and PEN_LOCK_EXCEPTION_LOG is not None:
+            before = list(seq)
+            _fix_start()
+            k = next((i for i, (x, y) in enumerate(zip(before, seq)) if x is not y), min(len(before), len(seq)))
+            PEN_LOCK_EXCEPTION_LOG.append(("fix_start", len(before), k))
+            return
+        _fix_start()
+
+    def _fix_start():
         a, g = seq[-2], seq[-1]
         if extreme(a, a["k"], g["k"]):
             return
@@ -180,7 +205,10 @@ def build_pens(fx, std, rule="old", min_gap=None):
         if f["type"] == last["type"]:        # 步骤二：同类取更极端的
             if not beyond(f, last):
                 return
-            if pend is not None and (len(seq) < 3 or not beyond(last, seq[-3])):
+            brk = PEN_FINAL_LOCK and len(seq) >= 2 and l77_breaks(seq[-2], f)   # P1：延伸会破正文成笔条件 ⇒ 第 N+1 笔不成立、第 N 笔没定稿 ⇒ 这一步照不锁走
+            if brk and PEN_LOCK_EXCEPTION_LOG is not None:
+                PEN_LOCK_EXCEPTION_LOG.append(("延伸破 L77", len(seq)))
+            if pend is not None and (not PEN_FINAL_LOCK or brk) and (len(seq) < 3 or not beyond(last, seq[-3])):
                 P, pend = pend, None         # 上一笔包不住待定分型 → 作废上一笔
                 seq.pop()
                 seq[-1] = P
