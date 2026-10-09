@@ -33,15 +33,17 @@ FIX = os.path.join(ROOT, "data", "aaplusdt_15m_q6.json")
 TICK = tick_of("aaplusdt_.json")
 EVENT = dict(kind="d2", dir="L", price=273.27)
 _memo = {}
+CAP0 = W.CAP                                    # 方案定的 200；检查按它比，不按（可能被变异改掉的）W.CAP
 
 
 def snap(bars):
+    """→ (trend, segs, snapshot)。缓存只存引擎结果（慢：8.7k 根一次几十秒），snapshot 每次现算 ⇒ 变异臂动了 snapshot 也不用清缓存。"""
     key = (bars[0]["t"], bars[-1]["t"], len(bars))
     if key not in _memo:
         r = A.analyze(bars, tick=TICK)
-        v = T.trend_v3(r)
-        _memo[key] = (v, r["segs"], W.snapshot(bars, v, r["segs"]))
-    return _memo[key]
+        _memo[key] = (T.trend_v3(r), r["segs"])
+    v, segs = _memo[key]
+    return v, segs, W.snapshot(bars, v, segs)
 
 
 def step(old, new):
@@ -49,7 +51,7 @@ def step(old, new):
     return W.diff(snap(old)[2][0], *snap(new)[2], new[-1]["t"])
 
 
-def run(quiet=False):
+def run(quiet=False, server_arm=True):
     bars = json.load(open(FIX))
     bad = []
 
@@ -92,12 +94,16 @@ def run(quiet=False):
         late = bars[:8746]
         vw2 = W.view("AAPLUSDT", "15m", 6, [1, 4], [dict(b, t=b["t"] + 10 ** 12) for b in late], v1, s1)
         chk("⑤ 窗口外的不给", vw2 == [], vw2)
-        fake = dict(last=rec["last"], withdrawn=[dict(n1[0], at=i) for i in range(W.CAP + 50)])
+        # 造的条数用定死的 CAP0 + 50（不读 W.CAP：「不封顶」那条变异把它改成 10**9，照它造会造十亿条）
+        fake = dict(last=rec["last"], withdrawn=[dict(n1[0], at=i) for i in range(CAP0 + 50)])
         W._save(key, fake)
         W.observe(key, bars[:8745], v0, s0)
         W.observe(key, bars[:8746], v1, s1)
-        chk("⑤ 一张图最多 CAP 条", len(json.load(open(W._path(key)))["withdrawn"]) == W.CAP, "")
+        n = len(json.load(open(W._path(key)))["withdrawn"])
+        chk("⑤ 一张图最多 %d 条" % CAP0, n == CAP0, n)
 
+        if not server_arm:
+            return len(bad)
         import server                           # noqa: E402
         shutil.rmtree(os.path.join(tmp, "withdrawn"), ignore_errors=True)
         slot = server.Slot(1)
@@ -128,17 +134,12 @@ def self_test():
     real_anchor, real_diff, real_cap = W._anchor, W.diff, W.CAP
     arms = []
 
-    def arm(name, setup, teardown, fresh=False):
-        """fresh：变异动了 snapshot ⇒ 缓存的快照作废，前后都清（其余臂只动比法，引擎结果照用缓存）。"""
+    def arm(name, setup, teardown):
         setup()
-        if fresh:
-            _memo.clear()
         try:
-            n = run(quiet=True)
+            n = run(quiet=True, server_arm=False)    # 变异都在账本模块里，服务端接线那格（⑥）不跟着拧，省四遍引擎
         finally:
             teardown()
-            if fresh:
-                _memo.clear()
         arms.append((name, n))
 
     def no_anchor():
@@ -163,7 +164,7 @@ def self_test():
             off = bars[0]["t"]
             return real_snap([dict(b, t=i) for i, b in enumerate(bars)], trend, segs) if off else real_snap(bars, trend, segs)
         W.snapshot = s
-    arm("键用下标不用开盘时间", by_index, lambda: setattr(W, "snapshot", real_snap), fresh=True)
+    arm("键用下标不用开盘时间", by_index, lambda: setattr(W, "snapshot", real_snap))
     ok = all(n > 0 for _, n in arms)
     for name, n in arms:
         print("%s 变异「%s」⇒ 主跑 %d 处不过" % ("✓" if n > 0 else "✗", name, n))
