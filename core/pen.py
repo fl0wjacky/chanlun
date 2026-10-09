@@ -97,7 +97,7 @@ MIN_GAP_DEFAULT = 3
 #   所以只许动 seq[-1]；会改到 seq[-2] 及更早的两条回头修正——「作废上一笔」（pend）和 fix_start——整条不走。
 #   关掉以后笔的端点可能不是这一笔的极值，nonextreme_pens 照报（P3：正文优先，极值规矩只报诊断）。
 PEN_FINAL_LOCK = False
-#   P2′（Nova 10-09 定）唯一的例外：最后一个端点延伸以后，最后一笔违反了 L77:37-40 正文的成笔条件
+#   这不是 P2 的例外，是 P1 本身（Atlas 10-09 11:04；原称「P2′」已作废）：最后一个端点延伸以后，最后一笔违反了 L77:37-40 正文的成笔条件
 #   （顶分型最高那根没有一部分高于底分型最低那根），才准许照原来的 fix_start 回头修一次。
 #   诊断钩子：设成一个 list，每触发一次记 (修之前的端点数, 修之后第一处不同的下标)，量「例外触发几次、改多深」用。
 PEN_LOCK_EXCEPTION_LOG = None
@@ -205,7 +205,7 @@ def build_pens(fx, std, rule="old", min_gap=None):
         if f["type"] == last["type"]:        # 步骤二：同类取更极端的
             if not beyond(f, last):
                 return
-            brk = PEN_FINAL_LOCK and len(seq) >= 2 and l77_breaks(seq[-2], f)   # P2′：延伸会破正文成笔条件 ⇒ 这一步照不锁走
+            brk = PEN_FINAL_LOCK and len(seq) >= 2 and l77_breaks(seq[-2], f)   # P1：延伸会破正文成笔条件 ⇒ 第 N+1 笔不成立、第 N 笔没定稿 ⇒ 这一步照不锁走
             if brk and PEN_LOCK_EXCEPTION_LOG is not None:
                 PEN_LOCK_EXCEPTION_LOG.append(("延伸破 L77", len(seq)))
             if pend is not None and (not PEN_FINAL_LOCK or brk) and (len(seq) < 3 or not beyond(last, seq[-3])):
