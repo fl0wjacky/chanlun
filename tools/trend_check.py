@@ -427,6 +427,8 @@ def sl_check(v):
             r = _rel(zr(x), zr(y))
             if r != "叠" and way and r == way[0]:
                 bad.append("T3′ S5 刀 %d 两边中枢按 [ZD,ZG] 是「%s」、跟前段同向，不该切" % (x["X1"], r))
+            if not way and r != "叠":                   # S4′（Atlas cd88a3c，L38:19-21 推论）：前段只有一个中枢 ⇒ 接缝两边必叠
+                bad.append("T3′ S5 刀 %d 前段只有一个中枢，接缝两边按 [ZD,ZG] 却是「%s」不是「叠」（S4′）" % (x["X1"], r))
     # T2（S6）：同级别不升级
     if v.get("units"):
         bad.append("T2 同级别下 units 不空（%d 个）" % len(v["units"]))
@@ -814,7 +816,16 @@ def self_test():
         i = next(i for i in range(len(d2) - 1) if d2[i]["state"] == "confirmed" and d2[i + 1]["state"] == "confirmed")
         lo, hi = d2[i]["bar"], d2[i + 1]["bar"]
         v["seg_centers"] = [z for z in v["seg_centers"] if not (z["X0"] >= lo and z["X1"] <= hi)]
-    for name, f, tag in (("中间段没中枢", brk_mid, "中间段"), ("S5 挪一根", brk_s5, "S5 刀"), ("D2 同向", brk_alt, "同向"),
+    def brk_s4(v):                                      # 找一个前段只有一个中枢的接缝，把右边那个中枢整个抬到左边中枢 ZG 之上（不叠）
+        zz = sorted(v["seg_centers"], key=lambda z: z["X0"]); s5 = {b["bar"] for b in v["bounds"] if b["rule"] == "S5"}
+        cnt = {}
+        for z in zz: cnt[z["seg"]] = cnt.get(z["seg"], 0) + 1
+        for x, y in zip(zz, zz[1:]):
+            if x["X1"] in s5 and x["seg"] != y["seg"] and cnt[x["seg"]] == 1:
+                d = x["ZG"] - y["ZD"] + 1
+                y["ZD"] += d; y["ZG"] += d
+                return
+    for name, f, tag in (("S4′ 单中枢接缝不叠", brk_s4, "S4′"), ("中间段没中枢", brk_mid, "中间段"), ("S5 挪一根", brk_s5, "S5 刀"), ("D2 同向", brk_alt, "同向"),
                          ("S5 丢死因", brk_death, "死因"), ("state 第三个值", brk_state, "state="),
                          ("S5 确认但右边 D2 待确认", brk_d4, "D-4′"), ("T1 中枢不是三段", brk_t1, "T1"),
                          ("T2 同级别冒出 units", brk_t2, "T2"), ("T3 ZD 不等三段 max lo", brk_t3, "T3"),
