@@ -11,12 +11,14 @@
       "title": "笔画好以后，还能不能回头改",
       "status": {
         "kind": "小栋定",
+        "verified": true,
         "date": "2026-10-09 11:07",
         "quote": "1B",
+        "via": "Nova 11:08 转述",
         "note": "选 B：照作者原话，笔的两头必须是这一笔的最高、最低，需要时可以回头改笔，包括已经算「定下来」的笔。"
       },
       "what": {
-        "plain": "一笔画出来以后，后面行情又走出一个更高（或更低）的点，落在这一笔里面。这时候是把这一笔的端点挪到新的极端点上（等于改了已经画好的笔），还是让端点留在原处、接受它不是这一笔的最高（最低）？",
+        "plain": "一笔画出来以后，后面行情又走出一个更高（或更低）的点，落在这一笔里面。这时候是把这一笔的端点挪到这个更高（更低）的点上（等于改了已经画好的笔），还是让端点留在原处、接受它不是这一笔的最高（最低）？",
         "analogy": "像量一座山：你先在一个山头插了旗，后来发现旁边还有个更高的山尖。是把旗拔起来挪过去，还是旗不动、在本子上记一句「这里不是最高」？挪旗，地图会改；不挪，地图不准。"
       },
       "sources": [
@@ -100,7 +102,7 @@
           "effect": "后面出现更极端的点，就把端点挪过去，前面画好的笔跟着改（实测最远改到倒数第 20 笔）。笔的两头永远是最高最低；代价是笔改了，建在它上面的线段、分界可能跟着收回。",
           "numbers": {
             "端点不是极值的笔": "5 处",
-            "回头改到已定稿的笔": "≥502 次／5349 次笔变动（按笔取样，下限）",
+            "已经定下来的笔被回头改": "至少 502 次",
             "线段确认后收回": "12（只加 S-13 甲 8）",
             "分界确认后收回／回翻": "待重量（Bram 锁关重量中）"
           },
@@ -158,8 +160,10 @@
       "title": "走势按一个固定级别切（同级别分解），还是大级别套小级别切（非同级别分解）",
       "status": {
         "kind": "小栋定",
+        "verified": true,
         "date": "2026-10-09 05:1x",
         "quote": "A（同级别）",
+        "via": "Nova 05:13 转述",
         "note": "05:4x 又定 B：完整版（D2 参照中枢也换成三段中枢，S9）做成正式版，跟分界确认（D-5，选项 D）一起上，上线那天撤回须为 0。"
       },
       "what": {
@@ -274,6 +278,7 @@
       "title": "正文里没点名、但起定义作用的句子算不算定义（升格）",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -285,6 +290,7 @@
       "title": "上涨／下跌／盘整按 L15（高低点）还是 L17（中枢）定",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-09 06:17"
       },
       "skeleton": true
@@ -296,6 +302,7 @@
       "title": "第三类买卖点按 L15 还是 T9（L20）",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -307,6 +314,7 @@
       "title": "T11 里的『线段』是泛指走势还是 D10 的线段",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -318,6 +326,7 @@
       "title": "趋势定义里『该方向』是谁的方向；同级别下第一段 a 进不进第一个中枢、后面中枢限不限形状",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-09 06:17"
       },
       "skeleton": true
@@ -329,6 +338,7 @@
       "title": "『买卖点都源自背驰』对『三类＝中枢破坏点』",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -340,6 +350,7 @@
       "title": "每根 K 线每层只属一个单位",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -351,6 +362,7 @@
       "title": "只有三类走势，每段至少三段次级别",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -362,6 +374,7 @@
       "title": "每段至少一个中枢；趋势至少两个不重叠",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -373,6 +386,7 @@
       "title": "（已并入 Q-6）",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -384,6 +398,7 @@
       "title": "每条规矩有原文出处或写明编者口径",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -395,6 +410,7 @@
       "title": "当下可用、出来不收回",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-09 03:41"
       },
       "skeleton": true
@@ -406,6 +422,7 @@
       "title": "笔用老笔（L77）还是新笔（L81 附录）",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-09 06:32"
       },
       "skeleton": true
@@ -417,6 +434,7 @@
       "title": "分析窗口取多长",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -428,6 +446,7 @@
       "title": "复权",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -439,6 +458,7 @@
       "title": "一笔最少几根 K 线",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-08 12:42"
       },
       "skeleton": true
@@ -450,6 +470,7 @@
       "title": "当下的笔能不能改",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-07 22:48"
       },
       "skeleton": true
@@ -461,6 +482,7 @@
       "title": "包含算不算端点相等",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -472,6 +494,7 @@
       "title": "顶底之间要不要『公共部分』",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -483,6 +506,7 @@
       "title": "序列开头一串互相包含、方向定不了",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -494,6 +518,7 @@
       "title": "分型在哪一刻算确认",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -505,6 +530,7 @@
       "title": "高点并列时顶记在哪一根",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -516,6 +542,7 @@
       "title": "『相等』的容差",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -527,6 +554,7 @@
       "title": "第三笔落在第一笔范围内：等，还是当场合并判",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-07 23:51"
       },
       "skeleton": true
@@ -538,6 +566,7 @@
       "title": "判『破』时追平算不算",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-08 00:33"
       },
       "skeleton": true
@@ -549,6 +578,7 @@
       "title": "分界两边元素一端相同算不算分界",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -560,6 +590,7 @@
       "title": "追平算不算『新高／新低』",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-09 00:26"
       },
       "skeleton": true
@@ -571,6 +602,7 @@
       "title": "第三笔破第一笔终点 ⇒ 新段",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -582,6 +614,7 @@
       "title": "暂定什么时候摘、谁先被破定结局",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -593,6 +626,7 @@
       "title": "缺口被之前同序列元素盖住算不算缺口",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-07 08:45"
       },
       "skeleton": true
@@ -604,6 +638,7 @@
       "title": "特征序列标准化 A／B（开头怎么定方向）",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-02 "
       },
       "skeleton": true
@@ -615,6 +650,7 @@
       "title": "缺口的『逆』指什么",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-03"
       },
       "skeleton": true
@@ -626,6 +662,7 @@
       "title": "L77 第二支：X＋A＋反弹合成一段",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -637,6 +674,7 @@
       "title": "L71 提前定和 L77 合段谁先",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -648,6 +686,7 @@
       "title": "图头段：量不了怎么办／挪位踩暂定刀怎么办",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -659,6 +698,7 @@
       "title": "线段终点必须是段内极值吗",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -670,6 +710,7 @@
       "title": "判『不重叠』用 DD～GG 还是 ZD～ZG",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -681,6 +722,7 @@
       "title": "升级出来的中枢怎么读",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-07 07:04"
       },
       "skeleton": true
@@ -692,6 +734,7 @@
       "title": "合成框的区间怎么算",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-07"
       },
       "skeleton": true
@@ -703,6 +746,7 @@
       "title": "不是正好 9 段时怎么划三组",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -714,6 +758,7 @@
       "title": "一段盘整里好几个中枢要不要合成升级（页上 ③）",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -725,6 +770,7 @@
       "title": "扩展链不足 9 段（4 段）",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -736,6 +782,7 @@
       "title": "高一级中枢从哪一段起划",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -747,6 +794,7 @@
       "title": "延伸在哪断开",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-08"
       },
       "skeleton": true
@@ -758,6 +806,7 @@
       "title": "延伸里另取三段当中枢",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -769,6 +818,7 @@
       "title": "中枢结束后碰回原区间／升级后跟低一级比",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -780,6 +830,7 @@
       "title": "中枢方向：上涨里只认下上下",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-07 05:57"
       },
       "skeleton": true
@@ -791,6 +842,7 @@
       "title": "D6 先后：段型先按方向判",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -802,6 +854,7 @@
       "title": "升级段 D6 不限方向",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -813,6 +866,7 @@
       "title": "中枢读法三条、什么时候算走完",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-02 01:47"
       },
       "skeleton": true
@@ -824,6 +878,7 @@
       "title": "类中枢从哪一笔起算；类中枢关系只在同一线段内",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-03"
       },
       "skeleton": true
@@ -835,6 +890,7 @@
       "title": "引擎 `big` 层两条、`DD_all/GG_all`",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -846,6 +902,7 @@
       "title": "分界一高一低交替（D2-3）",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-09 06:36"
       },
       "skeleton": true
@@ -857,6 +914,7 @@
       "title": "切法默认：走势分界还是延伸／扩展切",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -868,6 +926,7 @@
       "title": "分解只出一种",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -879,6 +938,7 @@
       "title": "走势层用标准化线段",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -890,6 +950,7 @@
       "title": "图上画哪套线段（页上 ②）",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -901,6 +962,7 @@
       "title": "确立＝死点之后第一个反方向三类点；参照中枢取哪个",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-08"
       },
       "skeleton": true
@@ -912,6 +974,7 @@
       "title": "分界的确认时机（页上 ①）",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -923,6 +986,7 @@
       "title": "一段走势没中枢 ⇒ 两头的刀一起去",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -934,6 +998,7 @@
       "title": "D2-8 大一级盘整里切出本级别趋势",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-07 08:45"
       },
       "skeleton": true
@@ -945,6 +1010,7 @@
       "title": "死点类型怎么分（D2-5）；盘整背驰的 A 段怎么取",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -956,6 +1022,7 @@
       "title": "小转大切不切（丙6）",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -967,6 +1034,7 @@
       "title": "背驰是不是分段依据（丙8）",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-08 14:04"
       },
       "skeleton": true
@@ -978,6 +1046,7 @@
       "title": "框只在分界断、中阴不断、扩展不断、次级别转折不断（D4-1～D4-4）",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -989,6 +1058,7 @@
       "title": "确立以后从分界那一点起整段重算中枢（D2-4）",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1000,6 +1070,7 @@
       "title": "盘整接盘整",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-07 "
       },
       "skeleton": true
@@ -1011,6 +1082,7 @@
       "title": "盘整组怎么分组",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1022,6 +1094,7 @@
       "title": "『会变的框』截到第几条分界",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-06"
       },
       "skeleton": true
@@ -1033,6 +1106,7 @@
       "title": "背驰的几种看法",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-04"
       },
       "skeleton": true
@@ -1044,6 +1118,7 @@
       "title": "面积和黄白线怎么组合",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-04"
       },
       "skeleton": true
@@ -1055,6 +1130,7 @@
       "title": "斜率这条看法",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-04"
       },
       "skeleton": true
@@ -1066,6 +1142,7 @@
       "title": "峰值单独用",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1077,6 +1154,7 @@
       "title": "1 分钟看黄白线回抽 0 轴（W48）",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1088,6 +1166,7 @@
       "title": "下上下第二下刚破前低不判背驰（W53）",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1099,6 +1178,7 @@
       "title": "二、三类之间的震荡买点要不要起名（M13）",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1110,6 +1190,7 @@
       "title": "走势起点终点自动算买卖点吗（J12）",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1121,6 +1202,7 @@
       "title": "突发跳空（M30）",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1132,6 +1214,7 @@
       "title": "MACD 0 轴防狼术（T13）",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1143,6 +1226,7 @@
       "title": "L107『只要』还是『除非』",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1154,6 +1238,7 @@
       "title": "买卖点定律一的『买点』",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1165,6 +1250,7 @@
       "title": "二类买点三种结果（不创新低／创新低＋盘整背驰／小转大）",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1176,6 +1262,7 @@
       "title": "背驰力度的参数：两段比的倍数、MACD 参数",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1187,6 +1274,7 @@
       "title": "零轴判据：多近算『回抽 0 轴』、什么算『在 0 轴下面』",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1198,6 +1286,7 @@
       "title": "三道题（合成中枢怎么读／叠图／以哪张为准）",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-06 01:29"
       },
       "skeleton": true
@@ -1209,6 +1298,7 @@
       "title": "第一刀随窗口跳",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-06 06:41"
       },
       "skeleton": true
@@ -1220,6 +1310,7 @@
       "title": "对照周期取本图 4 倍",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1231,6 +1322,7 @@
       "title": "合成框『对不上』的判据、状态四种",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1242,6 +1334,7 @@
       "title": "J18、J19 检查项的写法",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1253,6 +1346,7 @@
       "title": "图周期默认 4 小时",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1264,6 +1358,7 @@
       "title": "合成框落在对照图『主要那个中枢』里的时间占比多少算对得上",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1275,6 +1370,7 @@
       "title": "默认画哪几层",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1286,6 +1382,7 @@
       "title": "走势分段层默认开不开",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1297,6 +1394,7 @@
       "title": "成交量、MACD 副图",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-04 05:00"
       },
       "skeleton": true
@@ -1308,6 +1406,7 @@
       "title": "买卖点『待确认』那档默认",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1319,6 +1418,7 @@
       "title": "框编号 A、B、C 和小写",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1330,6 +1430,7 @@
       "title": "级别对照默认",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1341,6 +1442,7 @@
       "title": "防狼术窄带默认",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1352,6 +1454,7 @@
       "title": "背驰看法默认",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-04"
       },
       "skeleton": true
@@ -1363,6 +1466,7 @@
       "title": "笔最少几根 K 线",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-08"
       },
       "skeleton": true
@@ -1374,6 +1478,7 @@
       "title": "背景按什么上色",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-08 12:35"
       },
       "skeleton": true
@@ -1385,6 +1490,7 @@
       "title": "各档不透明度",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1396,6 +1502,7 @@
       "title": "分界画法",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1407,6 +1514,7 @@
       "title": "『等确认』条（原中阴）放哪、叫什么",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-05 23:46"
       },
       "skeleton": true
@@ -1418,6 +1526,7 @@
       "title": "待定、撤回的样式",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1429,6 +1538,7 @@
       "title": "相邻盘整段怎么标",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-07 07:34"
       },
       "skeleton": true
@@ -1440,6 +1550,7 @@
       "title": "会变的框",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-06"
       },
       "skeleton": true
@@ -1451,6 +1562,7 @@
       "title": "死点类型显示",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1462,6 +1574,7 @@
       "title": "中枢框拆两截",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-02"
       },
       "skeleton": true
@@ -1473,6 +1586,7 @@
       "title": "高一级的框怎么上色、归哪颗芯片",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-05 23:3x"
       },
       "skeleton": true
@@ -1484,6 +1598,7 @@
       "title": "合成大框填不填",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1495,6 +1610,7 @@
       "title": "暂定那一刀（S7）的记号",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1506,6 +1622,7 @@
       "title": "未完成线段末端画不画圈",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1517,6 +1634,7 @@
       "title": "最后一根没收盘的 K 线",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1528,6 +1646,7 @@
       "title": "二类点的字",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1539,6 +1658,7 @@
       "title": "『(弱)』",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1550,6 +1670,7 @@
       "title": "待确认的点",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1561,6 +1682,7 @@
       "title": "幽灵点（确认过、后来没了）",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-05"
       },
       "skeleton": true
@@ -1572,6 +1694,7 @@
       "title": "线段层和笔层的点怎么分",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1583,6 +1706,7 @@
       "title": "文字谁让谁",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1594,6 +1718,7 @@
       "title": "价格怎么写",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1605,6 +1730,7 @@
       "title": "分界悬停说什么",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1616,6 +1742,7 @@
       "title": "页头时间用哪个时区",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1627,6 +1754,7 @@
       "title": "最后一根实时跳价",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-05"
       },
       "skeleton": true
@@ -1638,6 +1766,7 @@
       "title": "手机底部芯片行",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1649,6 +1778,7 @@
       "title": "全屏按钮位置",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1660,6 +1790,7 @@
       "title": "回测范围",
       "status": {
         "kind": "小栋定",
+        "verified": false,
         "date": "10-04"
       },
       "skeleton": true
@@ -1671,6 +1802,7 @@
       "title": "只做多",
       "status": {
         "kind": "待定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
@@ -1682,6 +1814,7 @@
       "title": "费用默认 5bp／边、持有不动对照、成本敏感性 0/5/10",
       "status": {
         "kind": "我们定",
+        "verified": false,
         "date": null
       },
       "skeleton": true
