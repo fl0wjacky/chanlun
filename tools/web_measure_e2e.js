@@ -1853,7 +1853,7 @@ const shotChart = async (p, tag) => {
   const dmBump = await pDM.evaluate(async () => {
     const app = window.__app, ts = app.chart.timeScale(), s = app.state.candleSeries, T = app.state.data.trend;
     const H = app.chart.panes()[0].getHeight();
-    const bd = T.bounds.find((q) => { const x = ts.logicalToCoordinate(q.bar); return q.death && x !== null && x > 200 && x < 1100; });
+    const bd = T.bounds.find((q) => { const x = ts.logicalToCoordinate(q.bar); return q.death && q.death !== '盘整相连' && x !== null && x > 80 && x < 1250; });   // 盘整相连图上本来不写字（S12），挑它就量成 missing
     if (!bd) return { err: '屏上没有刀' };
     bd.price = s.coordinateToPrice(bd.kind === 'H' ? 8 : H - 30);
     const v = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: v.from + 0.01, to: v.to + 0.01 });

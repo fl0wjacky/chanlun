@@ -95,11 +95,14 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
     const read = () => { const e = document.querySelector('.chip[data-key="lv"]'), u = document.querySelector('.chip[data-key="up"]');
       return { lvShown: getComputedStyle(e).display !== 'none', lvDis: e.disabled, lvPressed: e.getAttribute('aria-pressed'), title: e.getAttribute('title'),
                upShown: getComputedStyle(u).display !== 'none' }; };
-    d.trend_reading = 'same_level'; app.repaint(); await new Promise((r) => setTimeout(r, 300));
+    d.trend_reading = 'same_level'; app.repaint(); await new Promise((r) => setTimeout(r, 600));
     const sl = read();
-    if (was === undefined) delete d.trend_reading; else d.trend_reading = was;
-    app.repaint(); await new Promise((r) => setTimeout(r, 300));
-    return { sl, back: read() };
+    // 「切回现行」＝载荷里**没有** trend_reading（现行后台就是这样），不是「恢复原值」—— 真后台原值就是 same_level（9a9ba34 起），恢复它量不到现行
+    delete d.trend_reading; app.repaint(); await new Promise((r) => setTimeout(r, 600));
+    const back = read();
+    if (was !== undefined) d.trend_reading = was;
+    app.repaint(); await new Promise((r) => setTimeout(r, 600));
+    return { sl, back };
   });
   ck('⑤b 同级别下「级别对照」露着、按灰、没按下，悬停写「同级别下不适用…L38:35…」；「高一级」藏着；切回现行 ⇒ 悬停说明撤掉',
      LV.sl.lvShown && LV.sl.lvDis && LV.sl.lvPressed === 'false' && /^同级别下不适用：/.test(LV.sl.title || '') && /L38:35/.test(LV.sl.title || '')
@@ -265,11 +268,14 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
     const v = app.chart.timeScale().getVisibleLogicalRange(); app.chart.timeScale().setVisibleLogicalRange({ from: v.from + 0.01, to: v.to + 0.01 }); await new Promise((r) => setTimeout(r, 700));
     const lab = app.state.segStdLabel;
     const wantX = Math.round(app.chart.timeScale().timeToCoordinate(t(L.i1)));
+    const realStd = d.segs_std;   // 真后台（9a9ba34 起）本来就送 segs_std；量「没有 segs_std」那一半得先拿掉、量完放回去
     delete d.segs_std; app.repaint(); await new Promise((r) => setTimeout(r, 400));
     app.chart.timeScale().setVisibleLogicalRange({ from: v.from + 0.02, to: v.to + 0.02 }); await new Promise((r) => setTimeout(r, 700));
     const labAfter = app.state.segStdLabel;
+    const rawDone = d.segs.filter((s) => !s.live).length;
     return { lab, wantX, labAfter, before, std: std.length, solidOk: JSON.stringify(solid) === JSON.stringify(wantSolid), solidN: solid.length,
-      last, wantLast: [[t(L.i0), L.p0], [t(L.i1), L.p1]], dashN: dash.length, after: { solid: pts(S.solid).length, last: pts(S.stdLast).length } };
+      last, wantLast: [[t(L.i0), L.p0], [t(L.i1), L.p1]], dashN: dash.length, after: { solid: pts(S.solid).length, last: pts(S.stdLast).length }, rawDone,
+      restored: await (async () => { if (realStd) { d.segs_std = realStd; app.repaint(); await new Promise((r) => setTimeout(r, 300)); } return !!realStd; })() };
   });
   if (SD.err) { console.error(SD.err); await b.close(); process.exit(2); }
   ck('⑧c 短虚线那条的终点旁写「终点还可能挪」（跟长虚线的「未收盘」分得开）；撤掉 segs_std 字就没了',
@@ -278,8 +284,8 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
   ck('⑧ D-3 C：有 segs_std ⇒ 实线＝标准化那套除最后一条（点逐个对上）；最后一条单独画短虚线、两头＝它的起止',
      SD.solidOk && JSON.stringify(SD.last) === JSON.stringify(SD.wantLast), `标准化 ${SD.std} 条　实线 ${SD.solidN} 点　短虚线 ${JSON.stringify(SD.last)}`);
   ck('⑧b 未完成段照旧画长虚线；载荷没有 segs_std ⇒ 照旧画原始段、短虚线那条是空的（牙）',
-     SD.dashN > 0 && SD.before.last === 0 && SD.after.last === 0 && SD.after.solid === SD.before.solid,
-     `长虚线 ${SD.dashN} 点　改前 ${JSON.stringify(SD.before)}　撤掉以后 ${JSON.stringify(SD.after)}`);
+     SD.dashN > 0 && SD.after.last === 0 && SD.after.solid === SD.rawDone + 1,
+     `长虚线 ${SD.dashN} 点　撤掉以后 ${JSON.stringify(SD.after)}（原始已完成 ${SD.rawDone} 条 ⇒ 要 ${SD.rawDone + 1} 点）　真后台本来就有 segs_std：${SD.restored}`);
 
   if (SHOTS) await p.screenshot({ path: require('path').join(SHOTS, 'samelevel-fe.png') });
   await b.close();
