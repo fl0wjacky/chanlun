@@ -5,7 +5,7 @@
     python3 tools/withdrawn_check.py              # rc=0 全对 ／ 1 有一格不对
     python3 tools/withdrawn_check.py --self-test  # 反向臂：每条判据各拧坏一处，必须红；红不了 ⇒ rc=3
 
-夹具 data/aaplusdt_15m_q6.json：AAPL 15m 前 8746 根（决策页 Q-6 那张图的那一刀）。
+夹具 fixtures/t8/aaplusdt_15m_q6.json：AAPL 15m 前 8746 根（决策页 Q-6 那张图的那一刀）。
   ① 8745 → 8746 根：刚好记一条——D2 L 273.27（06-26 那一刀）；旁边 3 把 S5 只是回到待确认，不记；
   ② 前一步、后一步（8744 → 8745、8746 → 8747 换成 8746 → 8746 重算）：0 条；
   ③ 窗口左边切掉 500／1500／3000 根再多一根（线上每次刷新就是这样）：0 条——不比对齐点就会冒假撤回；
@@ -29,7 +29,8 @@ import decisions                                # noqa: E402
 import withdrawn as W                           # noqa: E402
 
 A = sys.modules["core.analyze"]                 # ★ 不能写 import core.analyze as A：拿到的是函数
-FIX = os.path.join(ROOT, "data", "aaplusdt_15m_q6.json")
+# 放在 fixtures/t8/ 不放 data/：data/ 会被 trend_check、pine_lockstep 等十几个检查整目录扫进去当样本
+FIX = os.path.join(ROOT, "fixtures", "t8", "aaplusdt_15m_q6.json")
 TICK = tick_of("aaplusdt_.json")
 EVENT = dict(kind="d2", dir="L", price=273.27)
 _memo = {}
