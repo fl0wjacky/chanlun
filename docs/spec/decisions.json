@@ -14,6 +14,7 @@
         "verified": true,
         "date": "2026-10-09 11:07",
         "quote": "1B",
+        "choice": "B",
         "via": "Nova 私信 #930",
         "note": "选 B：照作者原话，笔的两头必须是这一笔的最高、最低，需要时可以回头改笔，包括已经算「定下来」的笔。"
       },
@@ -83,7 +84,7 @@
       "options": [
         {
           "key": "A",
-          "label": "锁住：定下来的笔不改，端点可以不是极值",
+          "label": "定下来的笔不改，端点可以不是极值",
           "effect": "笔一旦定下来就不再动。后面出现更极端的点，就让端点留在原处，图上这一笔的头不是最高（最低）。线段、分界都不会因为笔改了而收回。",
           "numbers": {
             "端点不是极值的笔": "600 处（锁关时 5）",
@@ -96,6 +97,10 @@
             {
               "src": "decisions/fig/aapl30m_s13_nonextreme_0823_0826.png",
               "caption": "选 A 的代价：这一笔的起点停在 310.44，笔里面真正的最低是 308.12"
+            },
+            {
+              "src": "decisions/fig/zec15_s13_lock_0408_0421.png",
+              "caption": "同一段行情（ZEC 15 分钟，04-08～04-21）：上格是 B（端点永远挪到最高最低），下格是 A（定下来的笔不改）"
             }
           ]
         },
@@ -172,6 +177,7 @@
         "verified": true,
         "date": "2026-10-09 05:12",
         "quote": "A",
+        "choice": "A",
         "via": "Nova 私信 #889",
         "note": "05:4x 又定 B：完整版（D2 参照中枢也换成三段中枢，S9）做成正式版，跟分界确认（D-5，选项 D）一起上，上线那天撤回须为 0。"
       },
@@ -288,6 +294,7 @@
         "verified": true,
         "date": "2026-10-09 06:17",
         "quote": "1A2B3甲",
+        "choice": "甲",
         "via": "Nova 私信 #898（1A 是 R-3）",
         "note": "②B：开头那一段 a 不进第一个中枢；③甲：后面的中枢继续限形状（上涨里只认下上下），判不出同向趋势就退回不限。"
       },
@@ -413,6 +420,7 @@
         "verified": true,
         "date": "2026-10-09 05:45",
         "quote": "B",
+        "choice": "B",
         "via": "Nova 私信 #893",
         "note": "做完一起上，保证上线那天已经画出来的东西不收回。"
       },
@@ -474,6 +482,7 @@
         "verified": true,
         "date": "2026-10-09 06:17",
         "quote": "1A2B3甲",
+        "choice": "A",
         "via": "Nova 私信 #898（1A 是这一条）",
         "note": "A：照第 17 课按中枢判；第 15 课只当图上的辅助小字。"
       },
@@ -569,6 +578,7 @@
         "verified": true,
         "date": "2026-10-09 06:32",
         "quote": "1C2给对照图",
+        "choice": "C",
         "via": "Nova 私信 #901",
         "note": "①C：默认老笔（6 根，可切 7 根），设置里加「新笔」选项；②要一张新老对照图。"
       },
@@ -665,6 +675,7 @@
         "verified": true,
         "date": "2026-10-09 06:36",
         "quote": "A",
+        "choice": "A",
         "via": "Nova 私信 #903",
         "note": "A：保留交替（只管趋势段）。"
       },
@@ -802,7 +813,7 @@
     },
     {
       "id": "Q-1",
-      "layer": "六条整体要求（每条规矩都得过）",
+      "layer": "六条整体要求",
       "layer_order": 1,
       "title": "每根 K 线每层只属一个单位",
       "status": {
@@ -814,7 +825,7 @@
     },
     {
       "id": "Q-2",
-      "layer": "六条整体要求（每条规矩都得过）",
+      "layer": "六条整体要求",
       "layer_order": 1,
       "title": "只有三类走势，每段至少三段次级别",
       "status": {
@@ -826,7 +837,7 @@
     },
     {
       "id": "Q-3",
-      "layer": "六条整体要求（每条规矩都得过）",
+      "layer": "六条整体要求",
       "layer_order": 1,
       "title": "每段至少一个中枢；趋势至少两个不重叠",
       "status": {
@@ -838,7 +849,7 @@
     },
     {
       "id": "Q-4",
-      "layer": "六条整体要求（每条规矩都得过）",
+      "layer": "六条整体要求",
       "layer_order": 1,
       "title": "（已并入 Q-6）",
       "status": {
@@ -850,7 +861,7 @@
     },
     {
       "id": "Q-5",
-      "layer": "六条整体要求（每条规矩都得过）",
+      "layer": "六条整体要求",
       "layer_order": 1,
       "title": "每条规矩有原文出处或写明编者口径",
       "status": {
@@ -862,7 +873,7 @@
     },
     {
       "id": "Q-6",
-      "layer": "六条整体要求（每条规矩都得过）",
+      "layer": "六条整体要求",
       "layer_order": 1,
       "title": "当下可用、出来不收回",
       "status": {
@@ -1798,7 +1809,7 @@
     },
     {
       "id": "V-A1",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "默认画哪几层",
       "status": {
@@ -1810,7 +1821,7 @@
     },
     {
       "id": "V-A2",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "走势分段层默认开不开",
       "status": {
@@ -1822,7 +1833,7 @@
     },
     {
       "id": "V-A3",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "成交量、MACD 副图",
       "status": {
@@ -1834,7 +1845,7 @@
     },
     {
       "id": "V-A4",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "买卖点『待确认』那档默认",
       "status": {
@@ -1846,7 +1857,7 @@
     },
     {
       "id": "V-A5",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "框编号 A、B、C 和小写",
       "status": {
@@ -1858,7 +1869,7 @@
     },
     {
       "id": "V-A6",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "级别对照默认",
       "status": {
@@ -1870,7 +1881,7 @@
     },
     {
       "id": "V-A7",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "防狼术窄带默认",
       "status": {
@@ -1882,7 +1893,7 @@
     },
     {
       "id": "V-A8",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "背驰看法默认",
       "status": {
@@ -1894,7 +1905,7 @@
     },
     {
       "id": "V-A9",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "笔最少几根 K 线",
       "status": {
@@ -1906,7 +1917,7 @@
     },
     {
       "id": "V-B1",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "背景按什么上色",
       "status": {
@@ -1918,7 +1929,7 @@
     },
     {
       "id": "V-B2",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "各档不透明度",
       "status": {
@@ -1930,7 +1941,7 @@
     },
     {
       "id": "V-B3",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "分界画法",
       "status": {
@@ -1942,7 +1953,7 @@
     },
     {
       "id": "V-B4",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "『等确认』条（原中阴）放哪、叫什么",
       "status": {
@@ -1954,7 +1965,7 @@
     },
     {
       "id": "V-B5",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "待定、撤回的样式",
       "status": {
@@ -1966,7 +1977,7 @@
     },
     {
       "id": "V-B6",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "相邻盘整段怎么标",
       "status": {
@@ -1978,7 +1989,7 @@
     },
     {
       "id": "V-B7",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "会变的框",
       "status": {
@@ -1990,7 +2001,7 @@
     },
     {
       "id": "V-B8",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "死点类型显示",
       "status": {
@@ -2002,7 +2013,7 @@
     },
     {
       "id": "V-C1",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "中枢框拆两截",
       "status": {
@@ -2014,7 +2025,7 @@
     },
     {
       "id": "V-C2",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "高一级的框怎么上色、归哪颗芯片",
       "status": {
@@ -2026,7 +2037,7 @@
     },
     {
       "id": "V-C3",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "合成大框填不填",
       "status": {
@@ -2038,7 +2049,7 @@
     },
     {
       "id": "V-C4",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "暂定那一刀（S7）的记号",
       "status": {
@@ -2050,7 +2061,7 @@
     },
     {
       "id": "V-C5",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "未完成线段末端画不画圈",
       "status": {
@@ -2062,7 +2073,7 @@
     },
     {
       "id": "V-C6",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "最后一根没收盘的 K 线",
       "status": {
@@ -2074,7 +2085,7 @@
     },
     {
       "id": "V-D1",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "二类点的字",
       "status": {
@@ -2086,7 +2097,7 @@
     },
     {
       "id": "V-D2",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "『(弱)』",
       "status": {
@@ -2098,7 +2109,7 @@
     },
     {
       "id": "V-D3",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "待确认的点",
       "status": {
@@ -2110,7 +2121,7 @@
     },
     {
       "id": "V-D4",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "幽灵点（确认过、后来没了）",
       "status": {
@@ -2122,7 +2133,7 @@
     },
     {
       "id": "V-D5",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "线段层和笔层的点怎么分",
       "status": {
@@ -2134,7 +2145,7 @@
     },
     {
       "id": "V-E1",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "文字谁让谁",
       "status": {
@@ -2146,7 +2157,7 @@
     },
     {
       "id": "V-E2",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "价格怎么写",
       "status": {
@@ -2158,7 +2169,7 @@
     },
     {
       "id": "V-F1",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "分界悬停说什么",
       "status": {
@@ -2170,7 +2181,7 @@
     },
     {
       "id": "V-F2",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "页头时间用哪个时区",
       "status": {
@@ -2182,7 +2193,7 @@
     },
     {
       "id": "V-F3",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "最后一根实时跳价",
       "status": {
@@ -2194,7 +2205,7 @@
     },
     {
       "id": "V-F4",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "手机底部芯片行",
       "status": {
@@ -2206,7 +2217,7 @@
     },
     {
       "id": "V-F5",
-      "layer": "显示（Iris 10-09 04:05 列，Atlas 核状态）",
+      "layer": "显示",
       "layer_order": 8,
       "title": "全屏按钮位置",
       "status": {
