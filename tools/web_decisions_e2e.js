@@ -11,6 +11,7 @@
 //   ⑥ 手机 390：树收成下拉、页面不横向溢出；下拉换条目 ⇒ 详情跟着换
 //   ⑧ 原文定／不再适用：状态圈是自己那一档、没有「选这个」（10-09 这 9 条都还没选项，按钮那半要等带选项的出现才真咬得到）
 //   ⑨ 子问题（parent）在树上紧跟母条目、缩进，详情里能点回母条目
+//   ⑩ 原话调不出、只有 Nova 回执的（quote 以「原话未能调出」开头）：页面上不许套『』装成原话
 //   ⑦ 主站顶栏有入口，点了到决策树页；手机上入口不另占一行（顶栏不变高）
 // 用法：E2E_URL=<地址> node tools/web_decisions_e2e.js <输出目录>   退出码：0 全过，1 有红，2 跑不了
 const { chromium } = require('playwright');
@@ -105,6 +106,16 @@ const chk = (name, ok, got) => { res.push(ok); console.log(`${ok ? '✓' : '✗'
       if (!(j >= 0 && i > j && between && order[i][1] && link === x.parent)) kidBad.push([x.id, i, j, between, link]);
     }
     chk(`⑨ 子问题 ${kidsD.length} 条：紧跟母条目、缩进、能点回母条目`, kidsD.length > 0 && kidBad.length === 0, kidBad);
+
+    // ⑩ 原话调不出、只有回执的：状态行和「你选的」标签都不许出现『原话未能调出…』（不装成原话）
+    const rcpt = items.filter((x) => x.status && x.status.verified && /^原话未能调出/.test(x.status.quote || ''));
+    const rcBad = [];
+    for (const x of rcpt) {
+      await open(x.id);
+      const t = await p.$eval('#detail', (d) => d.textContent);
+      if (t.includes('『原话未能调出') || t.includes('原话『原话未能调出')) rcBad.push(x.id);
+    }
+    chk(`⑩ 只有回执的 ${rcpt.length} 条：没有一处把回执套成『原话』`, rcpt.length > 0 && rcBad.length === 0, rcBad);
 
     // ⑤
     const x5 = his[0];
