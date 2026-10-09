@@ -589,10 +589,12 @@ def _sl_state(bars, bounds, two_sets, chosen):
             else "pending"
 
 
-# P（Nova 10-09 18:29，待小栋在合并页拍）：S5 的原文前提是「当成两个盘整的连接」（L38:19-21），而 L43:9 明说「不允许
-#   上涨+上涨、下跌+下跌」。切完以后两边要是都判成同向趋势，这一刀的前提就不成立 ⇒ 不切，两截并成一段（只并同一个 D2 组里、
-#   S5 接缝两边的；D2 分界两边不动）。并完再看下一个接缝，直到组里没有相邻的同向趋势。关掉 ⇒ 跟落地支 60c72a4 一字不差。
-S5_NO_SAME_TREND = True
+# S5 切出同向趋势相连（上涨+上涨／下跌+下跌，L43:9 原文不允许）怎么办 —— 两个编者口径，待小栋在合并页选（Nova 10-09 18:33）：
+#   None：现行（落地支 60c72a4），照切，会有 L43 违反。
+#   "P"：去掉这把 S5，两截并成一段（不犯 L43，但并出来的趋势里有叠着的相邻中枢，犯 L20:6）。
+#   "Z"：右边那截的第一个中枢单列成一段盘整，在它第三段终点补一刀 S5（L20、L43、L38 规则 A 都不犯；代价是可能出现中枢不叠的盘整＋盘整）。
+#   只处理同一个 D2 组里、S5 接缝两边；D2 分界两边不动（那是 D2-T1，另一件）。处理完再查，直到组里没有相邻的同向趋势。
+S5_FIX = None
 
 
 def _sl_layer(done, ks, bounds_, n):
@@ -635,8 +637,8 @@ def _sl_layer(done, ks, bounds_, n):
                     way = r
             cur.append(z)
         pieces.append((start, b, cur, g))
-    if S5_NO_SAME_TREND:
-        pieces, extra = _merge_same_trend(pieces, extra, kind_of)
+    if S5_FIX:
+        pieces, extra = _fix_same_trend(pieces, extra, kind_of, done, S5_FIX)
     segments, centers_out = [], []
     for g, (a, b, zz, _grp) in enumerate(pieces):
         last = g == len(pieces) - 1
@@ -652,21 +654,31 @@ def _sl_layer(done, ks, bounds_, n):
     return segments, centers_out, extra, two_sets
 
 
-def _merge_same_trend(pieces, extra, kind_of):
-    """P：同一个 D2 组里，S5 接缝两边都是同向趋势（上涨+上涨／下跌+下跌）⇒ 去掉这一刀，两截并成一段；并完接着看，直到没有。
-    pieces：[(起, 止, 中枢, 组号)]；extra：S5 刀（line_seg = 接缝前那条线段 = 前一截的止 − 1）。"""
+def _fix_same_trend(pieces, extra, kind_of, done, mode):
+    """S5_FIX：同一个 D2 组里，S5 接缝两边都是同向趋势（上涨+上涨／下跌+下跌）时——
+    P：去掉这一刀，两截并成一段；Z：右边那截的第一个中枢单列成一截（盘整），在它第三段终点补一刀 S5，其余中枢成下一截。
+    处理完从头再查，直到没有。pieces：[(起, 止, 中枢, 组号)]；extra：S5 刀（line_seg = 接缝前那条线段 = 前一截的止 − 1）。"""
     out = list(pieces)
-    gone = set()
-    k = 0
-    while k + 1 < len(out):
-        (a0, b0, z0, g0), (a1, b1, z1, g1) = out[k], out[k + 1]
-        t0, t1 = kind_of(z0), kind_of(z1)
-        if g0 == g1 and t0 == t1 and t0 in ("上涨", "下跌"):
-            gone.add(b0 - 1)
-            out[k:k + 2] = [(a0, b1, z0 + z1, g0)]
-            continue                                  # 并完的这一截再跟下一截比
-        k += 1
-    return out, [x for x in extra if x["line_seg"] not in gone]
+    gone, added = set(), []
+    changed = True
+    while changed:
+        changed = False
+        for k in range(len(out) - 1):
+            (a0, b0, z0, g0), (a1, b1, z1, g1) = out[k], out[k + 1]
+            t0, t1 = kind_of(z0), kind_of(z1)
+            if not (g0 == g1 and t0 == t1 and t0 in ("上涨", "下跌")):
+                continue
+            if mode == "P":
+                gone.add(b0 - 1)
+                out[k:k + 2] = [(a0, b1, z0 + z1, g0)]
+            else:                                     # Z
+                cut = z1[0]["PI1"] + 1
+                e = done[cut - 1]
+                added.append(dict(rule="S5", line_seg=cut - 1, bar=e["i1"], kind="H" if e["p1"] >= e["p0"] else "L", price=e["p1"]))
+                out[k + 1:k + 2] = [(a1, cut, z1[:1], g1), (cut, b1, z1[1:], g1)]
+            changed = True
+            break
+    return out, [x for x in extra if x["line_seg"] not in gone] + added
 
 
 def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_exceed=True, standardize=True):

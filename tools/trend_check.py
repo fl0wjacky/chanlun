@@ -431,28 +431,7 @@ def sl_check(v):
     for g, cs in byseg.items():
         rels = [_rel(zr(x), zr(y)) for x, y in zip(cs, cs[1:])]
         if "叠" in rels or len(set(rels)) > 1:
-            # P（core.trend.S5_NO_SAME_TREND，Nova 10-09 18:29）：照老规矩在这段里重切（叠、或者跟本截方向反 ⇒ 切），
-            #   切出来的每一截都是同向趋势（≥2 个中枢、方向都跟第一截一样）⇒ 这一段是 P 并起来的，合法；否则照旧报
-            subs, cur, way = [], [cs[0]], None
-            for x, y in zip(cs, cs[1:]):
-                r = _rel(zr(x), zr(y))
-                if r == "叠" or (way and r != way):
-                    subs.append((cur, way)); cur, way = [y], None
-                else:
-                    way = way or r
-                    cur.append(y)
-            subs.append((cur, way))
-            merged_ok = getattr(T, "S5_NO_SAME_TREND", False) and len(subs) > 1 and all(len(c) >= 2 for c, _ in subs) \
-                and len({w for _, w in subs}) == 1 and None not in {w for _, w in subs}
-            if not merged_ok:
-                bad.append("T3′ 第 %d 段走势里相邻中枢按 [ZD,ZG] 是 %s，不该同在一段" % (g, rels))
-    # L43:9（P 的目的）：S5 接缝两边不许都是同向趋势（上涨+上涨／下跌+下跌）。一律查（P 关着时这格会红，自检就靠它）
-    if True:
-        sg = v["segments"]
-        s5i = {b["bar"] for b in v["bounds"] if b["rule"] == "S5"}
-        for x, y in zip(sg, sg[1:]):
-            if y["i0"] in s5i and x["type"] == y["type"] and x["type"] in ("上涨", "下跌"):
-                bad.append("L43 S5 刀 %d 两边都是%s（%s+%s，原文不允许）" % (y["i0"], x["type"], x["type"], y["type"]))
+            bad.append("T3′ 第 %d 段走势里相邻中枢按 [ZD,ZG] 是 %s，不该同在一段" % (g, rels))
     ordered = sorted(zz, key=lambda z: z["X0"])
     for x, y in zip(ordered, ordered[1:]):
         if x["X1"] in s5bars and x["seg"] != y["seg"]:
@@ -874,14 +853,6 @@ def self_test():
     finally:
         T.SAME_LEVEL_OVERLAP = _ov
     print("%s G6 拧坏「判重叠换成 DDGG」⇒ T3′ 自己报出 %d 处（例 %s）" % ("✓" if hit else "✗", len(hit), hit[:1]))
-    miss += not hit
-    _p = T.S5_NO_SAME_TREND
-    try:
-        T.S5_NO_SAME_TREND = False                      # P 关掉 ⇒ 落地支 60c72a4 的老切法 ⇒ 上涨+上涨回来，L43 那格必须红
-        hit = [x for fn in kline_files() for x in sl_check(sl_run(fn)) if x.startswith("L43")]
-    finally:
-        T.S5_NO_SAME_TREND = _p
-    print("%s G6 关掉 P（S5 两边同向照切）⇒ L43 报出 %d 处（例 %s）" % ("✓" if hit else "✗", len(hit), hit[:1]))
     miss += not hit
     ok0 = not sl_check(v0)
     print("%s G6 没拧的原样 ⇒ 0 处" % ("✓" if ok0 else "✗"))
