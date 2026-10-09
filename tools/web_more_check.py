@@ -151,6 +151,9 @@ WANT_NOTICE = [
     ("【开关】类中枢开着：同一处变化（对照）", False),
     ("【开关】高一级关着：框上那圈升级标签变了", True),
     ("【开关】高一级开着：同一处变化（对照）", False),
+    # 同级别（载荷 trend_reading=same_level）：「以上级别根本不考虑」，高一级开着也不画 ⇒ 升级标签变了不出声。
+    #   上面那格（不给 data）是它的对照：data 缺省时 shownOf 必须走老路、照画 ⇒ 出声。两格一起才说明第二个参数真起作用、缺省也没把层悄悄藏掉。
+    ("【开关】同级别下高一级开着：框上那圈升级标签变了（同级别不画这一层）", True),
     ("【开关】「三卖」这个 chip 关着：三卖的点换了价", True),
     ("【开关】六个 chip 全开：同一处变化（对照）", False),
     ("【开关】只关了「三买」：变的是三卖的点 ⇒ 照样要比", False),
@@ -175,6 +178,7 @@ NOTICE_KEY = {"窗口里动一处笔（改窗口里第一笔的 p0）": "same_in
               "【开关】类中枢开着：同一处变化（对照）": "same_pc_on",
               "【开关】高一级关着：框上那圈升级标签变了": "same_up_off",
               "【开关】高一级开着：同一处变化（对照）": "same_up_on",
+              "【开关】同级别下高一级开着：框上那圈升级标签变了（同级别不画这一层）": "same_up_sl",
               "【开关】「三卖」这个 chip 关着：三卖的点换了价": "same_kind_off",
               "【开关】六个 chip 全开：同一处变化（对照）": "same_kind_on",
               "【开关】只关了「三买」：变的是三卖的点 ⇒ 照样要比": "same_kind_other",
@@ -332,6 +336,8 @@ out.vet = P.vet.map((d) => {
   const dUp = take({ centers: rep(centers, cIn, cU) }), dUp2 = take({ centers: rep(centers, cIn, cU2) });
   out.notice.same_up_off = S(dUp, W, shOff('up')) === S(dUp2, W, shOff('up'));
   out.notice.same_up_on = S(dUp, W, shAll) === S(dUp2, W, shAll);
+  const shSL = shownOf(ALL, { trend_reading: 'same_level' });
+  out.notice.same_up_sl = S(dUp, W, shSL) === S(dUp2, W, shSL);
   // ④ 六个 kind 的 chip：关着的那一个 kind 的点，画都不画 ⇒ 换了价也不该出声。
   //    「只关了别的 kind」那格是它的反面：变的是三卖的点、关的是三买 ⇒ 照样要比。
   const kIn = sigs.pen[sIn].kind;
@@ -400,7 +406,8 @@ def chart_stub():
 def layers_fence():
     """抠出 layers.js 里那份「画了哪几层」的过滤。`export` 在脚本里是语法错 ⇒ 只拆关键字，函数体原文照跑。"""
     body = block(LAYERS, SHOWN_BEGIN, SHOWN_END).replace("export function shownOf", "function shownOf")
-    if "function shownOf(opts)" not in body:
+    # 只认函数名：签名多了第二个参数（c57f1ac，同级别下藏「高一级」）这把尺就挂了一整批，没人看见（Nova 10-09 15:43）
+    if "function shownOf(" not in body:
         raise SystemExit(f"✗ {LAYERS} 的 {SHOWN_BEGIN} 段里没有 shownOf 的定义 —— 标记范围被改动了")
     return body
 
@@ -636,7 +643,8 @@ SWITCH_PROBES = [
     ("④那句话：判据不看图层开关（shown 丢掉，五层全比）", "const sh = shown || null;", "const sh = null;",
      ["【开关】买卖点关着：窗口里的点换了价", "【开关】类中枢关着：窗口里框的下沿变了",
       "【开关】高一级关着：框上那圈升级标签变了", "【开关】「三卖」这个 chip 关着：三卖的点换了价",
-      "【开关】「显示待确认」关着：一个未确认的点换了价（屏上没画）"]),
+      "【开关】「显示待确认」关着：一个未确认的点换了价（屏上没画）",
+      "【开关】同级别下高一级开着：框上那圈升级标签变了（同级别不画这一层）"]),
     # 买卖点那一侧的开关（大开关 ＋ kind chip ＋ 待确认）不看 ⇒ 只红跟买卖点有关的**关着**那三格；
     # 类中枢/高一级那两格不许跟着红（它们走的是另一条路）。
     ("④那句话：买卖点不看开关（关了也照比）", "&& (!sh || sh.sigAt(s))", "&& true",
@@ -646,7 +654,8 @@ SWITCH_PROBES = [
     ("④那句话：高一级的升级标签不看开关（关着也照比）",
      "const up = (upOn ? (z.up || []) : []).map((u) => `${u.ZD},${u.ZG}`).join(';');",
      "const up = (z.up || []).map((u) => `${u.ZD},${u.ZG}`).join(';');",
-     ["【开关】高一级关着：框上那圈升级标签变了"]),
+     # 同级别那格也跟着红：它靠的正是「up 关了就不比」这一条（同级别下 shownOf 把 up 给成 false）
+     ["【开关】高一级关着：框上那圈升级标签变了", "【开关】同级别下高一级开着：框上那圈升级标签变了（同级别不画这一层）"]),
     # 只把「类中枢」那一个开关丢掉 ⇒ 只红类中枢那一格
     ("④那句话：类中枢不看开关（关着也照比）",
      "on('pc') ? boxes(d.centers, d.pens || [], on('up')) : '',", "boxes(d.centers, d.pens || [], on('up')),",
