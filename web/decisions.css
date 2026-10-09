@@ -93,3 +93,21 @@ dialog .row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 1
   .figs figure { width: 100%; }
   .bar { gap: 10px; padding: 10px 14px; }
 }
+
+/* —— Atlas 格式（11:14）跟 Nova 11:15／11:17 的五处 —— */
+.dot.unver { background: none; border: 1.5px dashed var(--mu); width: 9px; height: 9px; }   /* 状态待核：还没逐条核过 */
+.node.skel span:last-child { color: var(--mu); }
+.status { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; color: var(--tx); margin-top: 2px; }
+.snote { color: var(--mu); margin: 6px 0 0; }
+.also { color: var(--mu); font-size: 14px; font-weight: 400; margin-left: 4px; }
+.opt .tagme { font-size: 11px; color: var(--bg); background: var(--ok); border-radius: 3px; padding: 0 6px; }   /* 你选的：实心绿，跟「推荐」的灰框分开 */
+.src .from { color: var(--mu); font-size: 12px; margin-right: 6px; }
+.src .url { color: var(--mu); font-size: 12px; margin-left: 8px; }
+.src .who { color: var(--dim); font-size: 12px; }
+.src .garbled { color: var(--dim); font-size: 12px; margin-top: 4px; }
+.src .reading { color: var(--tx); font-size: 13px; margin-top: 2px; }
+.src .reading::before { content: ""; }
+.src .tag.k-原文没写 { color: var(--rd); border-color: var(--rd); }
+.tried ul, ul.open { margin: 4px 0; padding-left: 18px; }
+.tried li { margin: 4px 0; }
+.deps .free { color: var(--mu); margin-right: 10px; }
