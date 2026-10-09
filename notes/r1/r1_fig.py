@@ -8,7 +8,7 @@ ap.add_argument('--root', required=True); ap.add_argument('--flag', action='appe
 ap.add_argument('--file'); ap.add_argument('--out'); ap.add_argument('--rank', action='store_true')
 ap.add_argument('--from', dest='frm'); ap.add_argument('--to')
 ap.add_argument('--label-a', default='现行：非同级别分解'); ap.add_argument('--label-b', default='同级别分解（开关）')
-ap.add_argument('--title', default='前后图'); ap.add_argument('--pen', default='old'); ap.add_argument('--pen-b', default=None, help='下格换一种笔（old/new），B-10 老笔新笔用')
+ap.add_argument('--title', default='前后图'); ap.add_argument('--note', default='', help='图注再加一行（写在画法说明下面）'); ap.add_argument('--pen', default='old'); ap.add_argument('--pen-b', default=None, help='下格换一种笔（old/new），B-10 老笔新笔用')
 a = ap.parse_args()
 sys.path[:0] = [a.root]; os.chdir(a.root)
 import config
@@ -75,7 +75,7 @@ else:  # 自动：包住所有变了的刀和段，两边各留 15%
 font = lambda s: ImageFont.truetype(config._pick_font(), s)
 F, Fs = font(20), font(15)
 W, PH, ML, MR = 2000, 560, 80, 20
-im = Image.new('RGB', (W, 90 + 2 * (PH + 30) + 40), BG); d = ImageDraw.Draw(im)
+im = Image.new('RGB', (W, 90 + 2 * (PH + 30) + (70 if a.note else 40)), BG); d = ImageDraw.Draw(im)
 win = bars[b0:b1 + 1]; lo = min(x['l'] for x in win) * 0.985; hi = max(x['h'] for x in win) * 1.015
 LL, LH = math.log(lo), math.log(hi)
 d.text((ML, 14), f'{a.file} · {a.title} · 上：{a.label_a} ／ 下：{a.label_b} · 开关 {" ".join(a.flag) or ("笔 " + a.pen + " → " + a.pen_b)}', fill=TX, font=F)
@@ -130,4 +130,5 @@ def panel(k, R, other, tag):
 panel(0, A, B, '上：' + a.label_a); panel(1, B, A, '下：' + a.label_b)
 d.text((ML, 90 + 2 * (PH + 30) + 6), '画法：背景按段型（上涨绿／下跌红／盘整灰）；笔灰，只在这一格有的笔加粗粉；线段金，只在这一格有的线段加粗青；分界白虚线，只在这一格有的加粗；价格旁写死点类型。对数价格轴，两格同一把尺。',
        fill=MU, font=Fs)
+if a.note: d.text((ML, 90 + 2 * (PH + 30) + 34), '注：' + a.note, fill=TX, font=Fs)
 im.save(a.out); print('saved', a.out, im.size, dd)
