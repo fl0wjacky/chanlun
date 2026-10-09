@@ -129,7 +129,9 @@ const paging = { span: 1, spanMax: null, earliest: false, nogain: false, stop: n
                  cut: new URLSearchParams(location.search).get('cut') || DEFAULT_CUT,
                  // ★ 笔的根数：地址栏点名的那个（`?pen=7`），没点名就是 null ＝「听后台的缺省」。
                  //   名单到了以后 loadMeasures 会把 null／名单外的数摆回 `pens.def`。
-                 pen: Number(new URLSearchParams(location.search).get('pen')) || null };
+                 // ★ 新笔（B-10＝C，小栋 10-09 06:32）：`?pen=new`。名单成了混型 [6, 7, "new"]，**不许**一律 Number()：
+                 //   Number('new') 是 NaN ⇒ 当场掉回缺省，分享出去的 `?pen=new` 打开就变老笔（Bram 06:34 提醒过）。
+                 pen: penOf(new URLSearchParams(location.search).get('pen')) };
 
 // ---- 背驰看法（卡 card-84091d2d-c97：四选一、默认不动、图脚标明当前用的是哪种）----
 // 口径在 docs/spec/背驰.md 第六节，四个名字的出处是 core/signals.py 的 MEASURES 上面那一行。
@@ -483,12 +485,19 @@ function ladderSpan(v) {
 //   首屏不认 ⇒ 一开始就 earliest 的品种（AAPL 那种）会白发一次请求；?load=16 在 15m 上被钳到 4 之后，
 //   页面还以为自己是 16 档，停法就印错（Atlas 2026-10-04 读代码挑出来的）。
 // 纯函数：给「现在手上那份的状态 cur」和「后台回的一份 d」，算出手上该变成什么；调用方 Object.assign 回去。
+// 笔的档：6／7 是数，新笔是字符串 'new'。外面进来的（地址栏、/api/meta）一律过这一道，里头就只有这两种形状。
+function penOf(x) {
+  if (x === 'new') return 'new';
+  const n = Number(x);
+  return x != null && x !== '' && Number.isInteger(n) ? n : null;
+}
 function adopt(cur, d, prevLen) {
   const s = { measure: typeof d.measure === 'string' && d.measure ? d.measure : cur.measure,
               // 切法也认回显（跟 measure 同一格）：点的那颗可能失败，屏幕上画的到底是哪种只有后台那份说了算
               cut: typeof d.cut === 'string' && d.cut ? d.cut : cur.cut,
               // 笔的根数也认回显：屏上画的到底是几根的笔，只有后台那份说了算
-              pen: Number.isFinite(d.pen_min) ? d.pen_min : cur.pen,
+              //   新笔那档回显 `pen_min: null`（「最少几根」对新笔不成立），认 `meta.pen_rule === 'new'`（Bram 47838ce）
+              pen: d.meta?.pen_rule === 'new' ? 'new' : Number.isFinite(d.pen_min) ? d.pen_min : cur.pen,
               span: Number.isFinite(d.span) ? d.span : cur.span,          // 回显的档位就是真档位
               spanMax: Number.isFinite(d.span_max) ? d.span_max : cur.spanMax,
               // 三个字段同一条规矩：**回了就听回显的，没回就维持现状**。
@@ -1847,8 +1856,9 @@ async function loadMeasures() {
       if (shown.length >= 2) buildCuts();    // 只剩一档＝没什么可切的：不画这一组、也不发这个参数
     }
     // 笔的根数（C3）：两个字段**都**得在、都得是整数，才画这一组。缺省不在名单里 ⇒ 当没这回事（不编）。
-    const po = Array.isArray(m.pen_min_options) ? m.pen_min_options.filter((x) => Number.isInteger(x)) : [];
-    const pd = Number.isInteger(m.pen_min_default) ? m.pen_min_default : null;
+    //   ★ 名单是混型 [6, 7, "new"]：过 `penOf`，整数和 'new' 都收（原来 `filter(Number.isInteger)` 会把 new 静默滤掉）
+    const po = Array.isArray(m.pen_min_options) ? m.pen_min_options.map(penOf).filter((x) => x !== null) : [];
+    const pd = penOf(m.pen_min_default);
     if (po.length >= 2 && pd != null && po.includes(pd)) {
       pens.list = po; pens.def = pd;
       if (paging.pen == null || !po.includes(paging.pen)) paging.pen = pd;   // 没点名／点了名单外的 ⇒ 缺省
@@ -2062,20 +2072,27 @@ async function setCut(id) {
 const PEN_TITLE = {
   6: '笔最少 6 根 K 线：顶分型和底分型之间可以没有独立 K 线（第 106 课「至少延伸6个基本K线单位」）',
   7: '笔最少 7 根 K 线：顶和底之间至少隔一根独立 K 线（第 62、77 课；第 62 课说只差这一根的「一般来说，也最好不算一笔」）',
+  // 新笔（B-10＝C）。定义在镜像第 81 课**后附的帖子**里（Atlas b548e21 更正：不是第 81 课正文）；
+  //   「用意」那半句是同一文件里 2007-09-19 的**答疑**，L81:129 原文逐字：「那主要是为了不同软件间可以减少不同」（Iris 核过）。
+  new: '新笔：包含处理后顶、底分型不共用 K 线，且顶分型最高那根和底分型最低那根之间的原始 K 线至少 3 根；不按「最少几根」算（第 81 课后附帖子）。作者说用意是「那主要是为了不同软件间可以减少不同」（答疑，L81:129）',
 };
 function buildPens() {
   const box = el('panel');
   const g = document.createElement('div');
   g.className = 'mgroup'; g.id = 'pgroup';
-  g.setAttribute('role', 'radiogroup'); g.setAttribute('aria-label', '笔最少几根 K 线');
+  // 名单里有新笔 ⇒ 这一组就不只是「最少几根」了，组名改「笔」、老笔两颗带上「老笔」二字（新笔不读最少几根，三选一，
+  //   不另起一组：分两组会让人以为能选「新笔＋7 根」，Bram 06:34 核过 far() 不读 min_gap）。没有新笔 ⇒ 跟原来一个字不差。
+  const hasNew = pens.list.includes('new');
+  const capText = hasNew ? '笔' : '笔最少几根 K 线';
+  g.setAttribute('role', 'radiogroup'); g.setAttribute('aria-label', capText);
   const cap = document.createElement('span');
-  cap.className = 'mcap'; cap.textContent = '笔最少几根 K 线';
+  cap.className = 'mcap'; cap.textContent = capText;
   g.appendChild(cap);
   for (const n of pens.list) {
     const b = document.createElement('button');
     b.className = 'chip mchip'; b.type = 'button'; b.dataset.pen = String(n);
-    b.textContent = `${n} 根`;
-    b.title = (PEN_TITLE[n] || `笔最少 ${n} 根 K 线（后台新加的一档，前端还没有说明）`) + (n === pens.def ? '（默认）' : '');
+    b.textContent = n === 'new' ? '新笔' : hasNew ? `老笔 ${n} 根` : `${n} 根`;
+    b.title = (PEN_TITLE[n] || (n === 'new' ? '新笔' : `笔最少 ${n} 根 K 线（后台新加的一档，前端还没有说明）`)) + (n === pens.def ? '（默认）' : '');
     b.setAttribute('role', 'radio');
     b.onclick = () => setPen(n);
     g.appendChild(b);
@@ -2090,14 +2107,14 @@ function buildPens() {
 //   它不只换笔，往上线段、中枢、走势全跟着变，屏上看得见差别，所以不置灰。
 function renderPens() {
   const g = el('pgroup'); if (!g) return;
-  for (const b of g.querySelectorAll('.mchip')) b.setAttribute('aria-checked', Number(b.dataset.pen) === paging.pen ? 'true' : 'false');
+  for (const b of g.querySelectorAll('.mchip')) b.setAttribute('aria-checked', b.dataset.pen === String(paging.pen) ? 'true' : 'false');   // 按字符串比（混型名单）
 }
 async function setPen(n) {
   if (!pens.list.includes(n) || n === paging.pen || paging.loading) return;
   const own = state.data;
   const id0 = ++paging.reqId;
   paging.loading = true;
-  el('state').textContent = '换笔的根数…'; el('state').className = 'badge';
+  el('state').textContent = n === 'new' ? '换成新笔…' : '换笔的根数…'; el('state').className = 'badge';
   try {
     // 锚点按**时间**抓：笔一变，后面全都重画，但 K 线一根不多不少，按时间对回去视口就不动。
     const anchor = own ? anchorOf(own.bars, chart.timeScale().getVisibleLogicalRange()) : null;

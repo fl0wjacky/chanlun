@@ -147,6 +147,45 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
   ck('②b 待确认的盘整相连 ⇒ 空心点；字只有「待确认」，不出「盘整相连」',
      !!C.st && C.st.hollow && !!C.dd && !!C.dd.mode && bare(C) === '待确认', desc(C));
 
+  // ⑥ 新笔三选一（B-10＝C，上线清单 #14／#21）：/api/meta 的 pen_min_options 里有 "new" ⇒
+  //   组名「笔」、三颗（老笔 6 根／老笔 7 根／新笔）；点「新笔」⇒ 请求带 pen_min=new、回显 pen_rule=new、那颗亮、
+  //   地址栏 pen=new、图脚说「新笔」且**不说「最少几根」**；带着 ?pen=new 重开一页 ⇒ 还是新笔（Number('new') 那个坑）。
+  //   名单里没有 new（现行后台）⇒ 组名照旧「笔最少几根 K 线」、没有新笔那颗（牙）。
+  const meta = await p.evaluate(async () => (await fetch('/api/meta')).json());
+  const hasNew = Array.isArray(meta.pen_min_options) && meta.pen_min_options.includes('new');
+  const grp = () => p.evaluate(() => {
+    const g = document.getElementById('pgroup');
+    if (!g) return null;
+    return { cap: (g.querySelector('.mcap') || {}).textContent, chips: [...g.querySelectorAll('.mchip')].map((b) => [b.dataset.pen, b.textContent, b.getAttribute('aria-checked')]) };
+  });
+  const g0 = await grp();
+  if (!hasNew) {
+    ck('⑥ 现行后台（名单没有 new）：组名照旧、没有新笔那颗（牙）',
+       !!g0 && g0.cap === '笔最少几根 K 线' && !g0.chips.some((c) => c[0] === 'new'), JSON.stringify(g0));
+  } else {
+    const reqs = []; p.on('request', (r) => { if (r.url().includes('/api/chart')) reqs.push(r.url()); });
+    await p.locator('.mchip[data-pen="new"]').click(); await sleep(2500);
+    const after = await p.evaluate(() => ({ url: location.search, rule: (window.__app.state.data.meta || {}).pen_rule,
+      foot: (document.getElementById('meta') || document.body).textContent }));
+    const g1 = await grp();
+    const sentNew = reqs.some((u) => /[?&]pen_min=new\b/.test(u));
+    const footOk = /新笔/.test(after.foot) && !/新笔（最少/.test(after.foot);
+    ck('⑥ 名单有 new：组名「笔」三颗；点新笔 ⇒ 请求 pen_min=new、回显 pen_rule=new、那颗亮、地址栏 pen=new、图脚不说「最少几根」',
+       !!g0 && g0.cap === '笔' && g0.chips.length === 3 && g0.chips.some((c) => c[0] === 'new' && c[1] === '新笔')
+         && sentNew && after.rule === 'new' && /[?&]pen=new\b/.test(after.url) && footOk
+         && g1.chips.find((c) => c[0] === 'new')[2] === 'true',
+       `组 ${JSON.stringify(g0)}　发出 pen_min=new ${sentNew}　回显 ${after.rule}　地址 ${after.url}　图脚新笔 ${footOk}`);
+    const p2 = await (await b.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+    await p2.goto(PAGE + '?symbol=ZECUSDT&tf=15m&pen=new', { waitUntil: 'domcontentloaded' });
+    await p2.waitForFunction(() => window.__app && window.__app.state.data && document.getElementById('pgroup'), null, { timeout: 60000 }).catch(() => {});
+    await sleep(2500);
+    const re = await p2.evaluate(() => ({ rule: (window.__app.state.data.meta || {}).pen_rule, url: location.search,
+      on: (document.querySelector('.mchip[data-pen="new"]') || {}).getAttribute?.('aria-checked') }));
+    ck('⑥b 带着 ?pen=new 打开 ⇒ 还是新笔（回显 pen_rule=new、那颗亮、地址栏不被抹掉）',
+       re.rule === 'new' && re.on === 'true' && /[?&]pen=new\b/.test(re.url), JSON.stringify(re));
+    await p2.context().close();
+  }
+
   if (SHOTS) await p.screenshot({ path: require('path').join(SHOTS, 'samelevel-fe.png') });
   await b.close();
   console.log(red ? `✗ ${red} 格红（${n - red}/${n} 过）` : `${n}/${n} 过`);   // predeploy 认「N/N 过」这一行
