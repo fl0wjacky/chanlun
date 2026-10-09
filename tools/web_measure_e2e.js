@@ -1011,6 +1011,21 @@ const shotChart = async (p, tag) => {
   await dN0.c.close(); await dNT.c.close(); await dN.c.close();
   await dA.c.close();
 
+  // ㊷b 芯片色块：**关着＝空心框、开着＝填实**（card-8aa5c9de-0c2）。原来关着是同一个实心块降透明度，看着像「半开」。
+  //   量的是算出来的样式（不是看 class）：开着的 `<i>` 底色＝那一层的色、没有描边；关着的底色透明、内描边＝那一层的色。
+  //   挑两颗缺省就定的：「线段」缺省开、「类中枢」缺省关（两颗都不按灰，跟按灰那条账分开）。
+  const dC = await open(TQ);
+  const swc = await dC.p.evaluate(() => Object.fromEntries(['seg', 'pc'].map((k) => {
+    const c = document.querySelector(`.chip[data-key="${k}"]`), i = c.querySelector('i'), cs = getComputedStyle(i);
+    return [k, { pressed: c.getAttribute('aria-pressed'), disabled: c.disabled, bg: cs.backgroundColor, shadow: cs.boxShadow, c: i.style.getPropertyValue('--c').trim() }];
+  })));
+  const hexRgb = (h) => { const n = parseInt(h.slice(1), 16); return `rgb(${n >> 16}, ${(n >> 8) & 255}, ${n & 255})`; };
+  ck('㊷b 芯片色块：开着的填实（底色＝那一层的色、没有描边）；关着的空心（底透明、描边＝那一层的色）',
+     swc.seg.pressed === 'true' && swc.seg.bg === hexRgb(swc.seg.c) && swc.seg.shadow === 'none'
+       && swc.pc.pressed === 'false' && !swc.pc.disabled && swc.pc.bg === 'rgba(0, 0, 0, 0)' && swc.pc.shadow.includes(hexRgb(swc.pc.c)),
+     JSON.stringify(swc));
+  await dC.c.close();
+
   // ───────────────────────────────────────────────────────────────────────────
   // ㊸–㊽ **合成出来的高一级框**归哪颗开关、按级别上什么色、「升级」二字钉在哪
   //        （v3 §八 5，卡 card-113a3b16-026，小栋 10-05 23:3xZ 定）

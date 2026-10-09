@@ -1574,7 +1574,8 @@ function buildChips() {
   const add = (label, key, dot) => {
     const b = document.createElement('button');
     b.className = 'chip'; b.type = 'button'; b.dataset.key = key;
-    b.innerHTML = (dot ? `<i style="background:${dot}"></i>` : '') + label;
+    // 色块的颜色走 CSS 变量 `--c`（不是直接写 background）：关着画**空心框**、开着才**填实**，两种都得拿到这个色（style.css `.chip i`）
+    b.innerHTML = (dot ? `<i style="--c:${dot}"></i>` : '') + label;
     b.onclick = () => {
       if (key.startsWith('sig:')) opts.sigKinds[key.slice(4)] = !opts.sigKinds[key.slice(4)];
       else opts[key] = !opts[key];
