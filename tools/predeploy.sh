@@ -147,7 +147,8 @@ done
 # ---- 渲染那半：前端 e2e ----
 # 一格可以带开关：「文件 开关…」用空格隔开（下面跑的时候按空格拆）。`web_more_e2e.js --selftest` 是 ㉑ 那条竞态的牙：
 #   故意把最后几档扣住，旧写法（死等 3 秒）必须红、现写法必须绿，两条都对才 rc=0（card-c5a625b8-a14，Nova 10-08 23:52 定接进来）。
-SUITES=(tools/web_ghost_e2e.js tools/web_more_e2e.js "tools/web_more_e2e.js --selftest" tools/web_readout_e2e.js tools/web_measure_e2e.js tools/web_fs_drag_e2e.js)
+SUITES=(tools/web_ghost_e2e.js tools/web_more_e2e.js "tools/web_more_e2e.js --selftest" tools/web_readout_e2e.js tools/web_measure_e2e.js tools/web_fs_drag_e2e.js tools/web_samelevel_e2e.js)
+# ★ web_samelevel_e2e（同级别正式版上线清单 #21／G10）：刀上 state 的空心点＋「待确认」、盘整相连图上不挂字只悬停；带一格「载荷没有 state ⇒ 一个像素不变」的牙。
 # ★ web_fs_drag_e2e（card-c90f0f08-3ac）：拖过再进/出全屏，视口不许跳回最初那一屏。web_measure_e2e 的全屏格是**没拖过**就进，量不到这个。
 # ★ subhead_slot_probe 挂在 --all 档、**不进默认档**（Nova 2026-10-05 16:04）：它要真后台连点十二次开关、
 #   跑将近一分钟，只有上线前那一趟值这个时间。它钉的是「副图页头拿格高 0 摆位置」（card-9b0fe913-758）。

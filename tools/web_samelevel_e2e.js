@@ -8,11 +8,13 @@
 //   NODE_PATH=<playwright 的 node_modules> node tools/web_samelevel_e2e.js http://127.0.0.1:8797/ [出图目录]
 // 退出码：0 全绿；1 有红；2 跑不动（页面没数据／屏上没刀 —— 查不了 ≠ 通过）
 const { chromium } = require('playwright');
+// 跟另外几套一样：E2E_URL 优先（上线门统一给，predeploy 那时把**出图目录**当第一个参数传进来）；没给就收「地址 [出图目录]」
 const PAGE = (process.env.E2E_URL || process.argv[2] || '').replace(/\/?$/, '/');
+const SHOTS = process.env.E2E_URL ? process.argv[2] : process.argv[3];
 if (!/^https?:/.test(PAGE)) { console.error('要给页面地址'); process.exit(2); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-let red = 0;
-const ck = (name, ok, msg) => { if (!ok) red++; console.log(`${ok ? '✓' : '✗'} ${name}　${msg}`); };
+let red = 0, n = 0;
+const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' : '✗'} ${name}　${msg}`); };
 
 (async () => {
   const b = await chromium.launch();
@@ -98,8 +100,8 @@ const ck = (name, ok, msg) => { if (!ok) red++; console.log(`${ok ? '✓' : '✗
   ck('②b 待确认的盘整相连 ⇒ 空心点；字只有「待确认」，不出「盘整相连」',
      !!C.st && C.st.hollow && !!C.dd && !!C.dd.mode && bare(C) === '待确认', desc(C));
 
-  if (process.argv[3]) await p.screenshot({ path: require('path').join(process.argv[3], 'samelevel-fe.png') });
+  if (SHOTS) await p.screenshot({ path: require('path').join(SHOTS, 'samelevel-fe.png') });
   await b.close();
-  console.log(red ? `✗ ${red} 格红` : '✓ 全绿');
+  console.log(red ? `✗ ${red} 格红（${n - red}/${n} 过）` : `${n}/${n} 过`);   // predeploy 认「N/N 过」这一行
   process.exit(red ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(2); });
