@@ -542,17 +542,21 @@ def _sl_centers_with_cuts(done, ks):
     for a, b in zip(edges, edges[1:]):
         out += _sl_centers(done, a, b)
     return out
-def _sl_state(bars, bounds, two_sets):
+def _sl_state(bars, bounds, two_sets, chosen):
     """①D（读法-①D，Nova 10-09 定）：同级别下每把刀标 state ＝ "pending"／"confirmed"，只看当前这一份 K 线，不记历史。
-    D-2‴：D2 刀 b（低点刀为例）——b 之后到当前最后一根的最高点 e（持平取最早那根）；甲的两套中枢（限形状、不限形状，
-          two_sets）里**各有**一个整个落在 [b, min(e, 下一把 D2)] 里（X0 ≥ b 且 X1 ≤ 上界，两套可以不是同一个），b 就确认；
-          高点刀对称取最低点。b′ 只会落在 e 或更晚更极端的点上 ⇒ D2-7 撤不了 b；两套都有 ⇒ D6-4 fallback 往哪边翻都还在，不回翻。
+    D-2‴／D-2⁗：D2 刀 b（低点刀为例）——b 之后到当前最后一根的最高点 e（持平取最早那根），上界 ＝ min(e, 下一把 D2)。
+          下一把 D2 **已确认** ⇒ 这一组封死（它不撤、线段层有锁＋甲不变），甲 fallback 不会再翻 ⇒ 实际选中那套（chosen）里
+          有一个中枢整个落在 [b, 上界] 就确认（D-2⁗）；否则甲的两套中枢（限形状、不限形状，two_sets）里**各有**一个才确认（D-2‴），
+          D6-4 往哪边翻都还在，不回翻。高点刀对称取最低点。b′ 只会落在 e 或更晚更极端的点上 ⇒ D2-7 撤不了 b。
+          从右往左算：先定下一把的 state。
     D-4′：S5 刀确认 ⇔ 左右两把 D2 刀都已确认（右边那把待确认时会被撤，撤了 S5 就翻回去）。
-    25 张前缀回放（定稿口径＋PEN_FINAL_LOCK）：确认后消失 D2 0／S5 0，确认回翻 D2 0／S5 0；D2 确认 78、S5 70，延迟中位 0、最大 1159。
+    25 张前缀回放（定稿口径＋PEN_FINAL_LOCK）：确认后消失 D2 0／S5 0，确认回翻 D2 0／S5 0；D2 确认 84、S5 78（跟不防回翻时一样多），
+    图尾待确认 0，延迟中位 0、最大 1564（只有 D-2‴ 时 78／70／图尾 6／最大 1159）。
     （试过作废的：只用 D-2′ 回翻 2／3；等最后一组 fallback 定、要求两套同一个中枢、F1 头 4 条定 a——见读法-①D 四之七。）"""
     n = len(bars)
     d2 = [b for b in bounds if b.get("rule") == "D2-2"]
-    for i, b in enumerate(d2):
+    for i in range(len(d2) - 1, -1, -1):                    # 从右往左：D-2⁗ 要先知道下一把 D2 确认没有
+        b = d2[i]
         hi = d2[i + 1]["bar"] if i + 1 < len(d2) else n      # 跟回放 dreplay3 同一判据：中枢也不越过下一把 D2 刀
         lo = b["bar"] + 1
         if lo >= n:
@@ -560,7 +564,8 @@ def _sl_state(bars, bounds, two_sets):
             continue
         key = (lambda q: bars[q]["h"]) if b["kind"] == "L" else (lambda q: -bars[q]["l"])
         e = max(range(lo, n), key=lambda q: (key(q), -q))
-        ok = all(any(z["X0"] >= b["bar"] and z["X1"] <= min(hi, e) for z in zs) for zs in two_sets)
+        sets = [chosen] if (i + 1 < len(d2) and d2[i + 1]["state"] == "confirmed") else two_sets   # D-2⁗
+        ok = all(any(z["X0"] >= b["bar"] and z["X1"] <= min(hi, e) for z in zs) for zs in sets)
         b["state"] = "confirmed" if ok else "pending"
     for b in bounds:
         if b.get("rule") != "S5":
@@ -650,7 +655,7 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
         bounds = sorted(bounds + extra, key=lambda x: x["bar"])
         if _DEATH and SAME_LEVEL_DEATH:                  # 正式版：同级别下照标死点类型（D2-5 按三段中枢）、小转大的二类（S11）
             _death_types(r, done, bounds, segments, centers_out)
-        _sl_state(r["bars"], bounds, two_sets)
+        _sl_state(r["bars"], bounds, two_sets, centers_out)
         return dict(seg_centers=centers_out, bounds=bounds, retracted=res["retracted"],
                     pending=pending(done, ks, res["want"]), segments=segments, units=[], reading="same_level",
                     xzd_seconds=_xzd_seconds(done, bounds, r) if (_DEATH and SAME_LEVEL_DEATH and _XZD_SECOND) else [],
