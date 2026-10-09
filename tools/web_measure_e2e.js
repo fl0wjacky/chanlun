@@ -1862,6 +1862,32 @@ const shotChart = async (p, tag) => {
      `${JSON.stringify(dmBump)}　压字 ${JSON.stringify(dm2.overlap)}`);
   await pDM.context().close();
 
+  // ───────────────────────────────────────────────────────────────────────────
+  // 51 买卖点子芯片：亮＝总开关开着并且这一类勾着（card-963457e4-e31，Nova 10-09 12:08 定）
+  //   ★ 真点 chip（不改 opts）：缺省 ⇒ 7 颗都是 没按下＋按灰；开总开关 ⇒ 6 颗亮、能点；关掉二买 ⇒ 它灭；
+  //     总开关关了再开 ⇒ 二买还是灭、其余 5 颗亮（子项的勾没被总开关冲掉）。
+  console.log('\n51 买卖点子芯片：总开关关着时一颗都不亮；子项的勾跟着总开关一关一开原样回来');
+  const SK = ['sig:一买', 'sig:二买', 'sig:三买', 'sig:一卖', 'sig:二卖', 'sig:三卖', 'sigPend'];
+  const dS = await open(TQ);
+  const sigRow = () => dS.p.evaluate((ks) => Object.fromEntries(ks.map((k) => {
+    const c = document.querySelector(`.chip[data-key="${k}"]`);
+    return [k, c ? (c.getAttribute('aria-pressed') === 'true' ? '亮' : '灭') + (c.disabled ? '灰' : '') : '无'];
+  })), SK);
+  const clickChip = async (k) => { await dS.p.locator(`.chip[data-key="${k}"]`).click(); await dS.p.waitForTimeout(150); };
+  const q0 = await sigRow();
+  await clickChip('sig'); const q1 = await sigRow();
+  await clickChip('sig:二买'); const q2 = await sigRow();
+  await clickChip('sig'); const q3 = await sigRow();
+  await clickChip('sig'); const q4 = await sigRow();
+  const all = (row, want, ks = SK.slice(0, 6)) => ks.every((k) => row[k] === want);
+  ck('51a 缺省（买卖点关着）：6 类＋待确认 7 颗都是「没按下＋按灰」（不许亮着却按灰）', all(q0, '灭灰', SK), JSON.stringify(q0));
+  ck('51b 打开买卖点 ⇒ 6 类都亮、能点；待确认照它自己的勾（缺省不勾）＝灭、能点', all(q1, '亮') && q1.sigPend === '灭', JSON.stringify(q1));
+  ck('51c 关掉二买 ⇒ 只有它灭', q2['sig:二买'] === '灭' && all(q2, '亮', SK.slice(0, 6).filter((k) => k !== 'sig:二买')), JSON.stringify(q2));
+  ck('51d 总开关关了再开 ⇒ 关着时 7 颗全「没按下＋按灰」；再开以后二买还是灭、其余 5 类亮（子项的勾没被冲掉）',
+     all(q3, '灭灰', SK) && q4['sig:二买'] === '灭' && all(q4, '亮', SK.slice(0, 6).filter((k) => k !== 'sig:二买')),
+     `关：${JSON.stringify(q3)}　再开：${JSON.stringify(q4)}`);
+  await dS.c.close();
+
   await b.close();
   console.log(`\n${n - bad}/${n} 过${bad ? `，${bad} 条红` : ''}　截图：${OUT}`);
   process.exit(bad ? 1 : 0);

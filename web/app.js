@@ -1543,7 +1543,10 @@ function applyToggles() {
     //     ★ 这两半现在共用下面那个 `hasTrend` —— 这**不是**把两条判据合成一条：`hasTrend` 是一个**事实**
     //       （载荷里有没有这一层），两处各自拿它去回答自己的问题（"有没有用"←`opts`；"画没画"←`opts && 事实`）。
     const hasTrend = !!(state.data && state.data.trend);
-    const on = k === 'sigPend' ? opts.sigPend : k.startsWith('sig:') ? opts.sigKinds[k.slice(4)]
+    // 买卖点那 7 颗子芯片（6 类＋待确认）：亮＝「买卖点」总开关开着 **并且** 这一类勾着（card-963457e4-e31，Nova 10-09 12:08 定）。
+    //   第一版只看子项自己的勾 ⇒ 总开关关着（缺省）时 6 颗亮着又按灰、图上一个点都没有 —— 跟 trend／lv 修过的是同一种骗人。
+    //   子项的勾（`opts.sigKinds`／`opts.sigPend`）一个字不动：总开关一开，用户原来勾的原样回来。
+    const on = k === 'sigPend' ? opts.sig && opts.sigPend : k.startsWith('sig:') ? opts.sig && opts.sigKinds[k.slice(4)]
       : k === 'lv' ? shownOf(opts).lv
         : k === 'trend' ? opts.trend && hasTrend
           : opts[k];
