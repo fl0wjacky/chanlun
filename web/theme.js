@@ -178,7 +178,6 @@ export const SIG = {
   tip: 6,                // 三角尖端离点位 6 px
   pendingAlpha: 140,     // 待确认 255 → 140
   confirmedAlpha: 255,
-  weakText: '(弱)',
   pendingMark: '?',
   // 「曾经有过、后来没了」的那个点（卡 card-cf3ed018-795）。
   // ★ 180 是量出来的、不是挑出来的：它比**待确认**（140）更实 —— 这个方向是对的，消失的点当初是

@@ -787,11 +787,32 @@ function ghostHide() { ghostOn = null; ghostTip.classList.remove('on'); }
 //    （普通的 `"D2-2"`＝反方向三类点确立，补的那刀 `"D2-8"`）。引擎是**产的那一头**，
 //    所以前端跟着改成 `rule`；`trend_check` 那边还有一条不变量「每刀都得有认得的 rule」。
 //    ⚠️ 两边名字不同时**不会报错**，浮层只是**静默不出** —— 这类错最费时间，所以才写这一段。
-// ★ 别的分界**不出浮层**：浮层冒出来却什么都不说，比不出来更让人以为这儿有事。
+// ★ 第六批 ② 起每一刀都有死点类型（D2-5），浮层都有话说；没有 death 的（旧后台）照旧不出 —— 浮层冒出来却什么都不说，比不出来更让人以为这儿有事。
 // ★ 那句话是 Nova 10-06 定的原话，一个字没改（「按第 29 课：大横盘后接一段上涨，在这里切开」）。
 const BOUND_TIP = '按第 29 课：大横盘后接一段上涨，在这里切开';
+// D2-5 死点类型（第六批 ②）：每一刀都出一句「这一刀是怎么死的」，全名＋后台给的理由（`death_why`），一个字不改写。
+//   D2-8 那一刀照旧先说第 29 课那句（Nova 10-06 定的原话），死点那句接在后面。
+// 六类的一句话和出处：Atlas 10-09 00:37 照 spec 走势分段.md D2-5（第 118-131 行）列的，「一句话」是他按 spec 写的白话。
+//   ★ 后三类是**编者口径**，原文没有这几个名字 ⇒ 出处照实写「编者口径」，不挂原文。
+//   ★ 小转大引 L44 那条定理，原文说的是**必要条件**，写「L44（必要条件）」，不写成「L44 判定」。
+const DEATH_INFO = {
+  '趋势背驰': ['这一刀正好是引擎认出的一买／一卖：趋势里最后一段跟前一段比，力度变小了。', 'L24 背驰（趋势背驰）'],
+  '盘整背驰': ['离开中枢的那一段 C，比进入那一段 A 走得更远，可力度（面积）更小。', 'L24、L27'],
+  '小转大': ['前一段是本级别趋势，趋势背驰、盘整背驰都真比过，都不成立；是小级别的转折带出了这一级的转折。', 'L43；L44（必要条件）'],
+  '盘整·未见背驰': ['跟「小转大」一样都比过、都不成立，但前一段是盘整，不叫小转大。', '编者口径'],
+  '比不了': ['没法比力度：找不到它离开的中枢，或者找不到进入段，或者进入段方向跟 C 相反。不算小转大。', '编者口径'],
+  'D2-8 补刀': ['这一刀是大一级盘整里按中枢排布切出来的，不是背驰，也不是反方向三类点确立的，不分类。', '编者口径'],
+};
+function boundText(b) {
+  if (!b.death) return b.rule === 'D2-8' ? BOUND_TIP : '';
+  const [say, src] = DEATH_INFO[b.death] || ['', ''];
+  const d = [`死点：${b.death}${say ? ' —— ' + say : ''}`, b.death_why ? `这一刀：${b.death_why}` : '', src ? `出处：${src}` : '']
+    .filter(Boolean).join('\n');
+  // ★ 刀的位置不归类型管（spec D2-5：类型只影响「中阴从哪一刻开始」和图上标什么字），所以这里一句都不提刀为什么落在这儿
+  return b.rule === 'D2-8' ? BOUND_TIP + '\n' + d : d;
+}
 function boundShow(e, b) {
-  if (b !== ghostOn) { ghostOn = b; ghostTip.textContent = BOUND_TIP; }
+  if (b !== ghostOn) { ghostOn = b; ghostTip.textContent = boundText(b); }
   placeTip(e);
 }
 // 盘整组那块标签（卡 card-9f7a80b6-e8a）：为什么相邻几段盘整标成一组。引原文两句，**分界不动**这件事也说出来
@@ -815,7 +836,7 @@ el('chart').addEventListener('mousemove', (e) => {
   const p = pzHitAt(e.clientX, e.clientY);
   if (p) { pzShow(e, p); return; }
   const b = boundHitAt(e.clientX, e.clientY);
-  if (b && b.rule === 'D2-8') { boundShow(e, b); return; }
+  if (b && boundText(b)) { boundShow(e, b); return; }
   ghostHide();
 });
 el('chart').addEventListener('mouseleave', ghostHide);

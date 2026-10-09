@@ -82,6 +82,11 @@ export function lvAligned(T, lv, tf, span) {
 
 const FONT = '12px -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif';
 const FONT_SM = '11px -apple-system, "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif';
+// D2-5 死点类型 → 图上的短名。★ 只在**图上**缩（Nova 10-09 00:38 定）：悬停第一行用后台 `death` 的原值，一个字不改写
+//   （app.js `boundText`），跟 spec D2-5 的六类逐字对上。认不得的类型不写（不编）。
+const DEATH_SHORT = { '趋势背驰': '趋势背驰', '盘整背驰': '盘整背驰', '小转大': '小转大',
+  '盘整·未见背驰': '未见背驰', '比不了': '比不了', 'D2-8 补刀': '补刀' };
+const DEATH_REAL = new Set(['趋势背驰', '盘整背驰', '小转大']);
 // 框编号那几个字母（§八 6，card-c6644f52-2fa）：**加粗、比这一层别的字大半档（14px）**。
 // ★★ 这是**看过图之后改的**，改了两处，理由都写在这儿：
 //   ① **不用段的方向色**（第一版用绿／红）。绿字母落在 16% 的绿带上、红字母落在 16% 的红带上，
@@ -833,6 +838,7 @@ function trendMarkView(target, state, prim) {
     const vp = viewport(prim._chart, state.candleSeries || prim._series, data);
     const D = state.trendDrawn || (state.trendDrawn = { bands: [], bounds: [], pending: [], retracted: [], units: [], num: [] });
     D.labels = [];
+    D.deaths = [];
     // 命中带的画布：跟 `ghostHits` 同一条账 —— `ctx.canvas` 就是这个窗格的画布，
     // `useMediaCoordinateSpace` 给的坐标就是它的 CSS 像素，所以「客户端坐标 − getBoundingClientRect」
     // 正好落在同一个系里。每帧重设：窗格重建过之后旧的 canvas 是个死元素，量出来的坐标全是错的。
@@ -873,6 +879,43 @@ function trendMarkView(target, state, prim) {
         else if (ly > H - 6) ly = y - 10;
         // 读数是 `fmtG`，跟这张图上**所有**价格同一个格式（价签、图脚都是它）。
         D.labels.push(haloText(ctx, x, ly, fmtG(b.price), TREND.edge, 'center', mine));
+        // 死点类型（D2-5，第六批 ②；后台 `death`／`death_why` 第四批就带着，前端原来一处没读）：价格字再往外一行、小一号。
+        //   ★ 只标不改刀（spec D2-5：类型不决定刀落在哪）。全名放悬停（app.js `boundShow`），图上只写短名。
+        //   ★ 深浅分两档：真判出来的三种（趋势背驰／盘整背驰／小转大）用结构色，编者口径那三种（盘整·未见背驰／比不了／D2-8 补刀）
+        //     用静音灰 —— 「比不了」占了线上 15 张的六成，跟真死点一个颜色的话图上满眼都是它，读的人分不出哪几刀是真背驰。
+        const dt = DEATH_SHORT[b.death];
+        if (dt) {
+          const col = DEATH_REAL.has(b.death) ? TREND.edge : TREND.mut;
+          // 候选格按顺序取第一个**不压字**的：价格字往外一行 → 同一行接在右边 → 同一行接在左边；都不行就不写
+          //   （悬停里照样有全名，见 app.js `boundText`）。要躲的字有两张表：这一层自己的 `mine`，和标注层那张
+          //   `placed`（价签／买卖点文字／盘整组 chip，`state.labelBoxes`，标注层先画，这一帧已经齐了）。
+          //   ★ 实截踩过：1699 那种贴格顶的顶，往外一行压进「等确认」斜线带；改成接在右边，又压在 [1631.1, 1681.99] 价签上。
+          ctx.font = FONT_SM;
+          const tw = ctx.measureText(dt).width;
+          ctx.font = FONT;
+          const pw = ctx.measureText(fmtG(b.price)).width;
+          const dy = ly + (b.kind === 'H' ? -14 : 14);
+          const top = TREND.hatchTop + TREND.hatchH + 1;
+          const cand = [
+            [x - tw / 2, dy, 'center', x, dt],
+            [x + pw / 2 + 5, ly, 'left', x + pw / 2 + 5, '· ' + dt],
+            [x - pw / 2 - 5, ly, 'right', x - pw / 2 - 5, dt + ' ·'],
+          ];
+          const others = [...mine, ...(state.labelBoxes || [])];
+          // 只读出口：每一刀记号落在哪一格（out＝往外一行／right／left／null＝三格都压、不写），工装拿它量「不压字」和配色
+          const rec = { bar: b.bar, death: b.death, txt: null, mode: null, box: null, col };
+          (D.deaths = D.deaths || []).push(rec);
+          for (const [, yy, al, ax, txt] of cand) {
+            ctx.font = FONT_SM;
+            const w = ctx.measureText(txt).width;
+            const x0 = al === 'center' ? ax - w / 2 : al === 'right' ? ax - w : ax;
+            const box = [x0, yy - 11, x0 + w, yy + 3];
+            if (box[1] < top || box[3] > H - 1 || box[0] < 2 || box[2] > W - 2 || hits(box, others)) continue;
+            D.labels.push(haloText(ctx, ax, yy, txt, col, al, mine, FONT_SM, 11));
+            Object.assign(rec, { txt, mode: al === 'center' ? 'out' : al, box });
+            break;
+          }
+        }
       }
 
       // ② 待定（§八 3）：还没确立的候选极值 —— 灰点线 ＋ 旁边标「待定」。价格再过它（创了新极值）
@@ -1586,7 +1629,8 @@ function drawSignalText(ctx, placed, x, y0, s, tier, H) {
 /** 买卖点的字。★ M29 以后二类带 `why`（core/signals.py，Atlas m29-code）：
  *    不创新低／不创新高 ⇒ 就是「二买／二卖」；创新低（高）＋盘整背驰 ⇒ 「二买·盘背」；
  *    小转大（走势层 xzd_seconds）⇒ 「二买·小转大（事后才确认）」，创新了又有盘整背驰的在「小转大」后面加「·盘背」。
- *  没有 `why` 的（一类、三类，或旧后台）照旧：`weak` 加「(弱)」。`weak` 字段这一版先不删（Nova 10-08 16:44）。 */
+ *  其余（一类、三类、不创新的二类）不加字。★ `weak`／「(弱)」第六批 ② 下线（后台 Bram weak-off 636d5b3 不再出这个字段，
+ *    「创新低／创新高」改从 `why` 读）—— 这里原来那条「没 why 就退回 weak」的路一起拆掉。 */
 export function sigLabel(s, tier) {
   const w = typeof s.why === 'string' ? s.why : '';
   let tag;
@@ -1594,8 +1638,7 @@ export function sigLabel(s, tier) {
   //   具体哪天才出现只放在给小栋的图上（Bram m29-figs），后台也不带这个字段（Atlas c84a098 去掉了 known_bar）。
   if (w.startsWith('小转大')) tag = '·小转大' + (w.includes('盘整背驰') ? '·盘背' : '') + '（事后才确认）';
   else if (w.includes('盘整背驰')) tag = '·盘背';
-  else if (w) tag = '';
-  else tag = s.weak ? SIG.weakText : '';
+  else tag = '';
   return s.kind + tag + (tier === 'pen' ? '·笔' : '') + (s.confirmed ? '' : SIG.pendingMark);
 }
 
