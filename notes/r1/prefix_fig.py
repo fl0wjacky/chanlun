@@ -9,7 +9,7 @@ ap.add_argument('--root', required=True); ap.add_argument('--base', action='appe
 ap.add_argument('--file'); ap.add_argument('--json'); ap.add_argument('--tick', type=float)
 ap.add_argument('--at', required=True, help='逗号分隔的 K 线根数（前缀长度），从小到大')
 ap.add_argument('--from', dest='frm'); ap.add_argument('--to'); ap.add_argument('--out', required=True)
-ap.add_argument('--pen', default='old'); ap.add_argument('--title', default='前缀连锁图'); ap.add_argument('--note', default='')
+ap.add_argument('--base-label', default=None, help='表头里口径那一截的简称（开关全名太长会冲出右边）'); ap.add_argument('--pen', default='old'); ap.add_argument('--title', default='前缀连锁图'); ap.add_argument('--note', default='')
 a = ap.parse_args()
 out = os.path.abspath(a.out); jpath = os.path.abspath(a.json) if a.json else None
 sys.path[:0] = [a.root]; os.chdir(a.root)
@@ -54,9 +54,9 @@ import config
 F = ImageFont.truetype(config._pick_font(), 26); Fs = ImageFont.truetype(config._pick_font(), 20)   # 跟 r1_fig 同一支字体（仓里挑的那支，缺字形会被 fontcheck 抓）
 BG, TX, MU = (18, 20, 26), (234, 238, 246), (140, 148, 166)
 W, ML, MR, PH = 2000, 80, 20, 420
-H = 90 + len(R) * (PH + 30) + 70
+H = 90 + len(R) * (PH + 30) + 44 + 26 * max(1, len(a.note.split('|')) if a.note else 1)
 im = Image.new('RGB', (W, H), BG); d = ImageDraw.Draw(im)
-d.text((ML, 14), f'{a.file or os.path.basename(jpath)} · {a.title} · 底座 {" ".join(f.rsplit(".", 1)[-1] for f in a.base) or "现行"}', fill=TX, font=F)
+d.text((ML, 14), f'{a.file or os.path.basename(jpath)} · {a.title} · 口径 {a.base_label or (" ".join(f.rsplit(".", 1)[-1] for f in a.base) or "现行")}', fill=TX, font=F)
 d.text((ML, 48), f'窗口 {utc(b0):%Y-%m-%d %H:%M} → {utc(b1):%Y-%m-%d %H:%M}（UTC）｜截到 ' + '、'.join(f'第 {n} 根' for n in AT), fill=MU, font=Fs)
 
 def dash(q, x0, y0, x1, y1, fill, width=2, on=8, off=6):
@@ -114,5 +114,5 @@ for k, cur in enumerate(R):
     im.paste(p, (0, y0))
 yb = 90 + len(R) * (PH + 30) + 4
 d.text((ML, yb), '画法：笔灰、线段金、分界白虚线；跟上一格比新出来的加粗（粉笔／青线段／粗白刀），上一格有、这一格没了的画红虚影（刀加红叉）。黄竖线＝截到哪一根，右边淡底＝还没走出来。对数轴。', fill=MU, font=Fs)
-if a.note: d.text((ML, yb + 28), '注：' + a.note, fill=TX, font=Fs)
+for j, line in enumerate(a.note.split('|') if a.note else []): d.text((ML, yb + 28 + 26 * j), ('注：' if j == 0 else '　　') + line, fill=TX, font=Fs)   # 图注用 | 分行
 im.save(out); print('saved', out, im.size, [(x['n'], len(x['pens']), len(x['segs']), len(x['bounds'])) for x in R])
