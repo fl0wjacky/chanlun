@@ -94,7 +94,9 @@ def panel(k, R, other, tag):
         b = bars[i]; q.line([X(i), Y(b['h']), X(i), Y(b['l'])], fill=(120, 126, 140, 160))
     for (x0, x1, zd, zg) in R['zs']:
         if x0 is None or x1 < b0 or x0 > b1: continue
-        q.rectangle([X(x0), Y(zg), X(x1), Y(zd)], outline=CHART['seg'] + (200,) if isinstance(CHART['seg'], tuple) else '#c48901', width=2)
+        # 左右各内缩 3px：同级别下中枢满三段就收、前后两个框首尾相接，不缩的话两个框的边贴在一起，
+        #   看着像一个框被分界刀从中间劈开（Nova 10-09 04:43 看到的就是这个错觉）。框里铺一层淡金，框和框之间露出一条缝。
+        q.rectangle([X(x0) + 3, Y(zg), X(x1) - 3, Y(zd)], fill=(196, 137, 1, 28), outline=(196, 137, 1, 220), width=2)
     oth = set(other['segs']); othb = {x[:2] for x in other['bounds']}
     for s in R['segs'] + R['live']:
         i0, i1, p0, p1 = s
