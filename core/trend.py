@@ -488,6 +488,78 @@ def _xzd_seconds(done, bounds, r=None):
     return out
 
 
+
+# ---------------------------------------------------------------- R-1 同级别分解（试验开关，默认关；docs/spec/读法-R1-分解方式.md S1～S6）
+SAME_LEVEL = False                                # 决策树 R-1 还没定：开了就照同级别切（只给量数、出前后图），默认关＝现行非同级别，输出逐字节不变
+SAME_LEVEL_OVERLAP = "ZDZG"                       # S3「判重叠用哪个区间」小栋还没认：ZDZG（拟）或 DDGG，两个都量
+
+
+def _sl_centers(done, a, b):
+    """S1＋S2：done[a..b) 里从左往右找三段重叠，满三段即收、不延伸；下一个从这三段之后起，段不共用。"""
+    out, k = [], a
+    while k + 2 < b:
+        lo = max(done[q]["lo"] for q in range(k, k + 3))
+        hi = min(done[q]["hi"] for q in range(k, k + 3))
+        if lo <= hi:
+            out.append(dict(PI0=k, PI1=k + 2, X0=done[k]["i0"], X1=done[k + 2]["i1"], ZD=lo, ZG=hi,
+                            DD=min(done[q]["lo"] for q in range(k, k + 3)), GG=max(done[q]["hi"] for q in range(k, k + 3)),
+                            nZ=3, live=False, kind="—", rel="—", status="已确认", status_note="—", term="—",
+                            npens=None, F1=done[k + 1]["i1"]))
+            k += 3
+        else:
+            k += 1
+    return out
+
+
+def _sl_rel(z1, z2):
+    """S3：两个本级别中枢 → "叠"／"上"／"下"。区间照 SAME_LEVEL_OVERLAP。"""
+    lo, hi = ("ZD", "ZG") if SAME_LEVEL_OVERLAP == "ZDZG" else ("DD", "GG")
+    if z2[lo] > z1[hi]:
+        return "上"
+    if z2[hi] < z1[lo]:
+        return "下"
+    return "叠"
+
+
+def _sl_layer(done, ks, bounds_, n):
+    """S3～S6：分界照 D2 定的组，每组里按同级别中枢再切：相邻两个中枢重叠，或者不重叠但方向跟这一截的趋势相反
+    ⇒ 前一个中枢第三段的终点再切一刀（S5，盘整＋盘整）。每一截：0 个中枢＝无中枢，1 个＝盘整，≥2 个依次同向不重叠＝上涨／下跌。
+    不升级、不合成（S6）。→ (segments, centers_out, extra_bounds)"""
+    edges = [0] + list(ks) + [len(done)]
+    pieces = []                                    # (起 done 下标, 止 done 下标（不含）, [中枢])
+    extra = []
+    for g, (a, b) in enumerate(zip(edges, edges[1:])):
+        zz = _sl_centers(done, a, b)
+        start, cur, way = a, [], None
+        for z in zz:
+            if cur:
+                r = _sl_rel(cur[-1], z)
+                if r == "叠" or (way and r != way):
+                    cut = cur[-1]["PI1"] + 1
+                    pieces.append((start, cut, cur))
+                    e = done[cut - 1]
+                    extra.append(dict(rule="S5", line_seg=cut - 1, bar=e["i1"], kind="H" if e["p1"] >= e["p0"] else "L",
+                                      price=e["p1"]))
+                    start, cur, way = cut, [], None
+                elif way is None:
+                    way = r
+            cur.append(z)
+        pieces.append((start, b, cur))
+    segments, centers_out = [], []
+    for g, (a, b, zz) in enumerate(pieces):
+        last = g == len(pieces) - 1
+        if not zz:
+            kind = "无中枢"
+        elif len(zz) == 1:
+            kind = "盘整"
+        else:
+            kind = "上涨" if _sl_rel(zz[0], zz[1]) == "上" else "下跌"
+        centers_out += [dict(z, seg=g) for z in zz]
+        segments.append(dict(i0=0 if a == 0 else done[a - 1]["i1"], i1=n - 1 if last else done[b - 1]["i1"],
+                             type=kind, upgraded=False, head=a == 0, live=last, n_centers_level=len(zz)))
+    return segments, centers_out, extra
+
+
 def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_exceed=True, standardize=True):
     """→ dict(seg_centers, bounds, retracted, pending, segments, units, reading)。
     seg_centers：按确立的分界切开重算的线段中枢（D4，前端画框就用它），每个带 seg（属于第几段走势，跟 segments 下标对齐）；
@@ -506,6 +578,12 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
                                    n_centers_level=0)])
     bounds = list(res["bounds"])
     ks = list(ks)
+    if SAME_LEVEL:                               # R-1 试验：同级别分解（默认关）。不升级、不补 D2-8、不标死点类型
+        segments, centers_out, extra = _sl_layer(done, ks, bounds, n)
+        bounds = sorted(bounds + extra, key=lambda x: x["bar"])
+        return dict(seg_centers=centers_out, bounds=bounds, retracted=res["retracted"],
+                    pending=pending(done, ks, res["want"]), segments=segments, units=[], reading="same_level",
+                    xzd_seconds=[])
     segments, units_out, centers_out = _layer(done, ks, bounds, reading, n)
     if _D28:
         cuts = _d28_cuts(done, ks, segments, units_out, centers_out)
