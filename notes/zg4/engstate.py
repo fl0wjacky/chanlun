@@ -32,6 +32,9 @@ def one(it):
             if s == "confirmed": o[("D2" if k[2] == "D2-2" else "S5") + "确认"].add(k)
         prev = cur
     o["D2延迟"] = [confat[k] - born[k] for k in confat if k[2] == "D2-2"]
+    if o["D2延迟"]:
+        mk = max((k for k in confat if k[2] == "D2-2"), key=lambda k: confat[k] - born[k])
+        ex.insert(0, ("最长延迟", mk, born[mk], confat[mk], confat[mk] - born[mk]))
     o["D2确认"] = len(o["D2确认"]); o["S5确认"] = len(o["S5确认"])
     o["图尾待确认D2"] = sum(1 for k, s in prev.items() if k[2] == "D2-2" and s == "pending")
     return name, o, ex[:3]
