@@ -445,7 +445,9 @@ export function makeAnnotPrimitive(state) {
                 // 暂定那一刀 V 同时是暂定段的终点和后面那一截的起点 ⇒ 只画一个圈（虚线那个）；
                 // 两个都画，实线小圈套在虚线圈里，看着像齿轮（实测截图）。
                 const tentEnds = new Set(data.segs.filter((s) => s.tentative).map((s) => `${s.i1}|${s.p1}`));
-                for (const s of data.segs) {
+                // D-3 C：有 `segs_std` 时端点圈跟着标准化那一套走（图上的线段是哪套，圈就画在哪套的端点上），未完成段照旧取原始的
+                const segsDrawn = Array.isArray(data.segs_std) && data.segs_std.length ? data.segs_std.concat(data.segs.filter((s) => s.live)) : data.segs;
+                for (const s of segsDrawn) {
                   const end = segEnd(data, s);
                   const pts = [[s.i0, s.p0], [end.i, end.p]];
                   const up = s.dir === 'up';

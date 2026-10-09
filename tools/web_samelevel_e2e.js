@@ -224,6 +224,33 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
      WD.labels.length === 2 && /^已撤回：笔回头改了（/.test(WD.labels[0]) && /^线段已撤回：笔回头改了（/.test(WD.labels[1]), JSON.stringify(WD.labels));
   ck('⑦c 「走势分段」关掉 ⇒ 一个叉都不画；载荷没有 withdrawn（现行后台）⇒ 0 个（牙）', WD.off === 0 && WD.noWd === 0, `关掉 ${WD.off}　改前 ${WD.noWd}`);
 
+  // ⑧ D-3 选 C（小栋 10-09 12:57）：载荷带 `segs_std`（标准化线段）⇒ 图上「线段」画它：除最后一条外实线、最后一条短虚线；
+  //   未完成段照旧长虚线；没有 `segs_std`（现行后台）⇒ 照旧画原始段、短虚线那条是空的（牙）。
+  //   后台还没出这个字段 ⇒ 页面里塞假的：拿原始已完成段，把最后两条并成一条当「标准化后」的样子。
+  const SD = await p.evaluate(async () => {
+    const app = window.__app, d = app.state.data, S = app.segSeries, t = (i) => d.bars[i].t / 1000;
+    const pts = (ser) => ser.data().map((q) => [q.time, q.value]);
+    const before = { solid: pts(S.solid).length, last: pts(S.stdLast).length };
+    const done = d.segs.filter((s) => !s.live);
+    if (done.length < 3) return { err: '已完成线段不到 3 条' };
+    const a = done.at(-2), z = done.at(-1);
+    const std = done.slice(0, -2).map((s) => ({ i0: s.i0, i1: s.i1, p0: s.p0, p1: s.p1, dir: s.dir }))
+      .concat([{ i0: a.i0, i1: z.i1, p0: a.p0, p1: z.p1, dir: a.dir }]);
+    d.segs_std = std; app.repaint(); await new Promise((r) => setTimeout(r, 400));
+    const solid = pts(S.solid), last = pts(S.stdLast), dash = pts(S.dash);
+    const wantSolid = [[t(std[0].i0), std[0].p0]].concat(std.slice(0, -1).map((s) => [t(s.i1), s.p1]));
+    const L = std.at(-1);
+    delete d.segs_std; app.repaint(); await new Promise((r) => setTimeout(r, 400));
+    return { before, std: std.length, solidOk: JSON.stringify(solid) === JSON.stringify(wantSolid), solidN: solid.length,
+      last, wantLast: [[t(L.i0), L.p0], [t(L.i1), L.p1]], dashN: dash.length, after: { solid: pts(S.solid).length, last: pts(S.stdLast).length } };
+  });
+  if (SD.err) { console.error(SD.err); await b.close(); process.exit(2); }
+  ck('⑧ D-3 C：有 segs_std ⇒ 实线＝标准化那套除最后一条（点逐个对上）；最后一条单独画短虚线、两头＝它的起止',
+     SD.solidOk && JSON.stringify(SD.last) === JSON.stringify(SD.wantLast), `标准化 ${SD.std} 条　实线 ${SD.solidN} 点　短虚线 ${JSON.stringify(SD.last)}`);
+  ck('⑧b 未完成段照旧画长虚线；载荷没有 segs_std ⇒ 照旧画原始段、短虚线那条是空的（牙）',
+     SD.dashN > 0 && SD.before.last === 0 && SD.after.last === 0 && SD.after.solid === SD.before.solid,
+     `长虚线 ${SD.dashN} 点　改前 ${JSON.stringify(SD.before)}　撤掉以后 ${JSON.stringify(SD.after)}`);
+
   if (SHOTS) await p.screenshot({ path: require('path').join(SHOTS, 'samelevel-fe.png') });
   await b.close();
   console.log(red ? `✗ ${red} 格红（${n - red}/${n} 过）` : `${n}/${n} 过`);   // predeploy 认「N/N 过」这一行

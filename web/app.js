@@ -207,6 +207,10 @@ const penSolid = line({ color: CHART.pen, lineWidth: WIDTH.pen });
 const penDash = line({ color: CHART.pen, lineWidth: WIDTH.pen, lineStyle: LWC.LineStyle.Dashed });
 const segSolid = line({ color: CHART.seg, lineWidth: WIDTH.seg });
 const segDash = line({ color: CHART.seg, lineWidth: WIDTH.seg, lineStyle: LWC.LineStyle.LargeDashed });
+// D-3 选 C（小栋 10-09 12:57）：载荷带 `segs_std`（标准化线段＝分界用的那一套）时，最后一条已完成的画**短虚线**、淡一档 ——
+//   它的终点还可能往后挪（后面一段走完，标准化会把端点挪到真极值、或者把相邻的并成一条）。未完成那一截照旧是 segDash 的长虚线。
+const fadeHex = (h, a) => `rgba(${parseInt(h.slice(1, 3), 16)},${parseInt(h.slice(3, 5), 16)},${parseInt(h.slice(5, 7), 16)},${a})`;   // 从主题色现算，不抄色号
+const segStdLast = line({ color: fadeHex(CHART.seg, 0.75), lineWidth: WIDTH.seg, lineStyle: LWC.LineStyle.Dashed });
 
 // 标注层要挂在一个**永远可见**的系列上：挂在「线段」系列上的话，一关线段开关，
 // 系列不可见 ⇒ 它的 primitive 也不再被画，价签和买卖点会跟着一起消失（那不是开关的语义）。
@@ -926,7 +930,11 @@ function paint(d) {
   // ★ S7「暂定」（card-d5a92ea2-3b2）：暂定段也带 live ⇒ 未完成的可能有**两条**首尾相接：暂定段（起点 → 判出来的那一刀 V）
   //   ＋ 它后面真正还在走的那一截（V → 迄今的极值）。原来只取 `find` 第一条 ⇒ 后面那一截**整条不画**。
   //   两条都是虚线、在 V 处拐弯，V 上那个虚线圈和「暂定」两个字在 layers.js 端点那一层画。
-  const segs = d.segs, done = segs.filter((s) => !s.live), lives = segs.filter((s) => s.live);
+  // D-3 C：有 `segs_std` ⇒ 已完成的线段画标准化那一套（跟分界同一套），最后一条单拎出来画短虚线；没有 ⇒ 照旧画原始段。
+  const std = Array.isArray(d.segs_std) && d.segs_std.length ? d.segs_std : null;
+  const segs = d.segs, lives = segs.filter((s) => s.live), done = std ? std.slice(0, -1) : segs.filter((s) => !s.live);
+  const stdLast = std ? std.at(-1) : null;
+  segStdLast.setData(stdLast ? [{ time: T(stdLast.i0), value: stdLast.p0 }, { time: T(stdLast.i1), value: stdLast.p1 }] : []);
   const segA = done.length ? [{ time: T(done[0].i0), value: done[0].p0 }] : [];
   for (const s of done) segA.push({ time: T(s.i1), value: s.p1 });
   segSolid.setData(segA);
@@ -1532,6 +1540,7 @@ function applyToggles() {
   penDash.applyOptions({ visible: opts.pen });
   segSolid.applyOptions({ visible: opts.seg });
   segDash.applyOptions({ visible: opts.seg });
+  segStdLast.applyOptions({ visible: opts.seg });
   // 成交量：开关说着开、数据里也确实有 v —— 两条都成立才画（样本没有 v ⇒ 开着也画不出来，
   // 那就把开关按灰并说出来，别让用户点了没反应还不知道为什么）。
   volSeries.applyOptions({ visible: !!opts.vol && sub.hasVol });
@@ -2792,4 +2801,6 @@ const metaReady = loadMeasures();
 //   但口径是抄的，抄的那份迟早跟页面分家；而这两个函数正是"本地钟怎么念"的唯一一份）。
 //   ★ 它们**只是印**，不碰状态：跟下面那两条注释一样，工装拿到的是字，不是权限。
 window.__app = { chart, state, opts, paging, measures, cuts, sub, fmtPrice, autoReload,
-                 shortLocal, clockLocal, zoneTag };   // autoReload：工装 readout_swap_probe 的 F 场景直接触发自动重取
+                 shortLocal, clockLocal, zoneTag,
+                 // 工装只读出口（web_samelevel_e2e ⑧，D-3 C）：线段三条系列的数据，量「图上画的是哪一套」；repaint 只给塞假载荷后重画用
+                 segSeries: { solid: segSolid, dash: segDash, stdLast: segStdLast }, repaint: () => paint(state.data) };   // autoReload：工装 readout_swap_probe 的 F 场景直接触发自动重取
