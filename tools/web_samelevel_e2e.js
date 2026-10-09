@@ -72,7 +72,7 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
        `屏上 ${real.states.length} 刀（pending ${nPend}）${badDot.length ? '　✗ 点不对 ' + JSON.stringify(badDot) : ''}${badTxt.length ? '　✗ 字不对 ' + JSON.stringify(badTxt) : ''}`);
   } else console.log('－ ④ 跳过：这个后台还不给 state');
 
-  // ⑤ 「高一级」「级别对照」两颗芯片（Nova 10-09 09:07）：同级别正式版（trend_reading=same_level）⇒ 两颗**藏起来**，
+  // ⑤ 「高一级」「级别对照」两颗芯片（Nova 10-09 09:07；13:14 改：「级别对照」不藏、按灰、悬停写原因，只「高一级」藏）：
   //   而且就算 opts 里 up／lv 是开的（地址栏带着 up=1 进来的那种），画图那张判据 `shownOf` 也给 false；
   //   现行口径 ⇒ 两颗照常露着（牙：别把现行口径也藏了）。
   const chipsLv = await p.evaluate(async () => {
@@ -82,11 +82,29 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
     const forced = shownOf({ ...app.state.opts, up: true, lv: true }, app.state.data);
     return { sl, up: vis('up'), lv: vis('lv'), forcedUp: forced.up, forcedLv: forced.lv };
   });
-  ck(chipsLv.sl ? '⑤ 同级别正式版：「高一级」「级别对照」两颗藏起来；opts 里开着也不画（shownOf.up／lv＝false）'
+  ck(chipsLv.sl ? '⑤ 同级别正式版：「高一级」藏起来、「级别对照」露着；opts 里开着也不画（shownOf.up／lv＝false）'
                 : '⑤ 现行口径：「高一级」「级别对照」两颗照常露着（牙）',
-     chipsLv.sl ? (chipsLv.up === false && chipsLv.lv === false && !chipsLv.forcedUp && !chipsLv.forcedLv)
+     chipsLv.sl ? (chipsLv.up === false && chipsLv.lv === true && !chipsLv.forcedUp && !chipsLv.forcedLv)
                 : (chipsLv.up === true && chipsLv.lv === true && chipsLv.forcedUp === true),
      JSON.stringify(chipsLv));
+
+  // ⑤b 「级别对照」在同级别下：露着、按灰、没按下、悬停写「同级别下不适用：…L38:35…」；切回现行口径 ⇒ 悬停说明撤掉（Nova 13:14 选 ①）。
+  //   后台还没翻默认 ⇒ 页面里把 `trend_reading` 改成 same_level 再重画（量的是前端读不读这个字段，不是后台给不给）。
+  const LV = await p.evaluate(async () => {
+    const app = window.__app, d = app.state.data, was = d.trend_reading;
+    const read = () => { const e = document.querySelector('.chip[data-key="lv"]'), u = document.querySelector('.chip[data-key="up"]');
+      return { lvShown: getComputedStyle(e).display !== 'none', lvDis: e.disabled, lvPressed: e.getAttribute('aria-pressed'), title: e.getAttribute('title'),
+               upShown: getComputedStyle(u).display !== 'none' }; };
+    d.trend_reading = 'same_level'; app.repaint(); await new Promise((r) => setTimeout(r, 300));
+    const sl = read();
+    if (was === undefined) delete d.trend_reading; else d.trend_reading = was;
+    app.repaint(); await new Promise((r) => setTimeout(r, 300));
+    return { sl, back: read() };
+  });
+  ck('⑤b 同级别下「级别对照」露着、按灰、没按下，悬停写「同级别下不适用…L38:35…」；「高一级」藏着；切回现行 ⇒ 悬停说明撤掉',
+     LV.sl.lvShown && LV.sl.lvDis && LV.sl.lvPressed === 'false' && /^同级别下不适用：/.test(LV.sl.title || '') && /L38:35/.test(LV.sl.title || '')
+       && LV.sl.upShown === false && LV.back.title === null && LV.back.upShown === true,
+     JSON.stringify(LV));
 
   // ③ 牙：把载荷里的 state 全拿掉（现行后台本来就没有）⇒ 0 个空心点、0 个「待确认」
   await p.evaluate(() => { for (const q of window.__app.state.data.trend.bounds) delete q.state; });

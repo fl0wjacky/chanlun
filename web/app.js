@@ -1577,10 +1577,11 @@ function applyToggles() {
       : k === 'lv' ? shownOf(opts, state.data).lv
         : k === 'trend' ? opts.trend && hasTrend
           : opts[k];
-    // 同级别正式版：「高一级」「级别对照」两颗**藏起来**（不是按灰 —— 按灰是"此刻没用、换一下就有用"，这里是"这一套口径里根本没有这一层"）。
+    // 同级别正式版：「高一级」**藏起来**（这一套口径里根本没有这一层）。「级别对照」**不藏、按灰、悬停写原因**（Nova 10-09 13:14 选 ①）：
+    //   级别联动第 3 项在同级别下不适用（spec §四），藏起来等于把「不适用」也藏了；按灰＋说明为什么，跟「按灰＝此刻用不了」同一条规矩。
     //   判据跟画图同一个 `shownOf`：它那边 `up`／`lv` 已经与上了 `!sameLevel`。
     const sameLevel = !!(state.data && state.data.trend_reading === 'same_level');
-    if (k === 'up' || k === 'lv') b.hidden = sameLevel;
+    if (k === 'up') b.hidden = sameLevel;
     b.setAttribute('aria-pressed', (k === 'up' ? on && !sameLevel : on) ? 'true' : 'false');
     const sigChip = k.startsWith('sig:') || k === 'sigPend';
     // 成交量那颗在**没有 v 的数据上**按灰（仓里的样本就是）：能点却画不出东西的开关是骗人的。
@@ -1594,7 +1595,11 @@ function applyToggles() {
           // ★ 按灰判的是**"这颗此刻有没有用"**（`!opts.up`），跟上面那个 `on` 判的**"这一层画没画"**
           //   （`shownOf(opts).lv`）是**两个问题、两条判据** —— 别合并。两个都从 `opts.up` 这同一个根上长出来：
           //   拿 `shownOf(opts).lv` 来判"有没有用"会绕远（那个式子里的 `opts.lv` 跟"能不能用"无关）。
-          : k === 'lv' ? !opts.up : false;
+          : k === 'lv' ? !opts.up || sameLevel : false;
+    if (k === 'lv') {
+      if (sameLevel) b.title = LV_NA;
+      else b.removeAttribute('title');
+    }
   }
   // 「关着的层不许有能点的开关」这条账，看法那组也算：买卖点一关，它就得跟着灰（或反过来亮回来）。
   renderMeasures();
@@ -1602,6 +1607,9 @@ function applyToggles() {
   renderCuts();
   renderPens();
 }
+
+// 「级别对照」在同级别下按灰时的悬停说明（spec 级别联动.md §四 第 3 项；Atlas 14d231b）
+const LV_NA = '同级别下不适用：本级不合成框；L38:35「该级别以上级别，根本不考虑」';
 
 function buildChips() {
   const box = el('panel');
