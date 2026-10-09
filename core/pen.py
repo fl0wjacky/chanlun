@@ -92,6 +92,10 @@ class RangeExt:
 # 顶分型和底分型之间可以没有独立 K 线）。开关切 7 根 ⇒ ≥ 4（L62:17、L77:37：顶底之间至少一根独立 K 线；L62 原文另说这种情况
 # 「一般来说，也最好不算一笔」）。各处默认值都读这一个常量，网站后台按请求的 pen_min 显式传。
 MIN_GAP_DEFAULT = 3
+# S-13 P2（Atlas 读法-S13，默认关）：定稿的笔不再改。笔列表里只有最后一笔没定稿（L77:51-52），
+#   所以只许动 seq[-1]；会改到 seq[-2] 及更早的两条回头修正——「作废上一笔」（pend）和 fix_start——整条不走。
+#   关掉以后笔的端点可能不是这一笔的极值，nonextreme_pens 照报（P3：正文优先，极值规矩只报诊断）。
+PEN_FINAL_LOCK = False
 
 def check_range_ext(cls=None, seeds=range(40)):
     """RangeExt 跟切片 max/min 在所有 (k0, k1) 上逐个比 → 不一致处数（0 才对）。
@@ -150,7 +154,7 @@ def build_pens(fx, std, rule="old", min_gap=None):
         """最后一笔 a→g 的起点若不是极值（笔内有个更极端的同类点 P），往回修，两种修法取保留端点多的：
         · 让 P 自己当端点：找更早的、与 g 同类的端点 e，使 e→P、P→g 都成笔；
         · 合并：找更早的、与 a 同类的端点 e，使 e→g 一笔两头都包得住。"""
-        if len(seq) < 2:
+        if len(seq) < 2 or PEN_FINAL_LOCK:
             return
         a, g = seq[-2], seq[-1]
         if extreme(a, a["k"], g["k"]):
@@ -180,7 +184,7 @@ def build_pens(fx, std, rule="old", min_gap=None):
         if f["type"] == last["type"]:        # 步骤二：同类取更极端的
             if not beyond(f, last):
                 return
-            if pend is not None and (len(seq) < 3 or not beyond(last, seq[-3])):
+            if pend is not None and not PEN_FINAL_LOCK and (len(seq) < 3 or not beyond(last, seq[-3])):
                 P, pend = pend, None         # 上一笔包不住待定分型 → 作废上一笔
                 seq.pop()
                 seq[-1] = P
