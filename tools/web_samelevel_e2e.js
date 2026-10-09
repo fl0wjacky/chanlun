@@ -67,7 +67,10 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
       if (r.death === '盘整相连') return !(r.state === 'pending' && t === '待确认');
       return t !== (SH[r.death] || '') + (r.state === 'pending' ? '（待确认）' : ''); })());
     const nPend = real.states.filter((s) => s.want === 'pending').length;
-    ck('④ 真载荷：屏上每把刀「空心 ⟺ state=pending」；字跟 state／death 对得上（盘整相连 confirmed 不写字）',
+    // 整份载荷一把 pending 都没有（行情走到哪都可能：比如 10-09 15:2x 的 ZEC 15m，30 把全 confirmed）⇒ 这一格没东西可量，记跳过，不记红也不记绿
+    const anyPend = await p.evaluate(() => window.__app.state.data.trend.bounds.some((q) => q.state === 'pending'));
+    if (!anyPend) console.log('－ ④ 跳过：这一刻载荷里一把待确认的刀都没有');
+    else ck('④ 真载荷：屏上每把刀「空心 ⟺ state=pending」；字跟 state／death 对得上（盘整相连 confirmed 不写字）',
        real.states.length > 0 && nPend > 0 && !badDot.length && !badTxt.length,
        `屏上 ${real.states.length} 刀（pending ${nPend}）${badDot.length ? '　✗ 点不对 ' + JSON.stringify(badDot) : ''}${badTxt.length ? '　✗ 字不对 ' + JSON.stringify(badTxt) : ''}`);
   } else console.log('－ ④ 跳过：这个后台还不给 state');
@@ -122,7 +125,10 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
   //   每套一次重画一次、量一次。别的刀一律 confirmed（量「其余都实心」）。
   const pick = await p.evaluate(() => {
     const app = window.__app, ts = app.chart.timeScale(), T = app.state.data.trend;
-    const on = T.bounds.filter((q) => { const x = ts.logicalToCoordinate(q.bar); return x !== null && x > 120 && x < 1250; });
+    // 右边留 160px：字（「比不了（待确认） ·」）要放得下。原来写死 x < 1250，可画布才 1188 宽 —— 数据一往前走，挑到贴右沿的刀，
+    //   图层照规矩不写字（㊿e：放不下就换格或不写），这一格就假红了（10-09 15:2x 在 Bram a5a7508 上撞到，跟后台无关）。
+    const W = document.querySelector('#chart canvas').getBoundingClientRect().width;
+    const on = T.bounds.filter((q) => { const x = ts.logicalToCoordinate(q.bar); return x !== null && x > 120 && x < W - 160; });
     if (!on.length) return { err: '屏上没有刀' };
     for (const q of T.bounds) q.state = 'confirmed';
     const t = on[on.length - 1];
