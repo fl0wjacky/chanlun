@@ -96,6 +96,15 @@ for tag, r in R.items():
     # 笔层
     P, std = r["pens"], m
     count("笔不变量违规", len(check_pens(P, r["seq"], std, r["pen_rule"])))
+    # T7（Atlas 对表，Nova 10:21）：锁开（PEN_FINAL_LOCK＋P2′）重划一遍笔，L77:37-40 正文的成笔条件照样不能破（G4）
+    import core.pen as _pen
+    _lk = _pen.PEN_FINAL_LOCK
+    try:
+        _pen.PEN_FINAL_LOCK = True
+        _P2, _seq2 = _pen.build_pens(r["fx"], std, r["pen_rule"], r["min_gap"])
+    finally:
+        _pen.PEN_FINAL_LOCK = _lk
+    count("锁开（P2′）笔不变量违规", len(check_pens(_P2, _seq2, std, r["pen_rule"], r["min_gap"])))
     count("笔内还能再切出三笔", len(unsplit_violations(P, r["fx"], std, r["pen_rule"])),
           "　｜ 诊断：端点非极值 %d（剧烈扩张震荡，两道回头修正都救不回，只报数）" % len(nonextreme_pens(P, std)))
     # 线段层
