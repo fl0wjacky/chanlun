@@ -182,6 +182,8 @@ var float zPrevH = na                       // 未定方向时扫到的最后一
 var float zPrevL = na
 var int   zPrevI = na
 var int   zN     = 0                        // 已推入的原始K线根数 = 原始下标的上界
+var array<float> zRH = array.new<float>()   // 原始K线：高（下标 = 原始下标）。只给 islast 的线段标准化（stdSegs）用：
+var array<float> zRL = array.new<float>()   //   原始K线：低   接点要挪到两邻之间的原始极值上；用 high[k] 回看会撞 max_bars_back
 
 // 重算最后一个分型格子。数组一律走参数（函数里不碰全局）。
 zRefx(array<float> H, array<float> L, array<int> IH, array<int> IL, array<Fx> FX) =>
@@ -275,6 +277,8 @@ else
         zIH.push(zN)
         zIL.push(zN)
 zRefx(zH, zL, zIH, zIL, zFx)
+zRH.push(high)
+zRL.push(low)
 zN += 1
 // ★ 本根的「喂笔」在下面笔那一节的末尾（`zPenStep` 定义之后）—— pine 要求先定义后调用。
 //   中间那一段全是函数定义，不执行，所以逐根顺序仍是：标准化 → 分型 → 喂笔。
@@ -881,6 +885,69 @@ l77AEndOf(int k, int at, bool up, array<int> mEnd, array<int> mConf, array<int> 
 SEG_FINAL_PENS = true
 segPens(array<Unit> P) =>
     SEG_FINAL_PENS and P.size() > 1 ? array.slice(P, 0, P.size() - 1) : P
+
+// ★ D-3 C′（小栋 10-09 12:57 选 C；最后两条待小栋在合并页拍）：图上的已完成线段画**标准化**那一套，跟网页 segs_std 同一套
+//   （core/trend.py `_standardize`／`_done`，D2-0）。逐行同 Python：
+//   · 接点 k：0 是图头起点，k ＝ done[k-1] 终点 ＝ done[k] 起点；接点是顶 ⇔ 它前一段向上（图头起点反过来）；
+//   · 中间接点挪到左右两个接点之间（**不含**两邻）的原始极值上，顶取最高、底取最低，一样极取后一根；一轮挪完再来，直到不动
+//     （上限 n+2 轮，同 Python `range(len(piv) + 1)`）；
+//   · 图头起点只在 [第一段起点, 接点 1) 里挪，末段终点只在 (倒数第二个接点, 最后一段终点] 里挪，**中间定住以后**各挪一次；
+//   · 端点价：顶取 high、底取 low；hi／lo 按新区间重取。只改端点，不改线段怎么划（PI0／PI1 照旧）。
+STD_PENDING_SEGS = 2          // 最后几条标准化线段画虚线（终点还可能挪）。跟 web/withdrawn.py PENDING_SEGS 是同一个数，改一处要改另一处
+
+stdBest(array<float> H, array<float> L, int a, int b, bool top) =>
+    int j = a
+    int i = a + 1
+    while i <= b
+        if top ? H.get(i) >= H.get(j) : L.get(i) <= L.get(j)
+            j := i
+        i += 1
+    j
+
+stdMove(array<int> piv, array<bool> top, array<float> H, array<float> L, int k, int a, int b) =>
+    bool moved = false
+    if a <= b
+        nb = stdBest(H, L, a, b, top.get(k))
+        if nb != piv.get(k)
+            piv.set(k, nb)
+            moved := true
+    moved
+
+stdSegs(array<Unit> done, array<Unit> P, array<float> H, array<float> L) =>
+    out = array.new<Unit>()
+    n = done.size()
+    if n > 0
+        piv = array.new<int>(n + 1, 0)
+        top = array.new<bool>(n + 1, false)
+        piv.set(0, done.get(0).i0)
+        top.set(0, not isUp(P.get(done.get(0).PI0)))   // 线段方向 ＝ 起笔方向（同 Python seg["dir"]）
+        for k = 0 to n - 1
+            piv.set(k + 1, done.get(k).i1)
+            top.set(k + 1, isUp(P.get(done.get(k).PI0)))
+        lo0 = done.get(0).i0
+        hiN = done.get(n - 1).i1
+        int nRound = 0
+        bool again = n >= 2
+        while again and nRound < n + 2
+            bool anyMoved = false
+            for k = 1 to n - 1
+                if stdMove(piv, top, H, L, k, piv.get(k - 1) + 1, piv.get(k + 1) - 1)
+                    anyMoved := true
+            again := anyMoved
+            nRound += 1
+        stdMove(piv, top, H, L, 0, lo0, piv.get(1) - 1)
+        stdMove(piv, top, H, L, n, piv.get(n - 1) + 1, hiN)
+        for k = 0 to n - 1
+            i0 = piv.get(k)
+            i1 = piv.get(k + 1)
+            float hi = H.get(i0)
+            float lo = L.get(i0)
+            for i = i0 to i1
+                hi := math.max(hi, H.get(i))
+                lo := math.min(lo, L.get(i))
+            s = done.get(k)
+            out.push(Unit.new(i0, i1, top.get(k) ? H.get(i0) : L.get(i0), top.get(k + 1) ? H.get(i1) : L.get(i1), hi, lo, s.PI0, s.PI1, false))
+    out
 
 buildSegments(array<Unit> P) =>
     segs = array.new<Unit>()
@@ -1587,10 +1654,21 @@ if barstate.islast
                 nPenDrawn += 1
                 gLines.push(clipLine(base + p.i0, p.p0, base + p.i1, p.p1, penCol, penW,
                      t == np - 1 ? line.style_dashed : line.style_solid))
+    // D-3 C′：已完成的画标准化那一套（stdSegs，跟网页 segs_std 同一套），最后 STD_PENDING_SEGS 条短虚线；未完成的照旧画原始段（同网页）
+    std = stdSegs(done, sp, zRH, zRL)
+    if showSeg and std.size() > 0
+        for si = std.size() - 1 to 0
+            s = std.get(si)
+            if s.i1 >= x0Draw
+                if nSegDrawn >= SEG_LINE_CAP
+                    break
+                nSegDrawn += 1
+                gLines.push(clipLine(base + s.i0, s.p0, base + s.i1, s.p1, segCol, segW,
+                     si >= std.size() - STD_PENDING_SEGS ? line.style_dotted : line.style_solid))
     if showSeg and segs.size() > 0
         for si = segs.size() - 1 to 0
             s = segs.get(si)
-            if s.i1 >= x0Draw
+            if s.live and s.i1 >= x0Draw
                 if nSegDrawn >= SEG_LINE_CAP
                     break
                 nSegDrawn += 1
