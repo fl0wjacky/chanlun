@@ -744,6 +744,10 @@ function trendBandView(target, state, prim) {
       //        （撤回不在这一支：它是 `trendMarkView` 里的灰点线，本来就没铺带子。）
       const hatch = hatchFill(ctx);
       const strip = (i0, i1, key) => {
+        // ★ 同级别正式版的 S5 刀（盘整相连）**没有** `pullback_end_bar`：它是两个已经走完的中枢之间的接缝，
+        //   没有「极值已出、还没立住」那一截，也就没有中阴。缺这个键就不铺 —— 不缺省、不猜。
+        //   （不挡的话 `xOfBar(undefined)` 一路传进 LWC，抛 `reading 'year'`，整层分界都画不出来；4d09f3b 真载荷实测踩到。）
+        if (i0 == null || i1 == null) return;
         const x0 = vp.xOfBar(i0), x1 = vp.xOfBar(i1);
         if (x0 === null || x1 === null || x1 < 0 || x0 > W) return;
         if (x1 - x0 < 1) return;

@@ -44,13 +44,42 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
     return { states: D.states || null, deaths: (D.deaths || []).map((r) => ({ bar: r.bar, death: r.death, state: r.state, txt: r.txt, mode: r.mode })) };
   });
 
-  // ③ 牙先跑：原样载荷（现行后台没有 state）
-  const base = await read();
+  // ④ 真载荷（后台已经给 state 的话，4d09f3b 起）：屏上每把刀「空心 ⟺ 载荷 state=pending」；
+  //   盘整相连且 confirmed ⇒ 图上 0 个字；pending 的字只能是「待确认」或「<短名>（待确认）」。后台没给 state 就跳过这格（不算过也不算红）。
   const anyState = await p.evaluate(() => window.__app.state.data.trend.bounds.some((q) => 'state' in q));
+  if (anyState) {
+    // 先把视口挪到**最后一把 pending 的刀**那一扇（图尾那几把 S5 一律待确认，D-4）—— 不挪的话屏上可能一把 pending 都没有，这格就空过了
+    await p.evaluate(async () => {
+      const app = window.__app, ts = app.chart.timeScale(), v = ts.getVisibleLogicalRange(), w = v.to - v.from;
+      const pd = app.state.data.trend.bounds.filter((q) => q.state === 'pending').map((q) => q.bar);
+      if (pd.length) { const c = pd[pd.length - 1]; ts.setVisibleLogicalRange({ from: c - w * 0.6, to: c + w * 0.4 }); }
+      await new Promise((r) => setTimeout(r, 900));
+    });
+    const real = await p.evaluate(() => {
+      const app = window.__app, T = app.state.data.trend, D = app.state.trendDrawn;
+      const by = Object.fromEntries(T.bounds.map((q) => [q.bar, q]));
+      return { states: (D.states || []).map((s) => ({ ...s, want: by[s.bar] ? by[s.bar].state : null, death: by[s.bar] ? by[s.bar].death : null })),
+               deaths: (D.deaths || []).map((r) => ({ bar: r.bar, death: r.death, state: r.state, txt: r.txt, mode: r.mode })) };
+    });
+    const SH = { '趋势背驰': '趋势背驰', '盘整背驰': '盘整背驰', '小转大': '小转大', '盘整·未见背驰': '未见背驰', '比不了': '比不了', 'D2-8 补刀': '补刀' };
+    const badDot = real.states.filter((s) => s.hollow !== (s.want === 'pending'));
+    const badTxt = real.deaths.filter((r) => r.mode && (() => { const t = r.txt.replace(/^· | ·$/g, '');
+      if (r.death === '盘整相连') return !(r.state === 'pending' && t === '待确认');
+      return t !== (SH[r.death] || '') + (r.state === 'pending' ? '（待确认）' : ''); })());
+    const nPend = real.states.filter((s) => s.want === 'pending').length;
+    ck('④ 真载荷：屏上每把刀「空心 ⟺ state=pending」；字跟 state／death 对得上（盘整相连 confirmed 不写字）',
+       real.states.length > 0 && nPend > 0 && !badDot.length && !badTxt.length,
+       `屏上 ${real.states.length} 刀（pending ${nPend}）${badDot.length ? '　✗ 点不对 ' + JSON.stringify(badDot) : ''}${badTxt.length ? '　✗ 字不对 ' + JSON.stringify(badTxt) : ''}`);
+  } else console.log('－ ④ 跳过：这个后台还不给 state');
+
+  // ③ 牙：把载荷里的 state 全拿掉（现行后台本来就没有）⇒ 0 个空心点、0 个「待确认」
+  await p.evaluate(() => { for (const q of window.__app.state.data.trend.bounds) delete q.state; });
+  await nudge();
+  const base = await read();
   ck('③ 牙：载荷没有 state ⇒ 0 个空心点、0 个「待确认」',
-     base.states !== null && base.states.length > 0 && !anyState
+     base.states !== null && base.states.length > 0
        && base.states.every((s) => !s.hollow) && base.deaths.every((r) => !(r.txt || '').includes('待确认')),
-     `屏上 ${base.states ? base.states.length : 'null'} 刀　载荷带 state=${anyState}　空心 ${base.states ? base.states.filter((s) => s.hollow).length : '-'}`);
+     `屏上 ${base.states ? base.states.length : 'null'} 刀　空心 ${base.states ? base.states.filter((s) => s.hollow).length : '-'}`);
 
   // 改载荷：现行后台刀很稀（ZEC 15m 两万根里十几把），一屏常常只有一两把 ⇒ 挑屏上**一把**刀，三种情形轮流套在它身上，
   //   每套一次重画一次、量一次。别的刀一律 confirmed（量「其余都实心」）。
@@ -72,7 +101,8 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
     //   那样「待确认」写没写出来就量不到了（第一版这么假绿过：A、C 两格字都是 null 也算过）。
     const app = window.__app, H = app.chart.panes()[0].getHeight();
     t.price = app.state.candleSeries.coordinateToPrice(H / 2);
-    if (k === 'A') Object.assign(t, orig, { state: 'pending' });
+    // A 量的是「D2 刀待确认」：挑到的刀要是 S5（盘整相连，没有短名，正式口径下图尾多半是它）⇒ 换成 D2 的「比不了」再量
+    if (k === 'A') { Object.assign(t, orig, { state: 'pending' }); if (t.rule === 'S5' || t.death === '盘整相连' || !t.death) Object.assign(t, { rule: 'D2-2', death: '比不了' }); window.__slfe.shortA = t.death; }
     if (k === 'B') Object.assign(t, { rule: 'S5', death: '盘整相连', death_why: '不分类（同级别两个盘整的连接，L38:20；S12）', state: 'confirmed' });
     if (k === 'C') Object.assign(t, { rule: 'S5', death: '盘整相连', death_why: '不分类（同级别两个盘整的连接，L38:20；S12）', state: 'pending' });
   }, k);
@@ -82,8 +112,9 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
   const bare = (o) => (o.dd && o.dd.txt ? o.dd.txt.replace(/^· | ·$/g, '') : null);
 
   const A = await one('A');
+  const SHORT_A = { '趋势背驰': '趋势背驰', '盘整背驰': '盘整背驰', '小转大': '小转大', '盘整·未见背驰': '未见背驰', '比不了': '比不了', 'D2-8 补刀': '补刀' }[await p.evaluate(() => window.__slfe.shortA)];
   ck('② 待确认（D2 刀）⇒ 空心点＋字「<短名>（待确认）」（刀挪到格中，必须写得出来）',
-     !!A.st && A.st.hollow && !!A.dd && !!A.dd.mode && bare(A) === pick.short + '（待确认）', `刀 ${pick.bar}（${pick.death}）　${desc(A)}`);
+     !!A.st && A.st.hollow && !!A.dd && !!A.dd.mode && bare(A) === SHORT_A + '（待确认）', `刀 ${pick.bar}（量时 ${SHORT_A}）　${desc(A)}`);
   const othersSolid = (o) => (o.r.states || []).length > 0 && (o.r.states || []).filter((s) => s.bar !== pick.bar).every((s) => !s.hollow)
     && o.r.deaths.filter((x) => x.bar !== pick.bar).every((x) => !(x.txt || '').includes('待确认'));
   ck('②c 其余 confirmed 的刀：实心、不带「待确认」', othersSolid(A), `屏上 ${(A.r.states || []).length} 刀`);
