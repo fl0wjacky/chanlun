@@ -7,7 +7,9 @@
 // ★ 缺的块写「（还没填）」，**不编**。★ `status.verified` 不是 true 的，一律画「状态待核」，不显示成小栋定／我们定（Nova 11:15）。
 const $ = (id) => document.getElementById(id);
 const MOCK = new URLSearchParams(location.search).has('mock');     // 样例：读 decisions/mock.json，不保存
-const KIND = { '小栋定': 'xiaodong', '我们定': 'ours', '待定': 'open' };
+const KIND = { '小栋定': 'xiaodong', '我们定': 'ours', '待定': 'open', '原文定': 'fixed', '不再适用': 'void' };
+// 原文定／不再适用（Atlas 11:28 分类）：只给看、不给「选这个」——前者原文写死了，后者被别的条目的选择带掉了
+const NOPICK = (s) => !!(s && s.verified && (s.kind === '原文定' || s.kind === '不再适用'));
 const st = { items: [], byId: {}, layers: [], choices: {}, pending: {}, cur: null };
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -50,7 +52,7 @@ function renderTree() {
     const og = document.createElement('optgroup'); og.label = `第 ${order} 层 · ${name}`;
     for (const d of its) {
       const b = document.createElement('button');
-      b.className = 'node' + (d.skeleton ? ' skel' : ''); b.type = 'button'; b.dataset.id = d.id;
+      b.className = 'node' + (d.skeleton ? ' skel' : '') + (dotCls(d.status) === 'void' ? ' void' : ''); b.type = 'button'; b.dataset.id = d.id;
       b.innerHTML = `<span class="dot ${dotCls(d.status)}" title="${esc(kindTxt(d.status))}"></span><span class="id">${esc(d.id)}</span><span>${esc(d.title)}</span>`;
       b.onclick = () => show(d.id);
       nav.appendChild(b);
@@ -71,6 +73,8 @@ function statusLine(s) {
   if (!s || !s.verified) return '<span class="dot unver"></span>状态待核<span class="mu">（还没逐条核过，先别当真）</span>';
   if (s.kind === '小栋定') return `<span class="dot xiaodong"></span>小栋定${s.date ? ' · ' + esc(day(s.date)) : ''}${s.quote ? ` · 『${esc(s.quote)}』` : ''}${s.via ? `<span class="mu">（${esc(s.via)}）</span>` : ''}`;
   if (s.kind === '我们定') return `<span class="dot ours"></span>我们定${s.by ? ' · ' + esc(s.by) : ''}${s.date ? ' · ' + esc(day(s.date)) : ''}<span class="mu"> — 这是我们替你定的，你可以推翻</span>`;
+  if (s.kind === '原文定') return `<span class="dot fixed"></span>原文定<span class="mu"> — 原文写死了，不是选择，这里只给你看</span>`;
+  if (s.kind === '不再适用') return `<span class="dot void"></span>不再适用<span class="mu"> — ${s.note ? esc(s.note) : '前面别的条目选完以后，这条不用定了'}</span>`;
   return '<span class="dot open"></span>待定';
 }
 
@@ -114,17 +118,20 @@ function show(id) {
     return `<article class="${cls}" data-key="${esc(o.key)}">
       <header><b>${esc(o.key)}　${esc(o.label)}</b>${o.key === rec.choice ? '<span class="tagrec">推荐</span>' : ''}${hisTag}</header>
       <p>${o.effect ? esc(o.effect) : todo}</p>${nums}${figBlock(o.figures)}
-      <div class="pick"><button type="button" class="ghost" data-pick="${esc(o.key)}">选这个</button></div></article>`;
+      ${NOPICK(s) ? '' : `<div class="pick"><button type="button" class="ghost" data-pick="${esc(o.key)}">选这个</button></div>`}</article>`;
   }).join('') || `<p>${todo}</p>`;
+  // 定了、但选项还没填（S-4 那种骨架条目）：照样把他选的那一项写出来，不许因为没卡片就什么都不挂
+  const pickedKey = mine ? mine.option : his;
+  const orphan = pickedKey && !(d.options || []).some((o) => o.key === pickedKey) ? `<p class="orphan"><span class="tagme">你选的</span> ${esc(pickedKey)}<span class="mu">（这一项的详情还在填）</span></p>` : '';
   const tried = (d.tried || []).length ? `<section class="blk tried"><h3>试过、没用的路</h3><ul>${d.tried.map((t) => `<li><b>${esc(t.label)}</b>：${esc(t.result)}</li>`).join('')}</ul></section>` : '';
   $('detail').innerHTML = `
     <h2>${esc(d.id)}${(d.also || []).length ? `<span class="also">（也是 ${d.also.map(esc).join('、')}）</span>` : ''}　${esc(d.title)}</h2>
     <div class="status">${statusLine(s)}</div>
-    ${s.verified && s.note ? `<p class="snote">${esc(s.note)}</p>` : ''}
+    ${s.verified && s.note && s.kind !== '不再适用' ? `<p class="snote">${esc(s.note)}</p>` : ''}
     ${d.skeleton ? '<p class="mu">这一条只有标题，详情还在填。</p>' : ''}
     <section class="blk what"><h3>① 管什么</h3>${d.what && d.what.plain ? `<p>${esc(d.what.plain)}</p>` : `<p>${todo}</p>`}${d.what && d.what.analogy ? `<p class="analogy">打个比方：${esc(d.what.analogy)}</p>` : ''}</section>
     <section class="blk"><h3>② 原文</h3>${(d.sources || []).map(srcBlock).join('') || `<p>${todo}</p>`}</section>
-    <section class="blk"><h3>③ 各选项后果</h3><div class="opts">${opts}</div>
+    <section class="blk"><h3>③ 各选项后果</h3>${orphan}<div class="opts${dotCls(s) === 'void' ? ' void' : ''}">${opts}</div>
       <div class="saveline" id="saveline" ${pend ? '' : 'hidden'}>已选 ${esc(pend || '')}，还没保存　<button type="button" id="saveBtn">确认</button><button type="button" class="ghost" id="undoBtn">算了</button><span id="saveErr" class="err"></span></div></section>
     ${tried}
     <section class="blk rec"><h3>④ 推荐和理由</h3>${rec.choice ? `<p><b>${esc(rec.choice)}</b>　<span class="basis">${rec.basis === '原文' ? '原文站在这边' : rec.basis === '产品要求' ? '为了产品要求' : esc(rec.basis || '')}</span>${rec.by ? `<span class="mu">　推荐人：${esc(rec.by)}</span>` : ''}</p><p>${rec.reason ? esc(rec.reason) : todo}</p>` : `<p>${todo}</p>`}</section>

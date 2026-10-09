@@ -112,3 +112,8 @@ dialog .row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 1
 .tried ul, ul.open { margin: 4px 0; padding-left: 18px; }
 .tried li { margin: 4px 0; }
 .deps .free { color: var(--mu); margin-right: 10px; }
+.dot.fixed { background: none; border: 1.5px solid var(--tx); width: 9px; height: 9px; }   /* 原文定：实线空心圈，不是谁定的 */
+.dot.void { background: var(--dim); opacity: .5; }                                         /* 不再适用 */
+.node.void span:last-child, .node.void .id { color: var(--dim); text-decoration: line-through; text-decoration-color: var(--line); }
+.opts.void { opacity: .5; }
+.orphan .tagme { font-size: 11px; color: var(--bg); background: var(--ok); border-radius: 3px; padding: 0 6px; margin-right: 4px; }

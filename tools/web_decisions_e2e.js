@@ -3,7 +3,8 @@
 // 量的是**页面接线**，读 ?mock=1（decisions/mock.json，Atlas 那份数据的快照）：
 //   predeploy 起的临时后台不一定有数据文件，后台那半（口令、回码、存取）归 web/check_decisions.py，这里不重复。
 //   ① 左边树的条数 = 数据里的条数，层名照 layer_order，没有一条丢
-//   ② 每条数据里写了「小栋定」且 verified 的，页上都挂「你选的」，挂在 status.choice 那一项上，而且只挂一项
+//   ② 每条数据里写了「小栋定」且 verified 的，页上都挂「你选的」，挂在 status.choice 那一项上，而且只挂一项；
+//      那一项还没填成卡片的（骨架条目），要有一行「你选的 X（详情还在填）」—— 10-09 S-4 就是这样，第一版这里什么都不挂
 //   ③ 没核过的条目画虚圈（.dot.unver），不许亮绿
 //   ④ 选项里写了的图**真的载进来了**（naturalWidth > 0）：路径写错时页面不报错、只是一张碎图
 //   ⑤ 样例模式点「选这个 → 确认」：不发 POST（样例不保存），标签换到新的那一项
@@ -52,7 +53,11 @@ const chk = (name, ok, got) => { res.push(ok); console.log(`${ok ? '✓' : '✗'
     for (const x of his) {
       await open(x.id);
       const me = await p.$$eval('.opt', (a) => a.filter((o) => o.querySelector('.tagme')).map((o) => o.dataset.key));
-      if (me.length !== 1 || me[0] !== x.status.choice) bad2.push([x.id, x.status.choice, me]);
+      // 选项还没填的（骨架）：卡片上挂不了，就得有那一行「你选的 X（详情还在填）」
+      const hasOpt = (x.options || []).some((o) => o.key === x.status.choice);
+      const orphan = await p.$eval('#detail', (d) => d.querySelector('.orphan')?.textContent || '');
+      const ok = hasOpt ? me.length === 1 && me[0] === x.status.choice : me.length === 0 && orphan.includes(x.status.choice);
+      if (!ok) bad2.push([x.id, x.status.choice, me, orphan]);
     }
     chk(`② 小栋定的 ${his.length} 条都挂「你选的」、挂在 status.choice 上、只挂一项`, his.length > 0 && bad2.length === 0, bad2);
 
