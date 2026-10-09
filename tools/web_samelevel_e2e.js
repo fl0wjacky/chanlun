@@ -4,8 +4,8 @@
 //   ③ 牙：载荷里**没有** state（现行后台）⇒ 一个空心点都没有、一个「待确认」都没有 —— 跟改之前一样。
 // ★ 后台的 `state` 字段还没进引擎（Bram 08:34 起草、未提交），所以这里**在页面里改载荷**：挑屏上几把真刀，
 //   把它们的 state／death 改掉再重画。量的是**前端读不读、怎么画**，不量后台给得对不对（那是 G2 回放＋check_parity 的事）。
-// 跑法：真后台 `python3 web/server.py --port 8797 --no-prewarm`（要联网取币安），然后
-//   NODE_PATH=<playwright 的 node_modules> node tools/web_samelevel_e2e.js http://127.0.0.1:8797/ [出图目录]
+// 跑法：真后台 `python3 web/server.py --port <端口> --no-prewarm`（要联网取币安），然后
+//   E2E_URL=<E2E_URL> NODE_PATH=<playwright 的 node_modules> node tools/web_samelevel_e2e.js [出图目录]
 // 退出码：0 全绿；1 有红；2 跑不动（页面没数据／屏上没刀 —— 查不了 ≠ 通过）
 const { chromium } = require('playwright');
 // 跟另外几套一样：E2E_URL 优先（上线门统一给，predeploy 那时把**出图目录**当第一个参数传进来）；没给就收「地址 [出图目录]」
