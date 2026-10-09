@@ -592,6 +592,7 @@ R6_YI_PRIME = False                               # R-6 乙′（读法-R3R6 一
                                                   #   第一个中枢从跟 a 反向的那条起找（找不到就整体往后挪两条，照 L39 把 a 并成 a′）。中枢形状不限。
 SL_FIRST_EXEMPT = False                           # 甲S-2／乙′-5（读法-R3R6 一·6，Atlas f3fac3c）：前一个走势段是本级别反向趋势 ⇒ 这一段第一个中枢不受限
                                                   #   （甲：首中枢可以从同向那条起；乙′：a 可以进第一个中枢）
+D2_ALTERNATE = True                               # D-0 分界一高一低交替（D2-3）；只给出图／量数关：等同 trend_v3(alternate=False)
 SAME_LEVEL_D2 = False                             # S9：D2 的参照中枢也换成同级别三段中枢（R-1＝A 以后的「完整同级别」）
 SAME_LEVEL_C8 = None                              # S10 丙8 在同级别下：None＝照现行；"filter"＝甲（只有趋势背驰／盘整背驰的死点才确立）；
                                                   #   "direct"＝乙（背驰点直接切，不等反向三类点；后面再出新极值就挪刀，记 moved）
@@ -729,6 +730,7 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
       ★ n_centers_level 是**本级别**中枢个数，跟读法无关；读法 A 的升级段，字母挂在 units 上，个数不是它；
     units：D3 合成出来的高一级中枢（只列 n>1 的），带 seg，给前端画升级框；
     reading：这一跑用的 D3 读法（A／B），前端据此决定字母挂哪一级（spec §八 第 6 条）。"""
+    alternate = alternate and D2_ALTERNATE
     if SAME_LEVEL and SAME_LEVEL_C8 in ("filter", "direct", "plus"):
         _C8["first"] = None
     if SAME_LEVEL and SAME_LEVEL_C8 == "direct":
