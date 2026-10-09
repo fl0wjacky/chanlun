@@ -1027,7 +1027,7 @@
       ],
       "recommendation": {
         "choice": "B",
-        "by": "Atlas（待 Nova 审）",
+        "by": "Nova",
         "basis": "原文",
         "reason": "作者在 L38 正文和 L52 答疑里自己说过「归根结底都是某级别的第一类买卖点」，调和是他给的，不是我们编的。"
       },
@@ -1098,7 +1098,7 @@
       ],
       "recommendation": {
         "choice": "A",
-        "by": "Atlas（待 Nova 审）",
+        "by": "Nova",
         "basis": "原文",
         "reason": "原博就是「只要」，我们不能替作者改字；读法差异照实标出来，用到这句推结论的地方要两种都写。"
       },
@@ -1161,7 +1161,7 @@
       ],
       "recommendation": {
         "choice": "A",
-        "by": "Atlas（待 Nova 审）",
+        "by": "Nova",
         "basis": "原文",
         "reason": "原字照留、标疑；引擎本来就买卖对称，不管选哪个图都不变。"
       },
@@ -1227,7 +1227,7 @@
       ],
       "recommendation": {
         "choice": "A",
-        "by": "Atlas（待 Nova 审）",
+        "by": "Nova",
         "basis": "原文",
         "reason": "原文只站在多头说；做空的规则得我们编。"
       },
@@ -1246,13 +1246,113 @@
       "id": "R-2",
       "layer": "读法选择",
       "layer_order": 0,
-      "title": "正文里没点名、但起定义作用的句子算不算定义（升格）",
       "status": {
         "kind": "待定",
-        "verified": false,
-        "date": null
+        "verified": true,
+        "note": "Nova 10-09 暂缓过：今天选哪个都不动图，有冲突时再问。现在放上来，你可以现在定，也可以留着。"
       },
-      "skeleton": true
+      "title": "正文里没起名字、但实际在当规则用的句子，算不算「定义」那一级",
+      "what": {
+        "plain": "我们排原文的分量：作者起了名字的（「缠中说禅××定理」「××定义」）最重，正文讲解次之，答疑最轻。有一批句子在正文里、实际被我们当规则用，可作者没给它起名字。它们算「定义」那一级，还是「讲解」那一级？这决定了将来跟有名字的定理打架时谁让谁。",
+        "analogy": "像公司制度：写进《员工手册》的条款，和经理在大会上随口定下、大家一直照做的规矩。两者冲突时，手册优先，还是平起平坐？"
+      },
+      "sources": [
+        {
+          "lesson": 18,
+          "lines": "64-65",
+          "layer": "正文",
+          "source": "镜像",
+          "text": "维持“缠中说禅走势中枢”的一个充分必要条件，就是任何一个离开该中枢的走势类型，都必须是次级别或次级别以下的走势类型"
+        },
+        {
+          "lesson": 33,
+          "lines": "9-10",
+          "layer": "正文",
+          "source": "镜像",
+          "text": "一般来说，中枢的延伸不能超过 5 段，也就是一旦出现 6 段的延伸，加上形成中枢本身那三段，就构成更大级别的中枢了。"
+        },
+        {
+          "lesson": 65,
+          "lines": "50",
+          "layer": "正文",
+          "source": "镜像",
+          "text": "线段有一个最基本的前提，就是线段的前三笔，必须有重叠的部分"
+        },
+        {
+          "lesson": 70,
+          "lines": "34",
+          "layer": "正文",
+          "source": "原博",
+          "url": "http://blog.sina.com.cn/s/blog_486e105c01000c86.html",
+          "sha256": "177c1e28833b",
+          "text": "没有人规定分段的结束位置一定是最高、最低的，关键要有至少三笔，因为从37开始到最高的位置，没有三笔，所以不能认为线段已经完成。"
+        },
+        {
+          "lesson": 71,
+          "lines": "26",
+          "layer": "正文",
+          "source": "镜像",
+          "text": "这种情况，无非两种最后的结果"
+        },
+        {
+          "layer": "正文",
+          "source": "镜像",
+          "lesson": 77,
+          "lines": "89-94",
+          "text": "（这一段镜像叠字很重，不照抄）",
+          "reading": "第一笔笔破坏、一个符合线段标准的走势 A、一个反弹，三者合成一个线段。"
+        },
+        {
+          "lesson": 78,
+          "lines": "40-41",
+          "layer": "正文",
+          "source": "镜像",
+          "text": "线段 C 没有形成第二特征序列的分型又直接新高或新低了，这时候，不能认为这是三个线段，线段 A、B、C 加起来只能算是一个线段。"
+        },
+        {
+          "lesson": 88,
+          "lines": "20-21",
+          "layer": "正文",
+          "source": "镜像",
+          "text": "新的走势类型最开始的形态就确立了"
+        },
+        {
+          "layer": "推论",
+          "source": "编者",
+          "text": "以上 8 句都在正文、都在被我们当规则用，作者都没起名字。我们在冲突表 15 条里没找到一条是「这类句子跟有名字的定理打架」的；但 108 课里这种句子没有全部找出来。"
+        }
+      ],
+      "options": [
+        {
+          "key": "A",
+          "label": "不升格：算正文讲解",
+          "effect": "照样当规则用；将来跟有名字的定理冲突时先让步。今天代码、图一处不动。",
+          "numbers": {},
+          "figures": []
+        },
+        {
+          "key": "B",
+          "label": "升格：跟有名字的定义同一级",
+          "effect": "冲突时摆到同一级比（谁更精确、谁在后），不自动让步。今天代码、图一处不动。",
+          "numbers": {},
+          "figures": []
+        }
+      ],
+      "recommendation": {
+        "choice": "A",
+        "by": "Atlas（待 Nova 审）",
+        "basis": "原文",
+        "reason": "作者给重要条目起名字（「缠中说禅……定理」），这是他自己标的分量；不起名字的照讲解算，规则最好懂。"
+      },
+      "affects": [
+        "C16（中心定理二 vs 不足 9 段）",
+        "Z-7"
+      ],
+      "depends_on": [],
+      "docs": [
+        "docs/spec/总纲-公理清单.md「给小栋的题」"
+      ],
+      "open": []
     },
     {
       "id": "R-4",
@@ -1308,21 +1408,9 @@
       "layer_order": 1,
       "title": "每段至少一个中枢；趋势至少两个不重叠",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
-      },
-      "skeleton": true
-    },
-    {
-      "id": "Q-4",
-      "layer": "六条整体要求",
-      "layer_order": 1,
-      "title": "（已并入 Q-6）",
-      "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "原文定",
+        "verified": true,
+        "note": "原文写死了，不是选择，列出来只为说明。依据：中心定理二（L20 正文）。"
       },
       "skeleton": true
     },
@@ -1348,7 +1436,7 @@
         "verified": true,
         "date": "2026-10-09 03:41",
         "via": "决策树 Q-6 行",
-        "note": "待重评：你 03:41 定过「当下可用、出来不收回」（笔层除外）。S-13 选了 B 以后，这条能不能推广到线段和分界，要等锁关重量的数，Nova 再给你一页。"
+        "note": "待重评：你 03:41 定过「当下可用、出来不收回」（笔层除外）。S-13 选了 B 以后，这条能不能推广到线段和分界，要等锁关重量的数，Nova 再给你一页。（原 Q-4 并入这一条。）"
       },
       "skeleton": true
     },
@@ -1418,9 +1506,9 @@
       "layer_order": 2,
       "title": "顶底之间要不要『公共部分』",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "原文定",
+        "verified": true,
+        "note": "原文写死了，不是选择，列出来只为说明。依据：L77:38 正文。"
       },
       "skeleton": true
     },
@@ -1502,9 +1590,9 @@
       "layer_order": 3,
       "title": "分界两边元素一端相同算不算分界",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "原文定",
+        "verified": true,
+        "note": "原文写死了，不是选择，列出来只为说明。依据：L67:17 正文推出＋L75:66 答疑一环。"
       },
       "skeleton": true
     },
@@ -1590,9 +1678,9 @@
       "layer_order": 3,
       "title": "L77 第二支：X＋A＋反弹合成一段",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "原文定",
+        "verified": true,
+        "note": "原文写死了，不是选择，列出来只为说明。依据：L77 正文（我们照做，Nova 10-08 17:20）。"
       },
       "skeleton": true
     },
@@ -1626,9 +1714,9 @@
       "layer_order": 3,
       "title": "线段终点必须是段内极值吗",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "原文定",
+        "verified": true,
+        "note": "原文写死了，不是选择，列出来只为说明。依据：L70:34、L78:50-51 正文。"
       },
       "skeleton": true
     },
@@ -1638,9 +1726,9 @@
       "layer_order": 4,
       "title": "判『不重叠』用 DD～GG 还是 ZD～ZG",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "原文定",
+        "verified": true,
+        "note": "原文写死了，不是选择，列出来只为说明。依据：中心定理二（L20 正文）。"
       },
       "skeleton": true
     },
@@ -1686,9 +1774,9 @@
       "layer_order": 4,
       "title": "一段盘整里好几个中枢要不要合成升级（页上 ③）",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "不再适用",
+        "verified": true,
+        "note": "因为 R-1 选 A（同级别分解），这条不用定了。"
       },
       "skeleton": true
     },
@@ -1698,9 +1786,9 @@
       "layer_order": 4,
       "title": "扩展链不足 9 段（4 段）",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "不再适用",
+        "verified": true,
+        "note": "因为 R-1 选 A（同级别分解），这条不用定了。"
       },
       "skeleton": true
     },
@@ -1978,9 +2066,9 @@
       "layer_order": 5,
       "title": "盘整组怎么分组",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "不再适用",
+        "verified": true,
+        "note": "因为 R-1 选 A（同级别分解），这条不用定了。"
       },
       "skeleton": true
     },
@@ -2278,9 +2366,11 @@
       "layer_order": 8,
       "title": "买卖点『待确认』那档默认",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "我们定",
+        "verified": true,
+        "by": "Iris",
+        "date": "2026-10-03",
+        "note": "显示上的默认，是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2362,9 +2452,11 @@
       "layer_order": 8,
       "title": "各档不透明度",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "我们定",
+        "verified": true,
+        "by": "Iris（Nova 10-08 12:35 调暗升级档）",
+        "date": null,
+        "note": "显示上的默认，是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2470,9 +2562,11 @@
       "layer_order": 8,
       "title": "合成大框填不填",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "我们定",
+        "verified": true,
+        "by": "Iris",
+        "date": "2026-10-06",
+        "note": "显示上的默认，是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2506,9 +2600,11 @@
       "layer_order": 8,
       "title": "最后一根没收盘的 K 线",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "我们定",
+        "verified": true,
+        "by": "照 Python 版本",
+        "date": null,
+        "note": "显示上的默认，是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2542,9 +2638,11 @@
       "layer_order": 8,
       "title": "待确认的点",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "我们定",
+        "verified": true,
+        "by": "Iris",
+        "date": "2026-10-03",
+        "note": "显示上的默认，是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2566,9 +2664,11 @@
       "layer_order": 8,
       "title": "线段层和笔层的点怎么分",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "我们定",
+        "verified": true,
+        "by": "照 Python／Pine 版本",
+        "date": null,
+        "note": "显示上的默认，是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2590,9 +2690,11 @@
       "layer_order": 8,
       "title": "价格怎么写",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "我们定",
+        "verified": true,
+        "by": "Iris",
+        "date": "2026-10-03",
+        "note": "显示上的默认，是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },
@@ -2650,9 +2752,11 @@
       "layer_order": 8,
       "title": "全屏按钮位置",
       "status": {
-        "kind": "待定",
-        "verified": false,
-        "date": null
+        "kind": "我们定",
+        "verified": true,
+        "by": "谁定的没核（card-5014b0cb-e4d）",
+        "date": null,
+        "note": "显示上的默认，是我们替你定的，你可以推翻。"
       },
       "skeleton": true
     },

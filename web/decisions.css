@@ -112,7 +112,7 @@ dialog .row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 1
 .tried ul, ul.open { margin: 4px 0; padding-left: 18px; }
 .tried li { margin: 4px 0; }
 .deps .free { color: var(--mu); margin-right: 10px; }
-.dot.fixed { background: none; border: 1.5px solid var(--tx); width: 9px; height: 9px; }   /* 原文定：实线空心圈，不是谁定的 */
+.dot.fixed { background: #6aa8ff; }   /* 原文定（Nova 11:34：颜色跟小栋定绿／我们定灰／待定琥珀都分开）：冷蓝，不是谁定的，是原文 */
 .dot.void { background: var(--dim); opacity: .5; }                                         /* 不再适用 */
 .node.void span:last-child, .node.void .id { color: var(--dim); text-decoration: line-through; text-decoration-color: var(--line); }
 .opts.void { opacity: .5; }

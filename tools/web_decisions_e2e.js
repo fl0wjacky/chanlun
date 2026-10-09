@@ -9,6 +9,7 @@
 //   ④ 选项里写了的图**真的载进来了**（naturalWidth > 0）：路径写错时页面不报错、只是一张碎图
 //   ⑤ 样例模式点「选这个 → 确认」：不发 POST（样例不保存），标签换到新的那一项
 //   ⑥ 手机 390：树收成下拉、页面不横向溢出；下拉换条目 ⇒ 详情跟着换
+//   ⑧ 原文定／不再适用：状态圈是自己那一档、没有「选这个」（10-09 这 9 条都还没选项，按钮那半要等带选项的出现才真咬得到）
 //   ⑦ 主站顶栏有入口，点了到决策树页；手机上入口不另占一行（顶栏不变高）
 // 用法：E2E_URL=<地址> node tools/web_decisions_e2e.js <输出目录>   退出码：0 全过，1 有红，2 跑不了
 const { chromium } = require('playwright');
@@ -16,7 +17,8 @@ const fs = require('fs');
 const path = require('path');
 
 const BASE = (process.env.E2E_URL || process.argv[2] || '').replace(/\/?$/, '/');
-const OUT = process.argv[process.env.E2E_URL ? 2 : 3] || fs.mkdtempSync('/tmp/dec-e2e-');
+// 不给目录就写仓里的 out/（已 gitignore）——同机几家，不往 /tmp 写（Nova 11:35）
+const OUT = process.argv[process.env.E2E_URL ? 2 : 3] || path.join(__dirname, '..', 'out', 'e2e-decisions');
 if (!/^https?:/.test(BASE)) { console.log('✗ 没给地址（E2E_URL）'); process.exit(2); }
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -76,6 +78,19 @@ const chk = (name, ok, got) => { res.push(ok); console.log(`${ok ? '✓' : '✗'
     const dots = await p.$$eval('.node', (a) => Object.fromEntries(a.map((n) => [n.querySelector('.id').textContent.trim(), n.querySelector('.dot')?.className || ''])));
     const lit = unver.filter((x) => !/\bunver\b/.test(dots[x] || ''));
     chk(`③ 没核过的 ${unver.length} 条都是虚圈`, lit.length === 0, lit.slice(0, 5));
+
+    // ⑧ 原文定／不再适用：只给看，不许有「选这个」
+    const ro = items.filter((x) => x.status && x.status.verified && ['原文定', '不再适用'].includes(x.status.kind));
+    const roBad = [];
+    for (const x of ro) {
+      await open(x.id);
+      const n = await p.locator('[data-pick]').count();
+      const dot = await p.$eval('.status .dot', (d) => d.className);
+      const tree = await p.$eval(`.node[data-id="${x.id}"] .dot`, (d) => d.className);   // 树上那颗走 KIND 表，状态行是另一条路，两处都要对
+      const want = x.status.kind === '原文定' ? 'fixed' : 'void';
+      if (n || !dot.includes(want) || !tree.includes(want)) roBad.push([x.id, n, dot, tree]);
+    }
+    chk(`⑧ 原文定／不再适用 ${ro.length} 条：状态圈对、没有「选这个」`, roBad.length === 0, roBad);
 
     // ⑤
     const x5 = his[0];
