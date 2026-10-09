@@ -432,27 +432,39 @@ def _death_types(r, done, bounds, segments, centers):
             if near:
                 b["death_warn"] = "%s 在 bar %d，落在刀所在线段里，跟刀 bar %d 对不上" % (kind1, near[0]["bar"], b["bar"])
         zs = [z for z in centers if z["PI1"] < j]
+        fill = ""                                      # D2-5 补位（读法-D2-5，Nova 06:43 定优先级 -1→-2→-3→-4）
         if not zs:
-            b["death"], b["death_why"] = "比不了", "找不到 Z"
-            continue
-        k0 = zs[-1]["PI0"]
-        if k0 == 0:
-            b["death"], b["death_why"] = "比不了", "找不到 A"
-            continue
-        A = done[k0 - 1]
-        if _is_up(A) != up:
-            b["death"], b["death_why"] = "比不了", "进入段反向"
-            continue
+            # -3：找不到 Z，但 C 跟往前两条三段重叠 ⇒ 拿 C 跟往前第二条比
+            if D25_FILL >= 3 and j >= 2 and max(done[q]["lo"] for q in (j - 2, j - 1, j)) <= min(done[q]["hi"] for q in (j - 2, j - 1, j)):
+                A, fill = done[j - 2], "（-3 补位：无 Z，C 与前两条重叠，比 C 往前第二条）"
+            else:
+                b["death"], b["death_why"] = "比不了", "找不到 Z"
+                continue
+        else:
+            z = zs[-1]
+            k0 = z["PI0"]
+            A = done[k0 - 1] if k0 > 0 else None
+            if A is None or _is_up(A) != up:
+                # -2：进入段反向或找不到 ⇒ C 往前第二条（必跟 C 同向），条件是它属于 Z
+                if D25_FILL >= 2 and j >= 2 and z["PI0"] <= j - 2 <= z["PI1"]:
+                    A, fill = done[j - 2], "（-2 补位：进入段%s，比 C 往前第二条 Ai／Ai+2）" % ("反向" if A is not None else "找不到")
+                else:
+                    b["death"], b["death_why"] = "比不了", ("进入段反向" if A is not None else "找不到 A")
+                    continue
         newx = (C["p1"] > A["p1"]) if up else (C["p1"] < A["p1"])
         if _panzheng(A, C, not up, hist):              # 盘整背驰的判法跟 M29 共用一份（signals._panzheng）
-            b["death"], b["death_why"] = "盘整背驰", "C 创新%s、面积小于 A" % ("高" if up else "低")
+            b["death"], b["death_why"] = "盘整背驰", "C 创新%s、面积小于 A" % ("高" if up else "低") + fill
             continue
-        why = "C 没创新%s" % ("高" if up else "低") if not newx else "C 面积不小于 A"
+        why = ("C 没创新%s" % ("高" if up else "低") if not newx else "C 面积不小于 A") + fill
         sg = pre.get(b["bar"])
         trend = sg is not None and sg["type"] in ("上涨", "下跌") and not sg["upgraded"]
         b["death"], b["death_why"] = ("小转大" if trend else "盘整·未见背驰"), why + ("" if trend else "；前一段是%s" % (
             (sg["type"] + ("·升" if sg["upgraded"] else "")) if sg else "？"))
     return bounds
+
+
+D25_FILL = 0                                      # D2-5 补位（读法-D2-5，Atlas 27e714a，Nova 06:43 定优先级）：0＝现行（进入段反向即「比不了」）；
+                                                  #   2＝加 -2（进入段反向／找不到 ⇒ 比 C 往前第二条，须属于 Z）；3＝再加 -3（找不到 Z 但 C 与前两条重叠）。只改标注
 
 
 _XZD_SECOND = True                                # 只给自检反向臂关：小转大的刀不出二类
