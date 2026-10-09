@@ -589,18 +589,20 @@ SAME_LEVEL_D6 = None                              # R-6 甲在同级别下：Non
                                                   #   "fallback"＝同 strict，但这样判不出同方向趋势就退回不限方向（照 D6-4）
 R6_YI_PRIME = False                               # R-6 乙′（读法-R3R6 一·5，Atlas c11fe60）：分界之后每段，从分界极值出发的第一条线段 a 不进第一个中枢；
                                                   #   第一个中枢从跟 a 反向的那条起找（找不到就整体往后挪两条，照 L39 把 a 并成 a′）。中枢形状不限。
+SL_FIRST_EXEMPT = False                           # 甲S-2／乙′-5（读法-R3R6 一·6，Atlas f3fac3c）：前一个走势段是本级别反向趋势 ⇒ 这一段第一个中枢不受限
+                                                  #   （甲：首中枢可以从同向那条起；乙′：a 可以进第一个中枢）
 SAME_LEVEL_D2 = False                             # S9：D2 的参照中枢也换成同级别三段中枢（R-1＝A 以后的「完整同级别」）
 SAME_LEVEL_C8 = None                              # S10 丙8 在同级别下：None＝照现行；"filter"＝甲（只有趋势背驰／盘整背驰的死点才确立）；
                                                   #   "direct"＝乙（背驰点直接切，不等反向三类点；后面再出新极值就挪刀，记 moved）
                                                   #   "plus"＝丙（D2 照旧，每组 D2 段里再加背驰刀；同方向再出新极值就挪刀，记 moved）
 
 
-def _sl_centers(done, a, b, first_up=None):
+def _sl_centers(done, a, b, first_up=None, first_free=False):
     """S1＋S2：done[a..b) 里从左往右找三段重叠，满三段即收、不延伸；下一个从这三段之后起，段不共用。
     first_up 给了（R-6 甲，D6）：中枢首段的方向必须是它（上涨段里 first_up=False，即下上下）。"""
     out, k = [], a
     while k + 2 < b:
-        if first_up is not None and _is_up(done[k]) != first_up:
+        if first_up is not None and _is_up(done[k]) != first_up and not (first_free and not out):
             k += 1
             continue
         lo = max(done[q]["lo"] for q in range(k, k + 3))
@@ -674,15 +676,20 @@ def _sl_layer(done, ks, bounds_, n):
     pieces = []                                    # (起 done 下标, 止 done 下标（不含）, [中枢])
     extra = []
     bk = {x["line_seg"] + 1: x["kind"] for x in bounds_}
+    def kind_of(zz):
+        return "无中枢" if not zz else "盘整" if len(zz) == 1 else ("上涨" if _sl_rel(zz[0], zz[1]) == "上" else "下跌")
     for g, (a, b) in enumerate(zip(edges, edges[1:])):
         zz = _sl_centers(done, a, b)
+        exempt = False
+        if SL_FIRST_EXEMPT and g and bk.get(a) in ("L", "H") and pieces:
+            exempt = kind_of(pieces[-1][2]) == ("下跌" if bk[a] == "L" else "上涨")
         if SAME_LEVEL_D6 and g and bk.get(a) in ("L", "H"):
             want_up = bk[a] == "L"                       # 从低点起 ⇒ 上涨 ⇒ 中枢首段向下（下上下）
-            zr = _sl_centers(done, a, b, first_up=not want_up)
+            zr = _sl_centers(done, a, b, first_up=not want_up, first_free=exempt)
             ok = len(zr) >= 2 and _sl_rel(zr[0], zr[1]) == ("上" if want_up else "下")
             if SAME_LEVEL_D6 == "strict" or ok:
                 zz = zr
-        if R6_YI_PRIME and g and bk.get(a) in ("L", "H"):
+        if R6_YI_PRIME and g and bk.get(a) in ("L", "H") and not exempt:
             zz = _yi_prime_centers(done, a, b)
         start, cur, way = a, [], None
         for z in zz:
