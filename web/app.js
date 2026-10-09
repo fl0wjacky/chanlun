@@ -932,9 +932,12 @@ function paint(d) {
   //   两条都是虚线、在 V 处拐弯，V 上那个虚线圈和「暂定」两个字在 layers.js 端点那一层画。
   // D-3 C：有 `segs_std` ⇒ 已完成的线段画标准化那一套（跟分界同一套），最后一条单拎出来画短虚线；没有 ⇒ 照旧画原始段。
   const std = Array.isArray(d.segs_std) && d.segs_std.length ? d.segs_std : null;
-  const segs = d.segs, lives = segs.filter((s) => s.live), done = std ? std.slice(0, -1) : segs.filter((s) => !s.live);
-  const stdLast = std ? std.at(-1) : null;
-  segStdLast.setData(stdLast ? [{ time: T(stdLast.i0), value: stdLast.p0 }, { time: T(stdLast.i1), value: stdLast.p1 }] : []);
+  // 哪几条画虚线：载荷里每条带 `state`（"pending"／"confirmed"）就**照它**（后台 snapshot 那一行说了算，跟撤回账本同一把尺）；
+  //   没带 `state`（老载荷）⇒ 退回「只有最后一条」。待确认的一定是尾巴上连着的几条 ⇒ 一条折线就画得下。
+  const nOpen = std ? (std.some((s) => s.state) ? std.length - std.findIndex((s) => s.state === 'pending') : 1) : 0;
+  const open = std && nOpen > 0 && nOpen <= std.length ? std.slice(-nOpen) : [];
+  const segs = d.segs, lives = segs.filter((s) => s.live), done = std ? std.slice(0, std.length - open.length) : segs.filter((s) => !s.live);
+  segStdLast.setData(open.length ? [{ time: T(open[0].i0), value: open[0].p0 }].concat(open.map((s) => ({ time: T(s.i1), value: s.p1 }))) : []);
   const segA = done.length ? [{ time: T(done[0].i0), value: done[0].p0 }] : [];
   for (const s of done) segA.push({ time: T(s.i1), value: s.p1 });
   segSolid.setData(segA);

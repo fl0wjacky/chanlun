@@ -483,7 +483,10 @@ export function makeAnnotPrimitive(state) {
               //    短虚线（可能挪）跟未完成段的长虚线挨在一起，光靠虚线疏密分不出来 —— 照 D-3 示意图写一个字。
               //    字放在圈外、离开线段那一侧（终点是顶往上、是底往下），登记 placed，价签会避开它（跟「暂定」同一条）。
               state.segStdLabel = null;
-              if (sh.seg && Array.isArray(data.segs_std) && data.segs_std.length) {
+              const stdL = Array.isArray(data.segs_std) && data.segs_std.length ? data.segs_std[data.segs_std.length - 1] : null;
+              // 带了 state 而最后一条已确认 ⇒ 没有「还可能挪」的，不写字（没带 state 的老载荷照旧：最后一条就是）
+              if (sh.seg && stdL && (!data.segs_std.some((q) => q.state) || stdL.state === 'pending')) {
+                // 字只写一次，写在**最靠右**那条待确认的终点上（两条都待确认时不写两行同样的话）—— 就是最后一条
                 const L = data.segs_std[data.segs_std.length - 1], x = vp.xOfBar(L.i1), y = vp.yOfPrice(L.p1);
                 if (onScreen(x, W, 20) && y !== null) {
                   const top = L.dir === 'up';

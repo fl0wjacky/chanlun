@@ -287,6 +287,25 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
      SD.dashN > 0 && SD.after.last === 0 && SD.after.solid === SD.rawDone + 1,
      `长虚线 ${SD.dashN} 点　撤掉以后 ${JSON.stringify(SD.after)}（原始已完成 ${SD.rawDone} 条 ⇒ 要 ${SD.rawDone + 1} 点）　真后台本来就有 segs_std：${SD.restored}`);
 
+  // ⑧d D-3 C 按 `state` 画虚线（Bram 提的 (C)：最后两条都算待确认；前端不写死条数，照载荷每条的 state）：
+  //   最后两条 pending ⇒ 短虚线那条折线 3 个点（两条首尾相接）、实线少两条；全部 confirmed ⇒ 短虚线是空的、字也不写；
+  //   没有 state ⇒ 退回「只有最后一条」（这一格是牙：老载荷不许变样）。
+  const ST = await p.evaluate(async () => {
+    const app = window.__app, d = app.state.data, S = app.segSeries;
+    const done = d.segs.filter((s) => !s.live).map((s) => ({ i0: s.i0, i1: s.i1, p0: s.p0, p1: s.p1, dir: s.dir }));
+    const real = d.segs_std, wait = async () => { app.repaint(); const ts = app.chart.timeScale(), v = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: v.from + 0.01, to: v.to + 0.01 }); await new Promise((r) => setTimeout(r, 700)); };
+    const read = () => ({ solid: S.solid.data().length, dash: S.stdLast.data().length, label: !!app.state.segStdLabel });
+    const ts = app.chart.timeScale(); ts.setVisibleLogicalRange({ from: done.at(-3).i0 - 40, to: d.bars.length + 5 }); await new Promise((r) => setTimeout(r, 600));
+    d.segs_std = done.map((s, k) => ({ ...s, state: k >= done.length - 2 ? 'pending' : 'confirmed' })); await wait(); const two = read();
+    d.segs_std = done.map((s) => ({ ...s, state: 'confirmed' })); await wait(); const none = read();
+    d.segs_std = done; await wait(); const old = read();
+    if (real) d.segs_std = real; else delete d.segs_std; await wait();
+    return { n: done.length, two, none, old };
+  });
+  ck('⑧d 按 state 画：最后两条 pending ⇒ 短虚线 3 点、实线少两条、写字；全 confirmed ⇒ 没有短虚线、不写字；没有 state ⇒ 只有最后一条（老载荷不变样）',
+     ST.two.dash === 3 && ST.two.solid === ST.n - 1 && ST.two.label && ST.none.dash === 0 && ST.none.solid === ST.n + 1 && !ST.none.label
+       && ST.old.dash === 2 && ST.old.solid === ST.n && ST.old.label, JSON.stringify(ST));
+
   if (SHOTS) await p.screenshot({ path: require('path').join(SHOTS, 'samelevel-fe.png') });
   await b.close();
   console.log(red ? `✗ ${red} 格红（${n - red}/${n} 过）` : `${n}/${n} 过`);   // predeploy 认「N/N 过」这一行
