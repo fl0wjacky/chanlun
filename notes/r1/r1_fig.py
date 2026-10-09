@@ -40,6 +40,7 @@ def run(fn, flipped):
                 live=[(s['i0'], s['i1'], s['p0'], s['p1']) for s in r['segs'] if s.get('live')],
                 bounds=[(b['bar'], b['kind'], b['price'], b.get('death')) for b in t['bounds']],
                 moved=[(m['from_bar'], m['to_bar'], m['kind']) for m in t.get('moved', [])],
+                retr=sorted(__import__('collections').Counter((x['bar'], x['kind'], x['price']) for x in t.get('retracted', [])).items()),
                 tsegs=[(s['i0'], s['i1'], s['type'], bool(s.get('head')), bool(s.get('upgraded'))) for s in t['segments']],
                 zs=[(z.get('X0', z.get('x0')), z.get('X1', z.get('x1')), z['ZD'], z['ZG']) for z in t['seg_centers'] if 'ZD' in z])
 
@@ -132,18 +133,26 @@ def panel(k, R, other, tag):
         q.ellipse([x0 - 8, y0_ - 8, x0 + 8, y0_ + 8], outline=(255, 150, 40), width=3)
         q.polygon([(x1, y1), (x1 - 9 if x1 > x0 else x1 + 9, y1 - 5), (x1 - 9 if x1 > x0 else x1 + 9, y1 + 5)], fill=(255, 150, 40))
         q.text((x0 - 14, y0_ + (14 if kind == 'L' else -34)), f'挪刀 {px(fb):g}', fill=(255, 150, 40), font=Fs)
+    for ((bar, kind, price), n) in R.get('retr', []):              # 撤回：红叉＝这把刀立过又被撤掉，旁边写撤了几次（同一把刀可以立了撤、撤了又立）
+        if bar < b0 or bar > b1: continue
+        x, y = X(bar), Y(price)
+        q.line([x - 9, y - 9, x + 9, y + 9], fill=(255, 80, 80), width=3); q.line([x - 9, y + 9, x + 9, y - 9], fill=(255, 80, 80), width=3)
+        lx, ly = (x - 60 if x - 60 > ML + 2 else x + 12), min(bot - 22, max(top + 2, y + (30 if kind == 'H' else -48)))
+        q.rectangle(q.textbbox((lx, ly), f'撤回×{n}', font=Fs), fill=BG + (230,))   # 垫一块底色：红字压在框边、刀点上会糊
+        q.text((lx, ly), f'撤回×{n}', fill=(255, 110, 110), font=Fs)
     # 画框外的一律刷回底色：框和线都不许越出画框（左右上下四边，ZD 低于窗口时框边会一路画到格外）
     q.rectangle([0, 0, ML - 1, PH], fill=BG); q.rectangle([W - MR + 1, 0, W, PH], fill=BG)
     q.rectangle([0, 0, W, top - 1], fill=BG); q.rectangle([0, bot + 1, W, PH], fill=BG)
     q.rectangle([ML, top, W - MR, bot], outline=(60, 66, 80))
     q.text((ML + 6, 4), tag, fill=TX, font=F)
     short = (bars[b1]['t'] - bars[b0]['t']) / 10 < 86400e3 * 1.5   # 刻度间隔不到一天半就带上时分（10 格），免得一排两个同样的日期（8 天窗口出过 05-07 05-07）
-    for i in range(b0, b1 + 1, max(1, (b1 - b0) // 10)): q.text((X(i) - (40 if short else 24), bot + 4), f'{utc(i):%m-%d %H:%M}' if short else f'{utc(i):%m-%d}', fill=MU, font=Fs)
+    # 最右一个刻度往里收，别被画布边切掉
+    for i in range(b0, b1 + 1, max(1, (b1 - b0) // 10)): q.text((min(W - MR - (80 if short else 48), X(i) - (40 if short else 24)), bot + 4), f'{utc(i):%m-%d %H:%M}' if short else f'{utc(i):%m-%d}', fill=MU, font=Fs)
     for v in sorted({float(f'{lo * (hi / lo) ** (j / 6):.3g}') for j in range(1, 6)}):
         q.text((6, Y(v) - 8), f'{v:g}', fill=MU, font=Fs); q.line([ML - 5, Y(v), ML, Y(v)], fill=MU)
     im.paste(p, (0, y0))
 panel(0, A, B, '上：' + a.label_a); panel(1, B, A, '下：' + a.label_b)
-d.text((ML, 90 + 2 * (PH + 30) + 6), '画法：背景按段型（上涨绿／下跌红／盘整灰）；笔灰，只在这一格有的笔加粗粉；线段金，只在这一格有的线段加粗青；分界白虚线，只在这一格有的加粗；橙圈＋箭头＝挪刀（刀原来在圈处，后来挪到箭头处）；价格旁写死点类型。对数价格轴，两格同一把尺。',
+d.text((ML, 90 + 2 * (PH + 30) + 6), '画法：背景＝段型（绿涨／红跌／灰盘整）；笔灰、线段金，只在这一格有的笔加粗粉、线段加粗青；分界白虚线，只在这一格有的加粗；橙圈→箭头＝挪刀；红叉＝撤回（×n 次）；价旁写死点类型；对数轴，两格同一把尺。',
        fill=MU, font=Fs)
 if a.note: d.text((ML, 90 + 2 * (PH + 30) + 34), '注：' + a.note, fill=TX, font=Fs)
 im.save(a.out); print('saved', a.out, im.size, dd)
