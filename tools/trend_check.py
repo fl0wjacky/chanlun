@@ -20,6 +20,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 from core.analyze import analyze                              # noqa: E402
 import core.trend as T                                        # noqa: E402
+import core.pen as PEN                                        # noqa: E402
 import re                                                     # noqa: E402
 
 # 线上用哪种 D3 读法以 web/server.py 的 TREND_READING 为准（不 import server，免得起它那一摊）；这里的格子都按它跑
@@ -348,8 +349,61 @@ def main():
     cell("⑧ 同一对 (b, b′) 被 D2-7 去掉最多一次（编者口径；含 zec1m_retract_loop 夹具）", retract_once())
     cell("④ 不看未来（zec15：最早能确立那一根起，之后一直在、不变）", no_future())
     cell("④′ 小转大的二类不看未来（zec15、zec30_cut：第一次出现前一根没有，之后不挪不没）", no_future_xzd("zec15.json") + no_future_xzd("zec30_cut.json"))
+    sl = []
+    for fn in files:
+        sl += ["%s %s" % (fn, x) for x in sl_check(sl_run(fn))]
+    cell("⑨ G6 同级别正式口径（%d 份）：中间段有中枢、S5 落在接缝、D2 高低交替、每刀有死因、state 两值且 S5 守 D-4′" % len(files), sl)
     print("全部通过" if not bad else "%d 处不过" % len(bad))
     return 1 if bad else 0
+
+
+# ---------------------------------------------------------------- G6：同级别正式版的不变量（上线清单 G6）
+# 跑的是正式口径全开（同级别＋S9＋甲＋首中枢豁免＋死因）＋笔锁 PEN_FINAL_LOCK，跟线上默认那套（main()①～⑧）分开：
+#   默认关的时候同级别那条路根本不走，①～⑧ 量不到它。sl_check 只读一份 trend_v3 输出，--self-test 拿它的拷贝拧坏一处、必须报。
+SL_FLAGS = dict(SAME_LEVEL=True, SAME_LEVEL_D2=True, SAME_LEVEL_D6="fallback", SL_FIRST_EXEMPT=True, SAME_LEVEL_DEATH=True)
+def sl_run(fn):
+    from config import tick_of
+    old = {k: getattr(T, k) for k in SL_FLAGS}; lk = PEN.PEN_FINAL_LOCK
+    try:
+        for k, x in SL_FLAGS.items(): setattr(T, k, x)
+        PEN.PEN_FINAL_LOCK = True
+        r = analyze(load(os.path.join(ROOT, "data", fn)), tick=tick_of(fn))
+        return T.trend_v3(r)
+    finally:
+        for k, x in old.items(): setattr(T, k, x)
+        PEN.PEN_FINAL_LOCK = lk
+def sl_check(v):
+    bad = []
+    for g, s in enumerate(v["segments"]):
+        if not s["head"] and not s["live"] and s["n_centers_level"] < 1:
+            bad.append("中间段 %d（%d–%d）没有本级别中枢" % (g, s["i0"], s["i1"]))
+    zz = v["seg_centers"]
+    bars = sorted(x["bar"] for x in v["bounds"])
+    for b in v["bounds"]:
+        if b["rule"] != "S5":
+            continue
+        nxt = min([x for x in bars if x > b["bar"]], default=float("inf"))
+        if not any(z["X1"] == b["bar"] for z in zz):
+            bad.append("S5 刀 %d 不是前一个中枢的终点" % b["bar"])
+        elif not any(b["bar"] <= z["X0"] and z["X1"] <= nxt for z in zz) and nxt != float("inf"):
+            bad.append("S5 刀 %d 后面到下一刀之间没有中枢" % b["bar"])
+    d2 = [b for b in v["bounds"] if b["rule"] == "D2-2"]
+    for x, y in zip(d2, d2[1:]):
+        if x["kind"] == y["kind"]:
+            bad.append("D2 刀 %d、%d 同向（%s）" % (x["bar"], y["bar"], x["kind"]))
+    for b in v["bounds"]:
+        if not b.get("death"):
+            bad.append("刀 %d 没有死因" % b["bar"])
+        if b["rule"] == "S5" and b.get("death") != "盘整相连":
+            bad.append("S5 刀 %d 死因是 %r" % (b["bar"], b.get("death")))
+        if b.get("state") not in ("pending", "confirmed"):
+            bad.append("刀 %d state=%r" % (b["bar"], b.get("state")))
+    for b in v["bounds"]:
+        if b["rule"] == "S5" and b.get("state") == "confirmed":
+            L = [x for x in d2 if x["bar"] < b["bar"]]; R = [x for x in d2 if x["bar"] > b["bar"]]
+            if not (L and R and L[-1]["state"] == "confirmed" and R[0]["state"] == "confirmed"):
+                bad.append("S5 刀 %d 确认了，可两边 D2 没都确认（D-4′）" % b["bar"])
+    return bad
 
 
 def extreme_between():
@@ -630,6 +684,31 @@ def self_test():
             setattr(T, flag, True)
         print("%s D3 %s ⇒ 报出 %d 处（例 %s）" % ("✓" if hits else "✗", name, len(hits), hits[:1]))
         miss += not hits
+    # G6 的牙：zec15 正式口径那份拷贝，每次拧坏一处，sl_check 必须报（证这把尺不是空转）
+    import copy
+    v0 = sl_run("zec15.json")
+    def brk_mid(v):
+        g = next(i for i, s in enumerate(v["segments"]) if not s["head"] and not s["live"]); v["segments"][g]["n_centers_level"] = 0
+    def brk_s5(v):
+        b = next(x for x in v["bounds"] if x["rule"] == "S5"); b["bar"] += 1
+    def brk_alt(v):
+        d2 = [x for x in v["bounds"] if x["rule"] == "D2-2"]; d2[1]["kind"] = d2[0]["kind"]
+    def brk_death(v):
+        next(x for x in v["bounds"] if x["rule"] == "S5").pop("death")
+    def brk_state(v):
+        v["bounds"][0]["state"] = "maybe"
+    def brk_d4(v):
+        d2 = [x for x in v["bounds"] if x["rule"] == "D2-2"]
+        s5 = next(x for x in v["bounds"] if x["rule"] == "S5" and x["state"] == "confirmed")
+        next(x for x in d2 if x["bar"] > s5["bar"])["state"] = "pending"
+    for name, f in (("中间段没中枢", brk_mid), ("S5 挪一根", brk_s5), ("D2 同向", brk_alt), ("S5 丢死因", brk_death),
+                    ("state 第三个值", brk_state), ("S5 确认但右边 D2 待确认", brk_d4)):
+        v = copy.deepcopy(v0); f(v); hit = sl_check(v)
+        print("%s G6 拧坏「%s」⇒ 报出 %d 处（例 %s）" % ("✓" if hit else "✗", name, len(hit), hit[:1]))
+        miss += not hit
+    ok0 = not sl_check(v0)
+    print("%s G6 没拧的原样 ⇒ 0 处" % ("✓" if ok0 else "✗"))
+    miss += not ok0
     for name, kw, changed in arms:
         _, v = run("zec15.json", **kw)
         ok = changed(v)
