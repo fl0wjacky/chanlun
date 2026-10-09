@@ -10,7 +10,8 @@
       刀（D2／S5）：新旧两次第一把相同的已确认 D2；
       线段：新旧两次第一条相同的已确认线段（有些图 span=1 上没有已确认 D2，线段照样要记得到）。
     找不到对齐点那一类这一轮不记（宁可漏记，不记假撤回），但「上次」照样换成这次。
-  · 已确认线段 = 已完成线段去掉最后一条（跟回放统计同一口径）。
+  · 已确认线段 = 已完成线段去掉最后 PENDING_SEGS 条（D-3 改 C′，待小栋拍：最后两条终点还可能挪，画虚线、不记撤回）。
+    哪几条算 pending **只在这里定**：服务端给 segs_std 每条标 state 也读这个数（前端只照 state 画，不自己数）。
   · 显示：各 span 的记录取并集（线上 15 张实测：对齐点之后 span=1 跟封顶 span 差异 0），
     只给本窗口里、并且在本次结果第一个已确认对象之后的；同一条撤回在几个 span 都记到了只给一次。
   · 存在状态目录（跟决策页同一个，仓库外）下 withdrawn/，一张图一个 JSON：{"last": …, "withdrawn": […]}，原子写。
@@ -23,6 +24,13 @@ import threading
 import decisions
 
 CAP = 200
+PENDING_SEGS = 2                                # C′：最后两条已完成线段算「还可能挪」。小栋要是选 A，改成 1，前后端都不用再动
+
+
+def seg_states(n):
+    """n 条已完成线段（segs_std）→ 每条的 state：最后 PENDING_SEGS 条 pending，其余 confirmed。"""
+    k = min(PENDING_SEGS, n)
+    return ["confirmed"] * (n - k) + ["pending"] * k
 # 只有真起服务（server.py 的 __main__）才打开。各检查程序都是 import server 起临时服务，状态目录默认又在
 #   checkout 旁边——不关着的话，在任何一份 checkout 里跑检查都会往那个目录写账本，搅了线上那本账。
 ENABLED = False
@@ -48,7 +56,8 @@ def snapshot(bars, trend, segs):
     t = lambda i: bars[i]["t"]
     cuts = [[t(b["bar"]), b["kind"], _p(b["price"]), b["rule"]] for b in trend["bounds"] if b.get("state") == "confirmed"]
     done = [s for s in segs if not s.get("live")]
-    sg = [[t(s["i0"]), t(s["i1"]), s["dir"], _p(s["p0"]), _p(s["p1"])] for s in done[:-1]]
+    st = seg_states(len(done))
+    sg = [[t(s["i0"]), t(s["i1"]), s["dir"], _p(s["p0"]), _p(s["p1"])] for s, x in zip(done, st) if x == "confirmed"]
     seen_c = {(t(b["bar"]), b["kind"], _p(b["price"])) for b in trend["bounds"]}
     seen_s = {(t(s["i0"]), t(s["i1"]), s["dir"]) for s in segs}
     return dict(cuts=cuts, segs=sg), dict(cuts=seen_c, segs=seen_s)
