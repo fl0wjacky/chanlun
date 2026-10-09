@@ -246,6 +246,24 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
      WD.labels.length === 2 && /^已撤回：笔回头改了（/.test(WD.labels[0]) && /^线段已撤回：笔回头改了（/.test(WD.labels[1]), JSON.stringify(WD.labels));
   ck('⑦c 「走势分段」关掉 ⇒ 一个叉都不画；载荷没有 withdrawn（现行后台）⇒ 0 个（牙）', WD.off === 0 && WD.noWd === 0, `关掉 ${WD.off}　改前 ${WD.noWd}`);
 
+  // ⑦d 已撤回的线段：起点在屏上、终点滚出右边（往左翻页就会这样）⇒ 屏上那一截淡红虚线照画，叉不打（终点不在屏上）。
+  //   第一版先看终点在不在屏上、不在就整条跳过（card-6f97c999-ed0，Nova 14:36 审 088fe62 时看出来的）。
+  const WE = await p.evaluate(async () => {
+    const app = window.__app, d = app.state.data, ts = app.chart.timeScale(), st = app.state;
+    const mid = Math.round(d.bars.length / 2); ts.setVisibleLogicalRange({ from: mid - 150, to: mid + 150 }); await new Promise((r) => setTimeout(r, 700));   // 视口摆中间：右边得有已加载、但不在屏上的 K 线
+    const v = ts.getVisibleLogicalRange(), a = Math.round(v.from + (v.to - v.from) * 0.7), z = Math.min(d.bars.length - 1, Math.round(v.to) + 40);
+    if (!d.bars[a] || !d.bars[z] || z <= v.to) return { err: '视口右边没有已加载的 K 线可当「屏外终点」' };
+    d.withdrawn = [{ kind: 'seg', t: d.bars[a].t, t1: d.bars[z].t, dir: 'up', p0: d.bars[a].l, p1: d.bars[z].h, at: d.bars[d.bars.length - 1].t }];
+    const redraw = async () => { const r = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: r.from + 0.01, to: r.to + 0.01 }); await new Promise((r) => setTimeout(r, 700)); };
+    await redraw();
+    const W = document.querySelector('#chart canvas').getBoundingClientRect().width;
+    const out = { lines: (st.trendDrawn.withdrawnLines || []).slice(), crosses: (st.trendDrawn.withdrawn || []).length, W };
+    delete d.withdrawn; await redraw(); return out;
+  });
+  if (WE.err) { console.error(WE.err); await b.close(); process.exit(2); }
+  ck('⑦d 撤回的线段终点滚出屏外、起点在屏上 ⇒ 屏上那一截虚线照画（x0 在屏内、x1 在屏外右边），叉不打',
+     WE.lines.length === 1 && WE.lines[0].x0 >= 0 && WE.lines[0].x0 <= WE.W && WE.lines[0].x1 > WE.W && WE.crosses === 0, JSON.stringify(WE));
+
   // ⑧ D-3 选 C（小栋 10-09 12:57）：载荷带 `segs_std`（标准化线段）⇒ 图上「线段」画它：除最后一条外实线、最后一条短虚线；
   //   未完成段照旧长虚线；没有 `segs_std`（现行后台）⇒ 照旧画原始段、短虚线那条是空的（牙）。
   //   后台还没出这个字段 ⇒ 页面里塞假的：拿原始已完成段，把最后两条并成一条当「标准化后」的样子。
