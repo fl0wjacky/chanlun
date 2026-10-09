@@ -4,11 +4,11 @@
 #   开关只在进程里翻（setattr），仓里的默认值一个字不动。上格＝现行（非同级别），下格＝翻了开关之后。
 import sys, os, json, argparse, importlib, math, datetime as DT
 ap = argparse.ArgumentParser()
-ap.add_argument('--root', required=True); ap.add_argument('--flag', required=True, action='append')
+ap.add_argument('--root', required=True); ap.add_argument('--flag', action='append', default=[])
 ap.add_argument('--file'); ap.add_argument('--out'); ap.add_argument('--rank', action='store_true')
 ap.add_argument('--from', dest='frm'); ap.add_argument('--to')
 ap.add_argument('--label-a', default='现行：非同级别分解'); ap.add_argument('--label-b', default='同级别分解（开关）')
-ap.add_argument('--pen', default='old')
+ap.add_argument('--title', default='前后图'); ap.add_argument('--pen', default='old'); ap.add_argument('--pen-b', default=None, help='下格换一种笔（old/new），B-10 老笔新笔用')
 a = ap.parse_args()
 sys.path[:0] = [a.root]; os.chdir(a.root)
 import config
@@ -19,16 +19,18 @@ def parse(f):
     k, v = f.split('=', 1); mod, attr = k.rsplit('.', 1)
     return importlib.import_module(mod), attr, {'True': True, 'False': False}.get(v, v if not v.replace('.', '').lstrip('-').isdigit() else float(v) if '.' in v else int(v))
 FLAGS = [parse(f) for f in a.flag]
+if not FLAGS and not a.pen_b: sys.exit('至少给一个 --flag 或 --pen-b')
 
 def run(fn, flipped):
     saved = [(m, at, getattr(m, at)) for m, at, _ in FLAGS]
     try:
         if flipped:
             for m, at, v in FLAGS: setattr(m, at, v)
-        r = analyze_file(fn, pen=a.pen); t = TR.trend_v3(r)
+        r = analyze_file(fn, pen=(a.pen_b or a.pen) if flipped else a.pen); t = TR.trend_v3(r)
     finally:
         for m, at, v in saved: setattr(m, at, v)
     return dict(bars=r['bars'] if 'bars' in r else None, r=r,
+                pens=[(p['i0'], p['i1'], p['p0'], p['p1']) for p in r['pens']],
                 segs=[(s['i0'], s['i1'], s['p0'], s['p1']) for s in r['segs'] if not s.get('live')],
                 live=[(s['i0'], s['i1'], s['p0'], s['p1']) for s in r['segs'] if s.get('live')],
                 bounds=[(b['bar'], b['kind'], b['price'], b.get('death')) for b in t['bounds']],
@@ -37,7 +39,8 @@ def run(fn, flipped):
 
 def diff(A, B):
     sa, sb = set(A['segs']), set(B['segs']); ba, bb = {x[:2] for x in A['bounds']}, {x[:2] for x in B['bounds']}
-    return dict(seg_only_a=len(sa - sb), seg_only_b=len(sb - sa), bnd_only_a=len(ba - bb), bnd_only_b=len(bb - ba),
+    pa, pb = set(A['pens']), set(B['pens'])
+    return dict(pen_only_a=len(pa - pb), pen_only_b=len(pb - pa), seg_only_a=len(sa - sb), seg_only_b=len(sb - sa), bnd_only_a=len(ba - bb), bnd_only_b=len(bb - ba),
                 type_changed=sum(1 for x, y in zip(A['tsegs'], B['tsegs']) if x[2] != y[2]) + abs(len(A['tsegs']) - len(B['tsegs'])))
 
 DATA = sorted(f for f in os.listdir('data') if f.endswith('.json'))
@@ -49,7 +52,7 @@ if a.rank:
         d = diff(A, B); score = d['seg_only_a'] + d['seg_only_b'] + 5 * (d['bnd_only_a'] + d['bnd_only_b'])
         rows.append((score, fn, d))
     for score, fn, d in sorted(rows, reverse=True):
-        print(f'{fn:20s} 分 {score:4d}　段 −{d["seg_only_a"]}/+{d["seg_only_b"]}　刀 −{d["bnd_only_a"]}/+{d["bnd_only_b"]}　段型变 {d["type_changed"]}')
+        print(f'{fn:20s} 分 {score:4d}　笔 −{d["pen_only_a"]}/+{d["pen_only_b"]}　段 −{d["seg_only_a"]}/+{d["seg_only_b"]}　刀 −{d["bnd_only_a"]}/+{d["bnd_only_b"]}　段型变 {d["type_changed"]}')
     sys.exit(0)
 
 # ---- 出图 ----
@@ -75,9 +78,9 @@ W, PH, ML, MR = 2000, 560, 80, 20
 im = Image.new('RGB', (W, 90 + 2 * (PH + 30) + 40), BG); d = ImageDraw.Draw(im)
 win = bars[b0:b1 + 1]; lo = min(x['l'] for x in win) * 0.985; hi = max(x['h'] for x in win) * 1.015
 LL, LH = math.log(lo), math.log(hi)
-d.text((ML, 14), f'{a.file} · R-1 前后图 · 上：{a.label_a} ／ 下：{a.label_b} · 开关 {" ".join(a.flag)}', fill=TX, font=F)
+d.text((ML, 14), f'{a.file} · {a.title} · 上：{a.label_a} ／ 下：{a.label_b} · 开关 {" ".join(a.flag) or ("笔 " + a.pen + " → " + a.pen_b)}', fill=TX, font=F)
 dd = diff(A, B)
-d.text((ML, 48), f'窗口 {utc(b0):%Y-%m-%d} → {utc(b1):%Y-%m-%d}（UTC）｜整张：线段 上独有 {dd["seg_only_a"]} / 下独有 {dd["seg_only_b"]}，分界刀 上独有 {dd["bnd_only_a"]} / 下独有 {dd["bnd_only_b"]}，段型变 {dd["type_changed"]}｜加粗＝只在这一格有',
+d.text((ML, 48), f'窗口 {utc(b0):%Y-%m-%d} → {utc(b1):%Y-%m-%d}（UTC）｜整张：笔 上独有 {dd["pen_only_a"]} / 下独有 {dd["pen_only_b"]}，线段 上独有 {dd["seg_only_a"]} / 下独有 {dd["seg_only_b"]}，分界刀 上独有 {dd["bnd_only_a"]} / 下独有 {dd["bnd_only_b"]}，段型变 {dd["type_changed"]}｜加粗＝只在这一格有',
        fill=MU, font=Fs)
 TYPE = {'上涨': (46, 158, 91), '下跌': (214, 69, 69)}
 def panel(k, R, other, tag):
@@ -97,6 +100,11 @@ def panel(k, R, other, tag):
         # 左右各内缩 3px：同级别下中枢满三段就收、前后两个框首尾相接，不缩的话两个框的边贴在一起，
         #   看着像一个框被分界刀从中间劈开（Nova 10-09 04:43 看到的就是这个错觉）。框里铺一层淡金，框和框之间露出一条缝。
         q.rectangle([X(x0) + 3, Y(zg), X(x1) - 3, Y(zd)], fill=(196, 137, 1, 28), outline=(196, 137, 1, 220), width=2)
+    othp = set(other['pens'])
+    for (i0, i1, p0, p1) in R['pens']:                          # 笔：灰；只在这一格有的笔用浅青加粗（B-10 老笔新笔要看这一层）
+        if i1 < b0 or i0 > b1: continue
+        mine = (i0, i1, p0, p1) not in othp
+        q.line([X(i0), Y(p0), X(i1), Y(p1)], fill=(255, 120, 200, 235) if mine else (122, 137, 166, 200), width=3 if mine else 1)   # 粉：跟线段的青分开
     oth = set(other['segs']); othb = {x[:2] for x in other['bounds']}
     for s in R['segs'] + R['live']:
         i0, i1, p0, p1 = s
@@ -114,12 +122,12 @@ def panel(k, R, other, tag):
     q.rectangle([0, 0, W, top - 1], fill=BG); q.rectangle([0, bot + 1, W, PH], fill=BG)
     q.rectangle([ML, top, W - MR, bot], outline=(60, 66, 80))
     q.text((ML + 6, 4), tag, fill=TX, font=F)
-    short = (bars[b1]['t'] - bars[b0]['t']) < 4 * 86400e3          # 窗口不到 4 天就带上时分，免得一排同一个日期
+    short = (bars[b1]['t'] - bars[b0]['t']) < 8 * 86400e3          # 窗口不到 4 天就带上时分，免得一排同一个日期
     for i in range(b0, b1 + 1, max(1, (b1 - b0) // 10)): q.text((X(i) - (40 if short else 24), bot + 4), f'{utc(i):%m-%d %H:%M}' if short else f'{utc(i):%m-%d}', fill=MU, font=Fs)
     for v in sorted({float(f'{lo * (hi / lo) ** (j / 6):.3g}') for j in range(1, 6)}):
         q.text((6, Y(v) - 8), f'{v:g}', fill=MU, font=Fs); q.line([ML - 5, Y(v), ML, Y(v)], fill=MU)
     im.paste(p, (0, y0))
 panel(0, A, B, '上：' + a.label_a); panel(1, B, A, '下：' + a.label_b)
-d.text((ML, 90 + 2 * (PH + 30) + 6), '画法：背景按段型（上涨绿／下跌红／盘整灰）；线段金，只在这一格有的线段加粗青；分界白虚线，只在这一格有的加粗；价格旁写死点类型。对数价格轴，两格同一把尺。',
+d.text((ML, 90 + 2 * (PH + 30) + 6), '画法：背景按段型（上涨绿／下跌红／盘整灰）；笔灰，只在这一格有的笔加粗粉；线段金，只在这一格有的线段加粗青；分界白虚线，只在这一格有的加粗；价格旁写死点类型。对数价格轴，两格同一把尺。',
        fill=MU, font=Fs)
 im.save(a.out); print('saved', a.out, im.size, dd)
