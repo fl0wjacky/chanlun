@@ -56,8 +56,11 @@ rF, vF, _ = run(bars, tk)
 R = vF["retracted"][0]; B = R["bar"]
 grid = sorted({p["i1"] + 1 for p in rF["pens"] if R["pullback_end_bar"] <= p["i1"] <= R["retracted_bar"] + 600})
 has = lambda n: any(b["bar"] == B for b in run(bars, tk, n)[1]["bounds"])
-t1 = next(n for n in grid if has(n)); t2 = next(n for n in grid if n > t1 and not has(n))
-k2 = max(n for n in grid if n < t2 and has(n))
+# 逐根找：确立＝第一次出现的前缀，撤回＝其后第一次消失的前缀（先按笔粗找，再在区间里逐根）
+g1 = next(n for n in grid if has(n)); lo = max(0, g1 - 400)
+t1 = next(n for n in range(lo, g1 + 1) if has(n))
+g2 = next(n for n in grid if n > g1 and not has(n)); gp = max(n for n in grid if n < g2)
+t2 = next(n for n in range(gp, g2 + 1) if not has(n)); k2 = t2 - 1
 lo_i, hi_i = max(0, B - 2500), min(len(bars) - 1, t2 + 600)
 img = Image.new("RGB", (1700, 1060), BG); d = ImageDraw.Draw(img)
 d.text((20, 12), "① 已确认的分界又被撤回（D2-7）· AAPLUSDT 15m · H 345.38（10-07 快照）", font=F, fill=TXT)

@@ -33,7 +33,7 @@ def one(it):
         dl = [(d["i0"], d["i1"]) for d in T.find_bounds(r)["done"] if not d.get("live")]
         R, S = set(rl[:-1]), set(dl[:-1])                # 最后一条已完成线段可能还是暂定的：不算「已确认」
         if prevR is not None:
-            lr, ls = prevR - R, prevS - S
+            lr, ls = prevR - set(rl), prevS - set(dl)     # 上一刻已确认的，这一刻连「最后一条」都不是了 ⇒ 撤了
             raw_w += len(lr); std_w += len(ls)
             if ls and not lr:
                 std_only += len(ls)
