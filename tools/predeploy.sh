@@ -154,6 +154,9 @@ SUITES=(tools/web_ghost_e2e.js tools/web_more_e2e.js "tools/web_more_e2e.js --se
 # ★★ 它跟 68decdd 是**一对**：改前那一棵树（`e494d90`）上它 5/12 红。所以这支**必须在 68decdd 之后并**
 #   —— 先并它再并 68decdd，中间的 main 上 `--all` 就是红的（那不是它报错，是它说的实话）。
 [ $ALL = 1 ] && SUITES+=(tools/web_macd_axis.js tools/web_mobile_share.js tools/web_readout_swap_probe.js tools/web_subhead_slot_probe.js)
+# ★ web_decisions_e2e（card-fe3aebd3-819）：决策树页读 ?mock=1，不靠临时后台有没有数据文件；口令和回码那半归 web/check_decisions.py。
+#   单起一行追加：SUITES=(…) 那行同级别前端支也要加一格，同一行两边都改就会冲突。
+SUITES+=(tools/web_decisions_e2e.js)
 
 frontend_skip() {  # 原因 —— 浏览器 / 后台起不来：每一套都记「未执行」，不许当绿
   for s in "${SUITES[@]}"; do record "$s" 未执行 "前端未执行：$1"; done

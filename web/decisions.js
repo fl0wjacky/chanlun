@@ -14,6 +14,7 @@ const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 const todo = '<span class="mu">（还没填）</span>';
 const dotCls = (s) => (!s || !s.verified ? 'unver' : (KIND[s.kind] || 'open'));
 const kindTxt = (s) => (!s || !s.verified ? '状态待核' : s.kind || '待定');
+const stamp = (t) => String(t || '').replace(/^\d{4}-(\d\d-\d\d)T(\d\d:\d\d).*$/, '$1 $2');   // 后台的 at 是 UTC ISO，跟数据里的时间同一种写法
 const day = (t) => String(t || '').replace(/^\d{4}-/, '');            // 2026-10-09 11:07 → 10-09 11:07
 
 async function getJSON(url, opt) {
@@ -106,10 +107,10 @@ function show(id) {
   const pend = st.pending[id];
   const rec = d.recommendation || {};
   const opts = (d.options || []).map((o) => {
-    const isHis = his === o.key || (mine && mine.option === o.key);
+    const isHis = mine ? mine.option === o.key : his === o.key;   // 页面上存过的比数据里记的新，以它为准
     const cls = ['opt', o.key === rec.choice ? 'rec' : '', isHis ? 'chosen' : '', pend === o.key ? 'pending' : ''].join(' ');
     const nums = o.numbers && Object.keys(o.numbers).length ? `<table class="nums">${Object.entries(o.numbers).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}</table>` : '';
-    const hisTag = isHis ? `<span class="tagme">你选的${his === o.key ? `（${esc(day(s.date))}，原话『${esc(s.quote || '')}』）` : `（${esc(mine.at || '')}，页面上存的）`}</span>` : '';
+    const hisTag = isHis ? `<span class="tagme">你选的${!mine ? `（${esc(day(s.date))}，原话『${esc(s.quote || '')}』）` : `（${esc(stamp(mine.at))}，页面上存的${mine.prev ? `，之前是 ${esc(mine.prev)}` : ''}）`}</span>` : '';
     return `<article class="${cls}" data-key="${esc(o.key)}">
       <header><b>${esc(o.key)}　${esc(o.label)}</b>${o.key === rec.choice ? '<span class="tagrec">推荐</span>' : ''}${hisTag}</header>
       <p>${o.effect ? esc(o.effect) : todo}</p>${nums}${figBlock(o.figures)}
@@ -153,13 +154,15 @@ async function confirmSave(d, key) {
   }
   if (MOCK) { st.choices[d.id] = { option: key, at: '样例，不保存' }; delete st.pending[d.id]; show(d.id); return; }
   // 存选择要口令（Nova 11:13 ①：网站公开）。口令只私信给小栋，第一次输一下，存在他这台浏览器里；不进页面源码
-  let pass = localStorage.getItem('decisions.pass');
-  if (!pass) { pass = prompt('保存需要口令（私信里给你的那个）：') || ''; if (!pass) return; }
+  // 回码照 Bram 11:25：403 口令错 ⇒ 清掉重输；503 服务器没放口令 ⇒ 不清他的；400 ⇒ 带回包的 error
+  let tok = localStorage.getItem('decisions.token');
+  if (!tok) { tok = (prompt('保存需要口令（私信里给你的那个）：') || '').trim(); if (!tok) return; }
   try {
-    const r = await fetch('/api/decisions/choices', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Decisions-Pass': pass }, body: JSON.stringify({ id: d.id, option: key }) });
-    if (r.status === 401 || r.status === 403) { localStorage.removeItem('decisions.pass'); throw new Error('口令不对，再点一次确认重新输'); }
-    if (!r.ok) throw new Error('保存失败：' + r.status);
-    localStorage.setItem('decisions.pass', pass);
+    const r = await fetch('/api/decisions/choices', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Decision-Token': tok }, body: JSON.stringify({ id: d.id, option: key }) });
+    if (r.status === 403) { localStorage.removeItem('decisions.token'); throw new Error('口令不对，再点一次「确认」重新输'); }
+    if (r.status === 503) { localStorage.setItem('decisions.token', tok); throw new Error('暂时存不了，稍后再试（是我们这边的事，不是你输错了）'); }
+    if (!r.ok) { let m = ''; try { m = (await r.json()).error || ''; } catch (_) {} throw new Error('存失败' + (m ? '：' + m : `（${r.status}）`)); }
+    localStorage.setItem('decisions.token', tok);
     st.choices[d.id] = await r.json();
     delete st.pending[d.id];
     show(d.id);
