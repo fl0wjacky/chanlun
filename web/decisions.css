@@ -92,6 +92,7 @@ dialog .row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 1
   #detail { padding: 16px 14px 60px; }
   .figs figure { width: 100%; }
   .bar { gap: 10px; padding: 10px 14px; }
+  .opt header { flex-wrap: wrap; row-gap: 4px; }
 }
 
 /* —— Atlas 格式（11:14）跟 Nova 11:15／11:17 的五处 —— */
