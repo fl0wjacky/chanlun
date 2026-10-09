@@ -674,6 +674,31 @@ def _sl_beichi(r, done, j, typ, centers, first, hist):
     return "盘整背驰" if _panzheng(A, C, not up, hist) else None
 
 
+def _sl_state(bars, bounds, centers):
+    """①D（读法-①D，Nova 10-09 定）：同级别下每把刀标 state ＝ "pending"／"confirmed"，只看当前这一份 K 线，不记历史。
+    D-2′：D2 刀 b（低点刀为例）——b 之后到当前最后一根的最高点 e（持平取最早那根），有同级别中枢整个落在 [b, e] 里
+          （X0 ≥ b 且 X1 ≤ e），b 就确认；高点刀对称取最低点。b′ 只会落在 e 或更晚更极端的点上，所以这个中枢一定在 b、b′ 之间，
+          D2-7 撤不了 b（25 张前缀回放：确认后撤只剩 S-13 那 1 次，锁上 PEN_FINAL_LOCK 后为 0）。
+    D-4：S5 刀确认 ⇔ 左边最近那把 D2 刀已确认，并且右边已经有下一把 D2 刀（回放：S5 确认后变 0）。"""
+    n = len(bars)
+    d2 = [b for b in bounds if b.get("rule") == "D2-2"]
+    for i, b in enumerate(d2):
+        hi = d2[i + 1]["bar"] if i + 1 < len(d2) else n      # 跟回放 dreplay3 同一判据：中枢也不越过下一把 D2 刀
+        lo = b["bar"] + 1
+        if lo >= n:
+            b["state"] = "pending"
+            continue
+        key = (lambda q: bars[q]["h"]) if b["kind"] == "L" else (lambda q: -bars[q]["l"])
+        e = max(range(lo, n), key=lambda q: (key(q), -q))
+        b["state"] = "confirmed" if any(z["X0"] >= b["bar"] and z["X1"] <= min(hi, e) for z in centers) else "pending"
+    for b in bounds:
+        if b.get("rule") != "S5":
+            continue
+        left = [x for x in d2 if x["bar"] < b["bar"]]
+        right = [x for x in d2 if x["bar"] > b["bar"]]
+        b["state"] = "confirmed" if left and right and left[-1]["state"] == "confirmed" else "pending"
+
+
 def _sl_layer(done, ks, bounds_, n):
     """S3～S6：分界照 D2 定的组，每组里按同级别中枢再切：相邻两个中枢重叠，或者不重叠但方向跟这一截的趋势相反
     ⇒ 前一个中枢第三段的终点再切一刀（S5，盘整＋盘整）。每一截：0 个中枢＝无中枢，1 个＝盘整，≥2 个依次同向不重叠＝上涨／下跌。
@@ -758,6 +783,7 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
         bounds = sorted(bounds + extra, key=lambda x: x["bar"])
         if _DEATH and SAME_LEVEL_DEATH:                  # 正式版：同级别下照标死点类型（D2-5 按三段中枢）、小转大的二类（S11）
             _death_types(r, done, bounds, segments, centers_out)
+        _sl_state(r["bars"], bounds, centers_out)
         return dict(seg_centers=centers_out, bounds=bounds, retracted=res["retracted"],
                     pending=pending(done, ks, res["want"]), segments=segments, units=[], reading="same_level",
                     xzd_seconds=_xzd_seconds(done, bounds, r) if (_DEATH and SAME_LEVEL_DEATH and _XZD_SECOND) else [],
