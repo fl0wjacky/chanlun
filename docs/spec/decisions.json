@@ -1225,8 +1225,12 @@
       "title": "追平算不算『新高／新低』",
       "status": {
         "kind": "小栋定",
-        "verified": false,
-        "date": "10-09 00:26"
+        "verified": true,
+        "date": "2026-10-09 00:26",
+        "quote": "B",
+        "choice": "B",
+        "via": "Nova 私信 #838",
+        "note": "追平不算新高／新低，照字面严格读。"
       },
       "skeleton": true
     },
