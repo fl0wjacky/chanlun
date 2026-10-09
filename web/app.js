@@ -1546,7 +1546,10 @@ function applyToggles() {
     const on = k === 'sigPend' ? opts.sigPend : k.startsWith('sig:') ? opts.sigKinds[k.slice(4)]
       : k === 'lv' ? shownOf(opts).lv
         : k === 'trend' ? opts.trend && hasTrend
-          : opts[k];
+          // 成交量：亮＝开着并且这份数据真有成交量（`sub.hasVol`，跟 volSeries 的 visible 同一个式子）。缺了这半，
+          //   首屏那一秒多（副图数据还没到）它是「亮着又按灰」—— 跟 trend、买卖点子芯片同一种骗人（card-8aa5c9de-0c2，Nova 13:34 看出来的）。
+          : k === 'vol' ? opts.vol && sub.hasVol
+            : opts[k];
     b.setAttribute('aria-pressed', on ? 'true' : 'false');
     const sigChip = k.startsWith('sig:') || k === 'sigPend';
     // 成交量那颗在**没有 v 的数据上**按灰（仓里的样本就是）：能点却画不出东西的开关是骗人的。

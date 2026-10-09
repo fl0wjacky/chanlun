@@ -1024,6 +1024,18 @@ const shotChart = async (p, tag) => {
      swc.seg.pressed === 'true' && swc.seg.bg === hexRgb(swc.seg.c) && swc.seg.shadow === 'none'
        && swc.pc.pressed === 'false' && !swc.pc.disabled && swc.pc.bg === 'rgba(0, 0, 0, 0)' && swc.pc.shadow.includes(hexRgb(swc.pc.c)),
      JSON.stringify(swc));
+  // ㊷c 成交量：没有成交量数据的那一刻（首屏副图还没到）⇒ 没按下＋按灰、色块空心；有了 ⇒ 按下、填实。
+  //   在页面里把 `sub.hasVol` 拨成 false，再点一下别的芯片逼 applyToggles 重排（量的是判据，不是网速）。
+  const volS = await dC.p.evaluate(async () => {
+    const a = window.__app, c = document.querySelector('.chip[data-key="vol"]'), i = c.querySelector('i');
+    const read = () => ({ pressed: c.getAttribute('aria-pressed'), disabled: c.disabled, bg: getComputedStyle(i).backgroundColor });
+    const kick = async () => { const pc = document.querySelector('.chip[data-key="pc"]'); pc.click(); pc.click(); await new Promise((r) => setTimeout(r, 200)); };
+    const was = a.sub.hasVol; a.sub.hasVol = false; await kick(); const off = read();
+    a.sub.hasVol = was; await kick(); return { off, on: read(), optsVol: a.opts.vol };
+  });
+  ck('㊷c 成交量：数据里还没有成交量 ⇒ 没按下＋按灰、色块空心（不许亮着又按灰）；有了 ⇒ 按下、填实；用户的开关（opts.vol）不动',
+     volS.off.pressed === 'false' && volS.off.disabled && volS.off.bg === 'rgba(0, 0, 0, 0)' && volS.on.pressed === 'true' && !volS.on.disabled
+       && volS.on.bg !== 'rgba(0, 0, 0, 0)' && volS.optsVol === true, JSON.stringify(volS));
   await dC.c.close();
 
   // ───────────────────────────────────────────────────────────────────────────
