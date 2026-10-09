@@ -221,7 +221,8 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
     const a = { bar: i1, kind: 'L', price: d.bars[i1].l }, z = { bar: i2, kind: 'H', price: d.bars[i2].h };
     const fake = [
       { kind: 'd2', t: d.bars[a.bar].t, dir: a.kind, price: a.price, at: d.bars[d.bars.length - 1].t },
-      { kind: 'seg', t: d.bars[z.bar].t, dir: z.kind, price: z.price, at: d.bars[d.bars.length - 1].t },
+      // 线段那条照 Bram 9a9ba34 的真形状：没有 price，起止是 (t,p0)→(t1,p1)，叉落在终点
+      { kind: 'seg', t: d.bars[a.bar].t, t1: d.bars[z.bar].t, dir: 'up', p0: a.price, p1: z.price, at: d.bars[d.bars.length - 1].t },
       { kind: 's5', t: d.bars[0].t - 86400000 * 30, dir: 'L', price: a.price, at: d.bars[d.bars.length - 1].t },   // 不在这一窗 ⇒ 不画
     ];
     const redraw = async () => { const v = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: v.from + 0.01, to: v.to + 0.01 }); await new Promise((r) => setTimeout(r, 700)); };

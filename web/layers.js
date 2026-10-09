@@ -985,19 +985,31 @@ function trendMarkView(target, state, prim) {
       //    跟上面 ③ `T.retracted` 是**两件事**：那是引擎一趟算里 D2-7 自己撤的；这是笔回头改了、上一趟确认的东西这一趟没了。
       //    画法照 Q-6 示意图：原位置一个**淡红叉**＋一条很淡的红虚线＋「已撤回：笔回头改了」。用 `t` 找位置不用下标 ——
       //    往左加载会让下标整体平移，开盘时间不会。`t` 不在这一窗的 K 线里 ⇒ 不画（不夹回画布）。
+      const ts = prim._chart.timeScale(), sec = (t) => (t > 1e12 ? t / 1000 : t);
       for (const w of (Array.isArray(data.withdrawn) ? data.withdrawn : [])) {
-        const tt = w.t > 1e12 ? w.t / 1000 : w.t;
-        const x = prim._chart.timeScale().timeToCoordinate(tt), y = vp.yOfPrice(w.price);
+        // 线段那条（Bram 9a9ba34）：`{kind:'seg', t, t1, dir:'up'|'down', p0, p1}` —— 没有 `price`，叉打在**终点**（t1, p1）上，
+        //   整条原位置再描一道很淡的红虚线（「这条线段被撤了」）。刀那两类：`{t, dir:'H'|'L', price}`，叉打在刀上。
+        const isSeg = w.kind === 'seg';
+        const tt = sec(isSeg ? w.t1 : w.t), pp = isSeg ? w.p1 : w.price;
+        const x = ts.timeToCoordinate(tt), y = vp.yOfPrice(pp);
         if (x === null || y === null || !onScreen(x, W, 8)) continue;
+        if (isSeg) {
+          const x0 = ts.timeToCoordinate(sec(w.t)), y0 = vp.yOfPrice(w.p0);
+          if (x0 !== null && y0 !== null) {
+            ctx.setLineDash(DASH.trendBack); ctx.strokeStyle = rgba(CHART.sell, 110); ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x, y); ctx.stroke(); ctx.setLineDash([]);
+          }
+        }
         ctx.setLineDash(DASH.trendBack);
         ctx.strokeStyle = rgba(CHART.sell, 70); ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
         ctx.setLineDash([]);
         ctx.strokeStyle = rgba(CHART.sell, 160); ctx.lineWidth = 2.5;
         ctx.beginPath(); ctx.moveTo(x - 7, y - 7); ctx.lineTo(x + 7, y + 7); ctx.moveTo(x - 7, y + 7); ctx.lineTo(x + 7, y - 7); ctx.stroke();
-        const what = w.kind === 'seg' ? '线段已撤回' : '已撤回';
-        D.labels.push(haloText(ctx, x + 12, y + (w.dir === 'H' ? -14 : 16), `${what}：笔回头改了（${fmtG(w.price)}）`, CHART.sell, 'left', mine));
-        D.withdrawn.push({ kind: w.kind, t: w.t, price: w.price, x: Math.round(x), y: Math.round(y) });
+        const what = isSeg ? '线段已撤回' : '已撤回';
+        const top = isSeg ? w.dir === 'up' : w.dir === 'H';      // 叉在顶上 ⇒ 字往上写，在底下 ⇒ 往下写
+        D.labels.push(haloText(ctx, x + 12, y + (top ? -14 : 16), `${what}：笔回头改了（${fmtG(pp)}）`, CHART.sell, 'left', mine));
+        D.withdrawn.push({ kind: w.kind, t: w.t, price: pp, x: Math.round(x), y: Math.round(y) });
       }
 
       // ③.5「等确认」三个字（§八 3，卡 card-60678062-8c2）：那条斜线带的**名字写在带子自己头上**。
