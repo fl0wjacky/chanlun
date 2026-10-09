@@ -460,7 +460,10 @@ export function makeAnnotPrimitive(state) {
                     //   还会被更极端的取代。画个实线圈就跟定了的端点长得一样；虚线圈又已经是「暂定」那一刀的记号，
                     //   不能再拿来表示「未完成」（两个意思撞在一起）。暂定段的终点是 V，照旧画虚线圈。
                     if (k === 1 && s.live && !s.tentative) continue;
-                    const col = (k === 0 ? up : !up) ? CHART.buy : CHART.sell;
+                    // 端点圈用**线段金**，不用买／卖的红绿（card-3f8f0c50-9ea）：红绿是买卖点的颜色，线段级买卖点又正好落在线段端点上 ——
+                    //   同色同位的圈跟三角粘成一颗「棒棒糖」，幽灵档出来以后圈还在原处（ghost e2e 那回就是被它压住的）。
+                    //   顶还是底，看圈在线段的哪一头就知道，用不着靠颜色再说一遍；颜色只留给一件事：买卖点。
+                    const col = CHART.seg;
                     ctx.beginPath(); ctx.arc(x, y, tent ? 7 : 4.5, 0, Math.PI * 2);
                     ctx.fillStyle = PAGE.bg; ctx.fill();
                     ctx.strokeStyle = col;
