@@ -46,16 +46,33 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
 
   // ④ 真载荷（后台已经给 state 的话，4d09f3b 起）：屏上每把刀「空心 ⟺ 载荷 state=pending」；
   //   盘整相连且 confirmed ⇒ 图上 0 个字；pending 的字只能是「待确认」或「<短名>（待确认）」。后台没给 state 就跳过这格（不算过也不算红）。
-  const anyState = await p.evaluate(() => window.__app.state.data.trend.bounds.some((q) => 'state' in q));
+  // ④ 选图：这一刻 ZEC 15m 可能一把 pending 都没有（行情走到全 confirmed）⇒ 另开一页换 ZEC 1h、AAPL 15m 接着找，
+  //   找到一张有 pending 的就在那张上量；几张都没有才记跳过，并印出试过哪几张（Nova 10-09 15:33）。另开页不动 p（后面几格还在 p 上量）。
+  const hasPend = (pg) => pg.evaluate(() => window.__app.state.data.trend.bounds.some((q) => q.state === 'pending'));
+  const tried4 = ['ZECUSDT 15m'];
+  let pp = p, pp2 = null;
+  if (!(await hasPend(p))) {
+    for (const [sym, tf] of [['ZECUSDT', '1h'], ['AAPLUSDT', '15m']]) {
+      tried4.push(`${sym} ${tf}`);
+      const q = await (await b.newContext({ viewport: { width: 1440, height: 900 } })).newPage();
+      await q.goto(PAGE + `?symbol=${sym}&tf=${tf}`, { waitUntil: 'domcontentloaded' });
+      const ok = await q.waitForFunction(() => window.__app && window.__app.state.data && window.__app.state.data.trend && window.__app.state.trendDrawn,
+        null, { timeout: 60000 }).then(() => true, () => false);
+      if (ok) await sleep(1500);
+      if (ok && await hasPend(q)) { pp = q; pp2 = q; break; }
+      await q.context().close();
+    }
+  }
+  const anyState = await pp.evaluate(() => window.__app.state.data.trend.bounds.some((q) => 'state' in q));
   if (anyState) {
     // 先把视口挪到**最后一把 pending 的刀**那一扇（图尾那几把 S5 一律待确认，D-4）—— 不挪的话屏上可能一把 pending 都没有，这格就空过了
-    await p.evaluate(async () => {
+    await pp.evaluate(async () => {
       const app = window.__app, ts = app.chart.timeScale(), v = ts.getVisibleLogicalRange(), w = v.to - v.from;
       const pd = app.state.data.trend.bounds.filter((q) => q.state === 'pending').map((q) => q.bar);
       if (pd.length) { const c = pd[pd.length - 1]; ts.setVisibleLogicalRange({ from: c - w * 0.6, to: c + w * 0.4 }); }
       await new Promise((r) => setTimeout(r, 900));
     });
-    const real = await p.evaluate(() => {
+    const real = await pp.evaluate(() => {
       const app = window.__app, T = app.state.data.trend, D = app.state.trendDrawn;
       const by = Object.fromEntries(T.bounds.map((q) => [q.bar, q]));
       return { states: (D.states || []).map((s) => ({ ...s, want: by[s.bar] ? by[s.bar].state : null, death: by[s.bar] ? by[s.bar].death : null })),
@@ -68,12 +85,13 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
       return t !== (SH[r.death] || '') + (r.state === 'pending' ? '（待确认）' : ''); })());
     const nPend = real.states.filter((s) => s.want === 'pending').length;
     // 整份载荷一把 pending 都没有（行情走到哪都可能：比如 10-09 15:2x 的 ZEC 15m，30 把全 confirmed）⇒ 这一格没东西可量，记跳过，不记红也不记绿
-    const anyPend = await p.evaluate(() => window.__app.state.data.trend.bounds.some((q) => q.state === 'pending'));
-    if (!anyPend) console.log('－ ④ 跳过：这一刻载荷里一把待确认的刀都没有');
+    const anyPend = await hasPend(pp);
+    if (!anyPend) console.log(`－ ④ 跳过：试过 ${tried4.join('、')}，这一刻都没有待确认的刀`);
     else ck('④ 真载荷：屏上每把刀「空心 ⟺ state=pending」；字跟 state／death 对得上（盘整相连 confirmed 不写字）',
        real.states.length > 0 && nPend > 0 && !badDot.length && !badTxt.length,
        `屏上 ${real.states.length} 刀（pending ${nPend}）${badDot.length ? '　✗ 点不对 ' + JSON.stringify(badDot) : ''}${badTxt.length ? '　✗ 字不对 ' + JSON.stringify(badTxt) : ''}`);
   } else console.log('－ ④ 跳过：这个后台还不给 state');
+  if (pp2) await pp2.context().close();
 
   // ⑤ 「高一级」「级别对照」两颗芯片（Nova 10-09 09:07；13:14 改：「级别对照」不藏、按灰、悬停写原因，只「高一级」藏）：
   //   而且就算 opts 里 up／lv 是开的（地址栏带着 up=1 进来的那种），画图那张判据 `shownOf` 也给 false；
