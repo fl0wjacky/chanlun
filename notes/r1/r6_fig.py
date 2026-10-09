@@ -92,7 +92,8 @@ def panel(k, D, tag, box=None, mark=None):
     q.rectangle([ML, 34, W - MR, bot], outline=(60, 66, 80))
     q.text((ML + 2, 4), tag, fill=TX, font=F)
     nseg = sum(1 for s in segs if b0 <= s['i0'] <= b1); nd2 = sum(1 for bd in D['bounds'] if b0 <= bd['bar'] <= b1 and bd['rule'] != 'S5')
-    t = f'这一年：分界 {nd2} 把、走势 {nseg} 段'; tw = q.textbbox((0, 0), t, font=F)[2]
+    nall = sum(1 for bd in D['bounds'] if b0 <= bd['bar'] <= b1)
+    t = f'实心点 {nd2} 个、全部分界 {nall} 把、走势 {nseg} 段'; tw = q.textbbox((0, 0), t, font=F)[2]   # 「分界」跟合并页一个数法＝全部的刀（Nova 20:55）
     q.text((W - MR - tw, 4), t, fill=TX, font=F)
     months = [i for i in range(b0, b1 + 1) if i == b0 or utc(i).month != utc(i - 1).month]
     for i in months: q.text((min(W - MR - 60, X(i) - 4), bot + 4), f'{utc(i):%Y-%m}', fill=MU, font=Fs)
@@ -110,7 +111,7 @@ def parse_mark(s):
 panel(0, A, a.ta)
 panel(1, B, a.tb, box=parse_box(a.box_b), mark=parse_mark(a.mark_b))
 yb = 74 + 2 * (PH + 26) + 4
-d.text((ML, yb), '画法：顶上色带＝走势段（红＝上涨，绿＝下跌，灰＝盘整）；框＝同级别中枢；金线＝线段；实心点＝分界（写价和日期）；空心圈＝盘整相连（红圈＝两边同向趋势相连）。', fill=MU, font=Fs)
+d.text((ML, yb), '画法：顶上色带＝走势段（红＝上涨，绿＝下跌，灰＝盘整）；框＝同级别中枢；金线＝线段；实心点＝走势转折处的分界（写价和日期）；空心圈也是分界（盘整相连）。', fill=MU, font=Fs)
 if a.legend2: d.text((ML, yb + 24), a.legend2, fill=MU, font=Fs)
 if a.note: d.multiline_text((ML, yb + 52), a.note, fill=TX, font=Fs)
 im.save(out); print('saved', out, im.size)
