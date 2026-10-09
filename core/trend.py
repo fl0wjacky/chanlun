@@ -415,8 +415,6 @@ def _layer(done, ks, bounds_, reading, n):
             k, up = classify(cz, reading, done)
             if k == want and not (_D6_BASE_ONLY and up):
                 pick = cz
-        if pick is None and R6_YI_PRIME and g and bks.get(a) in ("L", "H"):
-            pick = classify_relations(_group_centers(done, a + 1, b, g, last))
         if pick is None:
             pick = [dict(z, seg=g) for z in free]
         grouped += pick
@@ -590,11 +588,8 @@ SAME_LEVEL = False                                # 决策树 R-1 还没定：�
 SAME_LEVEL_OVERLAP = "ZDZG"                       # S3「判重叠用哪个区间」小栋还没认：ZDZG（拟）或 DDGG，两个都量
 SAME_LEVEL_D6 = None                              # R-6 甲在同级别下：None＝不限方向（乙粗版）；"strict"＝分界之后的组，中枢首段须跟走势反向（上涨里下上下）；
                                                   #   "fallback"＝同 strict，但这样判不出同方向趋势就退回不限方向（照 D6-4）
-R6_YI_FALLBACK = False                            # 乙′-6（Atlas 7f997d3，Nova 10-09 定）：排掉 a 以后这一组找不到三段重叠 ⇒ 退回让 a 进第一个中枢（S9 底座找法）
-R6_YI_PRIME = False                               # R-6 乙′（读法-R3R6 一·5，Atlas c11fe60）：分界之后每段，从分界极值出发的第一条线段 a 不进第一个中枢；
-                                                  #   第一个中枢从跟 a 反向的那条起找（找不到就整体往后挪两条，照 L39 把 a 并成 a′）。中枢形状不限。
-SL_FIRST_EXEMPT = False                           # 甲S-2／乙′-5（读法-R3R6 一·6，Atlas f3fac3c）：前一个走势段是本级别反向趋势 ⇒ 这一段第一个中枢不受限
-                                                  #   （甲：首中枢可以从同向那条起；乙′：a 可以进第一个中枢）
+SL_FIRST_EXEMPT = False                           # 甲S-2（读法-R3R6 一·6，Atlas f3fac3c）：前一个走势段是本级别反向趋势 ⇒ 这一段第一个中枢不受限
+                                                  #   （首中枢可以从同向那条起）。乙′（R6_YI_PRIME／R6_YI_FALLBACK）R-6 定甲以后删了，代码见 450b2ae 之前
 D2_ALTERNATE = True                               # D-0 分界一高一低交替（D2-3）；只给出图／量数关：等同 trend_v3(alternate=False)
 SAME_LEVEL_DEATH = False                          # 正式版待办（Atlas 05:19:53）：同级别下也标死点类型、出小转大的二类；原型阶段默认不标
 SAME_LEVEL_D2 = False                             # S9：D2 的参照中枢也换成同级别三段中枢（R-1＝A 以后的「完整同级别」）
@@ -632,21 +627,6 @@ def _sl_rel(z1, z2):
     if z2[hi] < z1[lo]:
         return "下"
     return "叠"
-
-
-def _yi_prime_centers(done, a, b):
-    """乙′（同级别）：a＝done[a] 不进第一个中枢。第一个中枢的首段要跟 a 反向，从 a+1 起找，三段不重叠就往后挪两条（a 并成 a′）；
-    第一个找到以后，后面的照 S1／S2 接着找、不限形状。"""
-    first, k = None, a + 1
-    while k + 2 < b:
-        lo = max(done[q]["lo"] for q in range(k, k + 3)); hi = min(done[q]["hi"] for q in range(k, k + 3))
-        if lo <= hi:
-            first = k
-            break
-        k += 2
-    if first is None:
-        return _sl_centers(done, a, b) if R6_YI_FALLBACK else []
-    return _sl_centers(done, first, b)
 
 
 def _sl_centers_with_cuts(done, ks):
@@ -728,8 +708,6 @@ def _sl_layer(done, ks, bounds_, n):
                 zz = zr
         else:
             two_sets[0].extend(zz); two_sets[1].extend(zz)
-        if R6_YI_PRIME and g and bk.get(a) in ("L", "H") and not exempt:
-            zz = _yi_prime_centers(done, a, b)
         start, cur, way = a, [], None
         for z in zz:
             if cur:
