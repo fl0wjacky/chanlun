@@ -5,7 +5,7 @@
 // 取不到后台就退回 `fixtures/`（离线也能看、也能截图对账）；两边都没有就老实说取不到，不画半张图。
 import { CHART, PAGE, CANDLE, WIDTH, SUB, TREND } from './theme.js';
 import { makeBoxPrimitive, makeAnnotPrimitive, makeTrendPrimitive, makeWolfPrimitive, shownOf, ghostHitAt,
-         boundHitAt, refTfName } from './layers.js';
+         boundHitAt, pzHitAt, refTfName } from './layers.js';
 
 const LWC = window.LightweightCharts;
 
@@ -794,11 +794,26 @@ function boundShow(e, b) {
   if (b !== ghostOn) { ghostOn = b; ghostTip.textContent = BOUND_TIP; }
   placeTip(e);
 }
+// 盘整组那块标签（卡 card-9f7a80b6-e8a）：为什么相邻几段盘整标成一组。引原文两句，**分界不动**这件事也说出来
+// （不然读者会问"既然是同一个，为什么中间还有竖线"）。原文逐字：主引 L38 原博正文、L45:60 答疑；附 L33:162（镜像答疑，不当原博正文；Nova 22:03 定）。出处见 spec 走势分段.md D1-3／§八 9。
+const PZ_TIP = '相邻这几段都是盘整：照原文，它们是同一个更大的盘整（中枢延伸、扩展出来的），中间的分界照旧画着、没动。\n'
+  + '第 38 课：「注意，以前说不允许“盘整+盘整”是在非同级别分解方式下的」\n'
+  + '第 45 课答疑：「如果真是盘整+盘整，那就是中枢延伸或扩展出来的，除了在同级别分解中可以允许盘整+盘整，其他情况下是不允许的。」\n'
+  + '第 33 课答疑（镜像）：「盘整+盘整还是盘整，但加多了就是级别大的盘整」\n'
+  + '（本页用的是非同级别分解）';
+function pzShow(e, g) {
+  if (g !== ghostOn) { ghostOn = g; ghostTip.textContent = PZ_TIP; }
+  placeTip(e);
+}
 el('chart').addEventListener('mousemove', (e) => {
   // 幽灵点优先：它是个小方框，分界那条带是**满高**的一列 —— 两者叠上时该说话的是那个点
   // （"这个点之前确认过"是这一眼下更具体的一件事）。
   const g = ghostHitAt(e.clientX, e.clientY);
   if (g) { ghostShow(e, g); return; }
+  // 盘整组标签排在分界**之前**：理由跟幽灵点一样 —— 标签是一小块，分界那条带是满高的一列，
+  // 两者叠上时指针分明是指着标签。
+  const p = pzHitAt(e.clientX, e.clientY);
+  if (p) { pzShow(e, p); return; }
   const b = boundHitAt(e.clientX, e.clientY);
   if (b && b.rule === 'D2-8') { boundShow(e, b); return; }
   ghostHide();

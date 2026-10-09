@@ -1637,6 +1637,150 @@ const shotChart = async (p, tag) => {
        + `　⇒ 字右沿离按钮左沿 ${mINK.gap} px（要 ≥ 4）　那句话的盒子宽 ${mINK.box}　左右内边距 ${mINK.pad}`
        + `　字换了几行：${mINK.ink.b - mINK.ink.t} px 高` : '★ 页面上没有 #notice');
 
+  // ---------------------------------------------------------------- 盘整组（卡 card-9f7a80b6-e8a，小栋 10-07 选 C）
+  // 相邻盘整段在图上标成一组：细轨 ＋ 段界 k/N ＋ 吸左的标签 ＋「屏内 第 a–b 段」＋ 两头「还有 n 段」＋ 悬停引原文。
+  // ★ 线上有没有组**看行情**（今天有、明天可能没有）⇒ 画的那几格不等行情：拿真载荷，把图头以外的段
+  //   **就地改成盘整**再重画一帧 —— 量的是画法和接线，组从哪儿来不归这一格管（分组口径在 ㊵ 用纯函数钉）。
+  //   不改的话这几格会在"今天这张图恰好没有组"时变成死闸：一格都没量，照样绿。
+  const pPZ = await (await b.newContext({ viewport: { width: 1600, height: 900 } })).newPage();
+  await pPZ.goto(PAGE + QS, { waitUntil: 'domcontentloaded' });
+  await waitData(pPZ);
+  await pPZ.waitForTimeout(1500);
+  // ㊵ 分组口径（纯函数，`走势分段.md` §八 第 9 条）：盘整连排 ≥2 段成组；升级·盘整算；无中枢断开；**图头不算**
+  const pzPure = await pPZ.evaluate(async () => {
+    const L = await import('/layers.js');
+    const S = (type, i0, i1, x = {}) => ({ type, i0, i1, ...x });
+    const run = (segs) => L.pzGroups({ segments: segs }).map((g) => [g.from, g.to]);
+    const cases = {
+      head: run([S('盘整', 0, 9, { head: true }), S('盘整', 9, 20), S('上涨', 20, 30)]),             // 图头 + 1 段 ⇒ 不成组
+      upg: run([S('盘整', 0, 9, { head: true }), S('盘整', 9, 20, { upgraded: true }), S('盘整', 20, 30)]),  // ⇒ [[1,2]]
+      wu: run([S('盘整', 0, 9), S('无中枢', 9, 20), S('盘整', 20, 30)]),                              // 无中枢断开 ⇒ []
+      two: run([S('下跌', 0, 9), S('盘整', 9, 20), S('盘整', 20, 30), S('盘整', 30, 40), S('上涨', 40, 50), S('盘整', 50, 60), S('盘整', 60, 70)]),
+    };
+    // 划分自检：一个 9 段的组，扫一遍各种视野，`左在外 + 屏内 + 右在外 = 9` 必须处处成立
+    const g = L.pzGroups({ segments: Array.from({ length: 9 }, (_, k) => S('盘整', k * 100, (k + 1) * 100)) })[0];
+    let worst = null, tried = 0;
+    for (let a = -50; a < 950; a += 37) for (let w = 10; w < 700; w += 61) {
+      const r = L.pzWhere(g, a, a + w); tried++;
+      if (r.before + r.inView + r.after !== g.n && !worst) worst = { a, w, ...r };
+    }
+    return { cases, tried, worst };
+  });
+  ck('㊵ 盘整组的口径（纯函数）：图头不算／升级·盘整算／「无中枢」断开／一张图里可以有几组；划分自检 左在外＋屏内＋右在外＝组内段数',
+     JSON.stringify(pzPure.cases) === JSON.stringify({ head: [], upg: [[1, 2]], wu: [], two: [[1, 3], [5, 6]] }) && !pzPure.worst,
+     `${JSON.stringify(pzPure.cases)}　视野扫了 ${pzPure.tried} 种${pzPure.worst ? '　✗ 对不上：' + JSON.stringify(pzPure.worst) : '，处处对得上'}`);
+
+  // 强行造一组：图头以外全改盘整，视野放在组的中间（两头都在屏外）
+  const pzForce = await pPZ.evaluate(async () => {
+    const app = window.__app, ts = app.chart.timeScale(), segs = app.state.data.trend.segments;
+    for (const s of segs) if (!s.head) s.type = '盘整';
+    const body = segs.filter((s) => !s.head);
+    const v = ts.getVisibleLogicalRange(), w = Math.min(v.to - v.from, (body.at(-1).i1 - body[0].i0) / 3);
+    const m = (body[0].i0 + body.at(-1).i1) / 2;
+    ts.setVisibleLogicalRange({ from: m - w / 2, to: m + w / 2 });
+    await new Promise((r) => setTimeout(r, 900));
+    const d = app.state.pzDrawn, lb = app.state.labelBoxes, vv = ts.getVisibleLogicalRange();
+    const g = d.groups[0] || null;
+    // 屏内几段：自己另数一遍（不抄 pzWhere）
+    const mine = g ? body.filter((s) => s.i1 >= vv.from && s.i0 <= vv.to).length : -1;
+    const tail = g ? lb.slice(-g.chips.length).map((b) => b.slice(0, 4).map(Math.round).join(',')) : [];
+    // 刻度字跟这一帧已经画上去的字（走势那层的 labels ＋ 标注层的 placed）**像素不交叠**
+    const others = [...((app.state.trendDrawn || {}).labels || []), ...lb];
+    const hit = (b) => others.some((q) => b[0] < q[2] && q[0] < b[2] && b[1] < q[3] && q[1] < b[3]);
+    const tl = g ? g.tickLabels : [];
+    const tlBad = tl.filter((t) => t.box && hit(t.box)).map((t) => t.k);
+    return { nBody: body.length, H: d.H, pane: app.chart.panes()[0].getHeight(),
+      chartH: Math.round(document.querySelector('#chart').getBoundingClientRect().height), railY: d.railY,
+      tl: tl.map((t) => [t.k, t.side]), tlBad, nOthers: others.length,
+      groups: d.groups.length, g, mine, tail, chipBoxes: g ? g.chips.map((c) => c.box.map(Math.round).join(',')) : [] };
+  });
+  const pg = pzForce.g;
+  ck('㊶ 盘整组画出来了：一组、标签写组内实数、两头都在屏外 ⇒ 位置 chip ＋ 两头「还有 n 段」都在',
+     pzForce.groups === 1 && !!pg && pg.n === pzForce.nBody && pg.chips[0]?.text === `同一更大横盘 · ${pzForce.nBody} 段`
+       && pg.chips.length === 2 && pg.before > 0 && pg.after > 0,
+     pg ? `组 ${pzForce.groups}　段 ${pg.n}（载荷里图头以外 ${pzForce.nBody}）　chip ${JSON.stringify(pg.chips.map((c) => c.text))}`
+       + `　左在外 ${pg.before}／屏内 ${pg.inView}（第 ${pg.lo}–${pg.hi}）／右在外 ${pg.after}　刻度 ${JSON.stringify(pg.ticks)}` : '★ 一组都没画');
+  ck('㊷ 划分自检（真画的那一帧）：左在外＋屏内＋右在外＝组内段数，屏内段数跟另数的一遍对得上',
+     !!pg && pg.before + pg.inView + pg.after === pg.n && pg.inView === pzForce.mine,
+     pg ? `${pg.before} + ${pg.inView} + ${pg.after} = ${pg.before + pg.inView + pg.after}（组 ${pg.n}）　另数屏内 ${pzForce.mine}` : '');
+  ck('㊸ 细轨贴的是**价格窗格**的底边：H ＝ panes()[0] 的高、≠ #chart 的高（底下还有成交量／MACD）',
+     pzForce.H === pzForce.pane && pzForce.H !== pzForce.chartH && pzForce.railY < pzForce.H,
+     `H ${pzForce.H}　价格窗格 ${pzForce.pane}　#chart ${pzForce.chartH}　细轨 y=${pzForce.railY}`);
+  ck('㊹ 避让：两块 chip **最后登记**（买卖点文字 → 价签 → 我）⇒ 让路的是我，老标签不动',
+     pzForce.tail.length > 0 && JSON.stringify(pzForce.tail) === JSON.stringify(pzForce.chipBoxes),
+     `登记表末尾 ${JSON.stringify(pzForce.tail)}　chip ${JSON.stringify(pzForce.chipBoxes)}`);
+
+  ck('㊾ 刻度字 k/N 不压别的字：跟分界价格字、价签、买卖点文字、chip 像素都不交叠（撞了翻边，两边都撞就只画刻度）',
+     pzForce.tl.length > 0 && pzForce.tlBad.length === 0,
+     `刻度 ${JSON.stringify(pzForce.tl)}（r＝右／l＝左／null＝只画刻度）　比了 ${pzForce.nOthers} 块字　交叠的 ${JSON.stringify(pzForce.tlBad)}`);
+
+  // ㊾b 牙：把一条分界的价格**挪到刻度字正上方**（那个价字会落进刻度字右边那一格），再画一帧 ——
+  //   刻度字必须翻边或者不写，而且 `blockedR` 得是真的（证明这一帧真撞过，不是碰巧没东西挨着）。
+  const pzBump = await pPZ.evaluate(async () => {
+    const app = window.__app, ts = app.chart.timeScale(), T = app.state.data.trend;
+    const g = app.state.pzDrawn.groups[0]; if (!g || !g.tickAt.length) return { err: '没有刻度' };
+    const { k, x } = g.tickAt[0]; const bar = Math.round(ts.coordinateToLogical(x));
+    const b = T.bounds.reduce((m, q) => (Math.abs(q.bar - bar) < Math.abs(m.bar - bar) ? q : m));
+    const y = app.state.pzDrawn.railY + (b.kind === 'H' ? 6 : -24);
+    b.price = app.state.candleSeries.coordinateToPrice(y);
+    const v = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: v.from + 0.01, to: v.to + 0.01 });
+    await new Promise((r) => setTimeout(r, 700));
+    const gg = app.state.pzDrawn.groups[0], t = gg.tickLabels.find((q) => q.k === k);
+    const others = [...app.state.trendDrawn.labels, ...app.state.labelBoxes];
+    const hit = (bx) => others.some((q) => bx[0] < q[2] && q[0] < bx[2] && bx[1] < q[3] && q[1] < bx[3]);
+    return { k, kind: b.kind, side: t.side, blockedR: t.blockedR, overlap: !!(t.box && hit(t.box)) };
+  });
+  ck('㊾b （牙）分界价格字挪到刻度字右边那一格上 ⇒ 刻度字换一格或只画刻度，仍然不交叠',
+     !pzBump.err && pzBump.blockedR === true && pzBump.side !== 'r' && !pzBump.overlap,
+     JSON.stringify(pzBump));
+
+  // ㊺ 悬停那块标签 ⇒ 出原文那句（第 38 课正文 ＋ 第 45 课答疑）
+  const chipBox = pg && pg.chips[0] ? pg.chips[0].box : null;
+  let tipTxt = '';
+  if (chipBox) {
+    const cr = await pPZ.evaluate(() => { const c = document.querySelector('#chart canvas'); const r = c.getBoundingClientRect(); return { x: r.left, y: r.top }; });
+    await pPZ.mouse.move(cr.x + (chipBox[0] + chipBox[2]) / 2, cr.y + (chipBox[1] + chipBox[3]) / 2);
+    await pPZ.waitForTimeout(300);
+    tipTxt = await pPZ.evaluate(() => { const t = document.getElementById('ghosttip'); return t && t.classList.contains('on') ? t.textContent : ''; });
+  }
+  ck('㊺ 悬停标签 ⇒ 说明里引第 38 课正文和第 45 课答疑，并说明分界没动',
+     /第 38 课/.test(tipTxt) && /第 45 课答疑/.test(tipTxt) && /分界照旧/.test(tipTxt),
+     tipTxt ? `「${tipTxt.slice(0, 40)}…」` : '★ 没出说明');
+
+  // ㊻ 组头滚到屏内 ⇒ 标签贴组头；组头滚出左边 ⇒ 标签吸视口左边（x=8）
+  const pzEdge = await pPZ.evaluate(async () => {
+    const app = window.__app, ts = app.chart.timeScale(), body = app.state.data.trend.segments.filter((s) => !s.head);
+    const v = ts.getVisibleLogicalRange(), w = v.to - v.from, i0 = body[0].i0;
+    ts.setVisibleLogicalRange({ from: i0 - w * 0.3, to: i0 + w * 0.7 });
+    await new Promise((r) => setTimeout(r, 700));
+    const a = app.state.pzDrawn.groups[0];
+    const xa = ts.logicalToCoordinate(i0);
+    return { inX: a ? Math.round(a.chips[0].box[0]) : null, xa: Math.round(xa), leftOut: a ? a.leftOut : null, before: a ? a.before : null };
+  });
+  ck('㊻ 组头在屏内 ⇒ 标签贴着组头（不吸左边）、左边不写「还有 n 段」',
+     pzEdge.leftOut === false && pzEdge.before === 0 && Math.abs(pzEdge.inX - Math.max(8, pzEdge.xa + 6)) <= 1,
+     `组头 x=${pzEdge.xa}　标签左沿 ${pzEdge.inX}　leftOut=${pzEdge.leftOut}　左在外 ${pzEdge.before}`);
+  ck('㊼ 组头在屏外 ⇒ 标签吸视口左边（x=8）',
+     !!pg && pg.leftOut && Math.round(pg.chips[0].box[0]) === 8, pg ? `标签左沿 ${Math.round(pg.chips[0].box[0])}` : '');
+
+  // ㊽ 「走势分段」芯片关掉 ⇒ 组一笔不画、命中格也清空（指着原来那块不再出话）
+  await pPZ.evaluate(() => document.querySelector('.chip[data-key="trend"]').click());
+  await pPZ.waitForTimeout(700);
+  const pzOff = await pPZ.evaluate(() => ({ g: window.__app.state.pzDrawn.groups.length,
+    on: document.querySelector('.chip[data-key="trend"]').getAttribute('aria-pressed') }));
+  let tipOff = '';
+  if (chipBox) {
+    const cr = await pPZ.evaluate(() => { const c = document.querySelector('#chart canvas'); const r = c.getBoundingClientRect(); return { x: r.left, y: r.top }; });
+    await pPZ.mouse.move(cr.x + 3, cr.y + 3);
+    await pPZ.mouse.move(cr.x + (chipBox[0] + chipBox[2]) / 2, cr.y + (chipBox[1] + chipBox[3]) / 2);
+    await pPZ.waitForTimeout(300);
+    tipOff = await pPZ.evaluate(() => { const t = document.getElementById('ghosttip'); return t && t.classList.contains('on') ? t.textContent : ''; });
+  }
+  ck('㊽ 关掉「走势分段」⇒ 盘整组一笔不画，原来标签那块也不再出说明',
+     pzOff.on === 'false' && pzOff.g === 0 && !/第 45 课答疑/.test(tipOff),
+     `芯片 aria-pressed=${pzOff.on}　画了 ${pzOff.g} 组　悬停 ${tipOff ? '「' + tipOff.slice(0, 20) + '…」' : '无'}`);
+  await pPZ.context().close();
+
   await b.close();
   console.log(`\n${n - bad}/${n} 过${bad ? `，${bad} 条红` : ''}　截图：${OUT}`);
   process.exit(bad ? 1 : 0);
