@@ -77,6 +77,16 @@ def run(quiet=False, server_arm=True):
     got = W.diff(noanchor, *snap(bars[:8746])[2], 0)
     chk("④ 找不到 D2 对齐点：刀一条都不记", not any(w["kind"] in ("d2", "s5") for w in got), got[:3])
 
+    # ⑦ 「哪几条算已确认」只有一份规矩（Iris／Nova 15:07）：segs_std 的 state（W.seg_states）跟账本 snapshot 记的已确认线段必须是同一批
+    for cut in (8745, 8746):
+        v, std, (conf, _) = snap(bars[:cut])
+        st = W.seg_states(len(std))
+        k = min(W.PENDING_SEGS, len(std))
+        ok_shape = st[len(st) - k:] == ["pending"] * k and set(st[:len(st) - k]) <= {"confirmed"}
+        payload_conf = [[bars[s["i0"]]["t"], bars[s["i1"]]["t"], s["dir"]] for s, x in zip(std, st) if x == "confirmed"]
+        chk("⑦ %d 根：pending 正好是最后 %d 条，confirmed 那批跟账本记的已确认线段同一批" % (cut, W.PENDING_SEGS),
+            ok_shape and payload_conf == [c[:3] for c in conf["segs"]], (st[-4:], len(payload_conf), len(conf["segs"])))
+
     tmp = tempfile.mkdtemp()
     saved = decisions.STATE
     decisions.STATE = tmp
@@ -121,6 +131,9 @@ def run(quiet=False, server_arm=True):
                     chk("⑥ ENABLED 关着：不写账本、不带 withdrawn", not wrote and got is None, (wrote, got))
                 else:
                     chk("⑥ ENABLED 开着：_cut_cc 算完带 withdrawn（那一条）", wrote and got is not None and len(got) == 1, got)
+                    ss = slot.mbodies.get((server.STD_KEY, server.DEFAULT_PEN_MIN)) or []
+                    chk("⑥ 载荷 segs_std 每条带 state，跟 seg_states 一致", [x.get("state") for x in ss] == W.seg_states(len(ss)) and ss,
+                        [x.get("state") for x in ss][-4:])
         finally:
             W.ENABLED = enabled
     finally:
@@ -166,6 +179,16 @@ def self_test():
             return real_snap([dict(b, t=i) for i, b in enumerate(bars)], trend, segs) if off else real_snap(bars, trend, segs)
         W.snapshot = s
     arm("键用下标不用开盘时间", by_index, lambda: setattr(W, "snapshot", real_snap))
+
+    def ledger_n1():
+        def s(bars, trend, segs):
+            conf, seen = real_snap(bars, trend, segs)
+            done = list(segs)
+            t = lambda i: bars[i]["t"]
+            conf = dict(conf, segs=[[t(x["i0"]), t(x["i1"]), x["dir"], W._p(x["p0"]), W._p(x["p1"])] for x in done[:-1]])
+            return conf, seen
+        W.snapshot = s
+    arm("账本还按最后一条算、载荷按最后两条标（两份规矩）", ledger_n1, lambda: setattr(W, "snapshot", real_snap))
     ok = all(n > 0 for _, n in arms)
     for name, n in arms:
         print("%s 变异「%s」⇒ 主跑 %d 处不过" % ("✓" if n > 0 else "✗", name, n))
