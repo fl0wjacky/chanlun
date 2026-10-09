@@ -13,7 +13,8 @@ for kv in a.set:
     k, v = kv.split('=', 1); assert hasattr(TR, k), k; setattr(TR, k, ast.literal_eval(v)); print('set', k, '=', getattr(TR, k))
 bars = json.load(open(config.data(a.file), encoding='utf-8')); tick = config.tick_of(a.file)
 r = analyze(bars, tick=tick); t = TR.trend_v3(r)
-u = lambda i: DT.datetime.fromtimestamp(bars[i]['t'] / 1000, DT.timezone.utc).strftime('%m-%d %H:%M')
+FMT = '%Y-%m-%d %H:%M' if bars[-1]['t'] - bars[0]['t'] > 300 * 86400000 else '%m-%d %H:%M'   # 跨年的数据带年份（btc_1h 七年），否则同一个 08-05 分不清是哪一年
+u = lambda i: DT.datetime.fromtimestamp(bars[i]['t'] / 1000, DT.timezone.utc).strftime(FMT)
 segs = [dict(i0=s['i0'], i1=s['i1'], type=s['type'], n=s['n_centers_level']) for s in t['segments']]
 bounds = [dict(bar=b['bar'], rule=b.get('rule', 'D2'), kind=b['kind'], price=b['price'], state=b.get('state')) for b in t['bounds']]
 cz = [dict(i0=z['X0'], i1=z['X1'], ZD=z['ZD'], ZG=z['ZG'], seg=z['seg']) for z in t['seg_centers']]
