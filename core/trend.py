@@ -190,6 +190,50 @@ def _find_bounds_direct(r, standardize=True):
     return dict(bounds=bounds, retracted=[], ks=ks, done=done, want=None, moved=moved)
 
 
+def _add_beichi_cuts(r, res):
+    """S10 丙：D2 的刀照旧；每两刀之间（一组）再从左往右找背驰点加刀，跟乙同一套判法（新极值、组里已有中枢、_sl_beichi），
+    第一把背驰刀的方向跟这一组的走向相反（D2 刀是 H ⇒ 这组往下走 ⇒ 先找 L）。背驰刀立了以后同方向再出更极端的点 ⇒ 挪刀、记 moved。"""
+    _c8_init(r)
+    done, ks0, b0 = res["done"], list(res["ks"]), list(res["bounds"])
+    edges = [0] + ks0 + [len(done)]
+    extra, moved = [], []
+    for g, (a, b) in enumerate(zip(edges, edges[1:])):
+        mine_ks, mine = [], []
+        want = None if g == 0 else ("L" if b0[g - 1]["kind"] == "H" else "H")
+        for t in range(a, b):
+            cz = _sl_centers_with_cuts(done[:t + 1], ks0[:g] + mine_ks) if SAME_LEVEL_D2 else _centers_with_cuts(done[:t + 1], ks0[:g] + mine_ks)
+            typ = "H" if _is_up(done[t]) else "L"
+            if mine and mine[-1]["kind"] == typ:
+                if (done[t]["p1"] > mine[-1]["price"]) if typ == "H" else (done[t]["p1"] < mine[-1]["price"]):
+                    if _sl_beichi(r, done, t, typ, cz, _C8["first"], _C8["hist"]):
+                        old = mine.pop(); mine_ks.pop()
+                        moved.append(dict(from_bar=old["bar"], to_bar=done[t]["i1"], kind=typ))
+                        mine_ks.append(t + 1)
+                        mine.append(dict(rule="S10丙", line_seg=t, bar=done[t]["i1"], kind=typ, price=done[t]["p1"],
+                                         pullback_line_seg=t, pullback_end_bar=done[t]["i1"], ZD=None, ZG=None))
+                continue
+            if want and typ != want and not mine:
+                continue
+            if mine and mine[-1]["kind"] == typ:
+                continue
+            lo = mine_ks[-1] if mine_ks else a
+            same = [k for k in range(lo, t + 1) if _is_up(done[k]) == (typ == "H")]
+            if not same or max(same, key=lambda k: (done[k]["p1"] if typ == "H" else -done[k]["p1"], k)) != t:
+                continue
+            if not [z for z in cz if z["PI0"] >= lo and z["PI1"] < t]:
+                continue
+            if t + 1 >= b:
+                continue                                 # 正好是下一把 D2 刀的位置，不重复
+            if _sl_beichi(r, done, t, typ, cz, _C8["first"], _C8["hist"]):
+                mine_ks.append(t + 1)
+                mine.append(dict(rule="S10丙", line_seg=t, bar=done[t]["i1"], kind=typ, price=done[t]["p1"],
+                                 pullback_line_seg=t, pullback_end_bar=done[t]["i1"], ZD=None, ZG=None))
+        extra += mine
+    ks = sorted(set(ks0 + [x["line_seg"] + 1 for x in extra]))
+    bounds = sorted(b0 + extra, key=lambda x: x["bar"])
+    return dict(res, ks=ks, bounds=bounds, moved=moved)
+
+
 def find_bounds(r, regroup=True, alternate=True, check_empty=True, no_exceed=True, standardize=True):
     """→ dict(bounds, retracted)。四个开关是 spec §四 的探针 P1／P2／P5／P3（默认全开 ＝ 规则本身）。
     bounds：[dict(line_seg=j, bar, kind 'H'/'L', price, pullback_line_seg=t, pullback_end_bar, ZD, ZG)]，按时间升序；
@@ -542,6 +586,7 @@ SAME_LEVEL_OVERLAP = "ZDZG"                       # S3「判重叠用哪个区�
 SAME_LEVEL_D2 = False                             # S9：D2 的参照中枢也换成同级别三段中枢（R-1＝A 以后的「完整同级别」）
 SAME_LEVEL_C8 = None                              # S10 丙8 在同级别下：None＝照现行；"filter"＝甲（只有趋势背驰／盘整背驰的死点才确立）；
                                                   #   "direct"＝乙（背驰点直接切，不等反向三类点；后面再出新极值就挪刀，记 moved）
+                                                  #   "plus"＝丙（D2 照旧，每组 D2 段里再加背驰刀；同方向再出新极值就挪刀，记 moved）
 
 
 def _sl_centers(done, a, b):
@@ -642,13 +687,15 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
       ★ n_centers_level 是**本级别**中枢个数，跟读法无关；读法 A 的升级段，字母挂在 units 上，个数不是它；
     units：D3 合成出来的高一级中枢（只列 n>1 的），带 seg，给前端画升级框；
     reading：这一跑用的 D3 读法（A／B），前端据此决定字母挂哪一级（spec §八 第 6 条）。"""
-    if SAME_LEVEL and SAME_LEVEL_C8 in ("filter", "direct"):
+    if SAME_LEVEL and SAME_LEVEL_C8 in ("filter", "direct", "plus"):
         _C8["first"] = None
     if SAME_LEVEL and SAME_LEVEL_C8 == "direct":
         res = _find_bounds_direct(r, standardize=standardize)
     else:
         res = find_bounds(r, regroup=regroup, alternate=alternate, check_empty=check_empty, no_exceed=no_exceed,
                           standardize=standardize)
+        if SAME_LEVEL and SAME_LEVEL_C8 == "plus":
+            res = _add_beichi_cuts(r, res)
     done, ks = res["done"], res["ks"]
     n = len(r["bars"])
     if not done:
