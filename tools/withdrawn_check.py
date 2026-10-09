@@ -41,7 +41,7 @@ def snap(bars):
     key = (bars[0]["t"], bars[-1]["t"], len(bars))
     if key not in _memo:
         r = A.analyze(bars, tick=TICK)
-        _memo[key] = (T.trend_v3(r), r["segs"])
+        _memo[key] = (T.trend_v3(r), T._done(r))     # 线段跟服务端一样比 segs_std（图上画的那套标准化线段）
     v, segs = _memo[key]
     return v, segs, W.snapshot(bars, v, segs)
 

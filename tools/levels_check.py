@@ -95,9 +95,50 @@ def run(V, units=None, start=None):
     return bad
 
 
+# §二 2 的实例是老路（非同级别，有合成框）量的 ⇒ 这一组钉回老路比；同级别那条路由 same_level() 单独比（第 3 项不适用、第 4 项起点照旧）。
+LEGACY = dict(SAME_LEVEL=False, SAME_LEVEL_D2=False, SAME_LEVEL_D6=None, SL_FIRST_EXEMPT=False, SAME_LEVEL_DEATH=False, D25_FILL=0)
+
+
+def _views(legacy):
+    import core.trend as T
+    saved = {k: getattr(T, k) for k in LEGACY}
+    try:
+        if legacy:
+            for k, v in LEGACY.items():
+                setattr(T, k, v)
+        return {tf: view(tf) for tf in TFS}
+    finally:
+        for k, v in saved.items():
+            setattr(T, k, v)
+
+
+def same_level(S):
+    """同级别（正式版默认）：本级没有合成框 ⇒ 第 3 项 units_applicable=false、不给列表；第 4 项起点跟老路同一组（10-09 实测）。"""
+    bad = []
+    for tf in TFS:
+        if S[tf]["units"]:
+            bad.append("同级别下 %s 冒出 %d 个合成框（T2 要空）" % (tf, len(S[tf]["units"])))
+        part = LV.units_part(S[tf], S.get(LV.ref_tf(tf, TFS)), True)
+        if part != {"units_applicable": False, "units": []}:
+            bad.append("同级别下 %s 第 3 项没写不适用：%s" % (tf, part))
+    part = LV.units_part(S["15m"], S["1h"], False)
+    if part["units_applicable"] is not True:
+        bad.append("老路下第 3 项被写成不适用：%s" % part)
+    for tf, st in START.items():
+        s = LV.start_link(S[tf], S["15m"], TFS[tf])
+        if s["status"] != st:
+            bad.append("同级别下 %s 起点 %s ≠ %s（%s）" % (tf, s["status"], st, s))
+    return bad
+
+
 def main():
-    V = {tf: view(tf) for tf in TFS}
-    bad = run(V)
+    import core.trend as T
+    if not T.SAME_LEVEL:
+        print("✗ 引擎默认不是同级别（这份检查按正式版默认写）")
+        return 1
+    V = _views(legacy=True)
+    S = _views(legacy=False)
+    bad = run(V) + same_level(S)
     if "--self-test" not in sys.argv:
         for b in bad:
             print("✗", b)
@@ -122,13 +163,25 @@ def main():
     src = LV.unit_links
     LV.unit_links = lambda h, r: [dict(u, status="mismatch") if u["status"] == "partial" else u for u in src(h, r)]
     # ★ C3 6 根以后夹具里一个 partial 都没有了 ⇒ 这一臂改在 7 根档（还在的开关档）上量，对 7 根档的旧基线
-    V7 = {tf: view(tf, min_gap=4) for tf in TFS}
+    import core.trend as T
+    saved = {k: getattr(T, k) for k in LEGACY}
+    for k, v in LEGACY.items():
+        setattr(T, k, v)
+    try:
+        V7 = {tf: view(tf, min_gap=4) for tf in TFS}
+    finally:
+        for k, v in saved.items():
+            setattr(T, k, v)
     arms.append(("partial 并回 mismatch（7 根档）", run(V7, UNITS_15_VS_1H_7, START_7)))
     LV.unit_links = src
     mult0 = LV.REF_MULT
     LV.REF_MULT = 2                                                              # 对照取下一档
     arms.append(("对照取下一档", run(V)))
     LV.REF_MULT = mult0
+    up0 = LV.units_part
+    LV.units_part = lambda h, r, sl: {"units_applicable": True, "units": LV.unit_links(h, r)}   # 同级别下也照算（只给空列表）
+    arms.append(("同级别下不写不适用", same_level(S)))
+    LV.units_part = up0
     rc = 0
     for name, b in arms:
         print(("✓ 红了" if b else "✗ 没红") + "：" + name + ("（%s）" % b[0] if b else ""))

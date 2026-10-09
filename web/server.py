@@ -72,7 +72,7 @@ import core.trend as _T                                 # noqa: E402  只读 SAM
 from fetch_klines import BASE as BINANCE_KLINES, UA, fetch as binance_fetch   # noqa: E402
 from make_web_fixture import iso, shape                 # noqa: E402
 from core.analyze import analyze                        # noqa: E402
-from core.trend import trend_v3                         # noqa: E402
+from core.trend import trend_v3, _done as std_segments  # noqa: E402  _done：分界用的那套已完成线段（标准化），D-3 C 图上画它
 import levels as LV                                     # noqa: E402  （web/levels.py：级别联动，不进引擎版本）
 from core.signals import MEASURES, MEASURE_ORIG, MEASURE_NOTE, macd_lines, wolf_below, signals as engine_signals   # noqa: E402
 import core.signals as _engine_signals_mod              # noqa: E402,F401  （见下行：模块对象从 sys.modules 取）
@@ -414,6 +414,7 @@ TREND_KEYS = ("bounds", "retracted", "pending", "segments", "units", "xzd_second
 
 
 WD_KEY = "__withdrawn__"                 # mbodies 里「已撤回」那一份的键（随 _cut_cc 一起算、随数据刷新清掉）
+STD_KEY = "__segs_std__"                 # mbodies 里 segs_std 那一份的键（同上）
 
 
 def _cut_cc(slot, symbol, pen_min=DEFAULT_PEN_MIN, tf=None):
@@ -423,11 +424,16 @@ def _cut_cc(slot, symbol, pen_min=DEFAULT_PEN_MIN, tf=None):
         r = analyze(slot.bars, tick=tick_of(SYMBOLS[symbol] + "_.json"), **pen_kw(pen_min))
         v = trend_v3(r, reading=TREND_READING)
         cc = slot.mbodies[(CUT_KEY, pen_min)] = (v["seg_centers"], {k: v[k] for k in TREND_KEYS}, v["reading"])
+        if _T.SAME_LEVEL:
+            # segs_std（D-3 C）：分界用的那套已完成线段原样送出去，前端画它、不自己再标准化一遍（两份实现迟早对不上）
+            std = std_segments(r)
+            slot.mbodies[(STD_KEY, pen_min)] = [{k: s[k] for k in ("i0", "i1", "p0", "p1", "dir")} for s in std]
         if _T.SAME_LEVEL and tf is not None and withdrawn.ENABLED:
             # 「已撤回」（Q-6 A）：一份数据一个笔档只在这里算一次 ⇒ 每次重算比一次上次。账本出错不许拖垮出图：记日志、这一格不带 withdrawn
+            #   线段比的是 segs_std（图上画的那套），不是原始线段：叉要落在画过的线上
             try:
-                withdrawn.observe((symbol, tf, slot.span, pen_min), slot.bars, v, r["segs"])
-                slot.mbodies[(WD_KEY, pen_min)] = withdrawn.view(symbol, tf, pen_min, spans_of(tf), slot.bars, v, r["segs"])
+                withdrawn.observe((symbol, tf, slot.span, pen_min), slot.bars, v, std)
+                slot.mbodies[(WD_KEY, pen_min)] = withdrawn.view(symbol, tf, pen_min, spans_of(tf), slot.bars, v, std)
             except Exception:
                 log("withdrawn failed", symbol, tf, slot.span, pen_min, traceback.format_exc().replace("\n", " | "))
     return cc
@@ -462,7 +468,7 @@ def get_levels(symbol, tf, span=1):
     return json.dumps(dict(
         symbol=symbol, tf=tf, span=span, engine=ENGINE, finest_tf=fin_tf, ref_tf=rf,
         start=None if fin_tf == tf else LV.start_link(here, fin, TFS[tf]),
-        units=LV.unit_links(here, ref),
+        **LV.units_part(here, ref, _T.SAME_LEVEL),
         data_at=dict(here=at(here_at), finest=at(fin_at), ref=at(ref_at)),   # 三张各自是哪一刻的数据，前端对得上号
     ), ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
@@ -482,6 +488,8 @@ def _measure_body(slot, symbol, tf, measure, cut=DEFAULT_CUT, pen_min=DEFAULT_PE
             cc = _cut_cc(slot, symbol, pen_min, tf)
             d["seg_centers"], d["trend"], d["cut"] = _clean(cc[0]), _clean(cc[1]), cut
             d["trend_reading"] = cc[2]                    # D3 读法回显：前端据此决定字母挂哪一级（Nova 10-05 16:4x）
+            if (STD_KEY, pen_min) in slot.mbodies:        # 同级别开着才有：{i0,i1,p0,p1,dir}，只含已完成的；未完成那段照旧在 segs 里
+                d["segs_std"] = _clean(slot.mbodies[(STD_KEY, pen_min)])
             if (WD_KEY, pen_min) in slot.mbodies:         # 同级别开着才有；顶层，跟 trend.retracted（D2-7 图内撤刀）是两回事
                 d["withdrawn"] = _clean(slot.mbodies[(WD_KEY, pen_min)])
             b = slot.mbodies[(measure, cut, pen_min)] = json.dumps(d, ensure_ascii=False, separators=(",", ":"),

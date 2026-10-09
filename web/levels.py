@@ -56,6 +56,16 @@ def start_link(here, finest, step_ms):
     return out
 
 
+def units_part(here, ref, same_level):
+    """/api/levels 里第 3 项那一块 → {"units_applicable": bool, "units": [...]}。
+    同级别下本级不合成框（T2：trend.units 为空），第 3 项**不适用**（Nova 10-09 13:09 选 (b)；spec 级别联动 §四 第 3 项，
+    依据 L38:35「该级别以上级别，根本不考虑」）：明说 units_applicable=false，不给一个看上去像「没有框」的空列表。
+    文案归前端（「级别对照」按灰、悬停写原因）。"""
+    if same_level:
+        return {"units_applicable": False, "units": []}
+    return {"units_applicable": True, "units": unit_links(here, ref)}
+
+
 def unit_links(here, ref):
     """第 3 项：本图每个合成框（trend.units，同下标）落在对照图哪几个线段中枢里、按时间算的占比。
     status 四种（Nova 10-06，spec L-9）：match（整个框在一个中枢里）／partial（只有 pre 或 post 落在外面，
