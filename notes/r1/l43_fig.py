@@ -28,7 +28,7 @@ LL, LH = math.log(lo), math.log(hi)
 d.text((ML, 12), a.title, fill=TX, font=F)
 d.text((ML, 44), f'同一个窗口、同一把尺（对数轴）· {utc(b0):%m-%d} → {utc(b1):%m-%d} · 线段画标准化那一套', fill=MU, font=Fs)
 GOLD, RED, GRN, GRY, WARN, AMB = (196, 137, 1), (230, 92, 92), (70, 175, 120), (150, 156, 170), (255, 80, 80), (255, 190, 60)
-RULE = {'S5': '盘整相连'}                                  # 刀名跟决策页一个叫法（Nova 18:58：小栋不认识 S5；D2 各条一律叫「转折分界」，Nova 18:59）
+RULE = {'S5': '盘整相连'}                                  # 刀名跟决策页一个叫法（Nova 18:58：小栋不认识 S5；D2 各条一律叫「分界」，Nova 19:0x 更正）
 TC = {'上涨': RED, '下跌': GRN, '盘整': GRY, '无中枢': GRY}
 
 def dashed(q, x0, y0, x1, y1, col, width, on=8, off=6):
@@ -84,7 +84,7 @@ def panel(k, D, tag):
         dashed(q, X(i), 34, X(i), bot, col + (220,), 3 if bad else 1)
         ty = min(bot - 56, max(64, Y(bd['price']) + (14 if bd['kind'] == 'L' else -40)))
         st = '待确认' if bd['state'] == 'pending' else '已确认' if bd['state'] == 'confirmed' else ''
-        t = f"{('转折分界' if bd['rule'].startswith('D2') else RULE.get(bd['rule'], bd['rule']))} {bd['price']:g} · {utc(i):%m-%d %H:%M} {st}"
+        t = f"{('分界' if bd['rule'].startswith('D2') else RULE.get(bd['rule'], bd['rule']))} {bd['price']:g} · {utc(i):%m-%d %H:%M} {st}"
         if bad: t += f"\n{segs[j - 1]['type']}接{segs[j]['type']} —— 第 43 课原文不允许"
         tw = q.multiline_textbbox((0, 0), t, font=Fb)[2]
         tx = X(i) + 8 if X(i) + 8 + tw < W - MR else X(i) - 8 - tw     # 靠右边出框 ⇒ 字放到线左边
