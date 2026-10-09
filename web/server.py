@@ -64,6 +64,8 @@ sys.path.insert(0, ROOT)
 
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 from config import tick_of                              # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import decisions                                        # noqa: E402  决策树网页的数据和存选择（web/decisions.py）
 from fetch_klines import BASE as BINANCE_KLINES, UA, fetch as binance_fetch   # noqa: E402
 from make_web_fixture import iso, shape                 # noqa: E402
 from core.analyze import analyze                        # noqa: E402
@@ -639,7 +641,7 @@ def cache_for(ext, want, ver):
 
 # ───────────────────────── HTTP ─────────────────────────
 
-ERR = {400: "bad request", 404: "not found", 405: "method not allowed", 503: "data not available yet"}
+ERR = {400: "bad request", 403: "forbidden", 404: "not found", 405: "method not allowed", 503: "data not available yet"}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -682,7 +684,33 @@ class Handler(BaseHTTPRequestHandler):
     def _bad_method(self):
         self._err(405)
 
-    do_POST = do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _bad_method
+    do_PUT = do_DELETE = do_PATCH = do_OPTIONS = _bad_method
+
+    def do_POST(self):
+        """全站唯一收 POST 的地方：决策页存小栋的选择（card-fe3aebd3-819）。别的路径照旧 405。"""
+        try:
+            if urllib.parse.urlsplit(self.path).path != "/api/decisions/choices":
+                return self._err(405)
+            try:
+                n = int(self.headers.get("Content-Length", ""))
+            except ValueError:
+                return self._err(400)
+            if n < 0 or n > decisions.MAX_BODY:
+                return self._err(400)
+            try:
+                rec = decisions.save(self.rfile.read(n), self.headers.get("X-Decision-Token"))
+            except decisions.Bad as e:
+                if e.code == 403:
+                    log("decision save refused: bad token from", self.address_string())
+                return self._send(e.code, json.dumps({"error": e.msg}).encode())
+            log("decision saved", rec["id"], "->", rec["option"], "(was %s)" % rec["prev"], "seq", rec["seq"])
+            self._send(200, json.dumps(rec, ensure_ascii=False).encode("utf-8"))
+        except Exception:
+            log("handler error", self.path[:200], traceback.format_exc().replace("\n", " | "))
+            try:
+                self._send(500, b'{"error":"internal error"}')
+            except Exception:
+                pass
 
     def _route(self):
         u = urllib.parse.urlsplit(self.path)
@@ -779,6 +807,15 @@ class Handler(BaseHTTPRequestHandler):
             if body is None:
                 return self._err(503)
             return self._send(200, body)
+        if u.path == "/api/decisions":                    # 决策树网页：docs/spec/decisions.json 原样，每次现读（pull 即生效）
+            if u.query:
+                return self._err(400)
+            raw = decisions.spec_bytes()
+            return self._err(503) if raw is None else self._send(200, raw)
+        if u.path == "/api/decisions/choices":            # 小栋存过的选择 {id: {option, note, at, seq, prev}}
+            if u.query:
+                return self._err(400)
+            return self._send(200, json.dumps(decisions.choices(), ensure_ascii=False).encode("utf-8"))
         if u.path == "/api/meta":
             if u.query:
                 return self._err(400)
