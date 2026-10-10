@@ -517,6 +517,41 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
   ck('⑪ 状态栏「完成线段 N」＝ segs_std 条数、「+M 未完成」＝原始里的 live 条数；线段中枢的 host 就是 segs_std（场面成立：两套条数故意不同）',
      SS.std !== SS.rawDone && SS.shown === SS.std && SS.shownLive === SS.live && SS.hostIsStd, JSON.stringify(SS));
 
+  // ⑫ 规则 B 的「暂定」线段框（card-900b75a1-f83，小栋 10-10 08:01 选 B）：后台标 `status: "暂定"` 的线段框
+  //   ⇒ 点划线（DASH.pendBox）＋填充淡一档＋价签后跟「暂定」；没标的照旧。后台那半还没出 ⇒ 页面里给屏上线段框塞标。
+  //   量法：包住 setLineDash／fillText 录一帧（画了什么纹样、写了什么字），再对 boxesDrawn 的 pending。
+  //   牙：一个都不标（现行载荷）⇒ 一笔点划都不许有、价签里一个「暂定」都不许有。
+  const PB = await p.evaluate(async () => {
+    const app = window.__app, d = app.state.data, st = app.state, ts = app.chart.timeScale();
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const zs = d.seg_centers || []; if (zs.length < 4) return { err: '线段框不到 4 个' };
+    const zl = zs[zs.length - 2];
+    ts.setVisibleLogicalRange({ from: zs[zs.length - 4].X0 - 20, to: d.bars.length + 5 }); await wait(600);
+    const C = CanvasRenderingContext2D.prototype, sd = C.setLineDash, ft = C.fillText;
+    const rec = async () => {
+      const dashes = [], texts = [];
+      C.setLineDash = function (a) { dashes.push((a || []).join(',')); return sd.call(this, a); };
+      C.fillText = function (t, ...r) { texts.push(String(t)); return ft.call(this, t, ...r); };
+      const r = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: r.from + 0.01, to: r.to + 0.01 }); await wait(600);
+      C.setLineDash = sd; C.fillText = ft;
+      const drawn = (st.boxesDrawn || []).filter((b) => b.tier === 'seg');
+      return { dashDot: dashes.filter((s) => s === '9,3,2,3').length, tagPend: [...new Set(texts.filter((t) => /^\[.*\] 暂定$/.test(t)))],
+               nSeg: drawn.length, nPend: drawn.filter((b) => b.pending).length };
+    };
+    const keep = zs.map((z) => z.status);
+    zs.forEach((z) => { z.status = '已确认'; });
+    const none = await rec();
+    const fmt = (await import('./layers.js')).fmtG;
+    zl.status = '暂定';
+    const one = await rec();
+    zs.forEach((z, k) => { z.status = keep[k]; }); app.repaint(); await wait(300);
+    return { none, one, want: `[${fmt(zl.ZD)}, ${fmt(zl.ZG)}] 暂定` };
+  });
+  if (PB.err) { console.error(PB.err); await b.close(); process.exit(2); }
+  ck('⑫ 「暂定」线段框：标了的那一个画点划（9 3 2 3）、价签写「… 暂定」、boxesDrawn 记 pending；一个都不标 ⇒ 零点划、零「暂定」价签（牙）',
+     PB.none.nSeg > 0 && PB.none.dashDot === 0 && PB.none.tagPend.length === 0 && PB.none.nPend === 0
+       && PB.one.nPend === 1 && PB.one.dashDot >= 1 && PB.one.tagPend.length === 1 && PB.one.tagPend[0] === PB.want, JSON.stringify(PB));
+
   if (SHOTS) await p.screenshot({ path: require('path').join(SHOTS, 'samelevel-fe.png') });
   await b.close();
   console.log(red ? `✗ ${red} 格红（${n - red}/${n} 过）` : `${n}/${n} 过`);   // predeploy 认「N/N 过」这一行
