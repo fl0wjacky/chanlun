@@ -365,7 +365,7 @@ def main():
     for fn in files:
         sl += ["%s %s" % (fn, x) for x in sl_check(sl_run(fn))]
     cell("⑨ G6 同级别正式口径（%d 份，笔锁关）：中间段有中枢、S5 落在接缝、D2 高低交替、每刀有死因、state 两值且 S5 守 D-4′；"
-         "T1 三段不共用、T2 不升级、T3 [ZD,ZG]、T3′ 相邻中枢按 [ZD,ZG] 判叠／方向、T4 甲／豁免／退回、T5 已确认 D2 窗口里有中枢" % len(files), sl)
+         "T1 三段不共用、T2 不升级、T3 [ZD,ZG]、T3′ 相邻中枢按 [ZD,ZG] 判叠／方向、T4 甲／豁免／退回、T5 已确认 D2 窗口里有中枢、T6 立刀也限形状" % len(files), sl)
     sl = []
     for fn in files:
         sl += ["%s %s" % (fn, x) for x in sl_check(sl_run(fn, lock=True))]
@@ -378,7 +378,8 @@ def main():
 # ---------------------------------------------------------------- G6：同级别正式版的不变量（上线清单 G6）
 # 跑的是正式口径全开（同级别＋S9＋甲＋首中枢豁免＋死因）＋笔锁 PEN_FINAL_LOCK，跟线上默认那套（main()①～⑧）分开：
 #   默认关的时候同级别那条路根本不走，①～⑧ 量不到它。sl_check 只读一份 trend_v3 输出，--self-test 拿它的拷贝拧坏一处、必须报。
-SL_FLAGS = dict(SAME_LEVEL=True, SAME_LEVEL_D2=True, SAME_LEVEL_D6="fallback", SL_FIRST_EXEMPT=True, SAME_LEVEL_DEATH=True)
+SL_FLAGS = dict(SAME_LEVEL=True, SAME_LEVEL_D2=True, SAME_LEVEL_D6="strict", SL_FIRST_EXEMPT=True, SAME_LEVEL_DEATH=True,
+                SL_S5_SHAPE=True, SL_WAY_LOCK=True, SL_D2_SHAPE=True)   # 形状 B 全限（card-8368a083-082）；以前写死 fallback，B 那几支其实没被这一格量到
 # ⑨ 主跑用笔锁「关」＝正式口径（小栋 10-09 S-13 ①B 定锁关；原来这里写死锁开，⑨ 一直量的不是线上那套，Nova 10-09 19:01）。
 #   锁开留成附加一档 ⑨′ 照样要全绿；⑨″ 守「⑨ 量的就是线上口径」：sl_run 的输出必须跟 core.pen 的默认锁值跑出来的逐份一样。
 SL_LOCK = False
@@ -443,8 +444,7 @@ def _walk_s5(done, a, b, zz, strict, lock=None):
                 up, dn = _scan(done, cut, b, first_up=False), _scan(done, cut, b, first_up=True)
                 ok_up = len(up) >= 2 and _rel(up[0], up[1]) == "上"
                 ok_dn = len(dn) >= 2 and _rel(dn[0], dn[1]) == "下"
-                pick = (up if up[0][0] <= dn[0][0] else dn) if ok_up and ok_dn else up if ok_up else dn if ok_dn else \
-                    ((dn if done[cut - 1]["dir"] == "up" else up) if strict else None)
+                pick = (up if up[0][0] <= dn[0][0] else dn) if ok_up and ok_dn else up if ok_up else dn if ok_dn else None   # 都不成 ⇒ 不限（盘整无方向）
                 if pick is not None:
                     zz = zz[:q] + pick
                     if lock is not None and len(pick) >= 2 and _rel(pick[0], pick[1]) != "叠":
@@ -536,10 +536,10 @@ def sl_check(v):
             alt[gi] = (lim, free)
             got = [(z["PI0"], z["PI1"]) for z in zz if a <= z["PI0"] < b]
             ok = len(lim) >= 2 and _rel(lim[0], lim[1]) == ("上" if want_up else "下")
-            strict = T.SAME_LEVEL_D6 == "strict"
+            strict = SL_FLAGS.get("SAME_LEVEL_D6") == "strict"          # 照 ⑨ 跑引擎时用的那套（sl_run 跑完就把引擎的旗还原了）
             base = lim if (ok or strict) else free
-            lock = ("上" if want_up else "下") if (strict and getattr(T, "SL_WAY_LOCK", False)) else None
-            want = [(x[0], x[1]) for x in (_walk_s5(done, a, b, base, strict, lock) if T.SL_S5_SHAPE else base)]
+            lock = ("上" if want_up else "下") if (strict and SL_FLAGS.get("SL_WAY_LOCK")) else None
+            want = [(x[0], x[1]) for x in (_walk_s5(done, a, b, base, strict, lock) if SL_FLAGS.get("SL_S5_SHAPE") else base)]
             # T4（限形状＋豁免；fallback 档判不出同向趋势就退回不限、strict 档不退回；S5 之后那截照 _walk_s5 再限一次）
             if got != want:
                 bad.append("T4 刀 %d 之后那组：中枢 %s，按%s该是 %s" % (cut["bar"], got[:3], "限形状" if ok else ("限形状（不退回）" if strict else "退回"), want[:3]))
@@ -587,6 +587,22 @@ def sl_check(v):
             L = [x for x in d2 if x["bar"] < b["bar"]]; R = [x for x in d2 if x["bar"] > b["bar"]]
             if not (L and R and L[-1]["state"] == "confirmed" and R[0]["state"] == "confirmed"):
                 bad.append("S5 刀 %d 确认了，可两边 D2 没都确认（D-4′）" % b["bar"])
+    # T6（甲S-7「B 全限」，SL_D2_SHAPE 开着时）：D2 立刀也只认限形状的中枢——检查自己重算，不调引擎：
+    #   ① 每把 D2 记下的参照中枢（ref_X0 起的三段），首段方向得跟刀前的走向相反（高点刀 ⇒ 首段向下＝下上下）；
+    #   ② 相邻两把 D2 之间（上一刀之后到这一刀的线段为止），用 _scan 按上一刀定的方向限形状，至少找得出一个中枢（D2-7 用同一把尺）。
+    dn = v.get("_done")
+    if dn is not None and SL_FLAGS.get("SL_D2_SHAPE"):
+        starts = {d["i0"]: q for q, d in enumerate(dn)}
+        for b in d2:
+            q = starts.get(b.get("ref_X0"))
+            if q is None:
+                bad.append("T6 D2 刀 %d 的参照中枢起点 %s 对不上线段" % (b["bar"], b.get("ref_X0")))
+            elif (dn[q]["dir"] == "up") != (b["kind"] == "L"):
+                bad.append("T6 D2 刀 %d（%s）的参照中枢首段方向不对（%s）" % (b["bar"], b["kind"], dn[q]["dir"]))
+        for x, y in zip(d2, d2[1:]):
+            a, j = x["line_seg"] + 1, y["line_seg"]
+            if not _scan(dn, a, j + 1, first_up=(x["kind"] == "H")):
+                bad.append("T6 D2 刀 %d → %d 之间没有限形状的中枢（D2-7）" % (x["bar"], y["bar"]))
     return bad
 
 

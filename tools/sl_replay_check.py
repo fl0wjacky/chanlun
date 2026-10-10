@@ -21,7 +21,8 @@ import core.pen as PEN                            # noqa: E402
 from config import tick_of                        # noqa: E402
 
 FIXTURES = ("zec_2h.json", "zec_1h.json")          # 都有确认过的 D2；zec_1h 还有确认过的 S5
-SL_FLAGS = dict(SAME_LEVEL=True, SAME_LEVEL_D2=True, SAME_LEVEL_D6="fallback", SL_FIRST_EXEMPT=True, SAME_LEVEL_DEATH=True)
+SL_FLAGS = dict(SAME_LEVEL=True, SAME_LEVEL_D2=True, SAME_LEVEL_D6="strict", SL_FIRST_EXEMPT=True, SAME_LEVEL_DEATH=True,
+                SL_S5_SHAPE=True, SL_WAY_LOCK=True, SL_D2_SHAPE=True)   # 形状 B 全限（card-8368a083-082）；以前写死 fallback，B 那几支其实没被这一格量到
 
 
 def replay(fn, tamper=None):
