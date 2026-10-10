@@ -1015,12 +1015,18 @@ function trendMarkView(target, state, prim) {
             // 终点滚出右边（叉画不了）⇒ 在画布右沿、线出屏的那个高度上留一个实心小三角 ▶ ＋「线段已撤回 →」：
             //   不然屏上只剩一条线，看不出它是什么、也不知道往右翻才看得到叉。
             if (x > W - 2 && x0 < W - 14) {
-              const ex = W - 6, ey = Math.max(8, Math.min(H - 8, y0 + (y - y0) * (ex - x0) / (x - x0)));
+              const ex = W - 6;
+              let ey = Math.max(8, Math.min(H - 8, y0 + (y - y0) * (ex - x0) / (x - x0)));
+              // 躲开现价那条（Nova 04:25）：最右边贴着价格轴的现价标签就在这个高度附近，三角挨上去会读成「现价旁边一个红箭头」。
+              //   现价的 y 在 ±12 之内 ⇒ 三角往离开它的方向挪到 12 之外（三角还贴着线、只是不压现价）；字的让位表里也把现价那块加进去。
+              const lastB = data.bars[data.bars.length - 1], yLast = lastB ? vp.yOfPrice(lastB.c) : null;
+              const lastBox = yLast === null ? null : [W - 70, yLast - 10, W, yLast + 10];
+              if (yLast !== null && Math.abs(ey - yLast) < 12) ey = Math.max(8, Math.min(H - 8, ey < yLast ? yLast - 12 : yLast + 12));
               ctx.fillStyle = rgba(CHART.sell, 220);
               ctx.beginPath(); ctx.moveTo(ex + 4, ey); ctx.lineTo(ex - 5, ey - 6); ctx.lineTo(ex - 5, ey + 6); ctx.closePath(); ctx.fill();
-              const ly = fitLabel(ctx, ex - 10, ey + 4, '线段已撤回 →', mine, H, 'right');
+              const ly = fitLabel(ctx, ex - 10, ey + 4, '线段已撤回 →', lastBox ? mine.concat([lastBox]) : mine, H, 'right');
               D.labels.push(haloText(ctx, ex - 10, ly, '线段已撤回 →', CHART.sell, 'right', mine));
-              D.withdrawnArrows.push({ t: w.t, x: Math.round(ex), y: Math.round(ey) });
+              D.withdrawnArrows.push({ t: w.t, x: Math.round(ex), y: Math.round(ey), yLast: yLast === null ? null : Math.round(yLast), yLine: Math.round(y0 + (y - y0) * (ex - x0) / (x - x0)) });
             }
           }
         }
