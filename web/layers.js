@@ -364,13 +364,17 @@ export function makeBoxPrimitive(state) {
                   //   ★ 严格不等号：`i1 === cutBar` 的框右沿正好停在分界线上，那片是**定住**的。
                   const wc = bx.i1 < cutBar;
                   const fade = wc ? TREND.willChangeFade : 1;
-                  drawFrame(ctx, x0, yt, x1, yb, col, w, fill, splitAt, solid, W, openL, fade);
+                  // 规则 B（card-900b75a1-f83，小栋 10-10 08:01 选 B）：后台在线段框上标 `status: "暂定"`
+                  //   （成员线段还在最后两条里／两头的刀还没确认／框在末段 —— 三条有一条不齐）⇒ **点划线框＋填充淡一档**，
+                  //   价签后面跟「待定」（标注层 ③；显示的字跟载荷值不同，见那里）。只认线段层：笔层的类中枢后台不标这个。
+                  const pend = tier === 'seg' && bx.z.status === '暂定';
+                  drawFrame(ctx, x0, yt, x1, yb, col, w, fill, splitAt, solid, W, openL, fade, pend);
                   // 只记**底下那个框**：升级框跟它同 i0/i1，记进去会让「同一格只许出现一次」这把尺子
                   // 把自己量红（它们本来就是同一个框的另一种说法，不是画了两遍）。
                   // `willChange` 一并记下：验收要能问「这格该淡不该淡」，靠肉眼数框数不出来。
                   //   ★ 记的是**事实**（`wc`），不是「淡没淡」—— 哪天把 `willChangeFade` 调成 1，
                   //     这一格照样说得出「这些框本来是会变的那一批」。
-                  state.boxesDrawn.push({ tier, i0: bx.i0, i1: bx.i1, provisional: openL, willChange: wc });
+                  state.boxesDrawn.push({ tier, i0: bx.i0, i1: bx.i1, provisional: openL, willChange: wc, pending: pend });
                   if (sh.up && bx.z.up && bx.z.up.length) {
                     for (const u of bx.z.up) {                  // 高一级别：满 9 段（第 33 课）
                       const uyt = vp.yOfPrice(u.ZG), uyb = vp.yOfPrice(u.ZD);
@@ -396,7 +400,7 @@ export function makeBoxPrimitive(state) {
 /** `openL`（可缺省）＝ 左沿是不是「还没立住的切点」（provisional，卡 card-e346ede6-996）⇒ 左沿改虚线。
  *  只动**左沿那条竖线**，不整框变虚：这个框的价位区间和右端都还是真的事实，不确定的只有起点。
  *  ★ 为什么不整框虚：**整框虚/尾截虚已经是「未完成」的信号**（`boxSplit` 那三种），再叠一层就没法分了。 */
-function drawFrame(ctx, x0, ytop, x1, ybot, col, width, fillAlpha, splitAt, solid, W, openL, fade = 1) {
+function drawFrame(ctx, x0, ytop, x1, ybot, col, width, fillAlpha, splitAt, solid, W, openL, fade = 1, pending = false) {
   if (x0 > x1) [x0, x1] = [x1, x0];
   const y0 = Math.min(ytop, ybot), y1 = Math.max(ytop, ybot);
   // 填充整块只铺一次（Python 的注释：两截各铺一遍会在分界处叠出一条深缝）
@@ -405,10 +409,18 @@ function drawFrame(ctx, x0, ytop, x1, ybot, col, width, fillAlpha, splitAt, soli
   //     不是「这是另一种框」。换色会让人以为多了一个类别（§八 1 立过的账）。
   //   ★ 也不改成灰点线：灰点线在这一层**已经有主**（「待定」§八 3、「撤回」§八 4），再借一次
   //     三件事就糊成一件了。
-  ctx.fillStyle = rgba(col, fillAlpha * fade);
+  // `pending`（可缺省 false）＝ 规则 B 的「暂定」线段框：四条边一律点划（`DASH.pendBox`），填充再乘 `TREND.pendFill`。
+  //   ★ 盖过 boxSplit 的拆两截／整框虚：暂定是「这个框还会不会在」的事，比「最后一段走没走完」大一级，两种纹样叠着画读不出来。
+  ctx.fillStyle = rgba(col, fillAlpha * fade * (pending ? TREND.pendFill : 1));
   ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
   ctx.strokeStyle = rgba(col, 235 * fade);
   ctx.lineWidth = width;
+  if (pending) {
+    ctx.setLineDash(DASH.pendBox);
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+    ctx.setLineDash([]);
+    return;
+  }
   const split = splitAt !== null && splitAt !== undefined && splitAt > x0 && splitAt < x1 ? splitAt : null;
   const solidL = !!solid && !openL;                                  // 左沿：'provisional' ⇒ 虚（见上面那句）
   const edges = split === null
@@ -612,7 +624,11 @@ export function makeAnnotPrimitive(state) {
                 for (const bx of boxes(data, tier)) {
                   const x = vp.xOfBar(bx.i0), y = vp.yOfPrice(bx.z.ZG);
                   if (!onScreen(x, W, 8) || y === null) continue;   // 框滚出去了，价签也跟着走
-                  tag(ctx, placed, x + 8, y - 8, `[${fmtG(bx.z.ZD)}, ${fmtG(bx.z.ZG)}]`, col, W, H);
+                  // 规则 B：后台 `status: "暂定"` 的线段框价签后面跟「待定」（框线换了点划，字是给不认纹样的人的）。
+                  //   ★ 显示的字是「待定」、不是载荷那个值（Nova 10-10 08:08）：图上已经有顶上的「待定」、分界的「待确认」，
+                  //     再来个「暂定」就三种说法 —— 跟顶那个统一。引擎的 status 值不动，换字只在这里。
+                  const pend = tier === 'seg' && bx.z.status === '暂定' ? ' 待定' : '';
+                  tag(ctx, placed, x + 8, y - 8, `[${fmtG(bx.z.ZD)}, ${fmtG(bx.z.ZG)}]${pend}`, col, W, H);
                   if (sh.up && bx.z.up) {
                     for (const u of bx.z.up) {
                       const uy = vp.yOfPrice(u.ZG);
