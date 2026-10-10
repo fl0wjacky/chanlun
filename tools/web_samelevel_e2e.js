@@ -332,16 +332,19 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
     const r = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: r.from + 0.01, to: r.to + 0.01 }); await new Promise((r) => setTimeout(r, 700));
     const A = (st.trendDrawn.withdrawnArrows || [])[0] || null;
     const lab = (st.trendDrawn.labels || []).find((b) => /线段已撤回 →/.test(b[4] || '')) || null;
-    // 现价高度取**画那一帧自己记下的** A.yLast，不取上面挪视口前量的 yLast：加了线、挪了视口以后价轴会自动缩放、差一两像素
-    //   （land-labels 5eadc8b 整趟 predeploy 里就差了 2px：三角离帧里现价 12、离旧量法 10 ⇒ 假红；单跑又绿）。
-    const yF = A && A.yLast !== null ? A.yLast : yLast;
-    const lastBox = [W - 70, yF - 10, W, yF + 10], hit = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
-    const out = { yLast: Math.round(yF), yLastBefore: Math.round(yLast), H: Math.round(H), arrow: A, lab: lab && lab.slice(0, 4).map(Math.round), labHitsLast: !!lab && hit(lab, lastBox) };
+    // 现价高度：挪完视口、画完这一帧以后，工装**自己再量一次**（图表接口把最后一根收盘价换成屏幕坐标），拿它判。
+    //   不用挪视口前量的 yLast：加线、挪视口以后价轴自动缩放，会差一两像素（5eadc8b 整趟 predeploy 里差 2px ⇒ 假红）。
+    //   也不拿被测代码自己记下的 A.yLast 来判（它算错了高度、三角跟着错的高度躲，照样会绿）—— 只打印对照，且要求跟工装量的差 ≤1px（Nova 06:23）。
+    const yNow = cs.priceToCoordinate(d.bars[d.bars.length - 1].c);
+    const lastBox = [W - 70, yNow - 10, W, yNow + 10], hit = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+    const out = { yLast: Math.round(yNow), yLastBefore: Math.round(yLast), yLastCode: A ? A.yLast : null, H: Math.round(H), arrow: A,
+                  lab: lab && lab.slice(0, 4).map(Math.round), labHitsLast: !!lab && hit(lab, lastBox) };
     delete d.withdrawn; const r2 = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: r2.from + 0.01, to: r2.to + 0.01 }); await new Promise((r) => setTimeout(r, 500));
     return out;
   });
-  ck('⑦f 线正好在现价那个高度出屏 ⇒ 右沿三角挪到现价 ±12 之外、「线段已撤回 →」不压现价那块（场面成立：现价真在屏上、线出屏处在现价 ±3 里）',
-     WF.yLast > 30 && WF.yLast < WF.H - 30 && !!WF.arrow && Math.abs(WF.arrow.yLine - WF.yLast) <= 3 && Math.abs(WF.arrow.y - WF.yLast) >= 12 && !!WF.lab && !WF.labHitsLast, JSON.stringify(WF));
+  ck('⑦f 线正好在现价那个高度出屏 ⇒ 右沿三角挪到现价 ±12 之外、「线段已撤回 →」不压现价那块（现价高度工装画完后自己量、代码记的跟它差 ≤1px；场面成立：现价真在屏上、线出屏处在现价 ±3 里）',
+     WF.yLast > 30 && WF.yLast < WF.H - 30 && !!WF.arrow && WF.arrow.yLast !== null && Math.abs(WF.arrow.yLast - WF.yLast) <= 1
+       && Math.abs(WF.arrow.yLine - WF.yLast) <= 3 && Math.abs(WF.arrow.y - WF.yLast) >= 12 && !!WF.lab && !WF.labHitsLast, JSON.stringify(WF));
 
   // ⑧ D-3 选 C（小栋 10-09 12:57）：载荷带 `segs_std`（标准化线段）⇒ 图上「线段」画它：除最后一条外实线、最后一条短虚线；
   //   未完成段照旧长虚线；没有 `segs_std`（现行后台）⇒ 照旧画原始段、短虚线那条是空的（牙）。
