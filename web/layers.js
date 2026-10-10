@@ -1163,9 +1163,13 @@ function trendMarkView(target, state, prim) {
        *  ★ 都让不开就按原位落：宁可压一点，也**不许**把字母挪出屏（跟这一层 ㊼ 那条账同源）。
        *    这种情况工装量得出来（大小写那两组矩形会相交），是要报的，不是要藏的。
        *  ★ 只在**本段**里避让：这一层保证的是"自己不叠自己"；跟分界／待定／撤回那几层的避让是另一条账。 */
+      // ★ 字母**整枚**在屏上才算（x 方向）：原来跟别的字一样用 `onScreen(x, W, 8)` —— 那是给"一根竖线＋一个价"的锚点留的 8px 余量，
+      //   字母是**居中画**的、半宽 `CW_LET/2`，锚点在 3.5 时字形就伸到 −1（measure ㊺ 在线上数据上红过：b(−1,305,8,322)）。
+      //   ⇒ 判"整枚在不在屏上"：左沿 ≥ 0、右沿 ≤ W。大写、小写、让位后的落点都走这一条。
+      const inX = (xx, cw = CW_LET) => xx !== null && xx - cw / 2 >= 0 && xx + cw / 2 <= W;   // 大写传自己那一枚的字宽
       const letClear = (x, y, dir, placed) => {
         const h0 = Math.round(SIZE_LET * 0.92), h1 = Math.round(SIZE_LET * 0.25), w = CW_LET / 2;
-        const free = (xx, yy) => onScreen(xx, W, 8) && onScreen(yy, H, 8) && !placed.some((b) =>
+        const free = (xx, yy) => inX(xx) && onScreen(yy, H, 8) && !placed.some((b) =>
           xx - w < b[2] + PAD_LET && b[0] < xx + w + PAD_LET
           && yy - h0 < b[3] + PAD_LET && b[1] < yy + h1 + PAD_LET);
         if (free(x, y)) return [x, y];
@@ -1196,10 +1200,11 @@ function trendMarkView(target, state, prim) {
           //    ★ 不夹回画布（跟上面 `onScreen` 那条账同一条）：落点看不见就不画，别把它拖到边上
           //      假装它在那儿。代价是：读法 A 下这一层可能只画得出一部分字母 —— 这是**要报的**，
           //      不是要藏的（见卡 card-c6644f52-2fa 上那张图）。
-          if (x === null || y === null || !onScreen(x, W, 8) || !onScreen(y, H, 8)) {
+          ctx.font = FONT_LET; const cwU = ctx.measureText(TREND_LET[k]).width;
+          if (x === null || y === null || !inX(x, cwU) || !onScreen(y, H, 8)) {
             // 「横着在屏上、纵着出去了」单独记一笔：这不是"滚到别处去了"（那种是正常的），
             // 是**这一枚的价当前看不见** —— 读法 A 下会真的发生，得让它量得出来。
-            if (x !== null && onScreen(x, W, 8) && (y === null || !onScreen(y, H, 8))) offY++;
+            if (x !== null && inX(x, cwU) && (y === null || !onScreen(y, H, 8))) offY++;
             continue;
           }
           const box = haloText(ctx, x, y + capMid, TREND_LET[k], col, 'center', mine, FONT_LET, SIZE_LET);
@@ -1232,7 +1237,7 @@ function trendMarkView(target, state, prim) {
           const b0 = prev ? prev.X1 : s.i0, b1 = next ? next.X0 : s.i1;
           const x0 = vp.xOfBar(Math.round((b0 + b1) / 2));
           const y0 = vp.yOfPrice(pa === null ? na : na === null ? pa : (pa + na) / 2);
-          const xOk = x0 !== null && onScreen(x0, W, 8), yOk = y0 !== null && onScreen(y0, H, 8);
+          const xOk = x0 !== null && inX(x0), yOk = y0 !== null && onScreen(y0, H, 8);
           if (!xOk || !yOk) {
             // 跟大写同一个账：「横着在屏上、纵着出去了」单独记一笔（读法 A 下真会发生）。
             // ★ 这里判的是**让位之前**的落点 —— 让位本身也要求不出屏（`letClear` 的每一档都判），
