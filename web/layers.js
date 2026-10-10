@@ -644,8 +644,10 @@ export function makeAnnotPrimitive(state) {
               drawPzGroups(ctx, state, sh, vp, placed, this._chart, W, H);
 
               // ⑤ 未收盘的最后一根：虚线框 + 「未收盘」（Python dashed_rect + 琥珀字）
-              //    ★ 这一句**不登记 placed** —— 跟 Python 一致：那边它也是直接画的、不在 draw_labels 里
-              //      （所以 Python 图上「未收盘」会压在线段端点的圈上）。照搬，不擅自"顺手修好"。
+              //    ★ 这一句**不登记 placed** —— 跟 Python 一致：那边它也是直接画的、不在 draw_labels 里。
+              //    ★ 字底的实底（card-851e2134-fed）**只加在网页这边**：网页有底、Python 出图（render/chart_full_smooth.py）没有，
+              //      **有意不同**（Nova 10-10 04:2x 定：Python 不跟）。check_parity 不比这一处（它不读「未收盘」）。
+              state.liveTagBox = null;                       // 这一帧没画「未收盘」就是 null（工装不许读到上一帧的框）
               if (!data.closed && data.bars.length) {
                 const i = data.bars.length - 1, b = data.bars[i];
                 const x = vp.xOfBar(i), yh = vp.yOfPrice(b.h), yl = vp.yOfPrice(b.l);
@@ -655,8 +657,15 @@ export function makeAnnotPrimitive(state) {
                   ctx.strokeStyle = CANDLE.open; ctx.lineWidth = 1.5;
                   ctx.strokeRect(x - hw - 1, yh - 6, hw * 2 + 2, yl - yh + 12);
                   ctx.setLineDash([]);
-                  ctx.font = FONT_SM; ctx.fillStyle = CANDLE.open; ctx.textAlign = 'right';
-                  ctx.fillText('未收盘', x - hw - 8, yl + 14);
+                  // 字底下垫一块跟页面同色的实底（card-851e2134-fed，线上 ZEC 15m：「未收盘」直接压在 K 线上、发糊）：
+                  //   位置照旧（Python 那边也是这儿），只是让字从 K 线里抠出来；框记进 state.liveTagBox 给工装量。
+                  ctx.font = FONT_SM;
+                  const lw = ctx.measureText('未收盘').width, lx = x - hw - 8, ly = yl + 14;
+                  const lb = [lx - lw - 4, ly - 11, lx + 4, ly + 4];
+                  ctx.fillStyle = rgba(PAGE.bg, 235); ctx.fillRect(lb[0], lb[1], lb[2] - lb[0], lb[3] - lb[1]);
+                  state.liveTagBox = lb;
+                  ctx.fillStyle = CANDLE.open; ctx.textAlign = 'right';
+                  ctx.fillText('未收盘', lx, ly);
                   ctx.textAlign = 'left';
                 }
               }
@@ -869,6 +878,7 @@ function trendMarkView(target, state, prim) {
   // 已撤回的只读清单同理：层关着也得清，不然工装读到的是上一帧画过的叉（⑦c 第一版就是这么红的）
   if (state.trendDrawn) { state.trendDrawn.withdrawn = []; state.trendDrawn.withdrawnLines = []; }
   if (!T || (!sh.trend && !sh.up)) return;
+  // ★ 例外一条（card-851e2134-fed）：「待定」那行字**读**标注层这一帧的 `state.labelBoxes` 来让位（不登记），见 ② 那段。
   // ★ 这一层的字**一律不登记 `placed`**（价签那张避让表），理由两条，都说破：
   //   ① 它们钉在**一条竖线和一个价**上（分界价格、待定、撤回）—— 挪开它就不是那个价了，避让没有意义；
   //   ② 「升级」那两个字倒是可以避让，但避让表住在**标注层**那个 primitive 里，两边共用一张表只能
@@ -983,7 +993,13 @@ function trendMarkView(target, state, prim) {
         ctx.strokeStyle = rgba(TREND.mut, 200); ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
         ctx.setLineDash([]);
-        D.labels.push(haloText(ctx, x - 8, y + 4, `${fmtG(p.price)} 待定`, TREND.mut, 'right', mine));
+        // ★ 字要躲开价签（card-851e2134-fed，线上 bdd1ef7 BTC 1h：「87385.1 待定」压在框价签「[82500.1, 87249.6]」上）：
+        //   标注层挂在同一条 overlay 系列上、**先于**这一层画 ⇒ 画到这里时 `state.labelBoxes` 已经是**这一帧**的价签／买卖点字框，
+        //   拿它跟自己这一层的 `mine` 合起来让位（只挪 y、竖线不动 ⇒ 还钉在那个候选上）。只读那张表、不往里登记：
+        //   标注层的次序不动（见这一层开头那段账）。
+        const txt = `${fmtG(p.price)} 待定`;
+        const avoid = mine.concat(state.labelBoxes || []);
+        D.labels.push(haloText(ctx, x - 8, fitLabel(ctx, x - 8, y + 4, txt, avoid, H, 'right'), txt, TREND.mut, 'right', mine));
       }
 
       // ③ 撤回（D2-7，§八 4）：确立过、后来被撤掉的那把刀。**跟「待定」分开**这件事
