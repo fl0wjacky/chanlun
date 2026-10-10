@@ -136,8 +136,10 @@ def _try_confirm(done, t, ks, typ, lo, no_exceed=True):
                                 else min(a["lo"] for a in after) < done[j]["p1"]):
         return None
     zs = (_sl_centers_with_cuts if (SAME_LEVEL and SAME_LEVEL_D2) else _centers_with_cuts)(done[:t + 1], ks)
-    if SL_D2_SHAPE and SAME_LEVEL and SAME_LEVEL_D2:     # 原型「B 全限」：立刀用的参照中枢也限形状——高点刀之前是往上走 ⇒ 下上下；低点刀反过来
-        zs = [z for z in zs if z["PI0"] < lo] + _sl_centers(done, lo, t + 1, first_up=(typ == "L"))
+    if SL_D2_SHAPE and SAME_LEVEL and SAME_LEVEL_D2:     # 甲S-7：立刀用的参照中枢也限形状。刀前那截按刀前走向（高点刀前往上 ⇒ 下上下），
+        #   刀后长出来的那截（R6＝B 允许参照中枢在刀后）按刀后走向（高点刀后往下 ⇒ 上下上，刀后第一段 a 不算进中枢）——Atlas 14:54 照 L39 正文
+        zs = ([z for z in zs if z["PI0"] < lo] + _sl_centers(done, lo, j + 1, first_up=(typ == "L"))
+              + _sl_centers(done, j + 1, t + 1, first_up=(typ == "H")))
     # D2-2 第 1 步（R6＝B，小栋 10-08）：两类候选取最后一个 —— ① 起点不晚于 H；② 起点在 H 之后、最后一条线段不晚于 S[t-2]（离开段之前已走完）
     ref = [z for z in zs if z["PI0"] >= lo and (z["X0"] <= done[j]["i1"] or (_R6_B and z["PI1"] <= t - 2))]
     if not ref:

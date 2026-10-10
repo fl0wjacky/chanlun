@@ -597,8 +597,9 @@ def sl_check(v):
             q = starts.get(b.get("ref_X0"))
             if q is None:
                 bad.append("T6 D2 刀 %d 的参照中枢起点 %s 对不上线段" % (b["bar"], b.get("ref_X0")))
-            elif (dn[q]["dir"] == "up") != (b["kind"] == "L"):
-                bad.append("T6 D2 刀 %d（%s）的参照中枢首段方向不对（%s）" % (b["bar"], b["kind"], dn[q]["dir"]))
+            elif (dn[q]["dir"] == "up") != ((b["kind"] == "L") if b["ref_X0"] < b["bar"] else (b["kind"] == "H")):
+                # 刀前的参照中枢照刀前走向（高点刀 ⇒ 首段向下），刀后的照刀后走向（高点刀 ⇒ 首段向上）
+                bad.append("T6 D2 刀 %d（%s）的参照中枢（起点 %d）首段方向不对（%s）" % (b["bar"], b["kind"], b["ref_X0"], dn[q]["dir"]))
         for x, y in zip(d2, d2[1:]):
             a, j = x["line_seg"] + 1, y["line_seg"]
             if not _scan(dn, a, j + 1, first_up=(x["kind"] == "H")):
