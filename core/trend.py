@@ -508,8 +508,10 @@ def _xzd_seconds(done, bounds, r=None):
 SAME_LEVEL = True                                # R-1 同级别分解：小栋 10-09 定 A→B（正式版，跟 ①D、S-13 一起上）。正式版取值 True；
                                                   #   现在默认关只为合并前 G1(a)「关掉跟 main 逐份同」，翻默认放合并前最后一笔
 SAME_LEVEL_OVERLAP = "ZDZG"                       # S3 相邻中枢判重叠用 [ZD,ZG]（编者口径，上线清单 #2：只剩这一个可行）；DDGG 只留作量数对照
-SAME_LEVEL_D6 = "fallback"                              # R-6 ③ 甲在同级别下（小栋 10-09 06:17 定）：正式版取值 "fallback"＝分界之后的组中枢首段须跟走势反向，
-                                                  #   判不出同方向趋势就退回不限方向（D6-4）；"strict" 只留作量数对照；None＝不限方向（旧量数口径）
+SAME_LEVEL_D6 = "strict"                         # 中枢形状 B 档（card-8368a083-082，等小栋字母；选 C 就把这一个值改回 "fallback"）：分界之后的组中枢首段须跟走势反向，
+                                                  #   **凑不出同方向趋势也不退回**——答疑 L24:84-85「向上的走势，里面的中枢一定是下-上-下」、L31:145（Atlas 核）；
+                                                  #   代价：25 张多 4 处「两把 D2 之间一个中枢都没有」的段（本级别无中枢，原理二 L17 说完成的走势类型至少一个中枢）。
+                                                  #   "fallback"＝凑不出就退回不限方向（R-6 ③ 甲，小栋 10-09 06:17 定，到 10-10 为止的线上口径）；None＝不限方向（旧量数口径）
 SL_FIRST_EXEMPT = True                           # 甲S-2（读法-R3R6 一·6，Atlas f3fac3c）：前一个走势段是本级别反向趋势 ⇒ 这一段第一个中枢不受限
                                                   #   （首中枢可以从同向那条起）。正式版取值 True。乙′（R6_YI_PRIME／R6_YI_FALLBACK）R-6 定甲以后删了，见 2ba3fbd
 D2_ALTERNATE = True                               # D-0 分界一高一低交替（D2-3，小栋 10-09 06:36 定 A 保留）；只给出图／量数关：等同 trend_v3(alternate=False)
@@ -595,6 +597,27 @@ def _sl_state(bars, bounds, two_sets, chosen):
 #   "Z"：右边那截的第一个中枢单列成一段盘整，在它第三段终点补一刀 S5（L20、L43、L38 规则 A 都不犯；代价是可能出现中枢不叠的盘整＋盘整）。
 #   只处理同一个 D2 组里、S5 接缝两边；D2 分界两边不动（那是 D2-T1，另一件）。处理完再查，直到组里没有相邻的同向趋势。
 S5_FIX = "Z"                                     # land-z：小栋 10-09 合并页第三题选 B（合加 Z）才合
+SL_WAY_LOCK = True                               # strict 下，限了形状的组方向定死（低点 D2 后只认往上、高点后只认往下；S5 之后按 _s5_shape 选中的那种）：
+                                                  #   不定死时 AAPL 30m 06-26 低点刀后两个下上下框往下走，判成「下跌」里的跌涨跌（25 张 2 个）；定死后照 S5 切开，各算盘整
+SL_S5_SHAPE = True                               # S5 切出来那一截也限中枢形状（_s5_shape，card-03ad1057-525）。True＝按结果限；False＝不限（旧口径）
+
+
+def _s5_shape(done, cut, b, e):
+    """S5 刀之后那一截按「结果」限中枢形状（card-03ad1057-525，L24:84-85、L31:145 答疑：上涨里的中枢下上下、下跌里上下上）。
+    S5 刀不是转折点，刀的高低定不了后面那截往哪走（按刀高低限，25 张实测反常框反而 80 → 84）⇒ 两种限法各试一遍：
+    哪种切得出跟它相配的同向趋势（上涨配下上下、下跌配上下上）就用哪种，两种都成取首中枢靠左的；
+    都不成：D6 退回（fallback）⇒ 这一截不限（返回 None）；不退回（strict）⇒ 照刀后的走向限（高点刀后往下 ⇒ 上下上）。→ 中枢列表或 None。"""
+    up = _sl_centers(done, cut, b, first_up=False)
+    dn = _sl_centers(done, cut, b, first_up=True)
+    ok_up = len(up) >= 2 and _sl_rel(up[0], up[1]) == "上"
+    ok_dn = len(dn) >= 2 and _sl_rel(dn[0], dn[1]) == "下"
+    if ok_up and ok_dn:
+        return up if up[0]["PI0"] <= dn[0]["PI0"] else dn
+    if ok_up or ok_dn:
+        return up if ok_up else dn
+    if SAME_LEVEL_D6 == "strict":
+        return dn if e["p1"] >= e["p0"] else up
+    return None
 
 
 def _sl_layer(done, ks, bounds_, n):
@@ -622,8 +645,13 @@ def _sl_layer(done, ks, bounds_, n):
                 zz = zr
         else:
             two_sets[0].extend(zz); two_sets[1].extend(zz)
-        start, cur, way = a, [], None
-        for z in zz:
+        lock = None                                       # SL_WAY_LOCK：strict 下限了形状的这一组，方向就定死（低点刀后只能往上）
+        if SL_WAY_LOCK and SAME_LEVEL_D6 == "strict" and g and bk.get(a) in ("L", "H"):
+            lock = "上" if bk[a] == "L" else "下"
+        start, cur, way = a, [], lock
+        q = 0
+        while q < len(zz):
+            z = zz[q]
             if cur:
                 r = _sl_rel(cur[-1], z)
                 if r == "叠" or (way and r != way):
@@ -633,9 +661,17 @@ def _sl_layer(done, ks, bounds_, n):
                     extra.append(dict(rule="S5", line_seg=cut - 1, bar=e["i1"], kind="H" if e["p1"] >= e["p0"] else "L",
                                       price=e["p1"]))
                     start, cur, way = cut, [], None
+                    if SL_S5_SHAPE:
+                        pick = _s5_shape(done, cut, b, e)
+                        if lock is not None and pick is not None and len(pick) >= 2 and _sl_rel(pick[0], pick[1]) != "叠":
+                            way = _sl_rel(pick[0], pick[1])      # 定死的组里，S5 之后那截的方向跟着选中的限法走
+                        if pick is not None:
+                            zz = zz[:q] + pick
+                            continue
                 elif way is None:
                     way = r
             cur.append(z)
+            q += 1
         pieces.append((start, b, cur, g))
     if S5_FIX:
         pieces, extra = _fix_same_trend(pieces, extra, kind_of, done, S5_FIX)

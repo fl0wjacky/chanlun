@@ -427,6 +427,36 @@ def _rel(z1, z2):
     return "上" if z2[4] > z1[5] else "下" if z2[5] < z1[4] else "叠"
 
 
+def _walk_s5(done, a, b, zz, strict, lock=None):
+    """检查自己写的一份「S5 之后那截也限形状」（card-8368a083-082），**不调引擎**：沿一组的中枢往右走，相邻两个叠或者转向 ⇒ 在前一个的
+    第三段终点切 S5；切完那一截两种限法各试一遍（上涨配下上下、下跌配上下上），哪种切得出相配的同向趋势用哪种，两种都成取首中枢靠左的；
+    都不成：strict ⇒ 照刀后走向限（高点刀后往下 ⇒ 上下上），否则不限（接着用原来那串）。→ 这一组最终的中枢串。"""
+    zz, out, cur, way, q = list(zz), [], [], lock, 0   # lock：strict 下这一组方向定死（低点刀后只认「上」）
+    while q < len(zz):
+        z = zz[q]
+        if cur:
+            r = _rel(cur[-1], z)
+            if r == "叠" or (way and r != way):
+                cut = cur[-1][1] + 1
+                out += cur
+                cur, way = [], None
+                up, dn = _scan(done, cut, b, first_up=False), _scan(done, cut, b, first_up=True)
+                ok_up = len(up) >= 2 and _rel(up[0], up[1]) == "上"
+                ok_dn = len(dn) >= 2 and _rel(dn[0], dn[1]) == "下"
+                pick = (up if up[0][0] <= dn[0][0] else dn) if ok_up and ok_dn else up if ok_up else dn if ok_dn else \
+                    ((dn if done[cut - 1]["dir"] == "up" else up) if strict else None)
+                if pick is not None:
+                    zz = zz[:q] + pick
+                    if lock is not None and len(pick) >= 2 and _rel(pick[0], pick[1]) != "叠":
+                        way = _rel(pick[0], pick[1])
+                    continue
+            elif way is None:
+                way = r
+        cur.append(z)
+        q += 1
+    return out + cur
+
+
 def _z_split(sx, r, byseg, segorder, s5bars, zr):
     """S4′ 的 land-z 口子（Atlas 19:00）：单中枢那截 sx 是 Z 单列出来的 ⇔ 它左边紧挨着的那截是趋势（≥2 个中枢、相邻都同一个方向 d）、
     两截之间是 S5 接缝、而且这截往右的那一对也是方向 d（Z 拆开的本来是一段同向趋势）。别的不叠单中枢接缝照旧红。只用中枢，独立判。"""
@@ -506,10 +536,13 @@ def sl_check(v):
             alt[gi] = (lim, free)
             got = [(z["PI0"], z["PI1"]) for z in zz if a <= z["PI0"] < b]
             ok = len(lim) >= 2 and _rel(lim[0], lim[1]) == ("上" if want_up else "下")
-            want = [(x[0], x[1]) for x in (lim if ok else free)]
-            # T4（甲＋豁免＋退回）：限形状判得出同向趋势就用它，判不出就退回不限形状
+            strict = T.SAME_LEVEL_D6 == "strict"
+            base = lim if (ok or strict) else free
+            lock = ("上" if want_up else "下") if (strict and getattr(T, "SL_WAY_LOCK", False)) else None
+            want = [(x[0], x[1]) for x in (_walk_s5(done, a, b, base, strict, lock) if T.SL_S5_SHAPE else base)]
+            # T4（限形状＋豁免；fallback 档判不出同向趋势就退回不限、strict 档不退回；S5 之后那截照 _walk_s5 再限一次）
             if got != want:
-                bad.append("T4 刀 %d 之后那组：中枢 %s，按甲（%s）该是 %s" % (cut["bar"], got[:3], "限形状" if ok else "退回", want[:3]))
+                bad.append("T4 刀 %d 之后那组：中枢 %s，按%s该是 %s" % (cut["bar"], got[:3], "限形状" if ok else ("限形状（不退回）" if strict else "退回"), want[:3]))
         # T5（D-2⁗／D-2‴ 静态条件）：已确认的 D2，对应那套里真有一个中枢整个落在 [b, min(极值, 下一把 D2)]
         bars = v.get("_bars")
         for i, c in enumerate(d2):
