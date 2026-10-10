@@ -200,6 +200,9 @@ export function boxes(data, tier) {
 
 /** 规则 B（full_common.box_split 的同构版）→ {splitAt: bar 下标 | null, solid: bool} */
 function boxSplit(z, i0, i1, host, unfinishedJ, iOfBar) {
+  if (z.status === '暂定' && unfinishedJ === null) {
+    return { splitAt: null, solid: false };            // boxstatus-b（只出图、不合）：线段框标「暂定」⇒ 整框虚线，借 ① 那套画法
+  }
   const j0 = z.PI0;
   const last = host.length - 1;
   if (unfinishedJ !== null && unfinishedJ !== undefined && j0 <= unfinishedJ && unfinishedJ < Math.min(j0 + 3, host.length)) {

@@ -681,6 +681,31 @@ def _fix_same_trend(pieces, extra, kind_of, done, mode):
     return out, [x for x in extra if x["line_seg"] not in gone] + added
 
 
+# card-900b75a1-f83（Nova 10-10 06:28，**只出图、不合**；小栋选 B 才转正式）：线段框的「已确认」跟着成员走。
+#   三条都满足才算已确认：① 成员线段（标准化后 done[PI0..PI1]）都不在最后 _BOX_PENDING_SEGS 条里（①C 那两条虚线）；
+#   ② 框所在走势段两头的刀都已确认（段起点、段终点那根上的分界 state=="confirmed"；图头／图尾没有刀的那头不算）；
+#   ③ 框不在末段（segments[seg]["live"]）。不满足 ⇒ status="暂定"，status_note 写哪一条没过。
+#   现行（a659045）：同级别的框一律「已确认」（_sl_centers 里写死），回放实测后来消失 232 个（card-900b75a1-f83）。
+BOX_STATUS_B = True
+_BOX_PENDING_SEGS = 2                            # 跟 web/withdrawn.PENDING_SEGS 同一个数（①C，小栋 10-09）；引擎不反向 import web
+
+
+def _box_status_b(done, bounds, segments, centers):
+    st = {b["bar"]: b.get("state") for b in bounds}
+    n = len(done)
+    for z in centers:
+        g = segments[z["seg"]] if z.get("seg") is not None and z["seg"] < len(segments) else None
+        why = []
+        if z["PI1"] >= n - _BOX_PENDING_SEGS:
+            why.append("成员线段还在最后两条里")
+        if g and any(st.get(x) not in (None, "confirmed") for x in (g["i0"], g["i1"])):
+            why.append("所在走势段有一头的刀待确认")
+        if g and g.get("live"):
+            why.append("在末段里（中枢划分还会变）")
+        if why:
+            z["status"], z["status_note"] = "暂定", "；".join(why)
+
+
 def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_exceed=True, standardize=True):
     """→ dict(seg_centers, bounds, retracted, pending, segments, units, reading)。
     seg_centers：按确立的分界切开重算的线段中枢（D4，前端画框就用它），每个带 seg（属于第几段走势，跟 segments 下标对齐）；
@@ -706,6 +731,8 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
         if _DEATH and SAME_LEVEL_DEATH:                  # 正式版：同级别下照标死点类型（D2-5 按三段中枢）、小转大的二类（S11）
             _death_types(r, done, bounds, segments, centers_out)
         _sl_state(r["bars"], bounds, two_sets, centers_out)
+        if BOX_STATUS_B:
+            _box_status_b(done, bounds, segments, centers_out)
         return dict(seg_centers=centers_out, bounds=bounds, retracted=res["retracted"],
                     pending=pending(done, ks, res["want"]), segments=segments, units=[], reading="same_level",
                     xzd_seconds=_xzd_seconds(done, bounds, r) if (_DEATH and SAME_LEVEL_DEATH and _XZD_SECOND) else [],
