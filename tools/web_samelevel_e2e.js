@@ -348,6 +348,38 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
      ST.two.dash === 3 && ST.two.solid === ST.n - 1 && ST.two.label && ST.none.dash === 0 && ST.none.solid === ST.n + 1 && !ST.none.label
        && ST.old.dash === 2 && ST.old.solid === ST.n && ST.old.label, JSON.stringify(ST));
 
+  // ⑩ 「待定」字躲价签（card-851e2134-fed，线上 bdd1ef7 BTC 1h：「87385.1 待定」压在框价签上）＋「未收盘」有底。
+  //   场面是塞出来的：挑一枚屏上的价签，往 trend.pending 里加一个候选，让「待定」那行字**原位**正好落在这枚价签里
+  //   （先证明原位真压上了 —— 不然这一格是空转），再看画出来的那行字跟这一帧所有价签／买卖点字框有没有交。
+  const PD = await p.evaluate(async () => {
+    const app = window.__app, st = app.state, d = st.data, ts = app.chart.timeScale(), cs = st.candleSeries;
+    const wait = () => new Promise((r) => setTimeout(r, 500));
+    const W = document.querySelector('#chart canvas').getBoundingClientRect().width;
+    const tags = (st.labelBoxes || []).filter((b) => b[0] > 220 && b[2] < W - 40 && b[1] > 40);
+    if (!tags.length) return { err: '屏上没有可用的价签' };
+    const tg = tags[0];
+    const x = tg[2] + 4, i = Math.round(ts.coordinateToLogical(x)), yb = (tg[1] + tg[3]) / 2 + 4;   // 字右沿＝x−8 落进价签；基线让字的中线压在价签中线上
+    const price = cs.coordinateToPrice(yb - 4);
+    if (!d.bars[i] || price == null) return { err: '算不出塞的位置' };
+    const T = d.trend, keep = T.pending;
+    T.pending = (keep || []).concat([{ bar: i, price, kind: 'H' }]); app.repaint(); await wait();
+    const hit = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+    const L = (st.trendDrawn.labels || []).filter((b) => /待定$/.test(b[4] || ''));
+    const mine = L.reduce((m, b) => (Math.abs(b[2] - (ts.timeToCoordinate(d.bars[i].t / 1000) - 8)) < 2 ? b : m), null);
+    const yRaw = cs.priceToCoordinate(price) + 4, raw = mine && [mine[0], yRaw - 11, mine[2], yRaw + 3];
+    const boxes = (st.labelBoxes || []).slice();
+    const out = { tag: tg.map(Math.round), raw: raw && raw.map(Math.round), drawn: mine && mine.slice(0, 4).map(Math.round),
+                  rawHit: !!raw && hit(raw, tg), drawnHits: mine ? boxes.filter((b) => hit(mine, b)).length : -1,
+                  live: st.liveTagBox ? st.liveTagBox.map(Math.round) : null, closed: !!d.closed };
+    T.pending = keep; app.repaint(); await wait();
+    return out;
+  });
+  if (PD.err) { console.error(PD.err); await b.close(); process.exit(2); }
+  ck('⑩ 「待定」那行字原位压在价签上时会让开（原位压上了＝场面成立；画出来的字跟这一帧的价签／买卖点字框零交）',
+     PD.rawHit && PD.drawnHits === 0, JSON.stringify(PD));
+  ck('⑩b 「未收盘」底下垫了实底（这根没收盘 ⇒ 这一帧记下了底的框）',
+     PD.closed || (Array.isArray(PD.live) && PD.live[2] > PD.live[0]), JSON.stringify({ live: PD.live, closed: PD.closed }));
+
   if (SHOTS) await p.screenshot({ path: require('path').join(SHOTS, 'samelevel-fe.png') });
   await b.close();
   console.log(red ? `✗ ${red} 格红（${n - red}/${n} 过）` : `${n}/${n} 过`);   // predeploy 认「N/N 过」这一行
