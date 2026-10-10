@@ -507,7 +507,7 @@ def _xzd_seconds(done, bounds, r=None):
 # ---------------------------------------------------------------- R-1 同级别分解（正式版开关，合并前最后一笔才翻默认；上线清单 docs/spec/同级别正式版-上线清单.md；docs/spec/读法-R1-分解方式.md S1～S6）
 SAME_LEVEL = True                                # R-1 同级别分解：小栋 10-09 定 A→B（正式版，跟 ①D、S-13 一起上）。正式版取值 True；
                                                   #   现在默认关只为合并前 G1(a)「关掉跟 main 逐份同」，翻默认放合并前最后一笔
-SAME_LEVEL_OVERLAP = "ZDZG"                       # S3 相邻中枢判重叠用 [ZD,ZG]（编者口径，上线清单 #2：只剩这一个可行）；DDGG 只留作量数对照
+SAME_LEVEL_OVERLAP = "DDGG"                       # 原型（card-dca6fa59-95f，不合）：S3 相邻中枢判重叠改用 [DD,GG]（第 20 课原尺），看引擎怎么切；main 上是 ZDZG
 SAME_LEVEL_D6 = "fallback"                              # R-6 ③ 甲在同级别下（小栋 10-09 06:17 定）：正式版取值 "fallback"＝分界之后的组中枢首段须跟走势反向，
                                                   #   判不出同方向趋势就退回不限方向（D6-4）；"strict" 只留作量数对照；None＝不限方向（旧量数口径）
 SL_FIRST_EXEMPT = True                           # 甲S-2（读法-R3R6 一·6，Atlas f3fac3c）：前一个走势段是本级别反向趋势 ⇒ 这一段第一个中枢不受限
