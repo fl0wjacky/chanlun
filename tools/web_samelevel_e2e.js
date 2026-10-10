@@ -518,9 +518,9 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
      SS.std !== SS.rawDone && SS.shown === SS.std && SS.shownLive === SS.live && SS.hostIsStd, JSON.stringify(SS));
 
   // ⑫ 规则 B 的「暂定」线段框（card-900b75a1-f83，小栋 10-10 08:01 选 B）：后台标 `status: "暂定"` 的线段框
-  //   ⇒ 点划线（DASH.pendBox）＋填充淡一档＋价签后跟「暂定」；没标的照旧。后台那半还没出 ⇒ 页面里给屏上线段框塞标。
+  //   ⇒ 点划线（DASH.pendBox）＋填充淡一档＋价签后跟「待定」（显示字跟载荷值不同，Nova 08:08）；没标的照旧。后台那半还没出 ⇒ 页面里给屏上线段框塞标。
   //   量法：包住 setLineDash／fillText 录一帧（画了什么纹样、写了什么字），再对 boxesDrawn 的 pending。
-  //   牙：一个都不标（现行载荷）⇒ 一笔点划都不许有、价签里一个「暂定」都不许有。
+  //   牙：一个都不标 ⇒ 一笔点划都不许有、价签里一个「待定」都不许有。
   const PB = await p.evaluate(async () => {
     const app = window.__app, d = app.state.data, st = app.state, ts = app.chart.timeScale();
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -535,7 +535,7 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
       const r = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: r.from + 0.01, to: r.to + 0.01 }); await wait(600);
       C.setLineDash = sd; C.fillText = ft;
       const drawn = (st.boxesDrawn || []).filter((b) => b.tier === 'seg');
-      return { dashDot: dashes.filter((s) => s === '9,3,2,3').length, tagPend: [...new Set(texts.filter((t) => /^\[.*\] 暂定$/.test(t)))],
+      return { dashDot: dashes.filter((s) => s === '9,3,2,3').length, tagPend: [...new Set(texts.filter((t) => /^\[.*\] 待定$/.test(t)))],
                nSeg: drawn.length, nPend: drawn.filter((b) => b.pending).length };
     };
     const keep = zs.map((z) => z.status);
@@ -545,10 +545,10 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
     zl.status = '暂定';
     const one = await rec();
     zs.forEach((z, k) => { z.status = keep[k]; }); app.repaint(); await wait(300);
-    return { none, one, want: `[${fmt(zl.ZD)}, ${fmt(zl.ZG)}] 暂定` };
+    return { none, one, want: `[${fmt(zl.ZD)}, ${fmt(zl.ZG)}] 待定` };
   });
   if (PB.err) { console.error(PB.err); await b.close(); process.exit(2); }
-  ck('⑫ 「暂定」线段框：标了的那一个画点划（9 3 2 3）、价签写「… 暂定」、boxesDrawn 记 pending；一个都不标 ⇒ 零点划、零「暂定」价签（牙）',
+  ck('⑫ 「暂定」线段框：标了的那一个画点划（9 3 2 3）、价签写「… 待定」、boxesDrawn 记 pending；一个都不标 ⇒ 零点划、零「待定」价签（牙）',
      PB.none.nSeg > 0 && PB.none.dashDot === 0 && PB.none.tagPend.length === 0 && PB.none.nPend === 0
        && PB.one.nPend === 1 && PB.one.dashDot >= 1 && PB.one.tagPend.length === 1 && PB.one.tagPend[0] === PB.want, JSON.stringify(PB));
 

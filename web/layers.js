@@ -366,7 +366,7 @@ export function makeBoxPrimitive(state) {
                   const fade = wc ? TREND.willChangeFade : 1;
                   // 规则 B（card-900b75a1-f83，小栋 10-10 08:01 选 B）：后台在线段框上标 `status: "暂定"`
                   //   （成员线段还在最后两条里／两头的刀还没确认／框在末段 —— 三条有一条不齐）⇒ **点划线框＋填充淡一档**，
-                  //   价签后面跟「暂定」（标注层 ③）。只认线段层：笔层的类中枢后台不标这个。
+                  //   价签后面跟「待定」（标注层 ③；显示的字跟载荷值不同，见那里）。只认线段层：笔层的类中枢后台不标这个。
                   const pend = tier === 'seg' && bx.z.status === '暂定';
                   drawFrame(ctx, x0, yt, x1, yb, col, w, fill, splitAt, solid, W, openL, fade, pend);
                   // 只记**底下那个框**：升级框跟它同 i0/i1，记进去会让「同一格只许出现一次」这把尺子
@@ -624,8 +624,10 @@ export function makeAnnotPrimitive(state) {
                 for (const bx of boxes(data, tier)) {
                   const x = vp.xOfBar(bx.i0), y = vp.yOfPrice(bx.z.ZG);
                   if (!onScreen(x, W, 8) || y === null) continue;   // 框滚出去了，价签也跟着走
-                  // 规则 B：「暂定」的线段框价签后面跟两个字（框线换了点划，字是给不认纹样的人的）。
-                  const pend = tier === 'seg' && bx.z.status === '暂定' ? ' 暂定' : '';
+                  // 规则 B：后台 `status: "暂定"` 的线段框价签后面跟「待定」（框线换了点划，字是给不认纹样的人的）。
+                  //   ★ 显示的字是「待定」、不是载荷那个值（Nova 10-10 08:08）：图上已经有顶上的「待定」、分界的「待确认」，
+                  //     再来个「暂定」就三种说法 —— 跟顶那个统一。引擎的 status 值不动，换字只在这里。
+                  const pend = tier === 'seg' && bx.z.status === '暂定' ? ' 待定' : '';
                   tag(ctx, placed, x + 8, y - 8, `[${fmtG(bx.z.ZD)}, ${fmtG(bx.z.ZG)}]${pend}`, col, W, H);
                   if (sh.up && bx.z.up) {
                     for (const u of bx.z.up) {
