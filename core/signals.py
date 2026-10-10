@@ -311,7 +311,7 @@ def _panzheng(A, C, want_down, data, measure="macd", ratio=1.0):
     return newx and _diverges(A, C, want_down, data, measure, ratio)
 
 
-_M29 = True          # 只给自检反向臂关：二类照旧（跌破只标弱、不判盘整背驰）
+_M29 = True          # 只给自检反向臂关：二类照旧（跌破只标弱、不判盘整背驰）；对应决策树 M-13（二类三种结果）、买卖点.md:106 第二类判据（原文 L53、L27），检查是 tools/m29_check.py
 
 
 def signals(r, level="seg", measure="macd", ratio=1.0, fast=12, slow=26, sig=9,
