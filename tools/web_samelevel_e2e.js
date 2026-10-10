@@ -332,8 +332,11 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
     const r = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: r.from + 0.01, to: r.to + 0.01 }); await new Promise((r) => setTimeout(r, 700));
     const A = (st.trendDrawn.withdrawnArrows || [])[0] || null;
     const lab = (st.trendDrawn.labels || []).find((b) => /线段已撤回 →/.test(b[4] || '')) || null;
-    const lastBox = [W - 70, yLast - 10, W, yLast + 10], hit = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
-    const out = { yLast: Math.round(yLast), H: Math.round(H), arrow: A, lab: lab && lab.slice(0, 4).map(Math.round), labHitsLast: !!lab && hit(lab, lastBox) };
+    // 现价高度取**画那一帧自己记下的** A.yLast，不取上面挪视口前量的 yLast：加了线、挪了视口以后价轴会自动缩放、差一两像素
+    //   （land-labels 5eadc8b 整趟 predeploy 里就差了 2px：三角离帧里现价 12、离旧量法 10 ⇒ 假红；单跑又绿）。
+    const yF = A && A.yLast !== null ? A.yLast : yLast;
+    const lastBox = [W - 70, yF - 10, W, yF + 10], hit = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+    const out = { yLast: Math.round(yF), yLastBefore: Math.round(yLast), H: Math.round(H), arrow: A, lab: lab && lab.slice(0, 4).map(Math.round), labHitsLast: !!lab && hit(lab, lastBox) };
     delete d.withdrawn; const r2 = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: r2.from + 0.01, to: r2.to + 0.01 }); await new Promise((r) => setTimeout(r, 500));
     return out;
   });
