@@ -91,7 +91,7 @@ export CHANLUN_STATE_DIR="$RUN_STATE"
 SRV=
 cleanup() {
   [ -n "$SRV" ] && { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
-  rm -rf "$RUN_STATE"
+  [ "${KEEP_RUN_STATE:-0}" = 1 ] || rm -rf "$RUN_STATE"   # 临时后台没起来时留着（里面有它的日志，表上印了位置）
 }
 trap cleanup EXIT
 SEEN_STATE=$("$PY" -c 'import os, sys; sys.path.insert(0, "web"); import decisions; print(os.path.realpath(decisions.STATE))' 2>/dev/null || true)
@@ -190,7 +190,7 @@ elif ! "$NODE" -e "require('playwright').chromium.launch().then(b => b.close())"
   frontend_skip "playwright / chromium 起不来"
 else
   PORT=$("$PY" -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
-  SRVLOG=$(mktemp)
+  SRVLOG="$RUN_STATE/server.log"                 # 不落系统临时目录（Nova 10-10）：跟状态目录一起，跑完一起删
   "$PY" web/server.py --port "$PORT" --no-prewarm >"$SRVLOG" 2>&1 &
   SRV=$!
   up=0
@@ -202,7 +202,8 @@ else
   done
   if [ $up = 0 ]; then
     frontend_skip "临时后台 30 秒内没起来（$(tail -1 "$SRVLOG" | cut -c1-60)）"
-    keep "临时后台" "日志 $(tmpname "$SRVLOG")"
+    KEEP_RUN_STATE=1
+    keep "临时后台" "日志 $SRVLOG"
   else
     export E2E_URL="http://127.0.0.1:$PORT/"   # 7 套都先读它（Iris 2140c0d），不用管各自收第几个参数
     for s in "${SUITES[@]}"; do
