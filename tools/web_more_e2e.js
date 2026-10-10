@@ -167,6 +167,11 @@ function payload(span) {
   const d = Object.assign({}, FULL, {
     bars, nbars: bars.length, span, span_max: SCEN.spanMax, earliest: !!SCEN.earliestFlag,
     pens: shift(FULL.pens), segs: shift(FULL.segs) });
+  // 中枢的 X0／X1 是 K 线下标：框的左右边改读它以后（card-f2ce0437-ba4），补数据时它也得跟着挪 ——
+  //   真后台整份重算本来就挪；替身不挪，「窗口外变了」就会被量成「框整个跳到别处」。PI0／PI1 是 host 里的位置，不动。
+  const shiftZ = (a) => (a || []).map((z) => (Number.isInteger(z.X0) ? Object.assign({}, z, { X0: z.X0 + extra, X1: z.X1 + extra }) : z));
+  if (FULL.centers) d.centers = shiftZ(FULL.centers);
+  if (FULL.seg_centers) d.seg_centers = shiftZ(FULL.seg_centers);
   if (FULL.signals) d.signals = { seg: barsOf(FULL.signals.seg), pen: barsOf(FULL.signals.pen) };
   // ⑬ 换档重算的替身：跟可视窗口**重叠**的（'in'）或**只在窗口外**的（'out'）结构动一下。
   //    判据跟页面 structKey 里那条一模一样（有时间重叠），不许各写各的 ——
@@ -180,12 +185,13 @@ function payload(span) {
     const overlap = (o) => ts(o.i0) != null && ts(o.i1) != null && ts(o.i1) >= SCEN.pageWin.t0 && ts(o.i0) <= SCEN.pageWin.t1;
     const tweak = (o) => Object.assign({}, o, { p0: o.p0 * 1.002, p1: o.p1 * 1.002 });
     if (SCEN.winmode === 'in-cen') {
-      //   中枢的横跨区按 host 取（跟页面 structKey、layers.js 的 boxes() 同一个取法：
-      //   类中枢 host=笔、线段中枢 host=**已完成**线段）。只动 ZD 一个数：框的上下沿变了，别的一根不碰。
+      //   中枢的横跨区跟页面 structKey、layers.js 的 boxes() 同一个取法：载荷有 X0／X1 就用它，
+      //   没有才退回 host（类中枢 host=笔、线段中枢 host=**已完成**线段）。只动 ZD 一个数：框的上下沿变了，别的一根不碰。
       const done = (d.segs || []).filter((s) => !s.live);
       const boxOv = (z, host) => { const a = host[z.PI0], b = host[z.PI1];
-                                   return !!a && !!b && ts(a.i0) != null && ts(b.i1) != null
-                                          && ts(b.i1) >= SCEN.pageWin.t0 && ts(a.i0) <= SCEN.pageWin.t1; };
+                                   const i0 = Number.isInteger(z.X0) ? z.X0 : a && a.i0, i1 = Number.isInteger(z.X1) ? z.X1 : b && b.i1;
+                                   return i0 != null && i1 != null && ts(i0) != null && ts(i1) != null
+                                          && ts(i1) >= SCEN.pageWin.t0 && ts(i0) <= SCEN.pageWin.t1; };
       const bump = (z) => { bumped++; return Object.assign({}, z, { ZD: z.ZD * 1.01 }); };
       d.centers = (d.centers || []).map((z) => (boxOv(z, d.pens || []) ? bump(z) : z));
       d.seg_centers = (d.seg_centers || []).map((z) => (boxOv(z, done) ? bump(z) : z));
@@ -790,7 +796,9 @@ async function race21(page, mode) {
     const winStructs = (q, w) => q.evaluate((w) => {
       const d = window.__app.state.data, ts = (i) => (d.bars[i] || {}).t;
       const ov = (o) => ts(o.i0) != null && ts(o.i1) != null && ts(o.i1) >= w.t0 && ts(o.i0) <= w.t1;
-      const host = (z, h) => { const a = h[z.PI0], b = h[z.PI1]; return !!a && !!b && ov({ i0: a.i0, i1: b.i1 }); };
+      const host = (z, h) => { const a = h[z.PI0], b = h[z.PI1];   // 跟 boxes() 同一个取法：有 X0／X1 用它，没有退回 host
+                               const i0 = Number.isInteger(z.X0) ? z.X0 : a && a.i0, i1 = Number.isInteger(z.X1) ? z.X1 : b && b.i1;
+                               return i0 != null && i1 != null && ov({ i0, i1 }); };
       const done = (d.segs || []).filter((s) => !s.live);
       const at = (s) => ts(s.bar) != null && ts(s.bar) >= w.t0 && ts(s.bar) <= w.t1;
       const sig = d.signals || { seg: [], pen: [] };

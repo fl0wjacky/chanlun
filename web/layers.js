@@ -175,9 +175,16 @@ export function boxes(data, tier) {
   const { host, unfinishedJ } = hostOf(data, tier);
   const out = [];
   for (const z of data[key] || []) {
+    // ★ 左右边直接用载荷的 X0／X1（card-f2ce0437-ba4，小栋 10-10 02:40／02:42）：线段中枢的 PI 指的是 `segs_std`
+    //   （D-3 C 以后图上画的那套），而 `hostOf('seg')` 给的是**原始**已完成线段 —— 两套端点挪过的地方，拿 host[PI] 量出来的框
+    //   就画到别的线段上去了（线上 222 个线段框里 60 个：只盖住一根线段、跨过分界）。X0／X1 是后台按它自己那套算的，
+    //   线段 222／222、笔 98／98 跟各自那套逐条相同 ⇒ 两层都改读它，笔层一个像素不变。载荷没带 X0／X1 才退回 host（老后台）。
+    //   host 照旧传给 boxSplit：③「仍在延续 ⇒ 拆两截」那条还用 host[PI0+2]，线段层 PI 跟 host 不是一套 ——
+    //   线上 15 张图眼下没有 live 的线段框，这条走不到；真要走到时得换成 segs_std，另开一件。
     const a = host[z.PI0], b = host[z.PI1];
-    if (!a || !b) continue;
-    out.push({ z, tier, i0: a.i0, i1: b.i1, unfinishedJ, host });
+    const i0 = Number.isInteger(z.X0) ? z.X0 : a && a.i0, i1 = Number.isInteger(z.X1) ? z.X1 : b && b.i1;
+    if (i0 == null || i1 == null) continue;
+    out.push({ z, tier, i0, i1, unfinishedJ, host });
   }
   return out;
 }

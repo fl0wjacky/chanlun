@@ -580,14 +580,15 @@ function structKey(d, t0, t1, shown, levels) {
   const row = (o) => `${ts(o.i0)}>${ts(o.i1)}@${o.p0},${o.p1}`;
   const part = (a) => (a || []).filter(inWin).map(row).join('|');
   // 中枢：取**画出来的那个框**的横跨区 ⇒ 跟 layers.js 的 boxes() 同一个取法
-  //   （host[PI0].i0 ／ host[PI1].i1。类中枢 host=笔；线段中枢 host=**已完成**线段，别拿 segs 直接取。
-  //    样本上 X0/X1 跟这个取法逐条相同，但「画的是哪个」以 boxes() 为准，不押在另一个字段上。）
+  //   （载荷的 X0／X1，没有才退回 host[PI0].i0 ／ host[PI1].i1 —— 跟 boxes() 逐字同一条，card-f2ce0437-ba4：
+  //    线段中枢的 PI 指 segs_std，host 却是原始线段，两套端点挪过的地方取出来的范围是错的。）
   //   高一级的标签跟着 `up` 开关走（layers.js 里那个 if 用的就是 sh.up）。
   const boxes = (zs, host, upOn) => (zs || []).map((z) => {
     const a = host[z.PI0], b = host[z.PI1];
-    if (!a || !b) return null;
+    const i0 = Number.isInteger(z.X0) ? z.X0 : a && a.i0, i1 = Number.isInteger(z.X1) ? z.X1 : b && b.i1;
+    if (i0 == null || i1 == null) return null;
     const up = (upOn ? (z.up || []) : []).map((u) => `${u.ZD},${u.ZG}`).join(';');   // 升级标签也是画在框上的
-    return { i0: a.i0, i1: b.i1, s: `${z.ZD},${z.ZG}${z.live ? ',live' : ''}${up ? ',' + up : ''}` };
+    return { i0, i1, s: `${z.ZD},${z.ZG}${z.live ? ',live' : ''}${up ? ',' + up : ''}` };
   }).filter((o) => o && ov(ts(o.i0), ts(o.i1))).map((o) => `${ts(o.i0)}>${ts(o.i1)}@${o.s}`).join('|');
   // 买卖点：一个点 —— 三角和它的字都画在这个 x 上。画不画由 shownOf 说了算
   //   （大开关 ＋ 六个 kind 的 chip ＋ 待确认；带了 shown 就必须带 sigAt，缺了当场炸，不静默放过）
