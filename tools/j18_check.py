@@ -31,11 +31,44 @@ from config import tick_of                                    # noqa: E402
 
 M = 60_000
 # (夹具, 小周期毫秒, 大周期毫秒)：小周期是夹具本身，大周期由它聚合
-PAIRS = [("zec15.json", 15 * M, 60 * M), ("zec15.json", 15 * M, 30 * M), ("zec_1h.json", 60 * M, 240 * M)]
+# 配对照 L-8（级别联动.md §三，card-7c8587e3-849）：大周期 = web/levels.py 的 ref_tf（本图 × REF_MULT＝4）——只在那里定，
+#   L-8 改了这里跟着走。小周期夹具：15m zec15、30m zec30_cut、1h zec_1h。2h／4h 没有 ×4 的对照，不比。
+# 15m→30m 只差 2 倍，不是 L-8 的「高一级」（:137 更正：只在两边分界重合的那一段同级）⇒ 留着当「同级对照」单列印出，**不计违反**。
+sys.path.insert(0, os.path.join(ROOT, "web"))
+import levels as LV                                           # noqa: E402
+TFS = {"15m": 15 * M, "30m": 30 * M, "1h": 60 * M, "2h": 120 * M, "4h": 240 * M}
+# 30m、1h 用 fixtures/j18/ 里截的真实行情（ZECUSDT，只有 t/o/h/l/c）：data/ 里的 zec30_cut、zec_1h 在 ×4 的大周期上只切得出图头那一刀，
+#   翻转臂量不出（Nova 20:10：自检臂印「跳过」等于没有这个检查）。截到 30m→2h、1h→4h 各有 ≥2 刀非图头为止。放 fixtures/ 不放 data/：data/ 会被十几个检查整目录扫。
+SMALLS = {"15m": "zec15.json", "30m": "fixtures/j18/zec_30m_l8.json", "1h": "fixtures/j18/zec_1h_l8.json"}
+SAME = [("zec15.json", 15 * M, 30 * M)]                       # 同级对照
+
+
+def rule_tag(rule):
+    """分界规则 → 给人看的「D2」／「S5」：按前缀归（D2-2、D2-8… ⇒ D2；S5… ⇒ S5）。别的原样返回、记进 UNTAGGED，自检会报。"""
+    if rule.startswith("D2"):
+        return "D2"
+    if rule.startswith("S5"):
+        return "S5"
+    UNTAGGED.add(rule)
+    return rule
+
+
+UNTAGGED = set()
+
+
+def pairs():
+    """→ [(夹具, 小周期毫秒, 大周期毫秒)]，按 L-8 从 levels.ref_tf 取；对照周期不在 TFS 里的不比。"""
+    out = []
+    for tf, fn in SMALLS.items():
+        ref = LV.ref_tf(tf, TFS)
+        if ref:
+            out.append((fn, TFS[tf], TFS[ref]))
+    return out
 
 
 def load(fn):
-    raw = json.load(open(os.path.join(ROOT, "data", fn)))
+    """fn 带目录（fixtures/j18/…）就照它读，不带就读 data/。"""
+    raw = json.load(open(os.path.join(ROOT, fn) if "/" in fn else os.path.join(ROOT, "data", fn)))
     raw = raw["bars"] if isinstance(raw, dict) else raw
     return [dict(t=b["t"], o=b["o"], h=b["h"], l=b["l"], c=b["c"]) for b in raw]
 
@@ -106,6 +139,8 @@ def check_pair(fn, fstep, bstep, small=None):
         t_end = big[c]["t"] + bstep                          # c 那根大 K 线收盘
         t0 = big[bd["bar"]]["t"]
         t1 = t0 + bstep                                      # E ＝ 极值那根大 K 线覆盖的时间
+        # 判词（通过／中阴／违反）故意用到 c 的小周期数据：J18 问的就是「大周期在 c 确立这一刻，小周期转了没有」，c 是题目本身的时刻，
+        #   不是偷看（Nova 10-09 20:15）。只有下面多印的那两样（段类型、最后同向分界）要只用到 E 收盘，见 smE／vsE。
         sm = [b for b in small if b["t"] + fstep <= t_end]
         vs = _trend(sm, fn)
         inE = lambda x: t0 <= sm[x["bar"]]["t"] < t1
@@ -125,25 +160,55 @@ def check_pair(fn, fstep, bstep, small=None):
             verdict = "图头"
         else:
             verdict = "违反"
+        # 报警多印两样（Nova 10-09 18:06，不改判词）：E 收盘时小周期在什么段里；小周期在 E 收盘前最后一个同向分界有没有被价格越过、是 D2 还是 S5。
+        #   ★ 这两样只用 E 收盘前的小周期 K 线现算（smE／vsE），不用上面截到 c 的 vs —— 不然就偷看了 E 之后的走势（Nova 20:10）
+        smE = [x for x in small if x["t"] + fstep <= t1]
+        vsE = _trend(smE, fn) if len(smE) > 1 else dict(bounds=[], segments=[])
+        iE = len(smE) - 1 if smE else None
+        seg = next((g for g in vsE["segments"] if iE is not None and g["i0"] <= iE <= g["i1"]), None)
+        same = [b for b in vsE["bounds"] if b["kind"] == bd["kind"]]
+        last_same = same[-1] if same else None
+        over = None
+        if last_same is not None and iE is not None:
+            rng = smE[last_same["bar"] + 1:iE + 1]
+            # 碰平也算越过（第四批定的「碰平也算突破」，Nova 20:10）
+            over = bool(rng) and (min(x["l"] for x in rng) <= last_same["price"] if bd["kind"] == "L" else max(x["h"] for x in rng) >= last_same["price"])
         out.append(dict(big_kind=bd["kind"], big_bar=bd["bar"], big_price=bd["price"], c=c, t_c=big[c]["t"], verdict=verdict,
                         small_last=vs["bounds"][-1]["kind"] if vs["bounds"] else None,
-                        small_pending=[(p["kind"], round(p["price"], 2)) for p in vs["pending"]]))
+                        small_pending=[(p["kind"], round(p["price"], 2)) for p in vs["pending"]],
+                        seg_at_E=seg["type"] if seg else None,
+                        last_same=(rule_tag(last_same["rule"]), round(last_same["price"], 2)) if last_same else None,
+                        last_same_over=over))
     return out
 
 
-def main(quiet=False):
+def _detail(r):
+    ls = "%s %s%s" % (r["last_same"][0], r["last_same"][1], "，已被越过" if r["last_same_over"] else "，没被越过") if r["last_same"] else "没有"
+    return "E 收盘时小周期在「%s」段里；小周期最后一个同向分界：%s" % (r["seg_at_E"] or "?", ls)
+
+
+def main(quiet=False, same_counts=False):
+    """→ 违反数（只数 L-8 配对；same_counts=True 是自检用的变异：同级对照也算进去）。"""
     viol = 0
-    for fn, fs, bs in PAIRS:
-        res = check_pair(fn, fs, bs)
-        n = {k: sum(1 for r in res if r["verdict"] == k) for k in ("通过", "中阴", "违反", "图头")}
-        viol += n["违反"]
-        if not quiet:
-            print("%s %s %dm 对 %dm：大周期 %d 刀 —— 通过 %d ／ 中阴 %d ／ 违反 %d ／ 图头 %d" % (
-                "⚠" if n["违反"] else "✓", fn, fs // M, bs // M, len(res), n["通过"], n["中阴"], n["违反"], n["图头"]))
+    for kind, plist in (("L-8", pairs()), ("同级对照", SAME)):
+        for fn, fs, bs in plist:
+            res = check_pair(fn, fs, bs)
+            n = {k: sum(1 for r in res if r["verdict"] == k) for k in ("通过", "中阴", "违反", "图头")}
+            if kind == "L-8" or same_counts:
+                viol += n["违反"]
+            if quiet:
+                continue
+            if kind == "L-8":
+                print("%s %s %dm 对 %dm（L-8）：大周期 %d 刀 —— 通过 %d ／ 中阴 %d ／ 违反 %d ／ 图头 %d" % (
+                    "⚠" if n["违反"] else "✓", fn, fs // M, bs // M, len(res), n["通过"], n["中阴"], n["违反"], n["图头"]))
+            else:
+                print("· %s %dm 对 %dm（同级对照，不计违反）：大周期 %d 刀 —— 通过 %d ／ 中阴 %d ／ 未见同向转折 %d ／ 图头 %d" % (
+                    fn, fs // M, bs // M, len(res), n["通过"], n["中阴"], n["违反"], n["图头"]))
             for r in res:
                 if r["verdict"] != "通过":
-                    print("    %s 大周期 %s %.2f（bar %d，确立 c=%d）⇒ 小周期最后分界 %s、待定 %s" % (
-                        r["verdict"], r["big_kind"], r["big_price"], r["big_bar"], r["c"], r["small_last"], r["small_pending"]))
+                    word = r["verdict"] if kind == "L-8" or r["verdict"] != "违反" else "同级对照：未见同向转折"
+                    print("    %s 大周期 %s %.2f（bar %d，确立 c=%d）⇒ %s；小周期最后分界 %s、待定 %s" % (
+                        word, r["big_kind"], r["big_price"], r["big_bar"], r["c"], _detail(r), r["small_last"], r["small_pending"]))
     return viol
 
 
@@ -152,7 +217,7 @@ def self_test():
     global aggregate
     miss = armed = 0
     real_agg = aggregate
-    for fn, fs, bs in PAIRS:
+    for fn, fs, bs in pairs():
         small = load(fn)
         top = max(b["h"] for b in small) + min(b["l"] for b in small)
         flipped = [dict(t=b["t"], o=top - b["o"], h=top - b["l"], l=top - b["h"], c=top - b["c"]) for b in small]
@@ -164,8 +229,9 @@ def self_test():
             aggregate = real_agg
         body = [r for r in res if r["verdict"] != "图头"]
         nbad = sum(1 for r in body if r["verdict"] == "违反")
-        if not body:                                     # 大周期只有图头那一刀 ⇒ 这一对量不出东西，不算过也不算不过
-            print("· %s %dm 对 %dm：大周期除图头外没有刀，这一对翻转量不出（跳过）" % (fn, fs // M, bs // M))
+        if not body:                                     # 大周期只有图头那一刀 ⇒ 这一对量不出 ⇒ 自检不算数（Nova 20:10：L-8 三对每一对都要量得出）
+            print("✗ %s %dm 对 %dm：大周期除图头外没有刀，这一对翻转量不出" % (fn, fs // M, bs // M))
+            miss += 1
             continue
         ok = nbad == len(body)
         miss += not ok
@@ -173,6 +239,35 @@ def self_test():
         print("%s %s %dm 对 %dm：小周期上下翻转 ⇒ 违反 %d／%d（图头除外，要全报）" % ("✓" if ok else "✗", fn, fs // M, bs // M, nbad, len(body)))
     if not armed:
         print("✗ 没有一对量得出来（每对的大周期都只有图头）⇒ 反向臂空转")
+    # 配对的两条反向臂：基准＝照 L-8 的违反数
+    base = main(quiet=True)
+    mult0 = LV.REF_MULT
+    try:
+        LV.REF_MULT = 2                                  # 配对取 ×2（15m→30m 被当成正式配对）⇒ 违反数必须变
+        got = main(quiet=True)
+    finally:
+        LV.REF_MULT = mult0
+    ok = got != base
+    miss += not ok
+    print("%s 配对改成 ×2（不照 L-8）⇒ 违反 %d（照 L-8 是 %d，必须不一样）" % ("✓" if ok else "✗", got, base))
+    got = main(quiet=True, same_counts=True)             # 同级对照也计违反 ⇒ 违反数必须变
+    ok = got != base
+    miss += not ok
+    print("%s 同级对照也算进违反 ⇒ 违反 %d（不算是 %d，必须不一样）" % ("✓" if ok else "✗", got, base))
+    UNTAGGED.clear()
+    main(quiet=True)
+    ok = not UNTAGGED
+    miss += not ok
+    print("%s 分界规则都归得进 D2／S5（没归类的：%s）" % ("✓" if ok else "✗", sorted(UNTAGGED) or "无"))
+    real_tag = globals()["rule_tag"]
+    globals()["rule_tag"] = lambda r: (UNTAGGED.add(r), r)[1]   # 变异：不归类、原样印 ⇒ 上面那格必须红
+    try:
+        UNTAGGED.clear(); main(quiet=True); red = bool(UNTAGGED)
+    finally:
+        globals()["rule_tag"] = real_tag
+        UNTAGGED.clear()
+    miss += not red
+    print("%s 变异「规则名不归类原样印」⇒ 那格报出 %s" % ("✓" if red else "✗", "红" if red else "没红"))
     return 1 if miss or not armed else 0
 
 
