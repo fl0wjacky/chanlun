@@ -1377,8 +1377,14 @@ function drawPzTop(ctx, state, mine, W) {
   for (const g of P.groups) {
     for (const c of g.chips) pzChipPaint(ctx, c.box, c.text, c.main);
     ctx.font = FONT_SM; ctx.fillStyle = TREND.mut; ctx.textBaseline = 'alphabetic';
-    if (g.before) { ctx.textAlign = 'left'; ctx.fillText(`◀ 左边还有 ${g.before} 段`, 8, P.railY - 20); }
-    if (g.after) { ctx.textAlign = 'right'; ctx.fillText(`右边还有 ${g.after} 段 ▶`, W - 8, P.railY - 20); }
+    // ★ 这一组一块 chip 都没挂上（组头贴着右沿、放不下）⇒ 「还有 n 段」两句也不挂（card-1036c063-804）：
+    //   那两句贴的是**画布两边**，不贴着组 —— 没有 chip 领着，它孤零零挂在右沿，读起来像旁边那一组的尾巴
+    //   （BTC 15m 09-14→09-22 那屏实例：「右边还有 1 段 ▶」其实是 09-21 起那组的，看着像左边 09-15 那组的）。
+    //   细轨和刻度照画（它们贴着组本身的 x，不会认错人）。
+    g.moreDrawn = { before: false, after: false };
+    if (!g.chips.length) { ctx.textAlign = 'left'; continue; }
+    if (g.before) { ctx.textAlign = 'left'; ctx.fillText(`◀ 左边还有 ${g.before} 段`, 8, P.railY - 20); g.moreDrawn.before = true; }
+    if (g.after) { ctx.textAlign = 'right'; ctx.fillText(`右边还有 ${g.after} 段 ▶`, W - 8, P.railY - 20); g.moreDrawn.after = true; }
     ctx.textAlign = 'left';
   }
   // ★ 左下角那块留给 LWC 的 TradingView 标（最底下那一格窗格才有，手机上价格窗格就是最底下那格）：

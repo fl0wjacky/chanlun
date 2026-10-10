@@ -1757,6 +1757,36 @@ const shotChart = async (p, tag) => {
      pzForce.tl.length > 0 && pzForce.tlBad.length === 0,
      `刻度 ${JSON.stringify(pzForce.tl)}（r＝右／l＝左／null＝只画刻度）　比了 ${pzForce.nOthers} 块字　交叠的 ${JSON.stringify(pzForce.tlBad)}`);
 
+  // ㊹b 组头贴着右沿、chip 一块都放不下 ⇒ 「还有 n 段」两句也不挂（card-1036c063-804，BTC 15m 09-14→09-22 那屏实例：
+  //   「右边还有 1 段 ▶」是 09-21 起那组的，没有 chip 领着，挂在右沿看着像左边那组的尾巴）。
+  //   场面钉死：用上面那一组（图头以外全是盘整），视野摆成**组头落在画布右沿往里 ~30px**、组的其余段都在右边屏外。
+  //   牙：同一组视野摆成组头在屏中间（chip 放得下）⇒ 「右边还有 n 段 ▶」照挂（这句没被一刀切掉）。
+  const pzOrphan = await pPZ.evaluate(async () => {
+    const app = window.__app, ts = app.chart.timeScale(), segs = app.state.data.trend.segments;
+    const body = segs.filter((s) => !s.head), i0 = body[0].i0;
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const W = document.querySelector('#chart canvas').getBoundingClientRect().width, span = 300;
+    const C = CanvasRenderingContext2D.prototype, ft = C.fillText;
+    const look = async (frac) => {
+      const texts = [];
+      C.fillText = function (t, ...r) { texts.push(String(t)); return ft.call(this, t, ...r); };
+      ts.setVisibleLogicalRange({ from: i0 - frac * span, to: i0 - frac * span + span }); await wait(900);
+      C.fillText = ft;
+      const g = app.state.pzDrawn.groups.find((q) => q.i0 === i0) || null;
+      const x = ts.timeToCoordinate(app.state.data.bars[i0].t / 1000);
+      return { x: x === null ? null : Math.round(x), W: Math.round(W), chips: g ? g.chips.length : -1, after: g ? g.after : -1,
+               more: g ? g.moreDrawn : null, rightText: texts.filter((t) => /^右边还有 \d+ 段 ▶$/.test(t)).length };
+    };
+    const v0 = ts.getVisibleLogicalRange();                    // 后面几格（㊾b…）接着用上面摆好的视野 ⇒ 量完摆回去
+    const out = { edge: await look(0.98), mid: await look(0.4) };
+    ts.setVisibleLogicalRange(v0); await wait(900);
+    return out;
+  });
+  ck('㊹b 组头贴右沿、chip 一块都放不下 ⇒ 「右边还有 n 段 ▶」不单独挂；同一组 chip 放得下时照挂（牙）',
+     pzOrphan.edge.x > pzOrphan.edge.W - 120 && pzOrphan.edge.chips === 0 && pzOrphan.edge.after > 0 && pzOrphan.edge.rightText === 0
+       && pzOrphan.mid.chips > 0 && pzOrphan.mid.after > 0 && pzOrphan.mid.rightText > 0,
+     JSON.stringify(pzOrphan));
+
   // ㊾b 牙：把一条分界的价格**挪到刻度字正上方**（那个价字会落进刻度字右边那一格），再画一帧 ——
   //   刻度字必须翻边或者不写，而且 `blockedR` 得是真的（证明这一帧真撞过，不是碰巧没东西挨着）。
   const pzBump = await pPZ.evaluate(async () => {
