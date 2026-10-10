@@ -7,13 +7,13 @@
 其余反过来的框一个都不许有。
 
     python3 tools/shape_check.py              # rc=0 全对 ／ 1 有不对
-    python3 tools/shape_check.py --self-test  # 反向臂：退回 fallback／S5 段不限，各自必须红；红不了 ⇒ rc=3
+    python3 tools/shape_check.py --self-test  # 反向臂：退回 fallback／S5 段不限／方向不定死，各自必须红；红不了 ⇒ rc=3
 
   ① 小栋两例（夹具 fixtures/shape/，线上 BTC 截的两段）：B 档下那个框没了；切回旧口径（fallback＋S5 不限）那个框必须在（夹具自己的牙）；
      btcusdt_4h_2022：2022-03-28 16:00 起的跌涨跌框 [37350.0, 40071.7]；btcusdt_15m_0930：2026-09-30 13:00 起的跌涨跌框 [83841.9, 85632.7]；
-  ② data/ 下每份＋fixtures/shape/ 全部夹具：趋势段里反过来的框只许是上面两种例外；SL_WAY_LOCK 关着（现默认）时再多许一种
-     「方向没定死」：从低点 D2 起头的那一段走成了下跌（高点后走成上涨），框照限形状是对的、段型反了（只认 D2 起头的那一段，S5 起头的不算）。
-  ③ SL_WAY_LOCK（新读法，等原文依据，默认关）：夹具 aaplusdt_30m_lock 开着时那两个框（07-13、07-29）归零、关着时在。
+  ② data/ 下每份＋fixtures/shape/ 全部夹具：趋势段里反过来的框只许是上面两种例外。
+  ③ SL_WAY_LOCK（甲S-6，Nova 10-10 13:34 定默认开）：夹具 aaplusdt_30m_lock 开着时「方向没定死」那两个框（07-13、07-29，
+     从低点 D2 起头的那一段走成了下跌）归零、关着时在。
   夹具 aaplusdt_15m_s5 专给自检臂「S5 之后那截不限」当牙（07-24、08-03 两个跌涨跌框冒出来）。
 例外的判法照 trend_check T4：前一段（终点＝这把 D2）是反向趋势 ⇒ 这组首框豁免。只读引擎输出，不挂引擎内部。
 """
@@ -72,8 +72,8 @@ def odd_boxes(bars, tick):
             why = "图头"
         elif first and prev_type.get(d2[g - 1]["bar"]) == ("下跌" if d2[g - 1]["kind"] == "L" else "上涨"):
             why = "首中枢豁免"
-        elif not T.SL_WAY_LOCK and sg["i0"] == d2[g - 1]["bar"] and sg["type"] == ("下跌" if d2[g - 1]["kind"] == "L" else "上涨"):
-            why = "方向没定死"                               # 低点刀后的组走成了下跌（高点刀后走成上涨）：SL_WAY_LOCK 关着时允许，开着时不该有
+        elif sg["i0"] == d2[g - 1]["bar"] and sg["type"] == ("下跌" if d2[g - 1]["kind"] == "L" else "上涨"):
+            why = "方向没定死"                               # 低点刀起头那段走成了下跌（高点刀后走成上涨）：只给 ③ 认这一类用，② 照样算不许
         out.append((_ts(bars, z["X0"]), z["ZD"], z["ZG"], why))
     return out
 
@@ -121,15 +121,15 @@ def run(quiet=False, teeth=True):
     for p in files:
         bars = json.load(open(p))
         name = os.path.basename(p)
-        got = [x for x in odd_boxes(bars, _tick(p)) if x[3] is None]
+        got = [x for x in odd_boxes(bars, _tick(p)) if x[3] not in ("首中枢豁免", "图头")]
         n_ok += not got
         if got:
             chk("② %s：趋势段里反过来的框只许豁免／图头" % name, False, got[:3])
-    chk("② %d 份：趋势段里反过来的框只剩豁免／图头%s" % (len(files), "" if T.SL_WAY_LOCK else "／方向没定死（SL_WAY_LOCK 关着）"), n_ok == len(files), "")
+    chk("② %d 份：趋势段里反过来的框只剩豁免／图头两种" % len(files), n_ok == len(files), "")
     if teeth:
         lk = os.path.join(FIX, "aaplusdt_30m_lock.json")
         bars = json.load(open(lk))
-        got = _with(dict(SL_WAY_LOCK=True), lambda: [x for x in odd_boxes(bars, _tick(lk)) if x[3] is None])
+        got = _with(dict(SL_WAY_LOCK=True), lambda: [x for x in odd_boxes(bars, _tick(lk)) if x[3] not in ("首中枢豁免", "图头")])
         chk("③ SL_WAY_LOCK 开着：aaplusdt_30m_lock 里「方向没定死」那两个框归零（开关本身管用）", got == [], got[:3])
         got = _with(dict(SL_WAY_LOCK=False), lambda: [x for x in odd_boxes(bars, _tick(lk)) if x[3] == "方向没定死"])
         chk("③ SL_WAY_LOCK 关着：同一份夹具里那两个框在（夹具的牙）", len(got) == 2, got[:3])
@@ -140,8 +140,8 @@ def run(quiet=False, teeth=True):
 
 def self_test():
     arms = [("退回 fallback（D6 凑不出就不限）", dict(SAME_LEVEL_D6="fallback")),
-            ("S5 之后那截不限形状", dict(SL_S5_SHAPE=False))]
-    # SL_WAY_LOCK 默认关（等原文依据），它的牙在主跑 ③：同一份夹具开着 0 个、关着 2 个
+            ("S5 之后那截不限形状", dict(SL_S5_SHAPE=False)),
+            ("限了形状的组方向不定死（甲S-6 关）", dict(SL_WAY_LOCK=False))]
     rc = 0
     for name, flags in arms:
         n = _with(flags, lambda: run(quiet=True, teeth=False))
