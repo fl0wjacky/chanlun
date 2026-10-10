@@ -40,10 +40,19 @@ TFS = {"15m": 15 * M, "30m": 30 * M, "1h": 60 * M, "2h": 120 * M, "4h": 240 * M}
 # 30m、1h 用 fixtures/j18/ 里截的真实行情（ZECUSDT，只有 t/o/h/l/c）：data/ 里的 zec30_cut、zec_1h 在 ×4 的大周期上只切得出图头那一刀，
 #   翻转臂量不出（Nova 20:10：自检臂印「跳过」等于没有这个检查）。截到 30m→2h、1h→4h 各有 ≥2 刀非图头为止。放 fixtures/ 不放 data/：data/ 会被十几个检查整目录扫。
 # 30m 夹具 10-10 换题（card-8368a083-082）：原夹具 zec_30m_l8 在形状 B 全限下 120m 没有图头以外的已确认 D2、出不了题（不是因为它会红）。
-#   按写死的池子和顺序取第一份过的：线上 30m ZEC→BTC→AAPL，各 span 2→4→8 整份拿；ZEC span 2 不过（120m 已确认 D2 1 把＝图头），ZEC span 4 过（5 把）⇒ 取它。
+#   按写死的池子和顺序取第一份过的：线上 30m ZEC→BTC→AAPL，各 span 2→4→8 整份拿。判据＝翻转臂量得出（图头除外至少 1 刀）。
+#   ZEC span 2（10-10 15:16Z 取数，20159 根）120m 只有 1 刀，翻转后是第 0 刀＝图头 ⇒ 量不出；ZEC span 4（40319 根）5 刀、图头除外 4 ⇒ 取它。
 #   原夹具留在 fixtures/j18/，当 B 全限「大周期 D2 少」的实例。
 SMALLS = {"15m": "zec15.json", "30m": "fixtures/j18/zec_30m_span4.json", "1h": "fixtures/j18/zec_1h_l8.json"}
 SAME = [("zec15.json", 15 * M, 30 * M)]                       # 同级对照
+# ×2 那一臂单独的题（card-8368a083-082，Nova 10-10 15:14）：这一臂证明的是「配对真有差别时 J18 会跟着变」，不证明 B 全限下什么。
+#   主跑那几份上两种配对判出的违反转折一样（zec15 上是同一个顶 H 688.60），牙在它们上面咬不到 ⇒ 按同一套池子规则另挑：
+#   线上 30m ZEC→BTC→AAPL、span 2→4→8 整份拿，取第一份「L-8 跟 ×2 判出的违反转折集合不同」的，取到就停。
+#   ZEC span 2／4／8 都相同（两边都空），BTC span 2 不同（L-8 空、×2 有 H 126208.5）⇒ 取它。10-10 15:23Z 取数，20160 根。
+X2_SMALLS = {"30m": "fixtures/j18/btc_30m_span2.json"}
+# 阳性对照：main（A 口径）原来那几份夹具，原来咬得到的照样要咬到
+X2_POS = {"15m": "zec15.json", "30m": "fixtures/j18/zec_30m_l8.json", "1h": "fixtures/j18/zec_1h_l8.json"}
+X2_POS_FLAGS = dict(SAME_LEVEL_D6="fallback", SL_S5_SHAPE=False, SL_WAY_LOCK=False, SL_D2_SHAPE=False, SL_EXEMPT_FINAL=False)
 
 
 def rule_tag(rule):
@@ -176,13 +185,33 @@ def check_pair(fn, fstep, bstep, small=None):
             rng = smE[last_same["bar"] + 1:iE + 1]
             # 碰平也算越过（第四批定的「碰平也算突破」，Nova 20:10）
             over = bool(rng) and (min(x["l"] for x in rng) <= last_same["price"] if bd["kind"] == "L" else max(x["h"] for x in rng) >= last_same["price"])
+        # 这一刀在小周期上是哪个转折：E 里极值那根小 K 线的时间（＋价＋H/L）。不带配对名、不带大周期 bar 号 ——
+        #   换配对时同一个顶还是同一个身份（Atlas／Nova 10-10 15:14，×2 那一臂用它比）
+        hit = next((x for x in small if t0 <= x["t"] < t1 and (x["h"] if bd["kind"] == "H" else x["l"]) == bd["price"]), None)
         out.append(dict(big_kind=bd["kind"], big_bar=bd["bar"], big_price=bd["price"], c=c, t_c=big[c]["t"], verdict=verdict,
+                        turn=(hit["t"] if hit else None, bd["price"], bd["kind"]),
                         small_last=vs["bounds"][-1]["kind"] if vs["bounds"] else None,
                         small_pending=[(p["kind"], round(p["price"], 2)) for p in vs["pending"]],
                         seg_at_E=seg["type"] if seg else None,
                         last_same=(rule_tag(last_same["rule"]), round(last_same["price"], 2)) if last_same else None,
                         last_same_over=over))
     return out
+
+
+def viol_turns(smalls, mult=None):
+    """→ 照 L-8（或 REF_MULT=mult）配对，smalls 里每份判「违反」的小周期转折集合 {(时间, 价, H/L)}。不带配对名：带了换配对就永远不同、牙永远绿。"""
+    m0 = LV.REF_MULT
+    if mult is not None:
+        LV.REF_MULT = mult
+    try:
+        out = set()
+        for tf, fn in smalls.items():
+            ref = LV.ref_tf(tf, TFS)
+            if ref:
+                out |= {r["turn"] for r in check_pair(fn, TFS[tf], TFS[ref]) if r["verdict"] == "违反"}
+        return out
+    finally:
+        LV.REF_MULT = m0
 
 
 def _detail(r):
@@ -242,17 +271,29 @@ def self_test():
         print("%s %s %dm 对 %dm：小周期上下翻转 ⇒ 违反 %d／%d（图头除外，要全报）" % ("✓" if ok else "✗", fn, fs // M, bs // M, nbad, len(body)))
     if not armed:
         print("✗ 没有一对量得出来（每对的大周期都只有图头）⇒ 反向臂空转")
-    # 配对的两条反向臂：基准＝照 L-8 的违反数
-    base = main(quiet=True)
-    mult0 = LV.REF_MULT
-    try:
-        LV.REF_MULT = 2                                  # 配对取 ×2（15m→30m 被当成正式配对）⇒ 违反数必须变
-        got = main(quiet=True)
-    finally:
-        LV.REF_MULT = mult0
-    ok = got != base
+    # 配对改成 ×2 ⇒ 判出的违反转折集合必须变（比转折、不比个数：只比个数时两边各 1 个就看不见）
+    fx = X2_SMALLS["30m"]
+    a, b = viol_turns(X2_SMALLS), viol_turns(X2_SMALLS, mult=2)
+    ok = a != b
     miss += not ok
-    print("%s 配对改成 ×2（不照 L-8）⇒ 违反 %d（照 L-8 是 %d，必须不一样）" % ("✓" if ok else "✗", got, base))
+    print("%s 配对改成 ×2（不照 L-8）⇒ %s 违反转折 %s（照 L-8 是 %s，必须不一样）" % ("✓" if ok else "✗", fx, sorted(b), sorted(a)))
+    again = viol_turns(X2_SMALLS)                        # 阴性对照：配对不变 ⇒ 必须判「没变」（防这颗牙永远绿）
+    ok = again == a
+    miss += not ok
+    print("%s 阴性对照：配对不变再跑一遍 ⇒ %s" % ("✓" if ok else "✗", "没变" if ok else "变了 %s" % sorted(again)))
+    import core.trend as T                               # 阳性对照：main（A 口径）原来那几份上，这颗牙照样咬得到
+    f0 = {k: getattr(T, k) for k in X2_POS_FLAGS}
+    try:
+        for k, v in X2_POS_FLAGS.items():
+            setattr(T, k, v)
+        pa, pb = viol_turns(X2_POS), viol_turns(X2_POS, mult=2)
+    finally:
+        for k, v in f0.items():
+            setattr(T, k, v)
+    ok = pa != pb
+    miss += not ok
+    print("%s 阳性对照：A 口径、原夹具（zec15／zec_30m_l8／zec_1h_l8）×2 ⇒ %s（照 L-8 是 %s，必须不一样）" % ("✓" if ok else "✗", sorted(pb), sorted(pa)))
+    base = main(quiet=True)
     got = main(quiet=True, same_counts=True)             # 同级对照也计违反 ⇒ 违反数必须变
     ok = got != base
     miss += not ok
