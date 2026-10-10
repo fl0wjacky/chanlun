@@ -75,12 +75,7 @@ def render(fn, name, tf, px, ph, out_name=None):
     if last_open:                                   # 未收盘的最后一根：虚线框出来并注明
         b = bars[-1]
         dashed_rect(d, [X(n - 1) - px, Y(b["h"]) - 6, X(n - 1) + px, Y(b["l"]) + 6], AM, width=2, dash_len=6, gap=4)
-        # 字底下垫一块底色实底（card-851e2134-fed）：跟网页 layers.js ⑤ 同一个改法 —— 不垫的话字直接压在 K 线上、发糊。
-        #   位置不变；底按字的真实墨迹框外扩一圈，颜色＝图底 BG。
-        pos = (X(n - 1) - 150, Y(b["l"]) + 14)
-        bb = d.textbbox(pos, "未收盘", font=f_n)
-        d.rectangle([bb[0] - 4, bb[1] - 2, bb[2] + 4, bb[3] + 2], fill=BG)
-        d.text(pos, "未收盘", font=f_n, fill=AM)
+        d.text((X(n - 1) - 150, Y(b["l"]) + 14), "未收盘", font=f_n, fill=AM)
 
     # ---- 标题、图例、统计 ----
     t0, t1 = utc(bars[0]["t"]), utc(bars[-1]["t"])

@@ -633,8 +633,8 @@ export function makeAnnotPrimitive(state) {
 
               // ⑤ 未收盘的最后一根：虚线框 + 「未收盘」（Python dashed_rect + 琥珀字）
               //    ★ 这一句**不登记 placed** —— 跟 Python 一致：那边它也是直接画的、不在 draw_labels 里。
-              //    ★ 字底的实底（card-851e2134-fed）两边**一起**加了：render/chart_full_smooth.py 同一处也垫了 BG 底，
-              //      所以「跟 Python 一致」这条照旧成立（Nova 10-10 03:5x 问的那件：选的是「跟」）。
+              //    ★ 字底的实底（card-851e2134-fed）**只加在网页这边**：网页有底、Python 出图（render/chart_full_smooth.py）没有，
+              //      **有意不同**（Nova 10-10 04:2x 定：Python 不跟）。check_parity 不比这一处（它不读「未收盘」）。
               state.liveTagBox = null;                       // 这一帧没画「未收盘」就是 null（工装不许读到上一帧的框）
               if (!data.closed && data.bars.length) {
                 const i = data.bars.length - 1, b = data.bars[i];
