@@ -855,7 +855,7 @@ function trendMarkView(target, state, prim) {
   //   （这跟「关着的层不算看得见」不是同一条账：那条管**画**，这条管**命中**。）
   boundHits.bands = [];
   // 已撤回的只读清单同理：层关着也得清，不然工装读到的是上一帧画过的叉（⑦c 第一版就是这么红的）
-  if (state.trendDrawn) { state.trendDrawn.withdrawn = []; state.trendDrawn.withdrawnLines = []; }
+  if (state.trendDrawn) { state.trendDrawn.withdrawn = []; state.trendDrawn.withdrawnLines = []; state.trendDrawn.withdrawnArrows = []; }
   if (!T || (!sh.trend && !sh.up)) return;
   // ★ 这一层的字**一律不登记 `placed`**（价签那张避让表），理由两条，都说破：
   //   ① 它们钉在**一条竖线和一个价**上（分界价格、待定、撤回）—— 挪开它就不是那个价了，避让没有意义；
@@ -875,6 +875,7 @@ function trendMarkView(target, state, prim) {
     D.states = [];
     D.withdrawn = [];
     D.withdrawnLines = [];
+    D.withdrawnArrows = [];
     // 命中带的画布：跟 `ghostHits` 同一条账 —— `ctx.canvas` 就是这个窗格的画布，
     // `useMediaCoordinateSpace` 给的坐标就是它的 CSS 像素，所以「客户端坐标 − getBoundingClientRect」
     // 正好落在同一个系里。每帧重设：窗格重建过之后旧的 canvas 是个死元素，量出来的坐标全是错的。
@@ -1005,9 +1006,22 @@ function trendMarkView(target, state, prim) {
         if (isSeg && x !== null && y !== null) {
           const x0 = ts.timeToCoordinate(sec(w.t)), y0 = vp.yOfPrice(w.p0);
           if (x0 !== null && y0 !== null && !(Math.max(x0, x) < -8 || Math.min(x0, x) > W + 8)) {
-            ctx.setLineDash(DASH.trendBack); ctx.strokeStyle = rgba(CHART.sell, 110); ctx.lineWidth = 1.5;
+            // 原尺寸下要看得见（card-e719d70c-e0e）：原来 alpha 110、1.5px，叠在图底上对比度 2.0:1，放大 3 倍才看得清；
+            //   现在 alpha 200、2px（4.0:1）。点线密度照旧用 trendBack，跟「待定」那条灰 2 4 照样分得开（颜色也不同）。
+            const WD_A = 200, WD_W = 2;
+            ctx.setLineDash(DASH.trendBack); ctx.strokeStyle = rgba(CHART.sell, WD_A); ctx.lineWidth = WD_W;
             ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x, y); ctx.stroke(); ctx.setLineDash([]);
-            D.withdrawnLines.push({ t: w.t, x0: Math.round(x0), x1: Math.round(x) });
+            D.withdrawnLines.push({ t: w.t, x0: Math.round(x0), x1: Math.round(x), alpha: WD_A, width: WD_W });
+            // 终点滚出右边（叉画不了）⇒ 在画布右沿、线出屏的那个高度上留一个实心小三角 ▶ ＋「线段已撤回 →」：
+            //   不然屏上只剩一条线，看不出它是什么、也不知道往右翻才看得到叉。
+            if (x > W - 2 && x0 < W - 14) {
+              const ex = W - 6, ey = Math.max(8, Math.min(H - 8, y0 + (y - y0) * (ex - x0) / (x - x0)));
+              ctx.fillStyle = rgba(CHART.sell, 220);
+              ctx.beginPath(); ctx.moveTo(ex + 4, ey); ctx.lineTo(ex - 5, ey - 6); ctx.lineTo(ex - 5, ey + 6); ctx.closePath(); ctx.fill();
+              const ly = fitLabel(ctx, ex - 10, ey + 4, '线段已撤回 →', mine, H, 'right');
+              D.labels.push(haloText(ctx, ex - 10, ly, '线段已撤回 →', CHART.sell, 'right', mine));
+              D.withdrawnArrows.push({ t: w.t, x: Math.round(ex), y: Math.round(ey) });
+            }
           }
         }
         if (x === null || y === null || !onScreen(x, W, 8)) continue;

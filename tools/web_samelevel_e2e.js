@@ -288,6 +288,31 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
   ck('⑦d 撤回的线段终点滚出屏外、起点在屏上 ⇒ 屏上那一截虚线照画（x0 在屏内、x1 在屏外右边），叉不打',
      WE.lines.length === 1 && WE.lines[0].x0 >= 0 && WE.lines[0].x0 <= WE.W && WE.lines[0].x1 > WE.W && WE.crosses === 0, JSON.stringify(WE));
 
+  // ⑦e 撤回的线段原尺寸下看得见（card-e719d70c-e0e）：同 ⑦d 的场面（起点在屏上、终点在屏外右边），再断三件事 ——
+  //   线的样式够浓（alpha ≥ 180、线宽 ≥ 2；原来 110／1.5，对比度 2.0:1，放大 3 倍才看清）；
+  //   画布右沿有一个小三角，高度＝这条线在右沿出屏的那个 y（±3）；旁边写「线段已撤回 →」。
+  const WA = await p.evaluate(async () => {
+    const app = window.__app, d = app.state.data, ts = app.chart.timeScale(), st = app.state;
+    const mid = Math.round(d.bars.length / 2); ts.setVisibleLogicalRange({ from: mid - 150, to: mid + 150 }); await new Promise((r) => setTimeout(r, 700));
+    const v = ts.getVisibleLogicalRange(), a = Math.round(v.from + (v.to - v.from) * 0.7), z = Math.min(d.bars.length - 1, Math.round(v.to) + 40);
+    if (!d.bars[a] || !d.bars[z] || z <= v.to) return { err: '视口右边没有已加载的 K 线可当「屏外终点」' };
+    d.withdrawn = [{ kind: 'seg', t: d.bars[a].t, t1: d.bars[z].t, dir: 'up', p0: d.bars[a].l, p1: d.bars[z].h, at: d.bars[d.bars.length - 1].t }];
+    const r = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: r.from + 0.01, to: r.to + 0.01 }); await new Promise((r) => setTimeout(r, 700));
+    const W = document.querySelector('#chart canvas').getBoundingClientRect().width, D = st.trendDrawn;
+    const L = (D.withdrawnLines || [])[0] || null, A = (D.withdrawnArrows || [])[0] || null;
+    const x0 = ts.timeToCoordinate(d.bars[a].t / 1000), x1 = ts.timeToCoordinate(d.bars[z].t / 1000);
+    const y0 = app.state.candleSeries.priceToCoordinate(d.bars[a].l), y1 = app.state.candleSeries.priceToCoordinate(d.bars[z].h);
+    const yAt = A ? y0 + (y1 - y0) * (A.x - x0) / (x1 - x0) : null;
+    const txt = (D.labels || []).filter((b) => /线段已撤回 →/.test(b[4] || '')).length;
+    const out = { W: Math.round(W), line: L, arrow: A, yAt: yAt == null ? null : Math.round(yAt), txt };
+    delete d.withdrawn; const r2 = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: r2.from + 0.01, to: r2.to + 0.01 }); await new Promise((r) => setTimeout(r, 500));
+    return out;
+  });
+  if (WA.err) { console.error(WA.err); await b.close(); process.exit(2); }
+  ck('⑦e 撤回的线段原尺寸看得见：线 alpha ≥ 180、宽 ≥ 2；终点在屏外右边 ⇒ 右沿有三角（高度＝线出屏处 ±3）、写「线段已撤回 →」',
+     !!WA.line && WA.line.alpha >= 180 && WA.line.width >= 2 && !!WA.arrow && WA.arrow.x >= WA.W - 12 && Math.abs(WA.arrow.y - WA.yAt) <= 3 && WA.txt === 1,
+     JSON.stringify(WA));
+
   // ⑧ D-3 选 C（小栋 10-09 12:57）：载荷带 `segs_std`（标准化线段）⇒ 图上「线段」画它：除最后一条外实线、最后一条短虚线；
   //   未完成段照旧长虚线；没有 `segs_std`（现行后台）⇒ 照旧画原始段、短虚线那条是空的（牙）。
   //   后台还没出这个字段 ⇒ 页面里塞假的：拿原始已完成段，把最后两条并成一条当「标准化后」的样子。
