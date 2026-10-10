@@ -136,6 +136,8 @@ def _try_confirm(done, t, ks, typ, lo, no_exceed=True):
                                 else min(a["lo"] for a in after) < done[j]["p1"]):
         return None
     zs = (_sl_centers_with_cuts if (SAME_LEVEL and SAME_LEVEL_D2) else _centers_with_cuts)(done[:t + 1], ks)
+    if SL_D2_SHAPE and SAME_LEVEL and SAME_LEVEL_D2:     # 原型「B 全限」：立刀用的参照中枢也限形状——高点刀之前是往上走 ⇒ 下上下；低点刀反过来
+        zs = [z for z in zs if z["PI0"] < lo] + _sl_centers(done, lo, t + 1, first_up=(typ == "L"))
     # D2-2 第 1 步（R6＝B，小栋 10-08）：两类候选取最后一个 —— ① 起点不晚于 H；② 起点在 H 之后、最后一条线段不晚于 S[t-2]（离开段之前已走完）
     ref = [z for z in zs if z["PI0"] >= lo and (z["X0"] <= done[j]["i1"] or (_R6_B and z["PI1"] <= t - 2))]
     if not ref:
@@ -179,6 +181,8 @@ def find_bounds(r, regroup=True, alternate=True, check_empty=True, no_exceed=Tru
                     continue
             if ks and check_empty:               # D2-7：上一刀 → 这一刀之间得有中枢
                 zz = (_sl_centers_with_cuts if (SAME_LEVEL and SAME_LEVEL_D2) else _centers_with_cuts)(done[:t + 1], ks + [j + 1])
+                if SL_D2_SHAPE and SAME_LEVEL and SAME_LEVEL_D2:   # 原型「B 全限」：D2-7 也只认限形状的中枢（上一刀是低点 ⇒ 这一组往上 ⇒ 下上下）
+                    zz = _sl_centers(done, lo, j + 1, first_up=(bounds[-1]["kind"] == "H"))
                 if not [q for q in zz if q["PI0"] >= lo and q["PI1"] <= j]:
                     ks.pop()
                     prev = bounds.pop()
@@ -602,6 +606,7 @@ SL_WAY_LOCK = True                               # 甲S-6（Nova 10-10 13:34 定
                                                   #   依据＝原文推论：L21:41-43「第三类买点后必然出现的两种情况」（中枢扩张／新生成上涨）＋ L20:162「第三类买卖点后，
                                                   #   并不必然是趋势，也有进入更大级别盘整的可能」——都没有「接着走成下跌」；**编者对应**：D2-2 的确认点＝第三类买点。
                                                   #   不定死时 AAPL 30m 06-26 低点刀后两个下上下框往下走，判成「下跌」里的跌涨跌（25 张 2 个）；定死后照 S5 切开，各算盘整
+SL_D2_SHAPE = True                               # 原型（不合，card-8368a083-082 Nova 14:49「B 全限」）：D2 立刀（D2-2 参照中枢、D2-7）也用限形状的中枢；不豁免、不退回
 SL_S5_SHAPE = True                               # S5 切出来那一截也限中枢形状（_s5_shape，card-03ad1057-525）。True＝按结果限；False＝不限（旧口径）
 
 
