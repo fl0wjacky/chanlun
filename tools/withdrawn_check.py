@@ -12,6 +12,9 @@
   ④ 找不到对齐点（上次的 D2 这次一把都没有）：刀这一类不记；
   ⑤ 账本：重开读得回、每张图最多 CAP 条、几个 span 同一条只给一次、窗口外的不给；
   ⑥ 服务端接线：ENABLED 关着一个字都不写；开着 ⇒ _cut_cc 算完 mbodies 里有 withdrawn。
+夹具 fixtures/t8/zecusdt_1h_leftedge.json（card-46e9b26d）：ZEC 1h 4041 根，窗口右滑一根时最左第 1～3 条线段并成一条（旧规矩记 3 条假撤回）。
+  ⑧ 滑一根：线段撤回 0 条（左沿＝首刀之前、最多头 LEFT_EDGE_MAX 条，不记）；把左沿边界关掉（自检臂）必红；
+     同一步里塞一条首刀之后的假撤回 ⇒ 必须照记（证明没挡多）；左沿里塞一条 ⇒ 不记；view 也不给左沿那截。
 """
 import json
 import os
@@ -32,6 +35,8 @@ A = sys.modules["core.analyze"]                 # ★ 不能写 import core.anal
 # 放在 fixtures/t8/ 不放 data/：data/ 会被 trend_check、pine_lockstep 等十几个检查整目录扫进去当样本
 FIX = os.path.join(ROOT, "fixtures", "t8", "aaplusdt_15m_q6.json")
 TICK = tick_of("aaplusdt_.json")
+FIX_EDGE = os.path.join(ROOT, "fixtures", "t8", "zecusdt_1h_leftedge.json")
+TICK_ZEC = tick_of("zec_.json")
 EVENT = dict(kind="d2", dir="L", price=273.27)
 _memo = {}
 CAP0 = W.CAP                                    # 方案定的 200；检查按它比，不按（可能被变异改掉的）W.CAP
@@ -76,6 +81,36 @@ def run(quiet=False, server_arm=True):
     noanchor = dict(old, cuts=[[c[0] + 1, c[1], c[2], c[3]] if c[3] == "D2-2" else c for c in old["cuts"]])
     got = W.diff(noanchor, *snap(bars[:8746])[2], 0)
     chk("④ 找不到 D2 对齐点：刀一条都不记", not any(w["kind"] in ("d2", "s5") for w in got), got[:3])
+
+    # ⑧ 左沿（card-46e9b26d）：窗口右滑一根，左边那几条线段并了 ⇒ 不记；首刀之后的照记
+    ez = json.load(open(FIX_EDGE))
+    zs = []
+    for b in (ez[:-1], ez[1:]):
+        r = A.analyze(b, tick=TICK_ZEC)
+        v, sg = T.trend_v3(r), T._done(r)
+        zs.append((b, v, sg, W.snapshot(b, v, sg)))
+    (b0, v0z, s0z, (last, _)), (b1, v1z, s1z, (conf, seen)) = zs
+    got = [w for w in W.diff(last, conf, seen, b1[-1]["t"]) if w["kind"] == "seg"]
+    chk("⑧ ZEC 1h 窗口右滑一根：左沿线段撤回 0 条", got == [], got[:3])
+    c0 = min(c[0] for c in last["cuts"])
+    j = next(i for i, x in enumerate(last["segs"]) if x[0] > c0 and i >= W.LEFT_EDGE_MAX)
+    fake = dict(last, segs=[x if i != j else [x[0], x[1] + 1] + x[2:] for i, x in enumerate(last["segs"])])
+    got = [w for w in W.diff(fake, conf, seen, b1[-1]["t"]) if w["kind"] == "seg"]
+    chk("⑧ 首刀之后塞一条假撤回（第 %d 条）：照记 1 条" % j, len(got) == 1 and got[0]["t"] == last["segs"][j][0], got[:3])
+    fake = dict(last, segs=[x if i != 1 else [x[0], x[1] + 1] + x[2:] for i, x in enumerate(last["segs"])])
+    got = [w for w in W.diff(fake, conf, seen, b1[-1]["t"]) if w["kind"] == "seg"]
+    chk("⑧ 左沿（第 1 条）塞一条：不记", got == [], got[:3])
+    lw = [dict(kind="seg", t=last["segs"][1][0], t1=last["segs"][1][1], dir=last["segs"][1][2], p0=0, p1=0, at=b1[-1]["t"])]
+    tmpv = tempfile.mkdtemp()
+    savedv = decisions.STATE
+    decisions.STATE = tmpv
+    try:
+        W._save(("ZECUSDT", "1h", 1, 6), dict(last=conf, withdrawn=lw))
+        vw = W.view("ZECUSDT", "1h", 6, [1], b1, v1z, s1z)
+        chk("⑧ 账本里已有的左沿撤回：view 不给", vw == [], vw)
+    finally:
+        decisions.STATE = savedv
+        shutil.rmtree(tmpv, ignore_errors=True)
 
     # ⑦ 「哪几条算已确认」只有一份规矩（Iris／Nova 15:07）：segs_std 的 state（W.seg_states）跟账本 snapshot 记的已确认线段必须是同一批
     for cut in (8745, 8746):
@@ -170,6 +205,10 @@ def self_test():
         W.diff = d
     arm("确认 → 待确认也记", pending_counts, lambda: setattr(W, "diff", real_diff))
     arm("不封顶", lambda: setattr(W, "CAP", 10 ** 9), lambda: setattr(W, "CAP", real_cap))
+    real_edge = W.LEFT_EDGE_MAX
+    arm("左沿边界关掉（LEFT_EDGE_MAX＝0）", lambda: setattr(W, "LEFT_EDGE_MAX", 0), lambda: setattr(W, "LEFT_EDGE_MAX", real_edge))
+    real_le = W._left_edge
+    arm("左沿不看首刀、线段一律全挡", lambda: setattr(W, "_left_edge", lambda rec: float("inf")), lambda: setattr(W, "_left_edge", real_le))
 
     real_snap = W.snapshot
 

@@ -63,6 +63,26 @@ def snapshot(bars, trend, segs):
     return dict(cuts=cuts, segs=sg), dict(cuts=seen_c, segs=seen_s)
 
 
+# 左沿（card-46e9b26d，Nova 10-10 定 ④ 加上限）：窗口每次刷新左边都切掉旧 K 线，最左那几条线段会跟着窗口起点并了又拆
+#   （ZEC 1h 03-16→03-29：200 步里同 3 条来回记了 20 次撤回）。那不是行情在动 ⇒ 线段撤回只看「第一把已确认刀（D2／S5）之后」的线段，
+#   刀之前那截当作窗口切出来的部分不记；刀在左沿不晃（两轮滑窗回放刀撤回 0 条），所以拿它当边界。
+#   LEFT_EDGE_MAX＝4 只是保险：防「左沿很久没有已确认的刀」时一挡一大截、把真撤回也挡掉，所以最多挡头 4 条。
+#   4 从哪来：两轮滑窗回放（15 张 200 步、1h 以上 9 张最多 1000 步）左沿最深晃到第 3 条（0 起），+1；**样本只有 ZEC 1h 一处**。
+LEFT_EDGE_MAX = 4
+
+
+def _left_edge(rec):
+    """→ 这份已确认集合里「左沿」的右界（开盘时间）：线段起点早于它的不记撤回、也不给前端。
+    ＝ 第一把已确认刀之前的线段，最多头 LEFT_EDGE_MAX 条，取两者少的那个；一条都不挡 ⇒ None。"""
+    segs = rec["segs"]
+    c0 = min((c[0] for c in rec["cuts"]), default=None)
+    k = sum(1 for x in segs if c0 is None or x[0] < c0)
+    k = min(k, LEFT_EDGE_MAX)
+    if k == 0:
+        return None
+    return segs[k][0] if k < len(segs) else float("inf")
+
+
 def _anchor(old, new):
     """两组键里第一个共同的（按时间）→ 它的时间；没有 ⇒ None。"""
     common = set(map(tuple, old)) & set(map(tuple, new))
@@ -79,8 +99,9 @@ def diff(last, conf, seen, at):
                 out.append(dict(kind="d2" if c[3] == "D2-2" else "s5", t=c[0], dir=c[1], price=c[2], at=at))
     u0 = _anchor(last["segs"], conf["segs"])
     if u0 is not None:
+        edge = _left_edge(last)
         for s in last["segs"]:
-            if s[0] >= u0 and (s[0], s[1], s[2]) not in seen["segs"]:
+            if s[0] >= u0 and (edge is None or s[0] >= edge) and (s[0], s[1], s[2]) not in seen["segs"]:
                 out.append(dict(kind="seg", t=s[0], t1=s[1], dir=s[2], p0=s[3], p1=s[4], at=at))
     return out
 
@@ -125,6 +146,9 @@ def view(symbol, tf, pen_min, spans, bars, trend, segs):
     conf, _ = snapshot(bars, trend, segs)
     lo_c = min((c[0] for c in conf["cuts"]), default=None)
     lo_s = min((s[0] for s in conf["segs"]), default=None)
+    edge = _left_edge(conf)                     # 左沿那截照样不给（账本里改规矩前已经记下的那几条也一样挡掉）
+    if edge is not None and lo_s is not None:
+        lo_s = max(lo_s, edge)
     end = bars[-1]["t"]
     got = {}
     for span in spans:
