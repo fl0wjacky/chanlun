@@ -601,6 +601,25 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
     return out;
   }, NZ);
   await p.evaluate(async ({ i0, keep }) => { const app = window.__app; const s = app.state.data.trend.segments.find((x) => x.i0 === i0); s.type = keep; app.repaint(); }, NZ);
+  // ⑬b 图头那截、最后那段**不算**「本级别无中枢」（Nova 13:22）：图头是左边被窗口截断（不是凑不出），最后一段右头还没有刀（是还没凑出）。
+  //   页面里把这两段的段型都改成 `无中枢`：图头照旧图头的灰、最后一段照旧盘整的浅灰，一块小标都不许有。
+  const NZH = await p.evaluate(async () => {
+    const app = window.__app, d = app.state.data, st = app.state, ts = app.chart.timeScale();
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const S = d.trend.segments, h = S[0], z = S[S.length - 1];
+    if (!h || !z || h === z) return { err: '走势段不到两段' };
+    const keep = [h.type, z.type];
+    const look = async (s) => { ts.setVisibleLogicalRange({ from: s.i0 - 5, to: Math.min(s.i1 + 5, d.bars.length + 5) }); await wait(500);
+      const band = (st.trendDrawn.bands || []).find((b) => b.i0 === s.i0 && b.i1 === s.i1) || null;
+      return { a: band ? band.a : null, head: band ? band.head : null, live: band ? band.live : null, chips: (st.nzDrawn || []).length }; };
+    h.type = '无中枢'; z.type = '无中枢'; app.repaint(); await wait(300);
+    const out = { head: await look(h), tail: await look(z), tailLive: !!z.live };
+    h.type = keep[0]; z.type = keep[1]; app.repaint(); await wait(300);
+    return out;
+  });
+  if (NZH.err) { console.error('⑬b ' + NZH.err); await b.close(); process.exit(2); }
+  ck('⑬b 图头那截、最后那段改成「无中枢」⇒ 照旧铺底色（图头灰／最后一段浅灰）、零小标（只有两头都有刀的才算本级别无中枢）',
+     NZH.head.a > 0 && NZH.head.chips === 0 && NZH.tailLive && NZH.tail.a > 0 && NZH.tail.chips === 0, JSON.stringify(NZH));
   ck('⑬ 「本级别无中枢」段：不铺底色（a=0）、左上角挂小标、指针放上去出原文浮层；同一段改回盘整 ⇒ 照旧灰底、零小标（牙）',
      NZ.nz.a === 0 && NZ.nz.chips === 1 && /^这一段：两把刀之间凑不出/.test(nzTip) && NZ2.a > 0 && NZ2.chips === 0,
      JSON.stringify({ NZ, tip: nzTip, NZ2 }));

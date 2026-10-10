@@ -775,8 +775,10 @@ function trendBandView(target, state, prim) {
         if (x0 === null || x1 === null || x1 < 0 || x0 > W) continue;   // 滚出去的那几段不画
         let col, a;
         if (s.head || g === 0) { col = TREND.head; a = TREND.headA; }
-        else if (s.type === '无中枢') {
-          // 「本级别无中枢」（card-8368a083-082）：两把刀之间凑不出一个本级别中枢 ⇒ **不铺底色**（a = 0）。
+        else if (s.type === '无中枢' && !s.live) {
+          // 「本级别无中枢」（card-8368a083-082）：**两头都有刀**、中间凑不出一个本级别中枢 ⇒ **不铺底色**（a = 0）。
+          //   ★ 只认两头都有刀的段（Nova 13:22）：图头（第一把刀之前，左边被窗口截断）在上一支就按图头画了，这里碰不到；
+          //     最后一段（还在长、右头没有刀）也不算 —— 那是「还没凑出来」，不是「凑不出」，照旧走下面盘整那支的浅灰。
           //   ★ 不借盘整的灰：盘整＝「有一个中枢、没有方向」，无中枢＝「连中枢都没有」，两件事铺同一个灰读不出来；
           //     空着最诚实 —— 两头的分界虚线照画，段的范围还在，标注层左上角挂「本级别无中枢」小标（悬停说原文）。
           col = TREND.head; a = 0;
@@ -1584,8 +1586,11 @@ function drawNzChips(ctx, state, sh, vp, placed, W, H) {
   if (!T || !sh.trend) return;
   if (!pzHits.canvas) pzHits.canvas = ctx.canvas;
   const top = TREND.hatchTop + TREND.hatchH + 4;
-  for (const s of T.segments || []) {
-    if (s.type !== '无中枢' || s.head) continue;
+  const segs = T.segments || [];
+  for (let g = 0; g < segs.length; g++) {
+    const s = segs[g];
+    // 只挂**两头都有刀**的：图头（g === 0／head，左边是窗口截断，不是凑不出）、最后一段（live，右头还没有刀）都不挂 —— 跟底色那支同一个判据。
+    if (s.type !== '无中枢' || s.head || g === 0 || s.live) continue;
     const xa = vp.xOfBar(s.i0), xb = vp.xOfBar(s.i1);
     if (xa === null || xb === null || xb < 0 || xa > W) continue;
     const x0 = Math.max(0, xa), x1 = Math.min(W, xb);
