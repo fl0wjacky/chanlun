@@ -365,6 +365,25 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
   ck('⑨ 中枢框左右边＝载荷 X0／X1（线段层、笔层都是；这份数据里原始线段跟标准化线段端点挪过的框有几个就得有几个 > 0，不然这一格没牙）',
      BX.moved > 0 && BX.nOffSeg === 0 && BX.nOffPen === 0 && BX.nSeg === BX.nZs && BX.nPen === BX.nZp, JSON.stringify(BX));
 
+  // ⑪ 给人看的线段数／线段位置跟图上画的那套（segs_std）对得上（card-83915c20-9e3，小栋 10-10 05:18「为什么有两套线段」）：
+  //   状态栏「完成线段 N」＝ segs_std 的条数；线段中枢的 host（hostOf('seg')，框的 boxSplit 拆点也用它）就是 segs_std 本身。
+  //   牙：本地这几张图原始和标准化恰好条数一样 ⇒ 页面里把 segs_std 掐掉最后一条，让两套**条数不同**，再看状态栏跟谁走。
+  const SS = await p.evaluate(async () => {
+    const app = window.__app, d = app.state.data, L = await import('./layers.js');
+    const keep = d.segs_std; if (!Array.isArray(keep) || keep.length < 3) return { err: '这份载荷没有 segs_std' };
+    d.segs_std = keep.slice(0, -1); app.repaint(); await new Promise((r) => setTimeout(r, 500));
+    const meta = (document.getElementById('meta') || {}).textContent || '';
+    const m = meta.match(/完成线段 (\d+)（\+(\d+) 未完成）/);
+    const rawDone = (d.segs || []).filter((s) => !s.live).length, live = (d.segs || []).filter((s) => s.live).length;
+    const out = { std: d.segs_std.length, rawDone, live, shown: m ? +m[1] : null, shownLive: m ? +m[2] : null,
+                  hostIsStd: L.hostOf(d, 'seg').host === d.segs_std };
+    d.segs_std = keep; app.repaint(); await new Promise((r) => setTimeout(r, 400));
+    return out;
+  });
+  if (SS.err) { console.error(SS.err); await b.close(); process.exit(2); }
+  ck('⑪ 状态栏「完成线段 N」＝ segs_std 条数、「+M 未完成」＝原始里的 live 条数；线段中枢的 host 就是 segs_std（场面成立：两套条数故意不同）',
+     SS.std !== SS.rawDone && SS.shown === SS.std && SS.shownLive === SS.live && SS.hostIsStd, JSON.stringify(SS));
+
   if (SHOTS) await p.screenshot({ path: require('path').join(SHOTS, 'samelevel-fe.png') });
   await b.close();
   console.log(red ? `✗ ${red} 格红（${n - red}/${n} 过）` : `${n}/${n} 过`);   // predeploy 认「N/N 过」这一行

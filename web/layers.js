@@ -158,7 +158,10 @@ export const doneSegs = (segs) => segs.filter((s) => !s.live);
  */
 export function hostOf(data, tier) {
   if (tier === 'seg') {
-    const done = doneSegs(data.segs);
+    // 线段中枢的 PI 指的是**图上画的那套**（D-3 C 以后是 `segs_std`）⇒ host 也得是它；没有 segs_std（老后台）才退回原始已完成段。
+    //   原来这里恒用原始 ⇒ 框的左右边（已改读 X0/X1）和 boxSplit ③ 的拆点 host[PI0+2] 都取到别的线段上（card-83915c20-9e3，并 card-9940abc8-766）。
+    const std = Array.isArray(data.segs_std) && data.segs_std.length ? data.segs_std : null;
+    const done = std || doneSegs(data.segs);   // RAW-SEGS: 老后台没有 segs_std 时的退路
     return { host: done, unfinishedJ: null };
   }
   const pens = data.pens;
@@ -451,8 +454,10 @@ export function makeAnnotPrimitive(state) {
               if (sh.seg) {
                 // 暂定那一刀 V 同时是暂定段的终点和后面那一截的起点 ⇒ 只画一个圈（虚线那个）；
                 // 两个都画，实线小圈套在虚线圈里，看着像齿轮（实测截图）。
+                // RAW-SEGS: 暂定（tentative）只长在原始的未完成段上，segs_std 里没有这个概念
                 const tentEnds = new Set(data.segs.filter((s) => s.tentative).map((s) => `${s.i1}|${s.p1}`));
                 // D-3 C：有 `segs_std` 时端点圈跟着标准化那一套走（图上的线段是哪套，圈就画在哪套的端点上），未完成段照旧取原始的
+                // RAW-SEGS: 有 segs_std 时只拿原始里的未完成段（live）接在后面 —— 未完成段只在原始里有；没有 segs_std 的老后台整套用原始
                 const segsDrawn = Array.isArray(data.segs_std) && data.segs_std.length ? data.segs_std.concat(data.segs.filter((s) => s.live)) : data.segs;
                 for (const s of segsDrawn) {
                   const end = segEnd(data, s);
