@@ -125,8 +125,20 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   //      `D_LINES.size` ⇒ **假红**。这一格于是**红绿跟挂钟走**：main `e494d90` 上 9 趟 5 红、成簇
   //      （相邻几分钟一致、跨半小时翻）—— 表现是「默认档随机拦住上线」，而跟那次要上的东西毫无关系。
   //      ★ 判据（该报几个）一个字都不用动：**错的是挑点，不是尺**。（card-a70ed1c2-cc6）
-  const target = (base.signals.seg || []).find((s) => s.confirmed === true && s.bar === TARGET_BAR)
-              || (base.signals.seg || []).find((s) => s.confirmed === true && s.bar >= 1000);
+  // ★★ 目标点那一根上**不许叠着别的同色买卖点**（card-3f8f0c50-9ea，10-09）：线段级三买跟笔级一买常落在同一根同一个价上，
+  //   都是买色。目标点变成幽灵以后，笔级那个照样实心（它没消失，画得对），它的墨留在那一小块里 ⇒ ③「实心掉一颗三角」量不出来 ⇒ 时红时不红。
+  //   错的是挑点，不是尺：挑一个那一根上只有它自己（同色）的点。
+  const buyish = (k) => String(k).endsWith('买');
+  const alone = (t) => ![...(base.signals.seg || []), ...(base.signals.pen || [])]
+    .some((o) => o !== t && o.bar === t.bar && buyish(o.kind) === buyish(t.kind));
+  // 挑点时排除了几个、还剩几个候选，都印出来（Nova 17:56）：候选哪天被排光，这里一眼看得见，而且下面 `!target` 会 exit 2，不会静悄悄报绿
+  {
+    const pool = (base.signals.seg || []).filter((s) => s.confirmed === true && s.bar >= 1000);
+    const kept = pool.filter(alone);
+    console.log(`挑目标点：已确认、bar≥1000 的线段级点 ${pool.length} 个，同一根叠着同色点被排除 ${pool.length - kept.length} 个，剩 ${kept.length} 个候选`);
+  }
+  const target = (base.signals.seg || []).find((s) => s.confirmed === true && s.bar === TARGET_BAR && alone(s))
+              || (base.signals.seg || []).find((s) => s.confirmed === true && s.bar >= 1000 && alone(s));
   const control = (base.signals.pen || []).find((s) => s.confirmed === true && Math.abs(s.bar - target.bar) < 200)
                || (base.signals.pen || []).find((s) => s.confirmed === true && s.bar >= 1000);
   if (!target || !control) { console.error('✗ 模子里找不到已确认的点，这一套没法量'); process.exit(2); }
@@ -685,13 +697,6 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
   //   而 ⑤ 那一格会把它误读成"整屏重绘"。
   //   ★ 这不是这一卡带出来的东西：空转那一趟 `ghosts` 是 0，图照样挪（真后台也复现）。
   //     记在卡上当发现 —— 换一次看法，整幅图的横向比例会动 6px。
-  // ★★ 量这几格（①b ②③⑤）时**先关「线段」那一层**：线段端点画一个买／卖色的圈，跟记号同色同位（线段级买卖点本来就在线段端点上），
-  //   圈的墨前后两次都在 ⇒ 「实心换成幽灵档」那一翻被它压住 ⇒ 时红时不红（10-10 落地支 cd7c4ee：5 趟 2 红；D-3 C 以后端点挪到真极值、
-  //   跟买卖点挤到同一根上，撞得更勤）。关了再量，量的就只有记号本身；⑤ 之后再打开，后面几格不受影响。
-  const segOn = async (want) => { const c = p.locator('.chip[data-key="seg"]');
-    if ((await c.getAttribute('aria-pressed') === 'true') !== want) await c.click();
-    await sleep(300); return (await c.getAttribute('aria-pressed')) === (want ? 'true' : 'false'); };
-  if (!(await segOn(false))) { console.error('✗ 关不掉「线段」那一层，②③ 没法干净地量'); process.exit(2); }
   await measure(p, 'macd', target.bar);
   const A0 = await sample(p, [target, control], 'before');
   if (process.env.GHOST_DUMP) await dumpBox(p, A0.boxes[0], cols, '①b before：目标点那一小块（点还在）');
@@ -734,7 +739,6 @@ const over = (fg, a, bg) => fg.map((v, i) => Math.round((a / 255) * v + (1 - a /
      `对照点 ${control.kind}@${control.bar}：${JSON.stringify(r0[1])} → ${JSON.stringify(r1[1])}\n`
      + `       框 ${JSON.stringify(A0.boxes[1])} → ${JSON.stringify(A1.boxes[1])}\n`
      + `       视图 ${JSON.stringify(A0.view)} → ${JSON.stringify(A1.view)}`);
-  if (!(await segOn(true))) { console.error('✗ 「线段」那一层开不回来'); process.exit(2); }
   // ★ 这一格是量到 ⑤ 的漂移之后补的：那一格的 3px 就是**图被挤矮了**（foot 60→77、#chart 760→743）。
   //   判据钉在这一条上：那一格浮层出现/消失，图的尺寸一个字都不许动。
   //   （原先它并进图脚那一行 —— 图脚是流内布局，多这 42 个字就折行；窄屏那一档图脚还整个隐藏。）
