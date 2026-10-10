@@ -692,6 +692,22 @@ BOX_STATUS_B = True
 _BOX_PENDING_SEGS = 2                            # 跟 web/withdrawn.PENDING_SEGS、pine STD_PENDING_SEGS 同一个数（①C）；tools/pending_sync_check.py 比三处
 
 
+# 原型（card-5a823fca-4d8，Nova 10-10 09:06，不合）：S5 刀确认改用 (a)——它右边那段走势的第一个中枢三段都已确认（不在①C 最后两条里）。
+#   现行 D-4′（左右两把 D2 都已确认）在 _sl_state 里已经算过；开了这个就覆盖 S5 的 state。
+S5_STATE_A = True
+
+
+def _s5_state_a(done, bounds, segments, centers):
+    n = len(done)
+    for b in bounds:
+        if b.get("rule") != "S5":
+            continue
+        g = next((i for i, s in enumerate(segments) if s["i0"] == b["bar"]), None)
+        zz = [z for z in centers if z.get("seg") == g] if g is not None else []
+        first = min(zz, key=lambda z: z["X0"]) if zz else None
+        b["state"] = "confirmed" if first is not None and first["PI1"] < n - _BOX_PENDING_SEGS else "pending"
+
+
 def _box_status_b(done, bounds, segments, centers):
     st = {b["bar"]: b.get("state") for b in bounds}
     n = len(done)
@@ -733,6 +749,8 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
         if _DEATH and SAME_LEVEL_DEATH:                  # 正式版：同级别下照标死点类型（D2-5 按三段中枢）、小转大的二类（S11）
             _death_types(r, done, bounds, segments, centers_out)
         _sl_state(r["bars"], bounds, two_sets, centers_out)
+        if S5_STATE_A:
+            _s5_state_a(done, bounds, segments, centers_out)
         if BOX_STATUS_B:
             _box_status_b(done, bounds, segments, centers_out)
         return dict(seg_centers=centers_out, bounds=bounds, retracted=res["retracted"],
