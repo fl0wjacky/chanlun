@@ -275,8 +275,11 @@ out.vet = P.vet.map((d) => {
   const pre = []; for (let i = 500; i >= 1; i--) pre.push({ t: bars[0].t - i * step });
   const mk = (o) => Object.assign({}, o, { i0: o.i0 + 500, i1: o.i1 + 500 });
   //   买卖点的 bar 也是**下标**，补 500 根就得跟着 +500（少了这一步，这一格量的就成了
-  //   「下标没跟着挪」——那是另一件事，真换档不会那样）。中枢不用挪：它存的是 host 里的位置（PI0/PI1）。
+  //   「下标没跟着挪」——那是另一件事，真换档不会那样）。中枢的 PI0/PI1 是 host 里的位置、不用挪；
+  //   ★ 可它的 X0/X1 是**K 线下标**：框的左右边改读 X0/X1 以后（card-f2ce0437-ba4），补 500 根它也得 +500 ——
+  //     真后台换档时整份载荷重算，X0/X1 本来就跟着挪；这里不挪，量的就又成了「下标没跟着挪」。
   const mkb = (s) => Object.assign({}, s, { bar: s.bar + 500 });
+  const mkz = (z) => (Number.isInteger(z.X0) ? Object.assign({}, z, { X0: z.X0 + 500, X1: z.X1 + 500 }) : z);
   // 贴着窗口左沿**收尾**的那一笔：i0 在窗口外、i1 正好落在窗口左沿上 —— 边界含等号它才在。
   //   ★ 量法是**只挪窗口左沿**（W3 = 压在那根上 ／ W4 = 往右 1ms 就不压了），不删结构：
   //     删一笔会让中枢的 PI0/PI1 整体错位（host 是笔数组），那样量到的就不是「边界在不在」了。
@@ -299,7 +302,7 @@ out.vet = P.vet.map((d) => {
     same_in: S(take({ pens: tweak(pens, iIn) })) === base,
     same_out: S(take({ pens: tweak(pens, iOut) })) === base,
     same_shift: S({ bars: pre.concat(bars), pens: pens.map(mk), segs: segs.map(mk),
-                    centers: centers, seg_centers: segc,
+                    centers: centers.map(mkz), seg_centers: segc.map(mkz),
                     signals: { seg: sigs.seg.map(mkb), pen: sigs.pen.map(mkb) } }) === base,
     same_edge: S(d0, W3) === S(d0, W4),
     same_far: S(d0, { t0: far0, t1: far1 })
