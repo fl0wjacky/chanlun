@@ -595,6 +595,7 @@ def _sl_state(bars, bounds, two_sets, chosen):
 #   "Z"：右边那截的第一个中枢单列成一段盘整，在它第三段终点补一刀 S5（L20、L43、L38 规则 A 都不犯；代价是可能出现中枢不叠的盘整＋盘整）。
 #   只处理同一个 D2 组里、S5 接缝两边；D2 分界两边不动（那是 D2-T1，另一件）。处理完再查，直到组里没有相邻的同向趋势。
 S5_FIX = "Z"                                     # land-z：小栋 10-09 合并页第三题选 B（合加 Z）才合
+SL_S5_SHAPE = "dir"                              # 原型（"kind"／"dir"／False）（card-03ad1057-525，不合）：S5 切出来那截取中枢也限形状（"dir"＝哪种限法切得出相配的同向趋势就用哪种，都不成照 D6 退回）；默认＝Nova 的 C 档（fallback＋豁免＋S5 段限形状）
 
 
 def _sl_layer(done, ks, bounds_, n):
@@ -623,7 +624,9 @@ def _sl_layer(done, ks, bounds_, n):
         else:
             two_sets[0].extend(zz); two_sets[1].extend(zz)
         start, cur, way = a, [], None
-        for z in zz:
+        q = 0
+        while q < len(zz):
+            z = zz[q]
             if cur:
                 r = _sl_rel(cur[-1], z)
                 if r == "叠" or (way and r != way):
@@ -633,9 +636,27 @@ def _sl_layer(done, ks, bounds_, n):
                     extra.append(dict(rule="S5", line_seg=cut - 1, bar=e["i1"], kind="H" if e["p1"] >= e["p0"] else "L",
                                       price=e["p1"]))
                     start, cur, way = cut, [], None
+                    if SL_S5_SHAPE == "kind":      # 第三条·按刀：高点刀 ⇒ 往下走 ⇒ 中枢首段向上（上下上）。量过：刀的高低定不了后面那截往哪走，反而多出反常
+                        zz = zz[:q] + _sl_centers(done, cut, b, first_up=e["p1"] >= e["p0"])
+                        continue
+                    if SL_S5_SHAPE == "dir":       # 第三条·按结果：两种限法各试一遍，哪种限法切出跟它相配的同向趋势就用哪种；都不成 ⇒ 照 D6 那样退回／不退回
+                        up = _sl_centers(done, cut, b, first_up=False)
+                        dn = _sl_centers(done, cut, b, first_up=True)
+                        ok_up = len(up) >= 2 and _sl_rel(up[0], up[1]) == "上"
+                        ok_dn = len(dn) >= 2 and _sl_rel(dn[0], dn[1]) == "下"
+                        if ok_up and ok_dn:
+                            pick = up if up[0]["PI0"] <= dn[0]["PI0"] else dn
+                        elif ok_up or ok_dn:
+                            pick = up if ok_up else dn
+                        else:
+                            pick = None if SAME_LEVEL_D6 != "strict" else (up if e["p1"] < e["p0"] else dn)
+                        if pick is not None:
+                            zz = zz[:q] + pick
+                            continue
                 elif way is None:
                     way = r
             cur.append(z)
+            q += 1
         pieces.append((start, b, cur, g))
     if S5_FIX:
         pieces, extra = _fix_same_trend(pieces, extra, kind_of, done, S5_FIX)
