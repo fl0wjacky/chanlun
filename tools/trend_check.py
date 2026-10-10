@@ -364,8 +364,13 @@ def main():
     sl = []
     for fn in files:
         sl += ["%s %s" % (fn, x) for x in sl_check(sl_run(fn))]
-    cell("⑨ G6 同级别正式口径（%d 份）：中间段有中枢、S5 落在接缝、D2 高低交替、每刀有死因、state 两值且 S5 守 D-4′；"
+    cell("⑨ G6 同级别正式口径（%d 份，笔锁关）：中间段有中枢、S5 落在接缝、D2 高低交替、每刀有死因、state 两值且 S5 守 D-4′；"
          "T1 三段不共用、T2 不升级、T3 [ZD,ZG]、T3′ 相邻中枢按 [ZD,ZG] 判叠／方向、T4 甲／豁免／退回、T5 已确认 D2 窗口里有中枢" % len(files), sl)
+    sl = []
+    for fn in files:
+        sl += ["%s %s" % (fn, x) for x in sl_check(sl_run(fn, lock=True))]
+    cell("⑨′ 附加一档：同一套 G6 检查在笔锁开下（%d 份）" % len(files), sl)
+    cell("⑨″ ⑨ 量的就是线上口径：sl_run 的刀、段、中枢跟 core.pen 默认锁值（%s）跑出来的逐份一样" % _PEN_LOCK_DEFAULT, prod_same(files))
     print("全部通过" if not bad else "%d 处不过" % len(bad))
     return 1 if bad else 0
 
@@ -374,12 +379,16 @@ def main():
 # 跑的是正式口径全开（同级别＋S9＋甲＋首中枢豁免＋死因）＋笔锁 PEN_FINAL_LOCK，跟线上默认那套（main()①～⑧）分开：
 #   默认关的时候同级别那条路根本不走，①～⑧ 量不到它。sl_check 只读一份 trend_v3 输出，--self-test 拿它的拷贝拧坏一处、必须报。
 SL_FLAGS = dict(SAME_LEVEL=True, SAME_LEVEL_D2=True, SAME_LEVEL_D6="fallback", SL_FIRST_EXEMPT=True, SAME_LEVEL_DEATH=True)
-def sl_run(fn):
+# ⑨ 主跑用笔锁「关」＝正式口径（小栋 10-09 S-13 ①B 定锁关；原来这里写死锁开，⑨ 一直量的不是线上那套，Nova 10-09 19:01）。
+#   锁开留成附加一档 ⑨′ 照样要全绿；⑨″ 守「⑨ 量的就是线上口径」：sl_run 的输出必须跟 core.pen 的默认锁值跑出来的逐份一样。
+SL_LOCK = False
+_PEN_LOCK_DEFAULT = PEN.PEN_FINAL_LOCK                 # import 时 core.pen 的默认值（线上就是它）
+def sl_run(fn, lock=None):
     from config import tick_of
     old = {k: getattr(T, k) for k in SL_FLAGS}; lk = PEN.PEN_FINAL_LOCK
     try:
         for k, x in SL_FLAGS.items(): setattr(T, k, x)
-        PEN.PEN_FINAL_LOCK = True
+        PEN.PEN_FINAL_LOCK = SL_LOCK if lock is None else lock
         r = analyze(load(os.path.join(ROOT, "data", fn)), tick=tick_of(fn))
         v = T.trend_v3(r)
         v["_done"] = T.find_bounds(r)["done"]          # T3／T4／T5 要拿线段自己重算（只给检查用，不进载荷）
@@ -388,6 +397,15 @@ def sl_run(fn):
     finally:
         for k, x in old.items(): setattr(T, k, x)
         PEN.PEN_FINAL_LOCK = lk
+def prod_same(files):
+    """⑨″：sl_run（⑨ 主跑用的那套）对 线上口径（SL_FLAGS＋core.pen 默认锁值）逐份比刀和段。不一样 ⇒ ⑨ 量的不是线上那套。"""
+    key = lambda v: ([(b["bar"], b["kind"], b["rule"], b.get("state")) for b in v["bounds"]], [(g["i0"], g["type"]) for g in v["segments"]],
+                     [(z["X0"], z["X1"], round(z["ZD"], 8), round(z["ZG"], 8)) for z in v["seg_centers"]])   # 中枢也比（Nova 21:1x：漏比中枢会放过只差中枢的那种）
+    bad = []
+    for fn in files:
+        if key(sl_run(fn)) != key(sl_run(fn, lock=_PEN_LOCK_DEFAULT)):
+            bad.append("%s：⑨ 跑出来的跟线上口径（锁 %s）不一样" % (fn, _PEN_LOCK_DEFAULT))
+    return bad
 def _scan(done, a, b, first_up=None, first_free=False):
     """检查自己写的一份同级别三段中枢找法（S1／S2／S3：满三段即收、段不共用、[max lo, min hi] 判重叠），**不调引擎**，
     免得尺子读自己要量的东西。first_up 给了＝限形状（中枢首段方向必须是它），first_free＝首中枢不限（甲S-2 豁免）。"""
@@ -908,6 +926,15 @@ def self_test():
     miss += not hit
     ok0 = not sl_check(v0)
     print("%s G6 没拧的原样 ⇒ 0 处" % ("✓" if ok0 else "✗"))
+    global SL_LOCK
+    _lk0 = SL_LOCK
+    try:
+        SL_LOCK = True                                  # 变异：⑨ 主跑偷偷开锁（就是 10-09 之前的样子）⇒ ⑨″ 必须红
+        hit = prod_same(kline_files())
+    finally:
+        SL_LOCK = _lk0
+    print("%s G6 ⑨ 主跑偷偷开笔锁 ⇒ ⑨″ 报出 %d 份（例 %s）" % ("✓" if hit else "✗", len(hit), hit[:1]))
+    miss += not hit
     miss += not ok0
     for name, kw, changed in arms:
         _, v = run("zec15.json", **kw)

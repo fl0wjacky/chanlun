@@ -460,7 +460,10 @@ export function makeAnnotPrimitive(state) {
                     //   还会被更极端的取代。画个实线圈就跟定了的端点长得一样；虚线圈又已经是「暂定」那一刀的记号，
                     //   不能再拿来表示「未完成」（两个意思撞在一起）。暂定段的终点是 V，照旧画虚线圈。
                     if (k === 1 && s.live && !s.tentative) continue;
-                    const col = (k === 0 ? up : !up) ? CHART.buy : CHART.sell;
+                    // 端点圈用**线段金**，不用买／卖的红绿（card-3f8f0c50-9ea）：红绿是买卖点的颜色，线段级买卖点又正好落在线段端点上 ——
+                    //   同色同位的圈跟三角粘成一颗「棒棒糖」，幽灵档出来以后圈还在原处（ghost e2e 那回就是被它压住的）。
+                    //   顶还是底，看圈在线段的哪一头就知道，用不着靠颜色再说一遍；颜色只留给一件事：买卖点。
+                    const col = CHART.seg;
                     ctx.beginPath(); ctx.arc(x, y, tent ? 7 : 4.5, 0, Math.PI * 2);
                     ctx.fillStyle = PAGE.bg; ctx.fill();
                     ctx.strokeStyle = col;
@@ -852,7 +855,7 @@ function trendMarkView(target, state, prim) {
   //   （这跟「关着的层不算看得见」不是同一条账：那条管**画**，这条管**命中**。）
   boundHits.bands = [];
   // 已撤回的只读清单同理：层关着也得清，不然工装读到的是上一帧画过的叉（⑦c 第一版就是这么红的）
-  if (state.trendDrawn) state.trendDrawn.withdrawn = [];
+  if (state.trendDrawn) { state.trendDrawn.withdrawn = []; state.trendDrawn.withdrawnLines = []; }
   if (!T || (!sh.trend && !sh.up)) return;
   // ★ 这一层的字**一律不登记 `placed`**（价签那张避让表），理由两条，都说破：
   //   ① 它们钉在**一条竖线和一个价**上（分界价格、待定、撤回）—— 挪开它就不是那个价了，避让没有意义；
@@ -871,6 +874,7 @@ function trendMarkView(target, state, prim) {
     D.deaths = [];
     D.states = [];
     D.withdrawn = [];
+    D.withdrawnLines = [];
     // 命中带的画布：跟 `ghostHits` 同一条账 —— `ctx.canvas` 就是这个窗格的画布，
     // `useMediaCoordinateSpace` 给的坐标就是它的 CSS 像素，所以「客户端坐标 − getBoundingClientRect」
     // 正好落在同一个系里。每帧重设：窗格重建过之后旧的 canvas 是个死元素，量出来的坐标全是错的。
@@ -995,14 +999,18 @@ function trendMarkView(target, state, prim) {
         const isSeg = w.kind === 'seg';
         const tt = sec(isSeg ? w.t1 : w.t), pp = isSeg ? w.p1 : w.price;
         const x = ts.timeToCoordinate(tt), y = vp.yOfPrice(pp);
-        if (x === null || y === null || !onScreen(x, W, 8)) continue;
-        if (isSeg) {
+        // 线段那条的淡红虚线：**只要整条有一截在屏上就画**（card-6f97c999-ed0，Nova 14:36）。原来先看终点在不在屏上、不在就整条跳过 ——
+        //   往左翻页、终点滚出右边时，屏上那一截也跟着没了。`timeToCoordinate` 对已加载但不在屏上的时间照样给 x（可以是负数或 > W），
+        //   线画到画布外由画布自己裁。叉、竖线、字照旧只在终点在屏上时画（叉打在终点上，终点不在屏上就没有叉可打）。
+        if (isSeg && x !== null && y !== null) {
           const x0 = ts.timeToCoordinate(sec(w.t)), y0 = vp.yOfPrice(w.p0);
-          if (x0 !== null && y0 !== null) {
+          if (x0 !== null && y0 !== null && !(Math.max(x0, x) < -8 || Math.min(x0, x) > W + 8)) {
             ctx.setLineDash(DASH.trendBack); ctx.strokeStyle = rgba(CHART.sell, 110); ctx.lineWidth = 1.5;
             ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x, y); ctx.stroke(); ctx.setLineDash([]);
+            D.withdrawnLines.push({ t: w.t, x0: Math.round(x0), x1: Math.round(x) });
           }
         }
+        if (x === null || y === null || !onScreen(x, W, 8)) continue;
         ctx.setLineDash(DASH.trendBack);
         ctx.strokeStyle = rgba(CHART.sell, 70); ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
