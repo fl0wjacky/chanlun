@@ -632,7 +632,7 @@ def _s5_shape(done, cut, b, e):
                                                    #   原先 strict 照刀后走向限，BTC 2h 05-06→07-01 因此成了无中枢）
 
 
-def _sl_layer(done, ks, bounds_, n):
+def _sl_layer(done, ks, bounds_, n, ex_over=None):
     """S3～S6：分界照 D2 定的组，每组里按同级别中枢再切：相邻两个中枢重叠，或者不重叠但方向跟这一截的趋势相反
     ⇒ 前一个中枢第三段的终点再切一刀（S5，盘整＋盘整）。每一截：0 个中枢＝无中枢，1 个＝盘整，≥2 个依次同向不重叠＝上涨／下跌。
     不升级、不合成（S6）。→ (segments, centers_out, extra_bounds)"""
@@ -648,6 +648,9 @@ def _sl_layer(done, ks, bounds_, n):
         exempt = False
         if SL_FIRST_EXEMPT and g and bk.get(a) in ("L", "H") and pieces:
             exempt = kind_of(pieces[-1][2]) == ("下跌" if bk[a] == "L" else "上涨")
+            if ex_over and a in ex_over:              # 豁免回头重判（_sl_layer_final）：照 Z 拆之后的最终段型
+                exempt = ex_over[a]
+            _USED_EXEMPT[a] = exempt
         if SAME_LEVEL_D6 and g and bk.get(a) in ("L", "H"):
             want_up = bk[a] == "L"                       # 从低点起 ⇒ 上涨 ⇒ 中枢首段向下（下上下）
             zr = _sl_centers(done, a, b, first_up=not want_up, first_free=exempt)
@@ -700,6 +703,42 @@ def _sl_layer(done, ks, bounds_, n):
         segments.append(dict(i0=0 if a == 0 else done[a - 1]["i1"], i1=n - 1 if last else done[b - 1]["i1"],
                              type=kind, upgraded=False, head=a == 0, live=last, n_centers_level=len(zz)))
     return segments, centers_out, extra, two_sets
+
+
+SL_EXEMPT_FINAL = True                           # 甲S-2 豁免看的「前一段」＝S5_FIX（Z）拆完以后的最终段型（Nova 10-10 14:57 定、Atlas 15:00 原文无异议：
+                                                  #   L45「下跌背驰后」，图上刀前是盘整就不算）。False＝旧口径（拆之前那一截的段型）
+_EXEMPT_ROUNDS = 6                               # 回头重判最多几轮；25 张实测见 _sl_layer_final 注释
+_USED_EXEMPT = {}                                # _sl_layer 这一轮每个 D2 组实际用的豁免判法（组起点 → bool），给 _sl_layer_final 比
+
+
+def _sl_layer_final(done, ks, bounds_, n):
+    """_sl_layer 跑完以后，照最终段型回头重判每个 D2 组的首中枢豁免：刀前紧挨着的那一段（终点＝这把刀）是本级别反向趋势才给。
+    跟这一轮用的不一样 ⇒ 把这几组的判法钉住、整层重算，直到不再变。
+    只在有组对不上时才重算。停得下来：每一轮只改「判法跟最终段型对不上」的组，钉住的组下一轮照钉住的判法走。
+    25 张（live15＋data/）实测：笔锁关 20 张不用重算、5 张重算 1 次；笔锁开 19 张不用、6 张重算 1 次；没有一张要第 2 次。
+    万一 _EXEMPT_ROUNDS 轮还在变，照最后一轮的结果出——trend_check T4 照最终段型独立重算，会报出来。"""
+    _USED_EXEMPT.clear()
+    res = _sl_layer(done, ks, bounds_, n)
+    if not (SL_EXEMPT_FINAL and SL_FIRST_EXEMPT):
+        return res
+    bk = {x["line_seg"] + 1: x for x in bounds_}
+    over = {}
+    for _ in range(_EXEMPT_ROUNDS):
+        prev_type = {s["i1"]: s["type"] for s in res[0]}
+        changed = {}
+        for a, used in list(_USED_EXEMPT.items()):     # 只比这一轮真判过豁免的组（D2 组、不是图头）
+            b = bk.get(a)
+            if b is None:
+                continue
+            want = prev_type.get(b["bar"]) == ("下跌" if b["kind"] == "L" else "上涨")
+            if want != used:
+                changed[a] = want
+        if not changed:
+            break
+        over.update(changed)
+        _USED_EXEMPT.clear()
+        res = _sl_layer(done, ks, bounds_, n, ex_over=over)
+    return res
 
 
 def _fix_same_trend(pieces, extra, kind_of, done, mode):
@@ -776,7 +815,7 @@ def trend_v3(r, reading="A", regroup=True, alternate=True, check_empty=True, no_
     bounds = list(res["bounds"])
     ks = list(ks)
     if SAME_LEVEL:                               # R-1 试验：同级别分解（默认关）。不升级、不补 D2-8、不标死点类型
-        segments, centers_out, extra, two_sets = _sl_layer(done, ks, bounds, n)
+        segments, centers_out, extra, two_sets = _sl_layer_final(done, ks, bounds, n)
         bounds = sorted(bounds + extra, key=lambda x: x["bar"])
         if _DEATH and SAME_LEVEL_DEATH:                  # 正式版：同级别下照标死点类型（D2-5 按三段中枢）、小转大的二类（S11）
             _death_types(r, done, bounds, segments, centers_out)
