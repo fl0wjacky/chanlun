@@ -309,8 +309,8 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
     return out;
   });
   if (WA.err) { console.error(WA.err); await b.close(); process.exit(2); }
-  ck('⑦e 撤回的线段原尺寸看得见：线 alpha ≥ 180、宽 ≥ 2；终点在屏外右边 ⇒ 右沿有三角（高度＝线出屏处 ±3）、写「线段已撤回 →」',
-     !!WA.line && WA.line.alpha >= 180 && WA.line.width >= 2 && !!WA.arrow && WA.arrow.x >= WA.W - 12 && Math.abs(WA.arrow.y - WA.yAt) <= 3 && WA.txt === 1,
+  ck('⑦e 撤回的线段原尺寸看得见：线 alpha ≥ 180、宽 ≥ 2、虚线上墨 ≥ 40%；终点在屏外右边 ⇒ 右沿有三角（高度＝线出屏处 ±3）、写「线段已撤回 →」',
+     !!WA.line && WA.line.alpha >= 180 && WA.line.width >= 2 && Array.isArray(WA.line.dash) && WA.line.dash[0] / (WA.line.dash[0] + WA.line.dash[1]) >= 0.4 && !!WA.arrow && WA.arrow.x >= WA.W - 12 && Math.abs(WA.arrow.y - WA.yAt) <= 3 && WA.txt === 1,
      JSON.stringify(WA));
 
   // ⑧ D-3 选 C（小栋 10-09 12:57）：载荷带 `segs_std`（标准化线段）⇒ 图上「线段」画它：除最后一条外实线、最后一条短虚线；

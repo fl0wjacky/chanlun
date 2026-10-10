@@ -1007,11 +1007,11 @@ function trendMarkView(target, state, prim) {
           const x0 = ts.timeToCoordinate(sec(w.t)), y0 = vp.yOfPrice(w.p0);
           if (x0 !== null && y0 !== null && !(Math.max(x0, x) < -8 || Math.min(x0, x) > W + 8)) {
             // 原尺寸下要看得见（card-e719d70c-e0e）：原来 alpha 110、1.5px，叠在图底上对比度 2.0:1，放大 3 倍才看得清；
-            //   现在 alpha 200、2px（4.0:1）。点线密度照旧用 trendBack，跟「待定」那条灰 2 4 照样分得开（颜色也不同）。
+            //   现在 alpha 200、2px（4.0:1），虚线换成 3 3（`DASH.wdLine`）—— 1 3 的点只上四分之一的墨，再浓也发虚。
             const WD_A = 200, WD_W = 2;
-            ctx.setLineDash(DASH.trendBack); ctx.strokeStyle = rgba(CHART.sell, WD_A); ctx.lineWidth = WD_W;
+            ctx.setLineDash(DASH.wdLine); ctx.strokeStyle = rgba(CHART.sell, WD_A); ctx.lineWidth = WD_W;
             ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x, y); ctx.stroke(); ctx.setLineDash([]);
-            D.withdrawnLines.push({ t: w.t, x0: Math.round(x0), x1: Math.round(x), alpha: WD_A, width: WD_W });
+            D.withdrawnLines.push({ t: w.t, x0: Math.round(x0), x1: Math.round(x), alpha: WD_A, width: WD_W, dash: DASH.wdLine.slice() });
             // 终点滚出右边（叉画不了）⇒ 在画布右沿、线出屏的那个高度上留一个实心小三角 ▶ ＋「线段已撤回 →」：
             //   不然屏上只剩一条线，看不出它是什么、也不知道往右翻才看得到叉。
             if (x > W - 2 && x0 < W - 14) {
