@@ -39,7 +39,10 @@ import levels as LV                                           # noqa: E402
 TFS = {"15m": 15 * M, "30m": 30 * M, "1h": 60 * M, "2h": 120 * M, "4h": 240 * M}
 # 30m、1h 用 fixtures/j18/ 里截的真实行情（ZECUSDT，只有 t/o/h/l/c）：data/ 里的 zec30_cut、zec_1h 在 ×4 的大周期上只切得出图头那一刀，
 #   翻转臂量不出（Nova 20:10：自检臂印「跳过」等于没有这个检查）。截到 30m→2h、1h→4h 各有 ≥2 刀非图头为止。放 fixtures/ 不放 data/：data/ 会被十几个检查整目录扫。
-SMALLS = {"15m": "zec15.json", "30m": "fixtures/j18/zec_30m_l8.json", "1h": "fixtures/j18/zec_1h_l8.json"}
+# 30m 夹具 10-10 换题（card-8368a083-082）：原夹具 zec_30m_l8 在形状 B 全限下 120m 没有图头以外的已确认 D2、出不了题（不是因为它会红）。
+#   按写死的池子和顺序取第一份过的：线上 30m ZEC→BTC→AAPL，各 span 2→4→8 整份拿；ZEC span 2 不过（120m 已确认 D2 1 把＝图头），ZEC span 4 过（5 把）⇒ 取它。
+#   原夹具留在 fixtures/j18/，当 B 全限「大周期 D2 少」的实例。
+SMALLS = {"15m": "zec15.json", "30m": "fixtures/j18/zec_30m_span4.json", "1h": "fixtures/j18/zec_1h_l8.json"}
 SAME = [("zec15.json", 15 * M, 30 * M)]                       # 同级对照
 
 
