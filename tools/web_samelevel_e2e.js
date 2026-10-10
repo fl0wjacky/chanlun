@@ -288,6 +288,58 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
   ck('⑦d 撤回的线段终点滚出屏外、起点在屏上 ⇒ 屏上那一截虚线照画（x0 在屏内、x1 在屏外右边），叉不打',
      WE.lines.length === 1 && WE.lines[0].x0 >= 0 && WE.lines[0].x0 <= WE.W && WE.lines[0].x1 > WE.W && WE.crosses === 0, JSON.stringify(WE));
 
+  // ⑦e 撤回的线段原尺寸下看得见（card-e719d70c-e0e）：同 ⑦d 的场面（起点在屏上、终点在屏外右边），再断三件事 ——
+  //   线的样式够浓（alpha ≥ 180、线宽 ≥ 2；原来 110／1.5，对比度 2.0:1，放大 3 倍才看清）；
+  //   画布右沿有一个小三角，高度＝这条线在右沿出屏的那个 y（±3）；旁边写「线段已撤回 →」。
+  const WA = await p.evaluate(async () => {
+    const app = window.__app, d = app.state.data, ts = app.chart.timeScale(), st = app.state;
+    const mid = Math.round(d.bars.length / 2); ts.setVisibleLogicalRange({ from: mid - 150, to: mid + 150 }); await new Promise((r) => setTimeout(r, 700));
+    const v = ts.getVisibleLogicalRange(), a = Math.round(v.from + (v.to - v.from) * 0.7), z = Math.min(d.bars.length - 1, Math.round(v.to) + 40);
+    if (!d.bars[a] || !d.bars[z] || z <= v.to) return { err: '视口右边没有已加载的 K 线可当「屏外终点」' };
+    d.withdrawn = [{ kind: 'seg', t: d.bars[a].t, t1: d.bars[z].t, dir: 'up', p0: d.bars[a].l, p1: d.bars[z].h, at: d.bars[d.bars.length - 1].t }];
+    const r = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: r.from + 0.01, to: r.to + 0.01 }); await new Promise((r) => setTimeout(r, 700));
+    const W = document.querySelector('#chart canvas').getBoundingClientRect().width, D = st.trendDrawn;
+    const L = (D.withdrawnLines || [])[0] || null, A = (D.withdrawnArrows || [])[0] || null;
+    const x0 = ts.timeToCoordinate(d.bars[a].t / 1000), x1 = ts.timeToCoordinate(d.bars[z].t / 1000);
+    const y0 = app.state.candleSeries.priceToCoordinate(d.bars[a].l), y1 = app.state.candleSeries.priceToCoordinate(d.bars[z].h);
+    const yAt = A ? y0 + (y1 - y0) * (A.x - x0) / (x1 - x0) : null;
+    const txt = (D.labels || []).filter((b) => /线段已撤回 →/.test(b[4] || '')).length;
+    const out = { W: Math.round(W), line: L, arrow: A, yAt: yAt == null ? null : Math.round(yAt), txt };
+    delete d.withdrawn; const r2 = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: r2.from + 0.01, to: r2.to + 0.01 }); await new Promise((r) => setTimeout(r, 500));
+    return out;
+  });
+  if (WA.err) { console.error(WA.err); await b.close(); process.exit(2); }
+  ck('⑦e 撤回的线段原尺寸看得见：线 alpha ≥ 180、宽 ≥ 2、虚线上墨 ≥ 40%；终点在屏外右边 ⇒ 右沿有三角（高度＝线出屏处 ±3）、写「线段已撤回 →」',
+     !!WA.line && WA.line.alpha >= 180 && WA.line.width >= 2 && Array.isArray(WA.line.dash) && WA.line.dash[0] / (WA.line.dash[0] + WA.line.dash[1]) >= 0.4 && !!WA.arrow && WA.arrow.x >= WA.W - 12
+       && (Math.abs(WA.arrow.y - WA.yAt) <= 3 || (Math.abs(WA.yAt - WA.arrow.yLast) < 12 && Math.abs(WA.arrow.y - WA.arrow.yLast) >= 12)) && WA.txt === 1,
+     JSON.stringify(WA));
+
+  // ⑦f 右沿三角躲现价（Nova 10-10 04:25）：故意让这条线**正好在现价那个高度出屏** ⇒ 三角得挪到现价 ±12 之外，
+  //   「线段已撤回 →」那行字也不许压在现价那块（右沿 70px、±10）上。牙：线出屏处真的就在现价 ±3 里（场面成立）。
+  const WF = await p.evaluate(async () => {
+    const app = window.__app, d = app.state.data, ts = app.chart.timeScale(), st = app.state, cs = st.candleSeries;
+    // 视口摆到**最新那一段、右边藏 20 根**：现价（最后一根的收盘）得真在屏上的价格范围里，这一格才有意义
+    //   （摆在中间的话现价远在屏外，三角被夹到画布顶上，「躲开了」是假的 —— 第一版就是这么假绿的）。
+    const n = d.bars.length; ts.setVisibleLogicalRange({ from: n - 200, to: n - 21 }); await new Promise((r) => setTimeout(r, 700));
+    const v = ts.getVisibleLogicalRange(), a = Math.round(v.from + (v.to - v.from) * 0.6), z = n - 1;
+    const W = document.querySelector('#chart canvas').getBoundingClientRect().width, ex = W - 6;
+    const H = document.querySelector('#chart canvas').getBoundingClientRect().height;
+    const yLast = cs.priceToCoordinate(d.bars[d.bars.length - 1].c);
+    const x0 = ts.timeToCoordinate(d.bars[a].t / 1000), x1 = ts.timeToCoordinate(d.bars[z].t / 1000);
+    const p0 = cs.coordinateToPrice(yLast + 60), y0 = cs.priceToCoordinate(p0);
+    const y1 = y0 + (yLast - y0) * (x1 - x0) / (ex - x0), p1 = cs.coordinateToPrice(y1);
+    d.withdrawn = [{ kind: 'seg', t: d.bars[a].t, t1: d.bars[z].t, dir: 'up', p0, p1, at: d.bars[d.bars.length - 1].t }];
+    const r = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: r.from + 0.01, to: r.to + 0.01 }); await new Promise((r) => setTimeout(r, 700));
+    const A = (st.trendDrawn.withdrawnArrows || [])[0] || null;
+    const lab = (st.trendDrawn.labels || []).find((b) => /线段已撤回 →/.test(b[4] || '')) || null;
+    const lastBox = [W - 70, yLast - 10, W, yLast + 10], hit = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+    const out = { yLast: Math.round(yLast), H: Math.round(H), arrow: A, lab: lab && lab.slice(0, 4).map(Math.round), labHitsLast: !!lab && hit(lab, lastBox) };
+    delete d.withdrawn; const r2 = ts.getVisibleLogicalRange(); ts.setVisibleLogicalRange({ from: r2.from + 0.01, to: r2.to + 0.01 }); await new Promise((r) => setTimeout(r, 500));
+    return out;
+  });
+  ck('⑦f 线正好在现价那个高度出屏 ⇒ 右沿三角挪到现价 ±12 之外、「线段已撤回 →」不压现价那块（场面成立：现价真在屏上、线出屏处在现价 ±3 里）',
+     WF.yLast > 30 && WF.yLast < WF.H - 30 && !!WF.arrow && Math.abs(WF.arrow.yLine - WF.yLast) <= 3 && Math.abs(WF.arrow.y - WF.yLast) >= 12 && !!WF.lab && !WF.labHitsLast, JSON.stringify(WF));
+
   // ⑧ D-3 选 C（小栋 10-09 12:57）：载荷带 `segs_std`（标准化线段）⇒ 图上「线段」画它：除最后一条外实线、最后一条短虚线；
   //   未完成段照旧长虚线；没有 `segs_std`（现行后台）⇒ 照旧画原始段、短虚线那条是空的（牙）。
   //   后台还没出这个字段 ⇒ 页面里塞假的：拿原始已完成段，把最后两条并成一条当「标准化后」的样子。
