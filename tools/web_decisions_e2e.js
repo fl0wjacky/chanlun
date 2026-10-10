@@ -1,7 +1,10 @@
 // 决策树页的浏览器工装（card-fe3aebd3-819，2026-10-09）
 //
-// 量的是**页面接线**，读 ?mock=1（decisions/mock.json，Atlas 那份数据的快照）：
-//   predeploy 起的临时后台不一定有数据文件，后台那半（口令、回码、存取）归 web/check_decisions.py，这里不重复。
+// 量的是**页面接线**，数据用仓里的**真数据** docs/spec/decisions.json（不再用 decisions/mock.json 那份快照）：
+//   页面照旧开 ?mock=1（样例模式＝不发 POST、不碰后台存取），但浏览器去取 decisions/mock.json 的那一下被这里接住、
+//   换成 docs/spec/decisions.json 的原样字节 —— 期望值也从同一份文件读，所以页面画的、工装比的是上线那份数据。
+//   为什么改（Nova 10-09 20:07，card-8fea72e0-772）：快照里没有新条目／新图，D-3 C 的图在落地支上碎了、这套照样 14/14。
+//   后台那半（口令、回码、存取）归 web/check_decisions.py，这里不重复。
 //   ① 左边树的条数 = 数据里的条数，层名照 layer_order，没有一条丢
 //   ② 每条数据里写了「小栋定」且 verified 的，页上都挂「你选的」，挂在 status.choice 那一项上，而且只挂一项；
 //      那一项还没填成卡片的（骨架条目），要有一行「你选的 X（详情还在填）」—— 10-09 S-4 就是这样，第一版这里什么都不挂
@@ -24,15 +27,22 @@ const OUT = process.argv[process.env.E2E_URL ? 2 : 3] || path.join(__dirname, '.
 if (!/^https?:/.test(BASE)) { console.log('✗ 没给地址（E2E_URL）'); process.exit(2); }
 fs.mkdirSync(OUT, { recursive: true });
 
+// 真数据：仓里那份（相对本文件定位，不靠后台有没有状态目录）
+const REAL = path.join(__dirname, '..', 'docs', 'spec', 'decisions.json');
+const REAL_BODY = fs.readFileSync(REAL);
+let realHits = 0;   // 接住了几次 —— 页面要是改了取数地址、这一下没接到，就会悄悄回去读快照，所以要数
+const realData = (c) => c.route('**/decisions/mock.json', (r) => { realHits++; return r.fulfill({ status: 200, contentType: 'application/json', body: REAL_BODY }); });
+
 const res = [];
 const chk = (name, ok, got) => { res.push(ok); console.log(`${ok ? '✓' : '✗'} ${name}${ok ? '' : '　得到：' + JSON.stringify(got)}`); };
 
 (async () => {
   const b = await chromium.launch();
   try {
-    const data = await (await fetch(BASE + 'decisions/mock.json')).json();
+    const data = JSON.parse(REAL_BODY);
     const items = data.decisions;
     const ctx = await b.newContext({ viewport: { width: 1400, height: 1000 } });
+    await realData(ctx);
     const p = await ctx.newPage();
     const errs = []; const posts = [];
     p.on('pageerror', (e) => errs.push(String(e)));
@@ -40,6 +50,7 @@ const chk = (name, ok, got) => { res.push(ok); console.log(`${ok ? '✓' : '✗'
     p.on('dialog', (d) => d.dismiss());
     await p.goto(BASE + 'decisions.html?mock=1', { waitUntil: 'domcontentloaded' });
     await p.waitForSelector('.node');
+    chk('⓪ 页面吃的是真数据（docs/spec/decisions.json，不是快照）', realHits >= 1, realHits);
 
     // ①
     const ids = await p.$$eval('.node .id', (a) => a.map((x) => x.textContent.trim()));
@@ -132,6 +143,7 @@ const chk = (name, ok, got) => { res.push(ok); console.log(`${ok ? '✓' : '✗'
 
     // ⑥
     const m = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    await realData(m);
     const mp = await m.newPage();
     await mp.goto(BASE + 'decisions.html?mock=1', { waitUntil: 'domcontentloaded' });
     await mp.waitForSelector('#treeSel option', { state: 'attached' });
