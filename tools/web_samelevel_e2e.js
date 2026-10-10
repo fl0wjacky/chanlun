@@ -348,6 +348,23 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
      ST.two.dash === 3 && ST.two.solid === ST.n - 1 && ST.two.label && ST.none.dash === 0 && ST.none.solid === ST.n + 1 && !ST.none.label
        && ST.old.dash === 2 && ST.old.solid === ST.n && ST.old.label, JSON.stringify(ST));
 
+  // ⑨ 中枢框画在哪儿（card-f2ce0437-ba4，小栋 10-10 02:40／02:42「左边一根线段也成中枢」「框跨了分界」）：
+  //   线段中枢的 PI 指 segs_std，前端原来拿**原始**已完成线段 host[PI] 量左右边 ⇒ 两套端点挪过的地方框画到别处。
+  //   断言：layers.js 的 boxes() 给出的左右边＝载荷 X0／X1（线段层、笔层都是）。
+  //   牙：这份数据里得真有「host[PI] ≠ X0/X1」的线段框（不然两种取法一样、改回去也绿）——数出来、必须 > 0。
+  const BX = await p.evaluate(async () => {
+    const L = await import('./layers.js');
+    const d = window.__app.state.data;
+    const done = (d.segs || []).filter((s) => !s.live);
+    const seg = L.boxes(d, 'seg'), pen = L.boxes(d, 'pen');
+    const off = (arr) => arr.filter((o) => o.i0 !== o.z.X0 || o.i1 !== o.z.X1).map((o) => [o.z.ZD, o.z.ZG, o.i0, o.z.X0, o.i1, o.z.X1]);
+    const moved = (d.seg_centers || []).filter((z) => done[z.PI0] && done[z.PI1] && (done[z.PI0].i0 !== z.X0 || done[z.PI1].i1 !== z.X1)).length;
+    return { nSeg: seg.length, nPen: pen.length, nZs: (d.seg_centers || []).length, nZp: (d.centers || []).length,
+             offSeg: off(seg).slice(0, 3), nOffSeg: off(seg).length, nOffPen: off(pen).length, moved };
+  });
+  ck('⑨ 中枢框左右边＝载荷 X0／X1（线段层、笔层都是；这份数据里原始线段跟标准化线段端点挪过的框有几个就得有几个 > 0，不然这一格没牙）',
+     BX.moved > 0 && BX.nOffSeg === 0 && BX.nOffPen === 0 && BX.nSeg === BX.nZs && BX.nPen === BX.nZp, JSON.stringify(BX));
+
   if (SHOTS) await p.screenshot({ path: require('path').join(SHOTS, 'samelevel-fe.png') });
   await b.close();
   console.log(red ? `✗ ${red} 格红（${n - red}/${n} 过）` : `${n}/${n} 过`);   // predeploy 认「N/N 过」这一行
