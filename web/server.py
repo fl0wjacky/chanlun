@@ -434,7 +434,7 @@ def _cut_cc(slot, symbol, pen_min=DEFAULT_PEN_MIN, tf=None):
             # 「已撤回」（Q-6 A）：一份数据一个笔档只在这里算一次 ⇒ 每次重算比一次上次。账本出错不许拖垮出图：记日志、这一格不带 withdrawn
             #   线段比的是 segs_std（图上画的那套），不是原始线段：叉要落在画过的线上
             try:
-                withdrawn.observe((symbol, tf, slot.span, pen_min), slot.bars, v, std)
+                withdrawn.observe((symbol, tf, slot.span, pen_min), slot.bars, v, std, engine=ENGINE)   # 引擎换了只重建基线（withdrawn.observe）
                 slot.mbodies[(WD_KEY, pen_min)] = withdrawn.view(symbol, tf, pen_min, spans_of(tf), slot.bars, v, std)
             except Exception:
                 log("withdrawn failed", symbol, tf, slot.span, pen_min, traceback.format_exc().replace("\n", " | "))

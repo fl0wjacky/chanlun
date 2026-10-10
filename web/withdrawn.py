@@ -125,14 +125,22 @@ def _save(key, rec):
     os.replace(tmp, p)
 
 
-def observe(key, bars, trend, segs):
-    """每次重算完一张图调一次：跟上次比、记新撤回、把「上次」换成这次。→ 这次新记的撤回（列表）。"""
+def observe(key, bars, trend, segs, engine=None):
+    """每次重算完一张图调一次：跟上次比、记新撤回、把「上次」换成这次。→ 这次新记的撤回（列表）。
+    engine：算这一次的引擎指纹（服务端 ENGINE：core/＋config.py 源码 sha256 前 10 位）。记录里存着上次的指纹；
+    **指纹对不上（或旧记录没有这个字段）⇒ 只重建基线、不比**（card-8368a083-082，Nova 10-10 15:02 定）：规则改了上线，
+    新引擎第一次重算跟旧引擎存下的「上次」比，会把「尺换了」记成「行情撤了」（形状 B 全限上线会冒 13 把这样的假撤回）。
+    代价：**上线那一刻要是行情正好真撤了一刀，这一次会漏记**（基线已经换成新的，下一次再比也比不出来）。上线是一瞬间的事，认这个代价。
+    engine=None（单测、老调用）⇒ 不看指纹，照旧比。"""
     conf, seen = snapshot(bars, trend, segs)
     with _lock:
         rec = _load(key) or dict(last=None, withdrawn=[])
-        new = diff(rec["last"], conf, seen, bars[-1]["t"]) if rec["last"] else []
+        same = engine is None or rec.get("engine") == engine
+        new = diff(rec["last"], conf, seen, bars[-1]["t"]) if (rec["last"] and same) else []
         rec["withdrawn"] = (rec["withdrawn"] + new)[-CAP:]
         rec["last"] = conf
+        if engine is not None:
+            rec["engine"] = engine
         _save(key, rec)
     return new
 

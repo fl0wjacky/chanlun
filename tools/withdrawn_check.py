@@ -15,6 +15,7 @@
 夹具 fixtures/t8/zecusdt_1h_leftedge.json（card-46e9b26d）：ZEC 1h 4041 根，窗口右滑一根时最左第 1～3 条线段并成一条（旧规矩记 3 条假撤回）。
   ⑧ 滑一根：线段撤回 0 条（左沿＝首刀之前、最多头 LEFT_EDGE_MAX 条，不记）；把左沿边界关掉（自检臂）必红；
      同一步里塞一条首刀之后的假撤回 ⇒ 必须照记（证明没挡多）；左沿里塞一条 ⇒ 不记；view 也不给左沿那截。
+  ⑨ 引擎指纹：上次是旧指纹存的基线 ⇒ 只重建、0 条（规则改了上线不冒假撤回）；指纹一样照常记。
 """
 import json
 import os
@@ -133,6 +134,16 @@ def run(quiet=False, server_arm=True):
         n1 = W.observe(key, bars[:8746], v1, s1)
         rec = json.load(open(W._path(key)))
         chk("⑤ 记下来、重开读得回", len(n1) == 1 and rec["withdrawn"] == n1 and rec["last"] == snap(bars[:8746])[2][0], rec["withdrawn"])
+        # ⑨ 引擎指纹（card-8368a083-082）：同一份 K 线、同一刀，上次是旧指纹存的基线 ⇒ 这次只重建、一条不记；同指纹照常记
+        k9 = ("AAPLUSDT", "15m", 9, 6)
+        W.observe(k9, bars[:8745], v0, s0, engine="old-engine")
+        n9 = W.observe(k9, bars[:8746], v1, s1, engine="new-engine")
+        r9 = json.load(open(W._path(k9)))
+        chk("⑨ 引擎指纹换了：只重建基线、0 条撤回，记录里指纹换成新的", n9 == [] and r9["engine"] == "new-engine" and r9["last"] == snap(bars[:8746])[2][0], (n9, r9.get("engine")))
+        k9b = ("AAPLUSDT", "15m", 10, 6)
+        W.observe(k9b, bars[:8745], v0, s0, engine="same")
+        n9b = W.observe(k9b, bars[:8746], v1, s1, engine="same")
+        chk("⑨ 引擎指纹一样：照常记那一条（D2 L 273.27）", len(n9b) == 1 and all(n9b[0].get(k) == x for k, x in EVENT.items()), n9b)
         W.observe(("AAPLUSDT", "15m", 4, 6), bars[:8745], v0, s0)
         W.observe(("AAPLUSDT", "15m", 4, 6), bars[:8746], v1, s1)
         vw = W.view("AAPLUSDT", "15m", 6, [1, 2, 4], bars[:8746], v1, s1)
@@ -209,6 +220,9 @@ def self_test():
     arm("左沿边界关掉（LEFT_EDGE_MAX＝0）", lambda: setattr(W, "LEFT_EDGE_MAX", 0), lambda: setattr(W, "LEFT_EDGE_MAX", real_edge))
     real_le = W._left_edge
     arm("左沿不看首刀、线段一律全挡", lambda: setattr(W, "_left_edge", lambda rec: float("inf")), lambda: setattr(W, "_left_edge", real_le))
+    real_obs = W.observe
+    arm("不看引擎指纹（换了也照比）", lambda: setattr(W, "observe", lambda key, bars, trend, segs, engine=None: real_obs(key, bars, trend, segs)),
+        lambda: setattr(W, "observe", real_obs))
 
     real_snap = W.snapshot
 
