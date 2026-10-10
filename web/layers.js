@@ -658,6 +658,7 @@ export function makeAnnotPrimitive(state) {
 
               // ④.5 盘整组（卡 card-9f7a80b6-e8a，小栋 10-07 选 C；`走势分段.md` §八 第 9 条）
               drawPzGroups(ctx, state, sh, vp, placed, this._chart, W, H);
+              drawNzChips(ctx, state, sh, vp, placed, W, H);     // 「本级别无中枢」小标（落位在这儿登记，笔画在走势那层最后）
 
               // ⑤ 未收盘的最后一根：虚线框 + 「未收盘」（Python dashed_rect + 琥珀字）
               //    ★ 这一句**不登记 placed** —— 跟 Python 一致：那边它也是直接画的、不在 draw_labels 里。
@@ -774,6 +775,12 @@ function trendBandView(target, state, prim) {
         if (x0 === null || x1 === null || x1 < 0 || x0 > W) continue;   // 滚出去的那几段不画
         let col, a;
         if (s.head || g === 0) { col = TREND.head; a = TREND.headA; }
+        else if (s.type === '无中枢') {
+          // 「本级别无中枢」（card-8368a083-082）：两把刀之间凑不出一个本级别中枢 ⇒ **不铺底色**（a = 0）。
+          //   ★ 不借盘整的灰：盘整＝「有一个中枢、没有方向」，无中枢＝「连中枢都没有」，两件事铺同一个灰读不出来；
+          //     空着最诚实 —— 两头的分界虚线照画，段的范围还在，标注层左上角挂「本级别无中枢」小标（悬停说原文）。
+          col = TREND.head; a = 0;
+        }
         else if (s.type === '上涨' || s.type === '下跌') {
           // ★ 绿和红**不是同一个 alpha**：同一个 16% 在白纸上红本来就比绿实（ΔL* 8.55 vs 6.93），
           //   近黑底上要保住这个差，红得给得比绿多。`theme.js` 里那五个数逐个反解过，别拉齐。
@@ -786,9 +793,8 @@ function trendBandView(target, state, prim) {
           col = TREND.head;
           a = s.live ? TREND.rangeLive : (s.upgraded ? TREND.rangeUpA : TREND.rangeA);
         }
-        ctx.fillStyle = rgba(col, Math.round(a * 255));
-        ctx.fillRect(x0, 0, x1 - x0, H);
-        state.trendDrawn.bands.push({ i0: s.i0, i1: s.i1, col, a: +a.toFixed(3), head: !!s.head, live: !!s.live });
+        if (a > 0) { ctx.fillStyle = rgba(col, Math.round(a * 255)); ctx.fillRect(x0, 0, x1 - x0, H); }
+        state.trendDrawn.bands.push({ i0: s.i0, i1: s.i1, col, a: +a.toFixed(3), head: !!s.head, live: !!s.live, type: s.type });
       }
 
       // ② 中阴（§八 3）：极值那一根 → 回抽段终点（载荷的 `pullback_end_bar`）之间，**贴格顶一条窄带**，
@@ -1363,6 +1369,7 @@ function trendMarkView(target, state, prim) {
     }
     // 盘整组的段界刻度（卡 card-9f7a80b6-e8a）：落点是标注层这一帧算好的（`state.pzDrawn`），见 `drawPzGroups`。
     drawPzTop(ctx, state, mine, W);
+    for (const c of (state.nzDrawn || [])) pzChipPaint(ctx, c.box, c.text, false);   // 「本级别无中枢」：压在分界虚线上面
   });
 }
 
@@ -1562,6 +1569,32 @@ function drawPzGroups(ctx, state, sh, vp, placed, chart, W, H) {
     //   「屏内 第 6–7 段」中间被一根虚线劈开）。字要压在线上面，就得最后画。
     state.pzDrawn.groups.push({ n: g.n, from: g.from, to: g.to, i0: g.i0, i1: g.i1, leftOut, rightOut, ...w,
       ticks: ticks.map((t) => t.k), tickAt: ticks, tickLabels: [], chips });
+  }
+}
+
+/** 「本级别无中枢」小标（card-8368a083-082）：段型 `无中枢`（两把刀之间凑不出一个本级别中枢）的段，
+ *  在**这一段可见部分的左上角**（「等确认」那条带下面）挂一块 chip，跟盘整组的 chip 同一个样子（页面底色实底＋灰细边），
+ *  悬停说原文（app.js `NZ_TIP`）。落位登记 `placed`（价签、买卖点字先占，我让），命中格并进 `pzHits`（载荷 `{ nz: 段 }`）。
+ *  ★ 可见宽度放不下 chip ＋ 12 就不挂：挂出去会压到隔壁那段头上，读成「隔壁也没有中枢」—— 比不挂更糟（跟「等确认」同一条账）。
+ *  ★ 归「走势分段」那颗芯片：关了一笔不画。 */
+const NZ_TEXT = '本级别无中枢';
+function drawNzChips(ctx, state, sh, vp, placed, W, H) {
+  state.nzDrawn = [];
+  const T = trendOf(state.data);
+  if (!T || !sh.trend) return;
+  if (!pzHits.canvas) pzHits.canvas = ctx.canvas;
+  const top = TREND.hatchTop + TREND.hatchH + 4;
+  for (const s of T.segments || []) {
+    if (s.type !== '无中枢' || s.head) continue;
+    const xa = vp.xOfBar(s.i0), xb = vp.xOfBar(s.i1);
+    if (xa === null || xb === null || xb < 0 || xa > W) continue;
+    const x0 = Math.max(0, xa), x1 = Math.min(W, xb);
+    ctx.font = FONT;
+    if (x1 - x0 < ctx.measureText(NZ_TEXT).width + 14 + 12) continue;
+    const box = pzChip(ctx, placed, x0 + 6, top, NZ_TEXT, false, W, H);
+    if (!box) continue;
+    pzHits.boxes.push([...box, { nz: s }]);
+    state.nzDrawn.push({ i0: s.i0, i1: s.i1, box, text: NZ_TEXT });
   }
 }
 

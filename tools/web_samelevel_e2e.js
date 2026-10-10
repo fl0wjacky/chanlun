@@ -560,6 +560,51 @@ const ck = (name, ok, msg) => { n++; if (!ok) red++; console.log(`${ok ? '✓' :
      PB.none.nSeg > 0 && PB.none.dashDot === 0 && PB.none.tagPend.length === 0 && PB.none.nPend === 0
        && PB.one.nPend === 1 && PB.one.dashDot >= 1 && PB.one.tagPend.length === 1 && PB.one.tagPend[0] === PB.want, JSON.stringify(PB));
 
+  // ⑬ 「本级别无中枢」段（card-8368a083-082）：段型 `无中枢` ⇒ **不铺底色**（a = 0）、可见部分左上角挂「本级别无中枢」小标、
+  //   小标进命中格（悬停出原文）。后台这一刻不一定有这种段 ⇒ 页面里挑一段屏上够宽的、非图头的段，把段型改成 `无中枢`。
+  //   牙：同一段改回 `盘整` ⇒ 照旧灰底、一块小标都不许有。悬停那句：指针放到小标上，浮层得是原文那段（含「没有重叠哪里有中枢」）。
+  //   命中格不直接读 `pzHits`（页面里 import 的 layers.js 不一定是 app 那一份模块实例）：「指针放上去真出浮层」本身就证了命中格。
+  const NZ = await p.evaluate(async () => {
+    const app = window.__app, d = app.state.data, st = app.state, ts = app.chart.timeScale();
+    const L = await import('./layers.js');
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const T = d.trend; if (!T || !(T.segments || []).length) return { err: '载荷没有走势段' };
+    // 场面钉死（不靠这一刻视口里碰巧有够宽的段）：挑最后一条「非图头、已走完」的段，视口摆到它两头各留 20 根。
+    const cand = T.segments.filter((x, g) => g > 0 && !x.head && !x.live && x.i1 - x.i0 >= 20);
+    if (!cand.length) return { err: '载荷里没有已走完的非图头走势段' };
+    const s = cand[cand.length - 1], keep = s.type;
+    ts.setVisibleLogicalRange({ from: s.i0 - 20, to: s.i1 + 20 }); await wait(600);
+    const look = async (type) => {
+      s.type = type; app.repaint(); await wait(500);
+      const band = (st.trendDrawn.bands || []).find((b) => b.i0 === s.i0 && b.i1 === s.i1) || null;
+      const chips = (st.nzDrawn || []).filter((c) => c.i0 === s.i0);
+      return { a: band ? band.a : null, chips: chips.length, box: chips[0] ? chips[0].box.map(Math.round) : null };
+    };
+    const nz = await look('无中枢');
+    const rect = document.querySelector('#chart canvas').getBoundingClientRect();
+    const at = nz.box ? { x: rect.left + (nz.box[0] + nz.box[2]) / 2, y: rect.top + (nz.box[1] + nz.box[3]) / 2 } : null;
+    return { i0: s.i0, i1: s.i1, keep, nz, at };
+  });
+  if (NZ.err) { console.error('⑬ ' + NZ.err); await b.close(); process.exit(2); }
+  let nzTip = '';
+  if (NZ.at) { await p.mouse.move(NZ.at.x, NZ.at.y); await p.waitForTimeout(300);
+    nzTip = await p.evaluate(() => { const t = [...document.querySelectorAll('div')].find((e) => /没有重叠哪里有中枢/.test(e.textContent || '') && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden');
+      return t ? t.textContent.slice(0, 40) : ''; });
+    await p.mouse.move(5, 5); }
+  const NZ2 = await p.evaluate(async ({ i0 }) => {
+    const app = window.__app, d = app.state.data, st = app.state;
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const s = d.trend.segments.find((x) => x.i0 === i0);
+    s.type = '盘整'; app.repaint(); await wait(500);
+    const band = (st.trendDrawn.bands || []).find((b) => b.i0 === s.i0) || null;
+    const out = { a: band ? band.a : null, chips: (st.nzDrawn || []).length };
+    return out;
+  }, NZ);
+  await p.evaluate(async ({ i0, keep }) => { const app = window.__app; const s = app.state.data.trend.segments.find((x) => x.i0 === i0); s.type = keep; app.repaint(); }, NZ);
+  ck('⑬ 「本级别无中枢」段：不铺底色（a=0）、左上角挂小标、指针放上去出原文浮层；同一段改回盘整 ⇒ 照旧灰底、零小标（牙）',
+     NZ.nz.a === 0 && NZ.nz.chips === 1 && /^这一段：两把刀之间凑不出/.test(nzTip) && NZ2.a > 0 && NZ2.chips === 0,
+     JSON.stringify({ NZ, tip: nzTip, NZ2 }));
+
   if (SHOTS) await p.screenshot({ path: require('path').join(SHOTS, 'samelevel-fe.png') });
   await b.close();
   console.log(red ? `✗ ${red} 格红（${n - red}/${n} 过）` : `${n}/${n} 过`);   // predeploy 认「N/N 过」这一行
