@@ -80,6 +80,27 @@ if [ -n "$EXPECT" ]; then
   fi
 fi
 
+# ---- 状态目录隔离（Nova 10-10）：这一趟起的后台、跑的检查，一律写进这一趟自己的临时状态目录 ----
+# 10-10 实测：临时后台不设 CHANLUN_STATE_DIR ⇒ 状态目录默认取「仓库上一级」下的那个；部署目录就在同一级时，**跟线上 server 共用同一本
+# 「已撤回」账本**，被测那笔的引擎跟线上不一样 ⇒ 往线上账本里写假撤回（BTC 30m 画出过两条）。所以：建在这一趟的工作目录里（不用 /tmp），
+# export 给后面所有子进程，跑完删掉。只判「解析出来的目录是不是这一趟自己的、不是缺省那个」——不比线上账本的修改时间／哈希：
+# 线上 server 每次重算都会重写账本，比时间／哈希会被它自己的正常写入弄红。
+DEFAULT_STATE=$(env -u CHANLUN_STATE_DIR "$PY" -c 'import os, sys; sys.path.insert(0, "web"); import decisions; print(os.path.realpath(decisions.STATE))' 2>/dev/null || true)
+RUN_STATE=$(mktemp -d "$PWD/.predeploy-state.XXXXXX")
+export CHANLUN_STATE_DIR="$RUN_STATE"
+SRV=
+cleanup() {
+  [ -n "$SRV" ] && { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
+  rm -rf "$RUN_STATE"
+}
+trap cleanup EXIT
+SEEN_STATE=$("$PY" -c 'import os, sys; sys.path.insert(0, "web"); import decisions; print(os.path.realpath(decisions.STATE))' 2>/dev/null || true)
+if [ -z "$DEFAULT_STATE" ] || [ -z "$SEEN_STATE" ]; then
+  record "状态目录隔离" 没比成 "解析不出状态目录（web/decisions.py 导不进来）"
+elif [ "$SEEN_STATE" != "$(cd "$RUN_STATE" && pwd -P)" ] || [ "$SEEN_STATE" = "$DEFAULT_STATE" ]; then
+  record "状态目录隔离" 红 "子进程解析出的状态目录不是这一趟自己的，会写进缺省那个（线上账本）"
+fi
+
 # ---- 数据那半：Python 检查（每一套自己就是 0 过 / 非 0 不过）----
 # trend_check --self-test：反向验证（拿掉规则 ⇒ 必须变／必须报）每趟都跑，不靠手动记得（Nova 10-06，card-3edd7fb3）。
 # live_seg_check：线上 15 张图现拉现算跑 check_segments，报错就拦（已知例外列在脚本里、写明卡号；拉不到 ⇒ 没比成）。约 50 秒，要联网。
@@ -172,7 +193,6 @@ else
   SRVLOG=$(mktemp)
   "$PY" web/server.py --port "$PORT" --no-prewarm >"$SRVLOG" 2>&1 &
   SRV=$!
-  trap 'kill $SRV 2>/dev/null; wait $SRV 2>/dev/null' EXIT
   up=0
   for _ in $(seq 1 60); do
     if "$PY" -c "import urllib.request, sys; urllib.request.urlopen('http://127.0.0.1:$PORT/api/meta', timeout=2)" 2>/dev/null; then
@@ -203,6 +223,16 @@ else
     done
     rm -f "$SRVLOG"
   fi
+fi
+# 隔离的正面证据：临时后台起过的话，它的「已撤回」账本必须落在这一趟的目录里（一个都没落 ⇒ 落到别处去了，按红算）
+if printf '%s\n' "${RESULTS[@]}" | grep -q '^状态目录隔离'; then
+  :                                               # 前面已经记过（红／没比成），不再补一行
+elif [ -n "$SRV" ] && [ "${up:-0}" = 1 ]; then
+  nw=$(find "$RUN_STATE/withdrawn" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
+  if [ "${nw:-0}" -gt 0 ]; then record "状态目录隔离" 绿 "临时后台的账本 $nw 份，全在这一趟自己的目录里，跑完删"
+  else record "状态目录隔离" 红 "临时后台起过，可这一趟的目录里一份账本都没有：写到别处去了"; fi
+else
+  record "状态目录隔离" 绿 "子进程的状态目录是这一趟自己的（没起临时后台，没有账本可数）"
 fi
 
 echo "================ 上线前检查 ================"

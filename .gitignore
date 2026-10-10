@@ -33,3 +33,6 @@ data/*_tmp.json
 
 # 回测加数据（card-3c7f0ccf-7b7）：按 tools/bt_manifest.json 拉的公开 K 线，只进清单和 sha1
 data/bt
+
+# predeploy 每一趟自己的状态目录（跑完自删；万一中断残留，别进仓）
+.predeploy-state.*
