@@ -447,7 +447,8 @@ const SPAN_WL_MAX = 16;          // 契约里 span 只认 1、2、4、8、16（N
 function badIndex(d) {
   const n = (d.bars || []).length, over = (i) => !(i >= 0 && i < n);
   for (const p of d.pens || []) if (over(p.i0) || over(p.i1)) return `笔 [${p.i0}, ${p.i1}]`;
-  for (const s of d.segs || []) if (over(s.i0) || over(s.i1)) return `线段 [${s.i0}, ${s.i1}]`;
+  for (const s of d.segs || []) if (over(s.i0) || over(s.i1)) return `线段 [${s.i0}, ${s.i1}]`;   // RAW-SEGS: 体检两套都查（原始里有未完成段）
+  for (const s of d.segs_std || []) if (over(s.i0) || over(s.i1)) return `线段（标准化）[${s.i0}, ${s.i1}]`;
   return null;
 }
 function vetted(d) {
@@ -594,7 +595,11 @@ function structKey(d, t0, t1, shown, levels) {
   //   （大开关 ＋ 六个 kind 的 chip ＋ 待确认；带了 shown 就必须带 sigAt，缺了当场炸，不静默放过）
   const sigs = (a) => (a || []).filter((s) => at(ts(s.bar)) && (!sh || sh.sigAt(s)))
     .map((s) => `${ts(s.bar)}@${s.price},${s.kind}${s.why ? ',' + s.why : ''}${s.confirmed === false ? ',未确认' : ''}`).join('|');
-  const done = (d.segs || []).filter((s) => !s.live);   // 线段中枢的 host（跟 layers.js doneSegs 同一条）
+  // 线段中枢的 host ＋ 线段那一层「看得见的变化」：都按**图上画的那套**算（跟 layers.js hostOf、app.js paint 同一条）——
+  //   有 segs_std ⇒ 已完成段用它、未完成段接原始里的 live；没有 ⇒ 整套原始（card-83915c20-9e3）。
+  const stdD = Array.isArray(d.segs_std) && d.segs_std.length ? d.segs_std : null;
+  const done = stdD || (d.segs || []).filter((s) => !s.live);   // RAW-SEGS: 老后台退路
+  const segsDrawn = stdD ? stdD.concat((d.segs || []).filter((s) => s.live)) : (d.segs || []);   // RAW-SEGS: 未完成段只在原始里有
   // 走势分段那一层（v3 §八，卡 card-c73ab37d-5a1）。★ 跟别的层同一条账：**层关着就不算「看得见」**
   //   —— 开着它却不算它的账，换档之后走势段整个换了一批、屏幕上明明白白变了，那句话却不出声。
   // ★ 记的是**画出来的那几件事实**（分界／中阴那头／待定／撤回／背景带／升级框），不是把整个
@@ -623,7 +628,7 @@ function structKey(d, t0, t1, shown, levels) {
       .map(([u, i]) => `${ts(u.X0)}>${ts(u.X1)}@${u.DD},${u.GG}${lvStat[i] === 'mismatch' ? ',对标' : ''}`).join('|');
     return (on('trend') ? [b, pd, rt, sg].join('/') : '') + '/' + un;
   };
-  return [on('pen') ? part(d.pens) : '', on('seg') ? part(d.segs) : '',
+  return [on('pen') ? part(d.pens) : '', on('seg') ? part(segsDrawn) : '',
           on('pc') ? boxes(d.centers, d.pens || [], on('up')) : '',
           on('sc') ? boxes(d.seg_centers, done, on('up')) : '',
           // 小转大的二类（走势层 xzd_seconds，M29）画在段级买卖点那一路里 ⇒ 算进段级那一份；字（why）也算，二买 ↔ 二买·盘背 是看得见的变化
@@ -937,6 +942,7 @@ function paint(d) {
   //   没带 `state`（老载荷）⇒ 退回「只有最后一条」。待确认的一定是尾巴上连着的几条 ⇒ 一条折线就画得下。
   const nOpen = std ? (std.some((s) => s.state) ? std.length - std.findIndex((s) => s.state === 'pending') : 1) : 0;
   const open = std && nOpen > 0 && nOpen <= std.length ? std.slice(-nOpen) : [];
+  // RAW-SEGS: 未完成段（live／暂定）只在原始里有；已完成段有 segs_std 就用它
   const segs = d.segs, lives = segs.filter((s) => s.live), done = std ? std.slice(0, std.length - open.length) : segs.filter((s) => !s.live);
   segStdLast.setData(open.length ? [{ time: T(open[0].i0), value: open[0].p0 }].concat(open.map((s) => ({ time: T(s.i1), value: s.p1 }))) : []);
   const segA = done.length ? [{ time: T(done[0].i0), value: done[0].p0 }] : [];
@@ -2398,6 +2404,7 @@ function renderLegend() {
   if (opts.seg) items.push(['line', CHART.seg, 2, '线段'], ['line-dash', CHART.seg, 2, '未完成的线段']);
   // ★ 「暂定」那一格**只在屏上真有暂定那一刀时才挂**：大多数图没有（25 张里 3 张），平白多一格会把图例顶折
   //   （见下面「会变」那段量过的账）。手机上没有悬停，所以说明不只靠 title：样例＋两个字就能对上屏上那个虚线圈。
+  // RAW-SEGS: 暂定段只长在原始的未完成段上
   const tent = opts.seg && state.data && (state.data.segs || []).find((s) => s.tentative);
   // 样例圈的颜色跟屏上那个圈同一条：暂定段向上 ⇒ 那一刀是顶（红）；向下 ⇒ 底（绿）
   if (tent) items.push(['ring-dash', tent.dir === 'up' ? CHART.sell : CHART.buy, 0, '暂定',
@@ -2564,10 +2571,14 @@ function ghostText(d) {
 }
 
 function renderMeta(d) {
-  const done = d.segs.filter((s) => !s.live).length;
+  // 「完成线段 N」数的是**图上画的那套**（小栋 10-10 05:18 问两套线段：原来数原始 ⇒ 跟屏上数出来的条数对不上，card-83915c20-9e3）。
+  //   未完成段只在原始里有 ⇒ 「+M 未完成」照旧数原始里的 live。
+  const live = (d.segs || []).filter((s) => s.live).length;   // RAW-SEGS: 未完成段只在原始里有
+  const done = Array.isArray(d.segs_std) && d.segs_std.length ? d.segs_std.length
+    : (d.segs || []).length - live;   // RAW-SEGS: 老后台没有 segs_std 时的退路
   el('meta').textContent =
     `${d.name || d.symbol} · ${d.tf} ｜ ${d.nbars} 根 ｜ 笔 ${d.pens.length} ｜ 类中枢 ${d.centers.length}`
-    + ` ｜ 完成线段 ${done}（+${d.segs.length - done} 未完成）｜ 线段中枢 ${d.seg_centers.length}`
+    + ` ｜ 完成线段 ${done}（+${live} 未完成）｜ 线段中枢 ${d.seg_centers.length}`
     + ` ｜ 精度 ${d.meta?.tick} ｜ ${d.meta?.pen_rule === 'new' ? '新笔' : '老笔'}${Number.isFinite(d.pen_min) ? `（最少 ${d.pen_min} 根）` : ''}`
     + ` ｜ 买卖点 线段中枢层 ${sigTierText([...(d.signals?.seg || []), ...(d.trend?.xzd_seconds || [])])} · 类中枢层 ${sigTierText(d.signals?.pen || [])}`
     + measureText(d)

@@ -158,7 +158,10 @@ export const doneSegs = (segs) => segs.filter((s) => !s.live);
  */
 export function hostOf(data, tier) {
   if (tier === 'seg') {
-    const done = doneSegs(data.segs);
+    // 线段中枢的 PI 指的是**图上画的那套**（D-3 C 以后是 `segs_std`）⇒ host 也得是它；没有 segs_std（老后台）才退回原始已完成段。
+    //   原来这里恒用原始 ⇒ 框的左右边（已改读 X0/X1）和 boxSplit ③ 的拆点 host[PI0+2] 都取到别的线段上（card-83915c20-9e3，并 card-9940abc8-766）。
+    const std = Array.isArray(data.segs_std) && data.segs_std.length ? data.segs_std : null;
+    const done = std || doneSegs(data.segs);   // RAW-SEGS: 老后台没有 segs_std 时的退路
     return { host: done, unfinishedJ: null };
   }
   const pens = data.pens;
@@ -451,8 +454,10 @@ export function makeAnnotPrimitive(state) {
               if (sh.seg) {
                 // 暂定那一刀 V 同时是暂定段的终点和后面那一截的起点 ⇒ 只画一个圈（虚线那个）；
                 // 两个都画，实线小圈套在虚线圈里，看着像齿轮（实测截图）。
+                // RAW-SEGS: 暂定（tentative）只长在原始的未完成段上，segs_std 里没有这个概念
                 const tentEnds = new Set(data.segs.filter((s) => s.tentative).map((s) => `${s.i1}|${s.p1}`));
                 // D-3 C：有 `segs_std` 时端点圈跟着标准化那一套走（图上的线段是哪套，圈就画在哪套的端点上），未完成段照旧取原始的
+                // RAW-SEGS: 有 segs_std 时只拿原始里的未完成段（live）接在后面 —— 未完成段只在原始里有；没有 segs_std 的老后台整套用原始
                 const segsDrawn = Array.isArray(data.segs_std) && data.segs_std.length ? data.segs_std.concat(data.segs.filter((s) => s.live)) : data.segs;
                 for (const s of segsDrawn) {
                   const end = segEnd(data, s);
@@ -639,8 +644,10 @@ export function makeAnnotPrimitive(state) {
               drawPzGroups(ctx, state, sh, vp, placed, this._chart, W, H);
 
               // ⑤ 未收盘的最后一根：虚线框 + 「未收盘」（Python dashed_rect + 琥珀字）
-              //    ★ 这一句**不登记 placed** —— 跟 Python 一致：那边它也是直接画的、不在 draw_labels 里
-              //      （所以 Python 图上「未收盘」会压在线段端点的圈上）。照搬，不擅自"顺手修好"。
+              //    ★ 这一句**不登记 placed** —— 跟 Python 一致：那边它也是直接画的、不在 draw_labels 里。
+              //    ★ 字底的实底（card-851e2134-fed）**只加在网页这边**：网页有底、Python 出图（render/chart_full_smooth.py）没有，
+              //      **有意不同**（Nova 10-10 04:2x 定：Python 不跟）。check_parity 不比这一处（它不读「未收盘」）。
+              state.liveTagBox = null;                       // 这一帧没画「未收盘」就是 null（工装不许读到上一帧的框）
               if (!data.closed && data.bars.length) {
                 const i = data.bars.length - 1, b = data.bars[i];
                 const x = vp.xOfBar(i), yh = vp.yOfPrice(b.h), yl = vp.yOfPrice(b.l);
@@ -650,8 +657,15 @@ export function makeAnnotPrimitive(state) {
                   ctx.strokeStyle = CANDLE.open; ctx.lineWidth = 1.5;
                   ctx.strokeRect(x - hw - 1, yh - 6, hw * 2 + 2, yl - yh + 12);
                   ctx.setLineDash([]);
-                  ctx.font = FONT_SM; ctx.fillStyle = CANDLE.open; ctx.textAlign = 'right';
-                  ctx.fillText('未收盘', x - hw - 8, yl + 14);
+                  // 字底下垫一块跟页面同色的实底（card-851e2134-fed，线上 ZEC 15m：「未收盘」直接压在 K 线上、发糊）：
+                  //   位置照旧（Python 那边也是这儿），只是让字从 K 线里抠出来；框记进 state.liveTagBox 给工装量。
+                  ctx.font = FONT_SM;
+                  const lw = ctx.measureText('未收盘').width, lx = x - hw - 8, ly = yl + 14;
+                  const lb = [lx - lw - 4, ly - 11, lx + 4, ly + 4];
+                  ctx.fillStyle = rgba(PAGE.bg, 235); ctx.fillRect(lb[0], lb[1], lb[2] - lb[0], lb[3] - lb[1]);
+                  state.liveTagBox = lb;
+                  ctx.fillStyle = CANDLE.open; ctx.textAlign = 'right';
+                  ctx.fillText('未收盘', lx, ly);
                   ctx.textAlign = 'left';
                 }
               }
@@ -862,8 +876,9 @@ function trendMarkView(target, state, prim) {
   //   （这跟「关着的层不算看得见」不是同一条账：那条管**画**，这条管**命中**。）
   boundHits.bands = [];
   // 已撤回的只读清单同理：层关着也得清，不然工装读到的是上一帧画过的叉（⑦c 第一版就是这么红的）
-  if (state.trendDrawn) { state.trendDrawn.withdrawn = []; state.trendDrawn.withdrawnLines = []; }
+  if (state.trendDrawn) { state.trendDrawn.withdrawn = []; state.trendDrawn.withdrawnLines = []; state.trendDrawn.withdrawnArrows = []; }
   if (!T || (!sh.trend && !sh.up)) return;
+  // ★ 例外一条（card-851e2134-fed）：「待定」那行字**读**标注层这一帧的 `state.labelBoxes` 来让位（不登记），见 ② 那段。
   // ★ 这一层的字**一律不登记 `placed`**（价签那张避让表），理由两条，都说破：
   //   ① 它们钉在**一条竖线和一个价**上（分界价格、待定、撤回）—— 挪开它就不是那个价了，避让没有意义；
   //   ② 「升级」那两个字倒是可以避让，但避让表住在**标注层**那个 primitive 里，两边共用一张表只能
@@ -882,6 +897,7 @@ function trendMarkView(target, state, prim) {
     D.states = [];
     D.withdrawn = [];
     D.withdrawnLines = [];
+    D.withdrawnArrows = [];
     // 命中带的画布：跟 `ghostHits` 同一条账 —— `ctx.canvas` 就是这个窗格的画布，
     // `useMediaCoordinateSpace` 给的坐标就是它的 CSS 像素，所以「客户端坐标 − getBoundingClientRect」
     // 正好落在同一个系里。每帧重设：窗格重建过之后旧的 canvas 是个死元素，量出来的坐标全是错的。
@@ -978,7 +994,13 @@ function trendMarkView(target, state, prim) {
         ctx.strokeStyle = rgba(TREND.mut, 200); ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
         ctx.setLineDash([]);
-        D.labels.push(haloText(ctx, x - 8, y + 4, `${fmtG(p.price)} 待定`, TREND.mut, 'right', mine));
+        // ★ 字要躲开价签（card-851e2134-fed，线上 bdd1ef7 BTC 1h：「87385.1 待定」压在框价签「[82500.1, 87249.6]」上）：
+        //   标注层挂在同一条 overlay 系列上、**先于**这一层画 ⇒ 画到这里时 `state.labelBoxes` 已经是**这一帧**的价签／买卖点字框，
+        //   拿它跟自己这一层的 `mine` 合起来让位（只挪 y、竖线不动 ⇒ 还钉在那个候选上）。只读那张表、不往里登记：
+        //   标注层的次序不动（见这一层开头那段账）。
+        const txt = `${fmtG(p.price)} 待定`;
+        const avoid = mine.concat(state.labelBoxes || []);
+        D.labels.push(haloText(ctx, x - 8, fitLabel(ctx, x - 8, y + 4, txt, avoid, H, 'right'), txt, TREND.mut, 'right', mine));
       }
 
       // ③ 撤回（D2-7，§八 4）：确立过、后来被撤掉的那把刀。**跟「待定」分开**这件事
@@ -1012,9 +1034,28 @@ function trendMarkView(target, state, prim) {
         if (isSeg && x !== null && y !== null) {
           const x0 = ts.timeToCoordinate(sec(w.t)), y0 = vp.yOfPrice(w.p0);
           if (x0 !== null && y0 !== null && !(Math.max(x0, x) < -8 || Math.min(x0, x) > W + 8)) {
-            ctx.setLineDash(DASH.trendBack); ctx.strokeStyle = rgba(CHART.sell, 110); ctx.lineWidth = 1.5;
+            // 原尺寸下要看得见（card-e719d70c-e0e）：原来 alpha 110、1.5px，叠在图底上对比度 2.0:1，放大 3 倍才看得清；
+            //   现在 alpha 200、2px（4.0:1），虚线换成 3 3（`DASH.wdLine`）—— 1 3 的点只上四分之一的墨，再浓也发虚。
+            const WD_A = 200, WD_W = 2;
+            ctx.setLineDash(DASH.wdLine); ctx.strokeStyle = rgba(CHART.sell, WD_A); ctx.lineWidth = WD_W;
             ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x, y); ctx.stroke(); ctx.setLineDash([]);
-            D.withdrawnLines.push({ t: w.t, x0: Math.round(x0), x1: Math.round(x) });
+            D.withdrawnLines.push({ t: w.t, x0: Math.round(x0), x1: Math.round(x), alpha: WD_A, width: WD_W, dash: DASH.wdLine.slice() });
+            // 终点滚出右边（叉画不了）⇒ 在画布右沿、线出屏的那个高度上留一个实心小三角 ▶ ＋「线段已撤回 →」：
+            //   不然屏上只剩一条线，看不出它是什么、也不知道往右翻才看得到叉。
+            if (x > W - 2 && x0 < W - 14) {
+              const ex = W - 6;
+              let ey = Math.max(8, Math.min(H - 8, y0 + (y - y0) * (ex - x0) / (x - x0)));
+              // 躲开现价那条（Nova 04:25）：最右边贴着价格轴的现价标签就在这个高度附近，三角挨上去会读成「现价旁边一个红箭头」。
+              //   现价的 y 在 ±12 之内 ⇒ 三角往离开它的方向挪到 12 之外（三角还贴着线、只是不压现价）；字的让位表里也把现价那块加进去。
+              const lastB = data.bars[data.bars.length - 1], yLast = lastB ? vp.yOfPrice(lastB.c) : null;
+              const lastBox = yLast === null ? null : [W - 70, yLast - 10, W, yLast + 10];
+              if (yLast !== null && Math.abs(ey - yLast) < 12) ey = Math.max(8, Math.min(H - 8, ey < yLast ? yLast - 12 : yLast + 12));
+              ctx.fillStyle = rgba(CHART.sell, 220);
+              ctx.beginPath(); ctx.moveTo(ex + 4, ey); ctx.lineTo(ex - 5, ey - 6); ctx.lineTo(ex - 5, ey + 6); ctx.closePath(); ctx.fill();
+              const ly = fitLabel(ctx, ex - 10, ey + 4, '线段已撤回 →', lastBox ? mine.concat([lastBox]) : mine, H, 'right');
+              D.labels.push(haloText(ctx, ex - 10, ly, '线段已撤回 →', CHART.sell, 'right', mine));
+              D.withdrawnArrows.push({ t: w.t, x: Math.round(ex), y: Math.round(ey), yLast: yLast === null ? null : Math.round(yLast), yLine: Math.round(y0 + (y - y0) * (ex - x0) / (x - x0)) });
+            }
           }
         }
         if (x === null || y === null || !onScreen(x, W, 8)) continue;
