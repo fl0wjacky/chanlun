@@ -1355,7 +1355,13 @@ const shotChart = async (p, tag) => {
   const dW = await open(TQ);
   await waitBand(dW.p);
   const SW54 = await dW.p.evaluate(async () => {
-    const a = window.__app, st = a.state, ts = a.chart.timeScale(), bars = st.data.bars;
+    const a = window.__app, st = a.state, ts = a.chart.timeScale();
+    // ★★ 不许在开头把 `bars` 抓死（card-900b75a1-f83，Bram 10-10 10:34：d170602 整趟红在这一格、单跑两遍 91/91 绿）：
+    //    这一页开的是 ZEC 15m，**每根 K 线收盘页面会自动重取**（app.js「每根 K 线收盘自动重取」）—— 扫这 180 来个视口要一阵子，
+    //    跨过一个 15 分钟整点，`state.data` 就换成新的一份：带子 `D.bounds` 是按**新**数据画的，工装却还拿**旧** bars 换 x
+    //    ⇒ 宽度对不上 ⇒ 判成漏写（mismatch）／孤儿。跟行情本身无关，跟「整趟正好跨没跨收盘」有关。
+    //    做法：每个视口现取 `st.data.bars`；视口前后 `st.data` 换了 ⇒ 这一窗作废重量（最多 3 次），重量了几次印出来。
+    let bars = st.data.bars, reloads = 0;
     // ★★ 这一格原先拿 `#chart` 的 clientWidth 当画布宽 ⇒ **假红**（card-4700b9cc-35e）：
     //    图层判「这条带子够不够宽、要不要写字」用的是 mediaSize（主图那一格，**1194**），
     //    这里用 1250 会把右轴那一条也算成"带子露在屏上" ⇒ 那条带子按 1250 看 82px 宽（够）、
@@ -1383,8 +1389,14 @@ const shotChart = async (p, tag) => {
     //   顺带把**旧那把尺**（`#chart` 的 clientWidth）会怎么判也带上：这就是假红的那个窗口。
     let near = { d: Infinity };
     for (const s of wins) {
-      ts.setVisibleLogicalRange({ from: s.from, to: s.from + s.span });
-      await frame(); await frame();
+      let d0 = null;
+      for (let k = 0; k < 3; k++) {                               // 量这一窗的时候数据换了（收盘自动重取）⇒ 作废重量
+        d0 = st.data; bars = d0.bars;
+        ts.setVisibleLogicalRange({ from: s.from, to: s.from + s.span });
+        await frame(); await frame();
+        if (st.data === d0) break;
+        reloads++;
+      }
       const D = st.trendDrawn || {};
       const bs = (D.bounds || []).map((b) => { const x0 = px(b.i0), x1 = px(b.i1);
         const vis = (x0 === null || x1 === null) ? 0 : Math.min(x1, W) - Math.max(x0, 0);
@@ -1409,7 +1421,7 @@ const shotChart = async (p, tag) => {
         if (labs.length !== roomy.length) { mismatch++; if (!worst) worst = { from: s.from, span: s.span, vis: bs.map((b) => b.vis), labs: labs.length }; }
       } else if (vis.length) fellBack++;
     }
-    return { nWin, nWithStrip, orphans, mismatch, fellBack, maxLabels, tw: Math.round(tw * 10) / 10, worst,
+    return { nWin, nWithStrip, orphans, mismatch, fellBack, maxLabels, reloads, tw: Math.round(tw * 10) / 10, worst,
       near: near.d === Infinity ? null : near, W: Math.round(W), Wchart, psW };
   });
   await dW.c.close();
@@ -1423,7 +1435,7 @@ const shotChart = async (p, tag) => {
      `画布宽（mediaSize，跟图层同一把尺）${SW54.W} ＋ 轴宽（问图要的）${SW54.psW} = ${SW54.Wchart}`
      + `（＝ \`#chart\` 的 clientWidth ⇒ 差的正好是右轴那一条）　`
      + `字宽 ${SW54.tw} px ⇒ 「够宽」的门槛 ${Math.round((SW54.tw + 12) * 10) / 10} px　`
-     + `扫了 ${SW54.nWin} 个视口（其中 ${SW54.nWithStrip} 个屏上有带子）　孤儿字 ${SW54.orphans} 个　`
+     + `扫了 ${SW54.nWin} 个视口（其中 ${SW54.nWithStrip} 个屏上有带子）　数据中途换过、重量的窗 ${SW54.reloads} 次　孤儿字 ${SW54.orphans} 个　`
      + `"写字数 ≠ 够宽的条数"的视口 ${SW54.mismatch} 个${SW54.worst ? '　★ ' + JSON.stringify(SW54.worst) : ''}　`
      + `一屏最多写了 ${SW54.maxLabels} 个字　`
      // ★ 绿也要让人看见"这颗牙咬到过门槛附近"，否则"0 个不平"可能只是所有带子都离门槛老远。
