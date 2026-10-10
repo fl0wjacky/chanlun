@@ -893,7 +893,7 @@ segPens(array<Unit> P) =>
 //     （上限 n+2 轮，同 Python `range(len(piv) + 1)`）；
 //   · 图头起点只在 [第一段起点, 接点 1) 里挪，末段终点只在 (倒数第二个接点, 最后一段终点] 里挪，**中间定住以后**各挪一次；
 //   · 端点价：顶取 high、底取 low；hi／lo 按新区间重取。只改端点，不改线段怎么划（PI0／PI1 照旧）。
-STD_PENDING_SEGS = 2          // 最后几条标准化线段画虚线（终点还可能挪）。跟 web/withdrawn.py PENDING_SEGS 是同一个数；tools/pending_sync_check.py 在上线前检查里比这两处，不等就红
+STD_PENDING_SEGS = 2          // 最后几条标准化线段画虚线（终点还可能挪）。①C 定为 2（spec 线段.md「最后两条画虚线」，决策页 D-3b）。跟 web/withdrawn.py PENDING_SEGS 是同一个数；tools/pending_sync_check.py 在上线前检查里比这两处，不等就红
 
 stdBest(array<float> H, array<float> L, int a, int b, bool top) =>
     int j = a

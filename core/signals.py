@@ -64,7 +64,7 @@ def macd_hist(bars, fast=12, slow=26, sig=9):
 
 
 # ---- 『B 段回抽 0 轴附近』这条必要条件：口径 ----
-# ★ 原文只给了「附近」两个字，**下面四个量全是我们发明的**，一律不许挂课号（见 README「0 轴回抽」）。
+# ★ 原文只给了「附近」两个字，**下面四个量全是我们发明的**，一律不许挂课号（见 README「0 轴回抽」）。『编者口径』
 ZA_STAT = "mean|DIF| 与 mean|DEA|（B 中枢窗口内，两条线到 0 的平均距离）"
 ZA_WINDOW = "B 中枢的 K 线跨度：起 = 构成它的第一段的起点 i0，止 = 最后一段的终点 i1"
 ZA_REF = "该点的 A 段内 max|DIF|（除价格尺度，才可跨品种 / 级别比）"
@@ -311,7 +311,7 @@ def _panzheng(A, C, want_down, data, measure="macd", ratio=1.0):
     return newx and _diverges(A, C, want_down, data, measure, ratio)
 
 
-_M29 = True          # 只给自检反向臂关：二类照旧（跌破只标弱、不判盘整背驰）
+_M29 = True          # 只给自检反向臂关：二类照旧（跌破只标弱、不判盘整背驰）；对应决策树 M-13（二类三种结果）、买卖点.md:106 第二类判据（原文 L53、L27），检查是 tools/m29_check.py
 
 
 def signals(r, level="seg", measure="macd", ratio=1.0, fast=12, slow=26, sig=9,

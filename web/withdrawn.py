@@ -24,7 +24,7 @@ import threading
 import decisions
 
 CAP = 200
-PENDING_SEGS = 2                                # C′：最后两条已完成线段算「还可能挪」。小栋要是选 A 改成 1；Pine 的 STD_PENDING_SEGS 要一起改（tools/pending_sync_check.py 比这两处）
+PENDING_SEGS = 2                                # C′：最后两条已完成线段算「还可能挪」。小栋 10-09 23:13 合并页 ①C 定了 C（spec 线段.md「最后两条画虚线」那行，决策页 D-3b）；Pine 的 STD_PENDING_SEGS 要一起改（tools/pending_sync_check.py 比这两处）
 
 
 def seg_states(n):
