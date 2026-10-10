@@ -1052,7 +1052,10 @@ function trendMarkView(target, state, prim) {
               if (yLast !== null && Math.abs(ey - yLast) < 12) ey = Math.max(8, Math.min(H - 8, ey < yLast ? yLast - 12 : yLast + 12));
               ctx.fillStyle = rgba(CHART.sell, 220);
               ctx.beginPath(); ctx.moveTo(ex + 4, ey); ctx.lineTo(ex - 5, ey - 6); ctx.lineTo(ex - 5, ey + 6); ctx.closePath(); ctx.fill();
-              const ly = fitLabel(ctx, ex - 10, ey + 4, '线段已撤回 →', lastBox ? mine.concat([lastBox]) : mine, H, 'right');
+              // 字也躲这一帧的价签／买卖点字框（card-d109b22e-df3：45ae7b5 上量到右沿正好挂着框价签时压上 1 处）：
+              //   跟「待定」那行同一个做法 —— 只读标注层这一帧的 `state.labelBoxes`、不往里登记，只挪 y（三角不动）。
+              const avoid = mine.concat(state.labelBoxes || [], lastBox ? [lastBox] : []);
+              const ly = fitLabel(ctx, ex - 10, ey + 4, '线段已撤回 →', avoid, H, 'right');
               D.labels.push(haloText(ctx, ex - 10, ly, '线段已撤回 →', CHART.sell, 'right', mine));
               D.withdrawnArrows.push({ t: w.t, x: Math.round(ex), y: Math.round(ey), yLast: yLast === null ? null : Math.round(yLast), yLine: Math.round(y0 + (y - y0) * (ex - x0) / (x - x0)) });
             }
